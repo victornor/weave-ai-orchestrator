@@ -76,32 +76,32 @@ describe('stalledWorkerTimeoutSec default (VS-202)', () => {
 });
 
 describe('YOLO mode: the setting', () => {
-  it('is off unless the workspace turns it on', () => {
-    expect(WorkspaceDefaultsSchema.parse({}).yolo).toBe(false);
-    expect(WorkspaceDefaultsSchema.parse({ yolo: true }).yolo).toBe(true);
+  it('is a per-project setting with no workspace default', () => {
+    // VS-382: `defaults.yolo` is gone; the schema strips it if an old config still carries it.
+    expect('yolo' in WorkspaceDefaultsSchema.parse({})).toBe(false);
+    expect('yolo' in WorkspaceDefaultsSchema.parse({ yolo: true })).toBe(false);
   });
 
-  it('leaves the project override unset when the policies block does not mention it', () => {
+  it('leaves the project value unset when the policies block does not mention it', () => {
     expect(ProjectPoliciesSchema.parse({}).yolo).toBeUndefined();
     expect(ProjectPoliciesSchema.parse({ yolo: false }).yolo).toBe(false);
+    expect(ProjectPoliciesSchema.parse({ yolo: true }).yolo).toBe(true);
   });
 
-  it('inherits the workspace default when the project says nothing', () => {
-    expect(yoloEnabled({}, true)).toBe(true);
-    expect(yoloEnabled({}, false)).toBe(false);
-    expect(yoloEnabled(null, true)).toBe(true);
-    expect(yoloEnabled(undefined, false)).toBe(false);
+  it('is off for a project that says nothing', () => {
+    expect(yoloEnabled({})).toBe(false);
+    expect(yoloEnabled(null)).toBe(false);
+    expect(yoloEnabled(undefined)).toBe(false);
   });
 
-  it('lets a project override the workspace either way', () => {
-    expect(yoloEnabled({ yolo: false }, true)).toBe(false);
-    expect(yoloEnabled({ yolo: true }, false)).toBe(true);
+  it('is on only for an explicit project true', () => {
+    expect(yoloEnabled({ yolo: true })).toBe(true);
+    expect(yoloEnabled({ yolo: false })).toBe(false);
   });
 
-  it('inherits rather than guessing when the project value is unusable', () => {
-    expect(yoloEnabled({ yolo: 'yes' }, false)).toBe(false);
-    expect(yoloEnabled({ yolo: 'yes' }, true)).toBe(true);
-    expect(yoloEnabled({ yolo: 1 }, false)).toBe(false);
+  it('is off rather than guessing when the project value is unusable', () => {
+    expect(yoloEnabled({ yolo: 'yes' })).toBe(false);
+    expect(yoloEnabled({ yolo: 1 })).toBe(false);
   });
 });
 

@@ -83,7 +83,6 @@ export function needsYouTicketIds(
   decisions: readonly Pick<Decision, 'ticketId' | 'kind' | 'status'>[],
   ticketsById: ReadonlyMap<string, Pick<Ticket, 'projectId'>>,
   projects: readonly Pick<Project, 'id' | 'policies'>[],
-  config: Record<string, unknown> | undefined,
 ): Set<string> {
   const byProject = new Map(projects.map((p) => [p.id, p]));
   const ids = new Set<string>();
@@ -93,7 +92,7 @@ export function needsYouTicketIds(
     if (!ticket) continue;
     const projectId = ticket.projectId;
     if (!projectId) continue;
-    if (isAutoApproving(d, config, byProject.get(projectId) ?? null)) continue;
+    if (isAutoApproving(d, byProject.get(projectId) ?? null)) continue;
     ids.add(d.ticketId);
   }
   return ids;

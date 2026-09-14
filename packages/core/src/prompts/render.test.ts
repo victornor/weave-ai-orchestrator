@@ -275,9 +275,10 @@ describe('prompt rendering', () => {
   describe('YOLO mode in the instructions', () => {
     const brief = (): string => renderBrief(h.ctx, h.deps, worker);
     const shipped = (): TestHarness['ctx'] => Object.assign(h.ctx, { templatesDir: SHIPPED_TEMPLATES });
+    const setYolo = (on: boolean): void => { h.db.update('projects', h.projectId, { policiesJson: { yolo: on } }); };
 
     it('tells a worker its approvals are granted for it when the mode is on', () => {
-      h.ctx.config.defaults.yolo = true;
+      setYolo(true);
       expect(brief()).toContain('YOLO mode is on for this project');
       shipped();
       expect(brief()).toContain('YOLO mode is on for this project');
@@ -285,7 +286,6 @@ describe('prompt rendering', () => {
     });
 
     it('tells a worker the approvals are the human\'s when the mode is off', () => {
-      expect(h.ctx.config.defaults.yolo).toBe(false);
       expect(brief()).toContain('are the human\'s');
       expect(brief()).not.toContain('YOLO mode is on');
       shipped();
@@ -293,26 +293,26 @@ describe('prompt rendering', () => {
       expect(brief()).not.toContain('YOLO mode is on');
     });
 
-    it('follows the project override rather than the workspace default', () => {
-      h.ctx.config.defaults.yolo = true;
-      h.db.update('projects', h.projectId, { policiesJson: { yolo: false } });
+    it('follows the ticket\'s project, the only place the setting lives (VS-382)', () => {
+      setYolo(false);
       expect(brief()).not.toContain('YOLO mode is on');
 
-      h.ctx.config.defaults.yolo = false;
-      h.db.update('projects', h.projectId, { policiesJson: { yolo: true } });
+      setYolo(true);
       expect(brief()).toContain('YOLO mode is on for this project');
+      expect(h.ctx.config.defaults).not.toHaveProperty('yolo');
     });
 
     it('states the policy in the weaver instructions, both ways', () => {
-      expect(renderConductorInstructions(h.ctx, h.deps)).toContain('Merge approval is always');
-      h.ctx.config.defaults.yolo = true;
+      expect(renderConductorInstructions(h.ctx, h.deps)).toContain('YOLO mode is off for every project');
+      setYolo(true);
       const on = renderConductorInstructions(h.ctx, h.deps);
-      expect(on).toContain('YOLO mode is on');
+      expect(on).toContain('YOLO mode is on for');
+      expect(on).toContain('api');
       expect(on).not.toMatch(/\{\{|\}\}/);
 
       shipped();
       const shippedOn = renderConductorInstructions(h.ctx, h.deps);
-      expect(shippedOn).toContain('YOLO mode is on for this workspace');
+      expect(shippedOn).toContain('YOLO mode is on for');
       expect(shippedOn).not.toMatch(/\{\{|\}\}/);
     });
   });

@@ -216,6 +216,22 @@ describe('routes', () => {
     expect(h.runtime.ctx.config.defaults.knowledgeBudgetTokens.project).toBe(10000);
   });
 
+  it('refuses the deprecated workspace-wide YOLO key and saves nothing (VS-382)', async () => {
+    const { h, fetch } = app();
+    const saved: unknown[] = [];
+    h.runtime.ctx.saveConfig = async (next) => { saved.push(next); };
+
+    const res = await fetch('/api/w/ws1/config', {
+      method: 'PATCH', headers: authed({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ defaults: { yolo: true } }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: { code: string; message: string } };
+    expect(body.error.code).toBe('validation');
+    expect(body.error.message).toMatch(/per project/i);
+    expect(saved).toHaveLength(0);
+  });
+
   it("serves a project's merge queue with active and waiting tickets in order", async () => {
     const { h, fetch } = app();
     h.tickets.set('tk_1', ticket({ status: 'merging', mergeQueuedAt: '2026-09-01T10:00:00.000Z', mergeStartedAt: '2026-09-01T10:00:01.000Z' }));

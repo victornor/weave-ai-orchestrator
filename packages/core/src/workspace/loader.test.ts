@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import YAML from 'yaml';
 import { DaemonConfigSchema, WorkspaceConfigSchema, toLegacySpelling, type WorkspaceConfig } from '@weave-ai/shared';
 import { createRegistries, workspacePaths } from '../context.js';
-import { openDbAsOf } from '@weave-ai/db';
+import { openDbAsOf, newId, nowIso } from '@weave-ai/db';
 import { createSecretStore } from '../secrets/store.js';
 import { effectiveModels } from '../models/index.js';
 import { loader, projectKnowledgeSkeleton } from './loader.js';
@@ -500,6 +500,70 @@ describe('workspace loader', () => {
       createSecretStore(workspacePaths(root)).put('telegram-bot-token', 'stored-token');
       await load();
       expect((yamlOf()['channels'] as { telegram: Record<string, unknown> })['telegram']).not.toHaveProperty('allowAll');
+    });
+  });
+
+  describe('YOLO mode migration (VS-382)', () => {
+    const yamlOf = (): Record<string, unknown> => YAML.parse(readFileSync(join(root, 'workspace.yaml'), 'utf8')) as Record<string, unknown>;
+    const decl = (id: string, policies: Record<string, unknown>): Record<string, unknown> => ({
+      id, url: `git@example.com:acme/${id}.git`, defaultBranch: 'main', maxWorkers: 2, warmPaths: [],
+      openspec: { enabled: true }, knowledgeRepo: { enabled: false }, policies,
+    });
+    const insertRow = (db: { insert: (t: string, v: Record<string, unknown>) => unknown }, workspaceId: string, slug: string, policies: Record<string, unknown>): void => {
+      const now = nowIso();
+      db.insert('projects', {
+        id: newId(), workspaceId, slug, name: slug, gitUrl: `git@example.com:acme/${slug}.git`, defaultBranch: 'main',
+        clonePath: join(root, 'projects', slug), maxWorkers: 2, worktreeProvider: 'git', openspecEnabled: 1,
+        knowledgeRepoEnabled: 0, policiesJson: policies, status: 'ready', createdAt: now, updatedAt: now,
+      });
+    };
+
+    it('copies defaults.yolo onto projects once, preserves an explicit false, and drops the key', async () => {
+      await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      const first = await load();
+      insertRow(first.db, first.workspaceId, 'api', {});
+      insertRow(first.db, first.workspaceId, 'web', { yolo: false });
+
+      const file = join(root, 'workspace.yaml');
+      writeFileSync(file, YAML.stringify({
+        ...yamlOf(),
+        defaults: { ...(yamlOf()['defaults'] as Record<string, unknown>), yolo: true },
+        projects: [decl('api', {}), decl('web', { yolo: false })],
+      }), 'utf8');
+
+      const ctx = await load();
+      expect(ctx.config.projects.find((p) => p.id === 'api')!.policies.yolo).toBe(true);
+      expect(ctx.config.projects.find((p) => p.id === 'web')!.policies.yolo).toBe(false);
+      expect(yamlOf()['defaults']).not.toHaveProperty('yolo');
+      // The row the daemon resolves YOLO from carries it too.
+      expect(ctx.db.get<{ policies: Record<string, unknown> }>('SELECT policies_json FROM projects WHERE slug = ?', ['api'])!.policies.yolo).toBe(true);
+      expect(ctx.db.get<{ policies: Record<string, unknown> }>('SELECT policies_json FROM projects WHERE slug = ?', ['web'])!.policies.yolo).toBe(false);
+      expect(ctx.db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'vs382_yolo_migrated'")?.value).toBe('1');
+    });
+
+    it('runs once: a project added later is not turned on', async () => {
+      await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+      const first = await load();
+      insertRow(first.db, first.workspaceId, 'api', {});
+      const file = join(root, 'workspace.yaml');
+      writeFileSync(file, YAML.stringify({
+        ...yamlOf(),
+        defaults: { ...(yamlOf()['defaults'] as Record<string, unknown>), yolo: true },
+        projects: [decl('api', {})],
+      }), 'utf8');
+      await load();
+
+      // A project declared and rowed after the migration, with the (still present) old key set again.
+      const after = await load();
+      insertRow(after.db, after.workspaceId, 'new', {});
+      writeFileSync(file, YAML.stringify({
+        ...yamlOf(),
+        defaults: { ...(yamlOf()['defaults'] as Record<string, unknown>), yolo: true },
+        projects: [...(yamlOf()['projects'] as unknown[]), decl('new', {})],
+      }), 'utf8');
+      const ctx = await load();
+      expect(ctx.config.projects.find((p) => p.id === 'new')!.policies.yolo).toBeUndefined();
+      expect(ctx.db.get<{ policies: Record<string, unknown> }>('SELECT policies_json FROM projects WHERE slug = ?', ['new'])!.policies.yolo).toBeUndefined();
     });
   });
 

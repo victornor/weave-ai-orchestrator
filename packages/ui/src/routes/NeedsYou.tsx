@@ -6,7 +6,7 @@ import { PlanPreview } from '../components/PlanPreview';
 import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { Button } from '../components/Button';
-import { useAnswerDecision, useDecisions, useProjects, useTickets, useWorkers, useWorkspaceSummary } from '../api/hooks';
+import { useAnswerDecision, useDecisions, useProjects, useTickets, useWorkers } from '../api/hooks';
 import { useConnection, useWs } from '../api/context';
 import { enqueue, useQueue } from '../lib/queue';
 import { decisionCarriesSecret } from '../lib/decisionSecrets';
@@ -27,7 +27,6 @@ export function NeedsYouRoute(): React.ReactElement {
   const workers = useWorkers({ status: 'running' });
   const tickets = useTickets({ limit: 200 });
   const projects = useProjects();
-  const summary = useWorkspaceSummary();
   const answer = useAnswerDecision();
   const queue = useQueue();
   // Hiding a card from the weave chat never takes it off this page — this is where a decision
@@ -141,7 +140,7 @@ export function NeedsYouRoute(): React.ReactElement {
                     busy={answer.isPending}
                     queued={isQueued}
                     plan={<PlanPreview decision={d} />}
-                    autoApproving={isAutoApproving(d, summary.data?.config, projects.data?.find((p) => p.id === t?.projectId))}
+                    autoApproving={isAutoApproving(d, projects.data?.find((p) => p.id === t?.projectId))}
                     onAnswer={(a) => onAnswer(d.id, a)}
                   />
                 </div>

@@ -29,6 +29,12 @@ export function workspaceRoutes(deps: AppDeps): Hono<AppEnv> {
     // The patch is merged raw: parsing it against the config schema first would fill every key the
     // client left out with that key's default, and the merge would then write those over the config.
     const patch = await body(c, z.record(z.string(), z.unknown()));
+    // VS-382: YOLO is set per project now, so `defaults.yolo` is not a workspace setting any more.
+    // Refused loudly rather than silently stripped by the schema, which would make a write that does
+    // nothing look like it succeeded.
+    if (isPlainObject(patch['defaults']) && 'yolo' in (patch['defaults'] as Record<string, unknown>)) {
+      throw new OcError('validation', 'YOLO mode is set per project now, not for the workspace — use PATCH /projects/:id with policies.yolo, or Settings → Projects.');
+    }
     const merged = WorkspaceConfigSchema.safeParse(deepMerge(ws.ctx.config, patch));
     if (!merged.success) throw new OcError('validation', 'the patched workspace config is invalid', { issues: merged.error.issues });
     await ws.ctx.saveConfig(merged.data);

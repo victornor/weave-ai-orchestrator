@@ -130,26 +130,13 @@ export function ApprovalsSection(): React.ReactElement {
   const patch = usePatchConfig();
   const config = summary.data?.config ?? {};
   const defaults = (config['defaults'] ?? {}) as Record<string, unknown>;
-  const yolo = defaults['yolo'] === true;
   const select = (key: string, value: unknown): void => patch.mutate({ defaults: { [key]: value } });
   const bool = (key: string): string => (defaults[key] === true ? 'on' : 'off');
   return (
     <div className="flex flex-col gap-4">
-      <div className={cx('v2-card p-3.5', yolo && 'border-needs-you/40')}>
-        <div className="flex items-start gap-3">
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="text-meta text-text-1">YOLO mode</span>
-            <span className="text-micro text-text-3">
-              Plan and merge approvals are granted by the daemon instead of by you. Hires, discards,
-              retries and questions still come to you.
-            </span>
-          </div>
-          <button type="button" role="switch" aria-checked={yolo} aria-label="YOLO mode"
-            className={cx('h-7 shrink-0 rounded-r6 border px-3 text-meta font-medium', yolo ? 'border-needs-you/50 bg-needs-you/15 text-needs-you' : 'border-line-2 text-text-3')}
-            onClick={() => select('yolo', !yolo)}>
-            {yolo ? 'On' : 'Off'}
-          </button>
-        </div>
+      {/* VS-382: YOLO is per project now; this section only points at where it is set. */}
+      <div className="v2-card p-3.5 text-micro text-text-3">
+        YOLO mode is set per project. Open <span className="text-text-1">Projects</span> and turn it on for one project; the daemon then grants that project&apos;s plan and merge approvals itself.
       </div>
       <div className="v2-card divide-y divide-line-1">
         <DefaultSelect label="Proposal approval" options={APPROVAL_OWNERS} raw={defaults['proposalApproval']}

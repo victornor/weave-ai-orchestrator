@@ -57,7 +57,7 @@ describe('the needs-you set', () => {
       { ticketId: 'tk_1', kind: 'question' as const, status: 'open' as const },
       { ticketId: 'tk_2', kind: 'plan_approval' as const, status: 'open' as const },
     ];
-    const ids = needsYouTicketIds(decisions, tickets, projects, { defaults: { yolo: true } });
+    const ids = needsYouTicketIds(decisions, tickets, projects);
     expect(ids.has('tk_1')).toBe(true);
     expect(ids.has('tk_2')).toBe(false);
   });
@@ -69,7 +69,6 @@ describe('the needs-you set', () => {
       [{ ticketId: 'tk_1', kind: 'plan_approval', status: 'open' }],
       tickets,
       projects,
-      { defaults: { yolo: false } },
     );
     expect(ids.has('tk_1')).toBe(true);
   });

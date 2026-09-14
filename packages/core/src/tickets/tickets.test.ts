@@ -757,7 +757,7 @@ describe('tickets', () => {
     });
 
     it('raises a human-owned action_approval when an operational ticket writes action, and YOLO does not answer it', () => {
-      h.ctx.config.defaults.yolo = true;
+      h.db.update('projects', h.projectId, { policiesJson: { yolo: true } });
       const t = make({ kind: 'operational', title: 'Restart the daemon' });
       decisions.create.mockClear();
       const written = tickets.putDocument(AGENT, t.id, 'action', 'systemctl restart agent-conductor');
@@ -1371,7 +1371,7 @@ describe('tickets', () => {
     });
 
     it('re-raises action_approval for an operational ticket that wrote action and has none open, without YOLO', async () => {
-      h.ctx.config.defaults.yolo = true;
+      h.db.update('projects', h.projectId, { policiesJson: { yolo: true } });
       const neverWrote = make({ kind: 'operational', title: 'never wrote' });
       h.db.update('tickets', neverWrote.id, { status: 'in_progress' });
 

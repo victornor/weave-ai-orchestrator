@@ -16,6 +16,7 @@ import { Markdown } from '../../components/Markdown';
 import { SkeletonRows } from '../../components/Skeleton';
 import { EmptyState } from '../../components/States';
 import { currentFocus, deliveryModeOf, resolveProject } from '../../lib/projectOverview';
+import { projectYolo } from '../../lib/yolo';
 import { cx } from '../../lib/cx';
 import { V2_PROJECT_SECTIONS, V2ProjectSection } from './sections';
 
@@ -77,6 +78,7 @@ export function V2ProjectScreen(): React.ReactElement {
               {delivery.inherited ? ' · inherited' : ''}
             </span>
             {project.status !== 'ready' ? <span className="v2-tag text-working">{project.status}</span> : null}
+            {projectYolo(project) ? <span className="v2-tag text-needs-you">YOLO mode — the daemon grants this project's plan and merge approvals; action approvals still come to you</span> : null}
             <ProjectSyncStatus projectId={project.id} />
           </div>
           <CurrentFocus projectId={project.id} />

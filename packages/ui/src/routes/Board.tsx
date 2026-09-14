@@ -74,7 +74,7 @@ export function BoardRoute(): React.ReactElement {
     const ids = new Set<string>();
     for (const d of openDecisions.data ?? []) {
       const t = d.ticketId ? byId.get(d.ticketId) : undefined;
-      if (t && isAutoApproving(d, summary.data?.config, projects.data?.find((p) => p.id === t.projectId))) ids.add(t.id);
+      if (t && isAutoApproving(d, projects.data?.find((p) => p.id === t.projectId))) ids.add(t.id);
     }
     return ids;
   }, [openDecisions.data, tickets.data, projects.data, summary.data]);

@@ -56,12 +56,19 @@ const INPUT = 'h-9 w-full rounded-r6 border border-line-2 bg-bg-input px-3 text-
 const PREFIX_RE = /^[A-Z][A-Z0-9]{1,9}$/;
 
 /**
- * The approval-policy patch the autonomy question writes, mapped onto the workspace settings that
- * already exist and are edited in Settings (VS-353). Exported so the mapping is testable on its own.
+ * The workspace-defaults patch the autonomy question writes, mapped onto the workspace settings
+ * that already exist and are edited in Settings (VS-353). VS-382: "Let the weaver decide" no longer
+ * writes a workspace-wide YOLO default, so it contributes nothing here — its autonomy is scoped to
+ * the projects added by the run (`autonomyProjectPolicies`). Exported so the mapping is testable.
  */
 export function autonomyDefaults(a: Autonomy): Record<string, unknown> {
-  if (a === 'yolo') return { yolo: true };
-  return { proposalApproval: a === 'merges' ? 'weaver' : 'human', yolo: false };
+  if (a === 'yolo') return {};
+  return { proposalApproval: a === 'merges' ? 'weaver' : 'human' };
+}
+
+/** The project policies the autonomy answer asks for: only "Let the weaver decide" turns YOLO on. */
+export function autonomyProjectPolicies(a: Autonomy): Record<string, unknown> {
+  return a === 'yolo' ? { yolo: true } : {};
 }
 
 interface StartedAdd { project?: { id?: string } | null; jobId?: string | null }
@@ -169,8 +176,12 @@ export function V2OnboardingPage(): React.ReactElement {
       const setting = { runtime, model: model || null };
       await api.ws(wsId, '/models', { method: 'PUT', body: { weaver: setting, workers: setting } });
       if (humanName.trim()) await api.ws(wsId, '/config', { method: 'PATCH', body: { weaver: { humanName: humanName.trim() } } });
-      // The autonomy answer lands only now that the workspace exists (VS-353).
-      await api.ws(wsId, '/config', { method: 'PATCH', body: { defaults: autonomyDefaults(autonomy ?? 'human') } });
+      // The autonomy answer lands only now that the workspace exists (VS-353). VS-382: "Let the
+      // weaver decide" writes no workspace default — it is applied per project below.
+      const wsDefaults = autonomyDefaults(autonomy ?? 'human');
+      if (Object.keys(wsDefaults).length > 0) {
+        await api.ws(wsId, '/config', { method: 'PATCH', body: { defaults: wsDefaults } });
+      }
       patchStep(1, { state: 'done', endedAt: Date.now() }, wsId);
     } catch (e) {
       patchStep(1, { state: 'failed', detail: describe(e), endedAt: Date.now() }, wsId);
@@ -181,7 +192,11 @@ export function V2OnboardingPage(): React.ReactElement {
         patchStep(2 + i, { state: 'running', startedAt: Date.now() }, wsId);
         const started = await api.ws<StartedAdd>(wsId, '/projects', {
           method: 'POST',
-          body: { url: p.url.trim(), id: p.id, maxWorkers: p.maxWorkers, ...(p.setupCommand.trim() ? { setupCommand: p.setupCommand.trim() } : {}) },
+          body: {
+            url: p.url.trim(), id: p.id, maxWorkers: p.maxWorkers,
+            ...(p.setupCommand.trim() ? { setupCommand: p.setupCommand.trim() } : {}),
+            ...(Object.keys(autonomyProjectPolicies(autonomy ?? 'human')).length > 0 ? { policies: autonomyProjectPolicies(autonomy ?? 'human') } : {}),
+          },
         });
         patchStep(2 + i, { jobId: started?.jobId ?? undefined, projectId: started?.project?.id ?? p.id }, wsId);
       } catch (e) {

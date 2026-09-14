@@ -283,14 +283,14 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
    * mode off stops every auto-approval that has not happened yet.
    */
   function yolo(t: Ticket): boolean {
-    return yoloEnabled(project(t.projectId)?.policies ?? null, ctx.config.defaults.yolo);
+    return yoloEnabled(project(t.projectId)?.policies ?? null);
   }
 
   /** Answer an approval this ticket is waiting on as the daemon, naming the mode that granted it. */
   async function autoApprove(t: Ticket, decisionId: string): Promise<void> {
     await deps().decisions.answer({ kind: 'system', id: null }, decisionId, {
       key: 'approve',
-      text: 'Auto-approved by YOLO mode: this workspace grants plan and merge approvals without the human.',
+      text: 'Auto-approved by YOLO mode: this project grants plan and merge approvals without the human.',
     });
   }
 

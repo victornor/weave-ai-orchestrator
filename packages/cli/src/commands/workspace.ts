@@ -1,6 +1,7 @@
 /** `weave workspace list|use|register|unregister|set-default|pause|resume|export|import` (PLAN §20). */
 import type { Command } from 'commander';
 import { resolve as resolvePath } from 'node:path';
+import { ApiError } from '../api.js';
 import { emit, fields, style, table, write } from '../output.js';
 import { loadContexts, putContext } from '../contexts.js';
 import { items, run, session } from './util.js';
@@ -81,11 +82,15 @@ Keys:    knowledgeBudgetTokens.project=<n>    knowledgeBudgetTokens.document=<n>
          knowledgeBudgetTokens.workspace=<n>  knowledgeBudgetTokens.shared=<n>
          knowledgeBudgetTokens.decisions=<n>  bootstrapBudgetTokens=<n>
          maxConcurrentRuns=<n>  turnTimeoutSec=<n>  autoMerge=true|false
-         yolo=true|false  (YOLO mode: the daemon grants plan and merge approvals itself)
 Example: weave workspace set-default knowledgeBudgetTokens.project=20000`)
     .action(async (assignments: string[], _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
       const defaults = parseAssignments(assignments);
+      // VS-382: YOLO is a per-project setting now; refuse the old workspace key rather than let the
+      // daemon strip it and report a change that did nothing.
+      if ('yolo' in defaults) {
+        throw new ApiError('validation', 'YOLO mode is set per project now, not for the workspace — run `weave project set-policy <id> yolo=true|false`', 400);
+      }
       const updated = await client.patch<Record<string, unknown>>(client.w('/config'), { defaults });
       const applied = (updated['defaults'] ?? {}) as Record<string, unknown>;
       emit(updated, () => {

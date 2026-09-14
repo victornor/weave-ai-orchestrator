@@ -304,6 +304,37 @@ class Loader implements WorkspaceLoader {
       db.run('INSERT INTO meta (key, value) VALUES (?, ?)', ['vs284_masked_settings_cleared', '1']);
     }
 
+    // VS-382: YOLO was a workspace-wide default (`defaults.yolo`) that every project without its
+    // own override inherited. It is now a per-project setting with no workspace fallback, so copy
+    // the old default onto each existing project once, preserving an explicit project opt-out. The
+    // key is dropped from the rewritten workspace.yaml because VS-382 removed it from the schema.
+    // Gated by a meta row: a workspace that never had the old default should not be visited again,
+    // and a project added later must not receive it.
+    const yoloMigrated = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'vs382_yolo_migrated'");
+    if (!yoloMigrated) {
+      const rawDefaults = (raw as { defaults?: Record<string, unknown> } | undefined)?.defaults;
+      if (rawDefaults?.['yolo'] === true) {
+        let changed = 0;
+        const declared = new Set(config.projects.map((p) => p.id));
+        config.projects = config.projects.map((p) => {
+          if (p.policies.yolo !== undefined) return p;
+          changed += 1;
+          return { ...p, policies: { ...p.policies, yolo: true } };
+        });
+        const rows = db.all<{ id: string; slug: string; policies: Record<string, unknown> | null }>(
+          "SELECT id, slug, policies_json FROM projects WHERE workspace_id = ? AND status != 'archived'", [ws.id],
+        );
+        for (const row of rows) {
+          if ((row.policies ?? {})['yolo'] !== undefined) continue;
+          db.update('projects', row.id, { policiesJson: { ...(row.policies ?? {}), yolo: true }, updatedAt: now });
+          if (!declared.has(row.slug)) changed += 1;
+        }
+        writeWorkspaceYaml(file, unresolveEnvRefs(config, envBack));
+        db.run('INSERT INTO meta (key, value) VALUES (?, ?)', ['vs382_yolo_migrated', '1']);
+        log.info({ projects: changed }, 'workspace YOLO default copied onto projects (VS-382)');
+      }
+    }
+
     // Per-workspace runtime config homes (CLAUDE_CONFIG_DIR / CODEX_HOME / XDG_CONFIG_HOME …).
     const models = effectiveModels(opts.daemon, config);
     const runtimeIds = new Set<string>([

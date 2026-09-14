@@ -236,16 +236,16 @@ describe('the rail update entry', () => {
   });
 });
 
-describe('AppShell — YOLO mode indicator', () => {
-  it('shows nothing while the mode is off', () => {
+describe('AppShell — no workspace-wide YOLO indicator (VS-382)', () => {
+  it('shows no workspace indicator while the mode is off', () => {
     render(<AppShell />);
     expect(screen.queryByLabelText('YOLO mode is on')).toBeNull();
   });
 
-  it('shows a persistent indicator while the mode is on', () => {
+  it('shows no workspace-wide indicator even when a config still carries the deprecated key', () => {
     state.config = { defaults: { yolo: true } };
     render(<AppShell />);
-    expect(screen.getByLabelText('YOLO mode is on')).toBeInTheDocument();
+    expect(screen.queryByLabelText('YOLO mode is on')).toBeNull();
   });
 });
 

@@ -28,7 +28,7 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `ac_session` httpOn
 - `GET /llms/api.txt` (agent-readable summary) · `GET /api/openapi.json`
 
 ## Workspace
-- `GET /api/w/:ws` → workspace + config summary · `PATCH /api/w/:ws/config` (partial `workspace.yaml`) · `POST /api/w/:ws/pause` · `POST /api/w/:ws/resume`
+- `GET /api/w/:ws` → workspace + config summary · `PATCH /api/w/:ws/config` (partial `workspace.yaml`; a `defaults.yolo` key is refused — YOLO is per project, set through `PATCH /api/w/:ws/projects/:id` as `policies.yolo`, VS-382) · `POST /api/w/:ws/pause` · `POST /api/w/:ws/resume`
 - `GET /api/w/:ws/events?after=<seq>` SSE stream (`event: <type>`, `id: <seq>`, `data: WorkspaceEvent`); heartbeat comment every 15 s
 - `POST /api/w/:ws/export` `{ out? }` → `{ path, workspace, roles, knowledgeFiles, tickets }` (portable package: `workspace.yaml`, `roles/**`, `knowledge/**`, `tickets/*.md`; no db, no runs, no secrets)
 - `GET /api/w/:ws/briefing`

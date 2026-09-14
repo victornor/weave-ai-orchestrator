@@ -441,3 +441,37 @@ describe('the V2 page header', () => {
     expect(fill.className).toContain('overflow-hidden');
   });
 });
+
+describe('every V2 nav surface renders the Lucide icon set (VS-420)', () => {
+  const RAIL_LABELS = ['Chat', 'Chats', 'Work', 'Roles', 'Knowledge', 'Live', 'Incidents', 'Scheduled', 'Settings'];
+
+  it('carries a mapped icon on each expanded-rail destination', () => {
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    for (const label of RAIL_LABELS) {
+      // A counted row's accessible name carries the count too ("Live 1"), so match on the prefix.
+      const glyph = within(rail).getByRole('link', { name: new RegExp(`^${label}\\b`) }).querySelector('svg[data-v2-glyph]');
+      expect(glyph, `${label} must carry a glyph`).not.toBeNull();
+      expect(glyph!.classList.contains('lucide')).toBe(true);
+    }
+  });
+
+  it('carries a mapped icon on each collapsed-rail row', () => {
+    localStorage.setItem('weave.v2.rail', 'collapsed');
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    for (const label of RAIL_LABELS) {
+      expect(within(rail).getByRole('link', { name: label }).querySelector('svg[data-v2-glyph]')).not.toBeNull();
+    }
+  });
+
+  it('carries a mapped icon on each phone tab and the More control', () => {
+    mountShell();
+    const nav = screen.getByRole('navigation');
+    for (const label of ['Chat', 'Needs you', 'Work', 'Live']) {
+      expect(within(nav).getByRole('link', { name: label }).querySelector('svg[data-v2-glyph]')).not.toBeNull();
+    }
+    // More is a menu, so it gets its own mark rather than the Settings glyph (VS-420).
+    expect(within(nav).getByRole('button', { name: 'More' }).querySelector('svg[data-v2-glyph="more"]')).not.toBeNull();
+  });
+});

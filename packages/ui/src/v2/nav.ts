@@ -6,8 +6,6 @@
  * This module is pure so the rail, the highlighting rule and the scope rule can be tested without a
  * router or a browser.
  */
-import type { CSSProperties } from 'react';
-
 export type V2GlyphName =
   | 'needs'
   | 'live'
@@ -21,7 +19,9 @@ export type V2GlyphName =
   | 'work'
   | 'roles'
   | 'knowledge'
-  | 'plugin';
+  | 'plugin'
+  /** The phone More control, which is a menu rather than a destination (VS-420). */
+  | 'more';
 
 export interface V2Dest {
   key: string;
@@ -166,65 +166,3 @@ export const V2_PROJECT_PATH = '/w/$ws/p/$project';
 export function projectRowKey(slug: string): string {
   return `project:${slug}`;
 }
-
-export const V2_GLYPH_STYLE: Record<V2GlyphName, CSSProperties> = {
-  needs: { width: 13, height: 13, borderRadius: 999, border: '1.5px solid currentColor' },
-  live: {
-    width: 13,
-    height: 13,
-    borderRadius: 2,
-    border: '1.5px solid currentColor',
-    background: 'radial-gradient(circle at 50% 50%, currentColor 0 2px, transparent 2.5px)',
-  },
-  incidents: { width: 13, height: 12, background: 'currentColor', clipPath: 'polygon(50% 0,100% 100%,0 100%)' },
-  map: {
-    width: 13,
-    height: 13,
-    borderRadius: 2,
-    border: '1.5px solid currentColor',
-    background: 'linear-gradient(to right, transparent 45%, currentColor 45%, currentColor 55%, transparent 55%)',
-  },
-  scheduled: { width: 13, height: 13, borderRadius: 999, border: '1.5px solid currentColor', borderTopColor: 'transparent' },
-  runs: {
-    width: 13,
-    height: 11,
-    borderRadius: 2,
-    border: '1.5px solid currentColor',
-    background:
-      'linear-gradient(to bottom, transparent 3px, currentColor 3px, currentColor 4.5px, transparent 4.5px, transparent 7px, currentColor 7px, currentColor 8.5px, transparent 8.5px)',
-  },
-  chats: { width: 13, height: 11, borderRadius: '3px 3px 3px 1px', border: '1.5px solid currentColor' },
-  chat: { width: 13, height: 11, borderRadius: '2px 2px 2px 1px', border: '1.5px solid currentColor' },
-  work: {
-    width: 13,
-    height: 11,
-    borderLeft: '2.5px solid currentColor',
-    borderRight: '2.5px solid currentColor',
-    borderTop: '1.5px solid currentColor',
-    borderBottom: '1.5px solid currentColor',
-    borderRadius: 2,
-  },
-  roles: {
-    width: 13,
-    height: 11,
-    borderRadius: 2,
-    border: '1.5px solid currentColor',
-    background:
-      'linear-gradient(to bottom, transparent 3.5px, currentColor 3.5px 5px, transparent 5px 7.5px, currentColor 7.5px 9px, transparent 9px)',
-  },
-  knowledge: { width: 11, height: 13, border: '1.5px solid currentColor', borderRadius: 2, borderLeftWidth: 3 },
-  settings: {
-    width: 13,
-    height: 13,
-    borderRadius: 999,
-    border: '1.5px solid currentColor',
-    background: 'radial-gradient(circle at 50% 50%, currentColor 0 1.5px, transparent 2px)',
-  },
-  plugin: {
-    width: 13,
-    height: 13,
-    border: '1.5px solid currentColor',
-    borderRadius: 2,
-    clipPath: 'polygon(0 0, 65% 0, 100% 35%, 100% 100%, 0 100%)',
-  },
-};

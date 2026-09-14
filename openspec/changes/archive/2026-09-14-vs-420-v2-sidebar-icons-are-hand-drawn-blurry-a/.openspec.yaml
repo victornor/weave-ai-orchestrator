@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Replace every V2 nav glyph with Lucide, crisp at every size
+skip_specs: true

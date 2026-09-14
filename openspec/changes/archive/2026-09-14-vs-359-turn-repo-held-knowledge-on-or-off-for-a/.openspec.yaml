@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Turn repo-held knowledge on or off for an existing project through one
+  reviewed PR, and warn when the project's repo is public

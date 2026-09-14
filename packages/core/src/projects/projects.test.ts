@@ -102,7 +102,7 @@ describe('projects', () => {
     expect(project.landingBranch).toBeNull();
   });
 
-  it('defaults knowledgeRepo to disabled, persists an explicit opt-in on add, and update can flip it (VS-358)', async () => {
+  it('defaults knowledgeRepo to disabled and persists an explicit opt-in on add (VS-358)', async () => {
     const src = await sourceRepo();
     const off = await projects.add(HUMAN, cfg(src));
     expect(off.knowledgeRepoEnabled).toBeFalsy();
@@ -111,9 +111,71 @@ describe('projects', () => {
     const on = await projects.add(HUMAN, cfg(src2, { id: 'api', knowledgeRepo: { enabled: true } }));
     expect(on.knowledgeRepoEnabled).toBeTruthy();
     expect(saved.at(-1)!.projects.find((p) => p.id === 'api')!.knowledgeRepo).toEqual({ enabled: true });
+  });
 
-    const flipped = await projects.update(HUMAN, on.id, { knowledgeRepo: { enabled: false } });
-    expect(flipped.knowledgeRepoEnabled).toBeFalsy();
+  describe('turning knowledgeRepo on or off for an existing project (VS-359)', () => {
+    /** A forge whose PRs are recorded, so `update` can start a switch without a real GitHub. */
+    function fakeForge(): { opened: Array<{ branch: string; base: string }> } {
+      const opened: Array<{ branch: string; base: string }> = [];
+      h.ctx.registries.forges.set('github', {
+        id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const }), mergePr: async () => ({}),
+        createPullRequest: async (_cwd, opts) => { opened.push(opts); return { url: `https://example.com/pr/${opened.length}`, number: opened.length }; },
+        pullRequestForBranch: async () => null,
+      });
+      return { opened };
+    }
+
+    it('starts a switch PR instead of flipping the flag, and keeps the config block unchanged', async () => {
+      const src = await sourceRepo();
+      const project = await projects.add(HUMAN, cfg(src));
+      await git(['config', 'receive.denyCurrentBranch', 'ignore'], src);
+      const forge = fakeForge();
+
+      const updated = await projects.update(HUMAN, project.id, { knowledgeRepo: { enabled: true } });
+
+      expect(forge.opened).toHaveLength(1);
+      expect(updated.knowledgeRepoEnabled).toBeFalsy();
+      expect(updated.knowledgeSwitch).toMatchObject({ direction: 'on', branch: 'ac/knowledge-web-on', prUrl: 'https://example.com/pr/1' });
+      expect(saved.at(-1)!.projects.find((p) => p.id === 'web')!.knowledgeRepo).toEqual({ enabled: false });
+    });
+
+    it('refuses a second switch while one is pending', async () => {
+      const src = await sourceRepo();
+      const project = await projects.add(HUMAN, cfg(src));
+      await git(['config', 'receive.denyCurrentBranch', 'ignore'], src);
+      fakeForge();
+      await projects.update(HUMAN, project.id, { knowledgeRepo: { enabled: true } });
+      await expect(projects.update(HUMAN, project.id, { knowledgeRepo: { enabled: false } })).rejects.toThrow(/already waiting/);
+    });
+
+    it('writes the flag directly for a project with no ready clone', async () => {
+      const src = await sourceRepo();
+      const project = await projects.add(HUMAN, cfg(src));
+      h.db.update('projects', project.id, { status: 'error' });
+      fakeForge();
+      const updated = await projects.update(HUMAN, project.id, { knowledgeRepo: { enabled: true } });
+      expect(updated.knowledgeRepoEnabled).toBeTruthy();
+      expect(updated.knowledgeSwitch ?? null).toBeNull();
+    });
+
+    it('applyKnowledgeRepoSwitch flips the row and the declared config together', async () => {
+      const src = await sourceRepo();
+      const project = await projects.add(HUMAN, cfg(src));
+      await projects.applyKnowledgeRepoSwitch(projects.get(project.id), true);
+      expect(projects.get(project.id).knowledgeRepoEnabled).toBeTruthy();
+      expect(saved.at(-1)!.projects.find((p) => p.id === 'web')!.knowledgeRepo).toEqual({ enabled: true });
+    });
+
+    it('answers repo visibility from the forge, and null when it cannot say', async () => {
+      const src = await sourceRepo();
+      const project = await projects.add(HUMAN, cfg(src));
+      h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const }), mergePr: async () => ({}), repoInfo: async () => ({ private: false }) });
+      await expect(projects.repoInfo(project.id)).resolves.toEqual({ private: false });
+      await expect(projects.repoInfoForUrl('git@github.com:acme/api.git')).resolves.toEqual({ private: false });
+
+      h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState: async () => ({ state: 'open' as const }), mergePr: async () => ({}) });
+      await expect(projects.repoInfo(project.id)).resolves.toBeNull();
+    });
   });
 
   it('persists autoMergeDefault on add (VS-153)', async () => {

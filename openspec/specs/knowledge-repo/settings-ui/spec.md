@@ -21,7 +21,7 @@ The project-creation form SHALL offer the knowledge-repo opt-in as a checkbox, o
 
 ### Requirement: The opt-in is visible and changeable on an existing project
 
-An existing project's settings SHALL show its current knowledge-repo opt-in and let a human change it, using the same interaction pattern as the project's other toggleable settings.
+An existing project's settings SHALL show its current knowledge-repo opt-in and let a human change it, using the same interaction pattern as the project's other toggleable settings. Changing it SHALL start the reviewed migration defined by `knowledge-repo/switch-migration`; while that migration is pending the row SHALL show that it is waiting for its pull request to merge, SHALL link to the pull request, and SHALL say that closing it cancels the change, and the toggle SHALL NOT be changeable again until the migration resolves.
 
 #### Scenario: Viewing an opted-out project's settings
 
@@ -31,6 +31,9 @@ An existing project's settings SHALL show its current knowledge-repo opt-in and 
 #### Scenario: Turning the toggle on
 
 - **WHEN** a human turns the toggle on for an existing project
-- **THEN** the project's knowledge-repo opt-in becomes enabled
+- **THEN** a migration begins and the row shows that it is waiting for the pull request to merge
 
-This requirement covers only presenting and changing the flag; migrating a project's existing knowledge into or out of the repository when the flag changes is a dedicated follow-up, not part of this capability.
+#### Scenario: Viewing a project with a pending switch
+
+- **WHEN** a human opens the settings of a project whose migration pull request is open
+- **THEN** the row links to the pull request and says that closing it cancels the change

@@ -288,6 +288,41 @@ describe('routes', () => {
     expect((await res.json()).error.code).toBe('validation');
   });
 
+  it('reports repo visibility for a project and for a not-yet-created URL (VS-359)', async () => {
+    const { h, fetch } = app();
+    h.impls.projects!['repoInfo'] = async () => ({ private: false });
+    h.impls.projects!['repoInfoForUrl'] = async () => ({ private: true });
+
+    const byId = await fetch('/api/w/ws1/projects/proj1/repo-info', { headers: authed() });
+    expect(byId.status).toBe(200);
+    await expect(byId.json()).resolves.toEqual({ private: false });
+
+    const byUrl = await fetch('/api/w/ws1/projects/repo-info?url=git%40github.com%3Aacme%2Fapi.git', { headers: authed() });
+    expect(byUrl.status).toBe(200);
+    await expect(byUrl.json()).resolves.toEqual({ private: true });
+  });
+
+  it('rejects repo-info without a url', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/projects/repo-info', { headers: authed() });
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts the knowledge-repo creation checkbox (VS-358/VS-359)', async () => {
+    const { h, fetch } = app();
+    let seen: { knowledgeRepo?: { enabled: boolean } } | null = null;
+    h.impls.projects!['startAdd'] = (_actor: unknown, cfg: { knowledgeRepo?: { enabled: boolean } }) => {
+      seen = cfg;
+      return { project: { id: 'p_new', slug: 'new' }, jobId: 'job1' };
+    };
+    const res = await fetch('/api/w/ws1/projects', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ url: 'git@github.com:acme/new.git', knowledgeRepo: { enabled: true } }),
+    });
+    expect(res.status).toBe(202);
+    expect(seen!.knowledgeRepo).toEqual({ enabled: true });
+  });
+
   it("carries a waiting ticket's own merge queue position on its detail payload", async () => {
     const { h, fetch } = app();
     h.tickets.set('tk_1', ticket({ status: 'merging', mergeQueuedAt: '2026-09-01T11:00:00.000Z' }));

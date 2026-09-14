@@ -8,6 +8,9 @@ const AddSchema = z.object({
   url: z.string().min(1), id: z.string().optional(), name: z.string().optional(),
   defaultBranch: z.string().optional(), landingBranch: z.string().optional(), maxWorkers: z.number().int().min(1).max(32).optional(), setupCommand: z.string().optional(),
   policies: ProjectPoliciesSchema.optional(),
+  // VS-358's creation checkbox sends this; without it here the strict parse rejects the body and the
+  // checkbox silently does nothing (fixed VS-359, which rides the same checkbox for its public warning).
+  knowledgeRepo: ProjectConfigSchema.shape.knowledgeRepo.optional(),
 // Strict: a project carries no runtime or model since VS-77, and a body that still sends one is a
 // caller that would otherwise believe it had chosen something. Ticket-level autoMerge is not a
 // project field — Auto-merge default is policies.autoMergeDefault (VS-153).
@@ -16,6 +19,16 @@ const AddSchema = z.object({
 export function projectRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.get('/', (c) => c.json(c.get('ws').services.projects.list()));
+  /**
+   * VS-359: whether a not-yet-created project's repository is public, read from its URL. Registered
+   * before `/:id` so the literal segment wins. A read-only advisory: `null` whenever the forge
+   * cannot say, never an error.
+   */
+  app.get('/repo-info', async (c) => {
+    const url = c.req.query('url');
+    if (!url) throw new OcError('validation', 'url is required', {});
+    return c.json(await c.get('ws').services.projects.repoInfoForUrl(url));
+  });
   app.get('/:id', (c) => c.json(c.get('ws').services.projects.get(c.req.param('id'))));
   /**
    * 202, not 201: the clone, the OpenSpec adoption and the knowledge seed take minutes, and progress
@@ -34,6 +47,8 @@ export function projectRoutes(): Hono<AppEnv> {
   app.post('/:id/fetch', async (c) => c.json(await c.get('ws').services.projects.fetch(c.req.param('id'))));
   /** Read-only (VS-131): classifies the clone against its remote without checkout or merge. */
   app.get('/:id/sync', async (c) => c.json(await c.get('ws').services.projects.checkSync(c.req.param('id'))));
+  /** VS-359: whether the project's repository is public, or `null` when the forge cannot say. */
+  app.get('/:id/repo-info', async (c) => c.json(await c.get('ws').services.projects.repoInfo(c.req.param('id'))));
   // The project's merge queue: what is landing now and who is waiting, in order (PLAN §11.4).
   app.get('/:id/merge-queue', (c) => {
     const s = c.get('ws').services;

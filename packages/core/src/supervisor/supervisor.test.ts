@@ -547,6 +547,63 @@ describe('supervisor scheduled passes', () => {
     });
   });
 
+  describe('knowledge-repo switch reconcile (VS-359)', () => {
+    const switchOn = { direction: 'on' as const, branch: 'ac/knowledge-api-on', prUrl: 'https://github.com/acme/api/pull/9', startedAt: nowIso() };
+
+    function seedReadySwitch(over: Record<string, unknown> = {}): void {
+      mkdirSync(join(h.ctx.paths.projects, h.projectSlug), { recursive: true });
+      h.db.update('projects', h.projectId, { status: 'ready', knowledgeRepoEnabled: 0, knowledgeSwitchJson: switchOn, ...over });
+    }
+    function stubProjects(state: 'open' | 'merged' | 'closed') {
+      const apply = vi.fn(async (_p: unknown, enabled: boolean) => {
+        h.db.update('projects', h.projectId, { knowledgeRepoEnabled: enabled ? 1 : 0, knowledgeSwitchJson: null });
+      });
+      h.services.projects = {
+        fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })),
+        get: () => ({ id: h.projectId, slug: h.projectSlug, clonePath: join(h.ctx.paths.projects, h.projectSlug) }),
+        applyKnowledgeRepoSwitch: apply,
+      } as never;
+      h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState: async () => ({ state }), mergePr: async () => ({}) });
+      return { apply };
+    }
+
+    it('a merged enabling pull request flips the opt-in and clears the pending switch', async () => {
+      seedReadySwitch();
+      const { apply } = stubProjects('merged');
+      await supervisor.tick();
+      expect(apply).toHaveBeenCalledWith(expect.objectContaining({ id: h.projectId }), true);
+      const row = h.db.get<{ knowledgeRepoEnabled: number; knowledgeSwitch: unknown }>('SELECT knowledge_repo_enabled, knowledge_switch_json FROM projects WHERE id = ?', [h.projectId])!;
+      expect(row.knowledgeRepoEnabled).toBe(1);
+      expect(row.knowledgeSwitch).toBeNull();
+    });
+
+    it('a merged disabling pull request turns the opt-in off', async () => {
+      seedReadySwitch({ knowledgeRepoEnabled: 1, knowledgeSwitchJson: { ...switchOn, direction: 'off', branch: 'ac/knowledge-api-off' } });
+      const { apply } = stubProjects('merged');
+      await supervisor.tick();
+      expect(apply).toHaveBeenCalledWith(expect.objectContaining({ id: h.projectId }), false);
+    });
+
+    it('a closed pull request cancels the switch and leaves the opt-in as it was', async () => {
+      seedReadySwitch({ knowledgeRepoEnabled: 0 });
+      const { apply } = stubProjects('closed');
+      await supervisor.tick();
+      expect(apply).not.toHaveBeenCalled();
+      const row = h.db.get<{ knowledgeRepoEnabled: number; knowledgeSwitch: unknown }>('SELECT knowledge_repo_enabled, knowledge_switch_json FROM projects WHERE id = ?', [h.projectId])!;
+      expect(row.knowledgeRepoEnabled).toBe(0);
+      expect(row.knowledgeSwitch).toBeNull();
+    });
+
+    it('an open pull request changes nothing', async () => {
+      seedReadySwitch();
+      const { apply } = stubProjects('open');
+      await supervisor.tick();
+      expect(apply).not.toHaveBeenCalled();
+      const row = h.db.get<{ knowledgeSwitch: unknown }>('SELECT knowledge_switch_json FROM projects WHERE id = ?', [h.projectId])!;
+      expect(row.knowledgeSwitch).not.toBeNull();
+    });
+  });
+
   describe('retention', () => {
     it('prunes old run directories, clears log_path and keeps the row', async () => {
       const oldRun = newId();

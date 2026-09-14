@@ -8,8 +8,16 @@ import { recordActivity } from '../events.js';
 import { binaryExists, type OnLine } from '../util/exec.js';
 import { git, githubSshRemote } from '../util/git.js';
 import { projectKnowledgeSkeleton } from '../workspace/loader.js';
+import { startKnowledgeRepoSwitch } from '../knowledge/repoSwitch.js';
 import { modelSettingFor, modelsFor } from '../models/resolve.js';
 import { createHistoryReader } from './history.js';
+
+/** VS-359: ask the forge whether a repository is public; `null` when it cannot say, never a throw. */
+async function forgeInfo(ctx: WorkspaceContext, cwd: string, remote: string | undefined): Promise<{ private: boolean } | null> {
+  const forge = ctx.registries.forges.get('github');
+  if (!forge?.repoInfo) return null;
+  try { return await forge.repoInfo(cwd, remote); } catch { return null; }
+}
 
 /**
  * VS-263 Decision 6: `policies_json` keeps writing the legacy `'conductor'` spelling for now, on the
@@ -331,17 +339,55 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       if (trimmedName !== undefined) patchForMerge.name = clearingName ? undefined : trimmedName;
       const merged = ProjectConfigSchema.parse({ ...(existing ?? { id: project.slug, url: project.gitUrl }), ...patchForMerge, id: project.slug });
       const nextName = clearingName ? '' : (merged.name ?? project.name);
+      // VS-359: changing the knowledge-repo opt-in on a project that already has a clone is a
+      // reviewed switch — one pull request whose merge flips the flag — never a direct write. A
+      // project still being created has no knowledge to move, so its creation path is untouched.
+      // `knowledgeRepoEnabled` is stored 0/1, so compare as booleans. Any explicit request while a
+      // switch is already pending is itself a second switch request and is refused.
+      const flagChanges = merged.knowledgeRepo.enabled !== Boolean(project.knowledgeRepoEnabled);
+      const switchRelevant = patch.knowledgeRepo !== undefined && (flagChanges || project.knowledgeSwitch !== null);
+      let knowledgeRepoEnabled = merged.knowledgeRepo.enabled;
+      if (switchRelevant && project.status === 'ready' && existsSync(project.clonePath)) {
+        if (project.knowledgeSwitch) {
+          throw new OcError('conflict', `a knowledge-repo switch for ${project.slug} is already waiting on ${project.knowledgeSwitch.prUrl}; close that pull request to cancel it`);
+        }
+        const direction = merged.knowledgeRepo.enabled ? 'on' : 'off';
+        const result = await startKnowledgeRepoSwitch(ctx, deps, project, direction);
+        if (result.kind === 'direct') {
+          await service.applyKnowledgeRepoSwitch(project, merged.knowledgeRepo.enabled);
+        } else {
+          knowledgeRepoEnabled = Boolean(project.knowledgeRepoEnabled); // the request started a switch; the flag flips when it merges
+        }
+      }
       ctx.db.update('projects', project.id, {
         name: nextName, defaultBranch: merged.defaultBranch, landingBranch: merged.landingBranch ?? null, maxWorkers: merged.maxWorkers,
         setupCommand: merged.setupCommand ?? null, warmPathsJson: merged.warmPaths, worktreeProvider: merged.worktrees ?? project.worktreeProvider,
         openspecEnabled: merged.openspec.enabled,
-        knowledgeRepoEnabled: merged.knowledgeRepo.enabled,
+        knowledgeRepoEnabled,
         policiesJson: toLegacyPolicies(merged.policies), updatedAt: nowIso(),
       });
-      await upsertConfigBlock(nextName === '' ? { ...merged, name: undefined } : merged);
+      await upsertConfigBlock({ ...(nextName === '' ? { ...merged, name: undefined } : merged), knowledgeRepo: { enabled: knowledgeRepoEnabled } });
       recordActivity(ctx.db, ctx.workspaceId, actor, 'project.update', 'project', project.id, { patch: Object.keys(patch) });
       ctx.events.emit('project.updated', 'project', project.id, { slug: project.slug });
       return get(project.id);
+    },
+
+    async applyKnowledgeRepoSwitch(project: Project, enabled: boolean): Promise<void> {
+      const fresh = get(project.id);
+      const base = ctx.config.projects.find((p) => p.id === fresh.slug) ?? configFor(fresh);
+      ctx.db.update('projects', fresh.id, { knowledgeRepoEnabled: enabled, knowledgeSwitchJson: null, updatedAt: nowIso() });
+      await upsertConfigBlock({ ...base, knowledgeRepo: { enabled } });
+      recordActivity(ctx.db, ctx.workspaceId, { kind: 'system', id: null }, 'project.update', 'project', fresh.id, { knowledgeRepoEnabled: enabled });
+      ctx.events.emit('project.updated', 'project', fresh.id, { slug: fresh.slug, knowledgeRepoEnabled: enabled });
+      log.info({ project: fresh.slug, enabled }, 'knowledge-repo switch applied');
+    },
+
+    async repoInfo(id: string): Promise<{ private: boolean } | null> {
+      return forgeInfo(ctx, get(id).clonePath, undefined);
+    },
+
+    async repoInfoForUrl(url: string): Promise<{ private: boolean } | null> {
+      return forgeInfo(ctx, ctx.paths.root, url);
     },
 
     async remove(actor: Actor, id: string): Promise<void> {

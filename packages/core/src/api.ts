@@ -221,6 +221,12 @@ export interface ProjectsService {
   history(id: string, query?: HistoryQuery): Promise<HistoryPage>;
   /** One commit's full detail — message, parents and changed files against its first parent. */
   commit(id: string, sha: string): Promise<CommitDetail>;
+  /** VS-359: flip the knowledge-repo opt-in and keep the declared config in step — used when a switch PR merges, and for a direct no-diff switch. */
+  applyKnowledgeRepoSwitch(project: S.Project, enabled: boolean): Promise<void>;
+  /** VS-359: whether the project's repository is public, or `null` when the forge cannot say. */
+  repoInfo(id: string): Promise<{ private: boolean } | null>;
+  /** VS-359: whether a not-yet-created project's repository is public, read from its URL. */
+  repoInfoForUrl(url: string): Promise<{ private: boolean } | null>;
 }
 
 /** A branch the history covers: the default branch, a worker's branch, or a ticket's. */

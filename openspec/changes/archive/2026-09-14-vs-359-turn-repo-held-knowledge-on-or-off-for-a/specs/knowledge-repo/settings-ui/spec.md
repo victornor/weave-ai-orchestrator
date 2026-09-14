@@ -1,0 +1,20 @@
+## MODIFIED Requirements
+
+### Requirement: The opt-in is visible and changeable on an existing project
+
+An existing project's settings SHALL show its current knowledge-repo opt-in and let a human change it, using the same interaction pattern as the project's other toggleable settings. Changing it SHALL start the reviewed migration defined by `knowledge-repo/switch-migration`; while that migration is pending the row SHALL show that it is waiting for its pull request to merge, SHALL link to the pull request, and SHALL say that closing it cancels the change, and the toggle SHALL NOT be changeable again until the migration resolves.
+
+#### Scenario: Viewing an opted-out project's settings
+
+- **WHEN** a human opens an opted-out project's settings
+- **THEN** the knowledge-repo toggle shows disabled
+
+#### Scenario: Turning the toggle on
+
+- **WHEN** a human turns the toggle on for an existing project
+- **THEN** a migration begins and the row shows that it is waiting for the pull request to merge
+
+#### Scenario: Viewing a project with a pending switch
+
+- **WHEN** a human opens the settings of a project whose migration pull request is open
+- **THEN** the row links to the pull request and says that closing it cancels the change

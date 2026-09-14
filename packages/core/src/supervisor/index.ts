@@ -702,6 +702,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     const byId = new Map(projects.map((p) => [p.id, p]));
     await reconcilePullRequests(byId);
     reconcileOpenSpecArchives(byId);
+    await reconcileKnowledgeRepoSwitches(byId);
   }
 
   /** `in_review` tickets with a PR: refresh its state on the work product and finish the ones the forge has merged. */
@@ -802,6 +803,44 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       if (archivedDirFor(project.clonePath, t.changeName)) continue;
       log.info({ ticket: t.identifier, change: t.changeName }, 'archiving an OpenSpec change left behind by a merged ticket');
       void deps().openspec.archiveAfterMerge(t.id).catch((e: unknown) => recordReconcileArchiveFailure(t, e));
+    }
+  }
+
+  /**
+   * VS-359: a pending knowledge-repo switch is one pull request whose outcome decides the project's
+   * opt-in. Poll it here, where a ticket's pull request is already reconciled, so the flag flips (or
+   * the switch is cancelled) with no worker and no ticket. A merged pull request applies the flag and
+   * fast-forwards the clone; a closed one clears the pending switch and changes nothing.
+   */
+  async function reconcileKnowledgeRepoSwitches(projects: Map<string, ProjectRow>): Promise<void> {
+    const forge = ctx.registries.forges.get('github');
+    if (!forge) return;
+    const rows = ctx.db.all<{ id: string; slug: string; knowledgeSwitch: { direction: 'on' | 'off'; prUrl: string } | null }>(
+      'SELECT id, slug, knowledge_switch_json FROM projects WHERE workspace_id = ? AND knowledge_switch_json IS NOT NULL',
+      [ctx.workspaceId],
+    );
+    for (const row of rows) {
+      const project = projects.get(row.id);
+      const sw = row.knowledgeSwitch;
+      if (!project || !sw || !existsSync(project.clonePath)) continue;
+      const state = await forge.prState(project.clonePath, sw.prUrl).catch((e: unknown) => {
+        log.warn({ project: row.slug, url: sw.prUrl, err: String(e) }, 'knowledge-repo switch state refresh failed');
+        return null;
+      });
+      if (!state || state.state === 'open') continue;
+      if (state.state === 'merged') {
+        try {
+          await deps().projects.applyKnowledgeRepoSwitch(deps().projects.get(row.id), sw.direction === 'on');
+          await deps().projects.fetch(row.id).catch((e: unknown) => log.warn({ project: row.slug, err: String(e) }, 'knowledge-repo switch clone fetch failed'));
+          log.info({ project: row.slug, direction: sw.direction }, 'knowledge-repo switch merged; opt-in applied');
+        } catch (e) {
+          log.warn({ project: row.slug, err: String(e) }, 'knowledge-repo switch apply failed');
+        }
+        continue;
+      }
+      // Closed unmerged: cancel, leaving the opt-in exactly as it was.
+      ctx.db.update('projects', row.id, { knowledgeSwitchJson: null, updatedAt: nowIso() });
+      log.info({ project: row.slug }, 'knowledge-repo switch cancelled (pull request closed)');
     }
   }
 

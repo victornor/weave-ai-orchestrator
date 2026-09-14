@@ -105,9 +105,22 @@ export function parsePullRequestUrl(text: string): { url: string; number: number
   return { url: m[1], number: Number(m[2]) };
 }
 
+/**
+ * VS-359: `gh repo view --json visibility` → `{ private }`. `INTERNAL` is not public, so it counts
+ * as private. Anything unrecognised or unparseable is `null` — "cannot tell", never a guess that
+ * would show or suppress a warning falsely. Pure and exported so the mapping is tested without gh.
+ */
+export function repoVisibilityFromGh(stdout: string): { private: boolean } | null {
+  let doc: { visibility?: string };
+  try { doc = JSON.parse(stdout) as { visibility?: string }; } catch { return null; }
+  const v = (doc.visibility ?? '').toUpperCase();
+  if (v === 'PUBLIC') return { private: false };
+  if (v === 'PRIVATE' || v === 'INTERNAL') return { private: true };
+  return null;
+}
+
 /** Exported for the mapping tests, which run `gh`'s recorded JSON through it and never call GitHub. */
-export function pullRequestFromGh(doc: GhPr): ForgePullRequest { return toPullRequest(doc); }
-export function pullRequestDetailFromGh(doc: GhPr): ForgePullRequestDetail {
+export function pullRequestFromGh(doc: GhPr): ForgePullRequest { return toPullRequest(doc); }export function pullRequestDetailFromGh(doc: GhPr): ForgePullRequestDetail {
   return { ...toPullRequest(doc), body: doc.body ?? '', files: (doc.files ?? []).map(toFile), checkRuns: (doc.statusCheckRollup ?? []).map(toCheck) };
 }
 
@@ -216,5 +229,18 @@ export class GhForge implements ForgeAdapter {
       throw new OcError('internal', `gh pr diff failed: ${r.stderr.trim().slice(0, 300)}`, { cwd, number });
     }
     return r.stdout;
+  }
+
+  /**
+   * VS-359: whether the repository is public, read from `gh repo view --json visibility`. `remote`
+   * defaults to `cwd`'s origin, and is given explicitly by the project-creation form, which asks
+   * before any clone exists. `null` on any failure — an unreachable or unauthenticated gh must
+   * suppress the warning, never raise one on a guess.
+   */
+  async repoInfo(cwd: string, remote?: string): Promise<{ private: boolean } | null> {
+    const args = ['repo', 'view', ...(remote ? [remote] : []), '--json', 'visibility'];
+    const r = await sh('gh', args, { cwd, timeoutMs: 30_000, env: { NO_COLOR: '1' } });
+    if (!r.ok) return null;
+    return repoVisibilityFromGh(r.stdout);
   }
 }

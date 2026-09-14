@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "Three V2 shell fixes: the Needs you badge counts only cards captain can act on, global
+  Live always navigates to global Needs you, and Work scrolls sideways on a narrow window"
+skip_specs: true

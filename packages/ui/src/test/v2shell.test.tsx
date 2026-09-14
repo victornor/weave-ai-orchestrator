@@ -227,6 +227,25 @@ describe('the rail counts', () => {
     const rail = screen.getByRole('complementary');
     expect(within(rail).getByRole('link', { name: /Live/ })).toHaveTextContent('1');
   });
+
+  it('counts only the cards captain can act on, globally and per workspace (VS-411)', () => {
+    // The daemon's own `needsYou` (9) stands in only until the decisions load; with data in hand the
+    // badge drops a plan/merge/action card the weaver has not reviewed, and keeps looked/concerns.
+    state.workspaces = [{ id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 9 }];
+    state.decisionsByWs = {
+      acme: [
+        { id: 'd1', kind: 'plan_approval', weaverReviewStatus: 'unseen' },
+        { id: 'd2', kind: 'merge_approval', weaverReviewStatus: 'looked' },
+        { id: 'd3', kind: 'action_approval', weaverReviewStatus: 'concerns' },
+        { id: 'd4', kind: 'question', weaverReviewStatus: 'unseen' },
+      ],
+    } as unknown as Record<string, Array<{ id: string }>>;
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    const needs = within(rail).getAllByRole('link', { name: /Needs you/ });
+    expect(needs.find((a) => a.getAttribute('href') === '/v2/needs')).toHaveTextContent('3');
+    expect(needs.find((a) => a.getAttribute('href') === '/v2/w/acme/needs')).toHaveTextContent('3');
+  });
 });
 
 describe('the rail carries the kept V1 screens', () => {

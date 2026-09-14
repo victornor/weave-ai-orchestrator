@@ -68,6 +68,19 @@ describe('whether the daemon refuses the browser', () => {
     await expect(v2Refused()).resolves.toBe(false); // the landing guard now sees the session
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
+
+  it('does not re-probe a later navigation once the daemon has answered signed-in (VS-411)', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(jsonResponse({ operator: { configured: true, id: 'op' }, session: { id: 's' }, totpEnabled: false }));
+    const now = Date.now();
+    await expect(v2Refused()).resolves.toBe(false);
+    // Past the 5 s cache: without the sticky signed-in result, a navigation more than 5 s after the
+    // last probe blocks on a fresh GET /auth/me, so the URL changes and the body stays put.
+    vi.spyOn(Date, 'now').mockReturnValue(now + 60_000);
+    await expect(v2Refused()).resolves.toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('the 401 redirect is V2-aware', () => {

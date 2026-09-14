@@ -7,6 +7,7 @@ import { useRouterState } from '@tanstack/react-router';
 import { useDecisionsMany, useIncidents, useWorkersMany, useWorkspaces } from '../api/hooks';
 import { liveWorkingAgents } from '../lib/board';
 import { agentIsWorking, useRunningWorkerIds } from '../lib/liveOrder';
+import { countsAsNeeds } from './needsCount';
 import { workspaceFromV2Path, type V2Scope } from './nav';
 
 export function useV2Scope(): V2Scope {
@@ -50,16 +51,18 @@ export function useV2Counts(scope: V2Scope): V2Counts {
 
   // Live is the daemon-wide roster — the same predicate the Live screen renders.
   const workerQueries = useWorkersMany(ids);
-  // Needs you is the open human decisions, the array `V2NeedsScreen` renders. Until a query
-  // answers, the listed `needsYou` (the daemon's own per-workspace count) stands in, so the badge
-  // is present on first paint rather than flashing to zero.
+  // Needs you is the open human decisions captain can act on, the array `V2NeedsScreen` renders. A
+  // plan, merge or action card the weaver has not reviewed yet is left out: its answer is refused
+  // until the weaver marks it, so counting it would promise an action captain cannot take (VS-411).
+  // Until a query answers, the listed `needsYou` (the daemon's own per-workspace count) stands in, so
+  // the badge is present on first paint rather than flashing to zero.
   const decisionQueries = useDecisionsMany(ids, { status: 'open', owner: 'human' });
   const incidents = useIncidents();
 
   const needsByWs: Record<string, number> = {};
   let needsGlobal = 0;
   listed.forEach((w, i) => {
-    const needs = decisionQueries[i]?.data?.length ?? w.needsYou;
+    const needs = decisionQueries[i]?.data?.filter(countsAsNeeds).length ?? w.needsYou;
     needsByWs[w.id] = needs;
     needsGlobal += needs;
   });

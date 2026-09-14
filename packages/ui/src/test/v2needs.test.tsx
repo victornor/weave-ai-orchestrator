@@ -104,6 +104,15 @@ describe('the V2 Needs you screen', () => {
     expect(screen.getByText('1 waiting')).toBeInTheDocument();
   });
 
+  it('still lists a card the badge leaves out, so only the number changes (VS-411)', () => {
+    state.decisions = [
+      makeDecision({ id: 'd1', workspaceId: 'ws1', kind: 'plan_approval', weaverReviewStatus: 'unseen', title: 'Unreviewed plan' }),
+    ];
+    render(<V2NeedsPage />);
+    expect(screen.getByText('Unreviewed plan')).toBeInTheDocument();
+    expect(screen.getByText('1 waiting')).toBeInTheDocument();
+  });
+
   it('pre-applies the workspace scope from the route', () => {
     state.path = '/v2/w/ws1/needs';
     render(<V2NeedsPage />);

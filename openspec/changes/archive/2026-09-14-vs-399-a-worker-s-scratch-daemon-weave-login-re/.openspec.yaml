@@ -1,0 +1,7 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "A worker's scratch-daemon `weave login` rewrote captain's shared
+  contexts.yaml and repointed every bare `weave` command at a stopped scratch
+  daemon: isolate scratch CLI state, guard `weave login` against the default
+  contexts file, and keep the test suite off the host's file"
+skip_specs: true

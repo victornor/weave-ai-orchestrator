@@ -1,7 +1,7 @@
 /** `weave login` / `logout` / `context` / `devices` — remote access (PLAN §4.4). */
 import type { Command } from 'commander';
 import { ApiClient, ApiError } from '../api.js';
-import { currentContext, loadContexts, putContext, removeContext, suggestContextName, useContext } from '../contexts.js';
+import { assertLoginContextIsolation, currentContext, loadContexts, putContext, removeContext, suggestContextName, useContext } from '../contexts.js';
 import { emit, fields, style, table, write } from '../output.js';
 import { promptHidden, promptLine } from '../prompt.js';
 import { applyCertPin, fetchCertPin } from '../tls.js';
@@ -30,11 +30,13 @@ export function register(program: Command): void {
     .option('--device <name>', 'device name shown in Settings -> Devices')
     .option('--password <password>', 'operator password (or set AC_PASSWORD); prompts when omitted')
     .option('--workspace-default <id>', 'default workspace for this context')
+    .option('--allow-default-contexts', "store this context in the host's contexts file even for a scratch loopback daemon")
     .action(async (url: string, opts: Record<string, string | boolean>, command: Command) => run(async () => {
       const target = String(url).replace(/\/+$/, '');
       if (target.startsWith('http:') && !isLoopback(target) && opts['insecure'] !== true) {
         throw new ApiError('validation', `refusing to send a password in plaintext to ${target}; use https or pass --insecure`, 400);
       }
+      assertLoginContextIsolation(target, { allowDefaultContexts: opts['allow-default-contexts'] === true });
 
       let certPin: string | undefined;
       if (opts['pin'] === true) {

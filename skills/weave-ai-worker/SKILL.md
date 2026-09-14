@@ -98,6 +98,10 @@ The same goes for the workspace's runtime directories under `.weave/runtimes/` �
 
 **Instead:** verify launcher, probe and adapter changes against a fake CLI binary and a scratch config directory, the way `packages/runtimes/*/test` and `packages/core/src/workspace/credentials.test.ts` do. If a fact genuinely needs the real CLI, say so in the PR as unverified and let the owner run it.
 
+## Scratch daemons
+
+Start one with `scripts/scratch-daemon.sh start` (it records the pid and prints an isolated environment). `--config-dir` isolates the *daemon*, not your CLI: `weave login` and `weave context use` write `$AC_CONTEXTS_FILE`, else the host's `~/.config/weave/contexts.yaml`. Before any `weave` command against a scratch daemon, `eval "$(scripts/scratch-daemon.sh env)"`, or copy the exports `start` printed. Never point either command at the host's contexts: a scratch context sets `current` to a daemon that stops with your scratch dir, and every bare `weave` command on the host then points at a dead port (VS-399, 2026-09-14).
+
 ## Knowledge
 
 At most one `weave_knowledge_note("project", section, text)` per ticket, usually on the merge turn, answering "what would I have wanted to know before starting this?". ≤ 60 words, standalone, absolute dates, no secrets, nothing derivable from git. A rejected write is not retried — say so in the report. Facts every contributor needs regardless of Weave AI go into the repo, through your PR. Full rules: `weave-ai-knowledge`.
@@ -132,6 +136,7 @@ Your last message is one fenced ```json block:
 | Fixing something unrelated you noticed | Silent scope expansion nobody approved | Note it in a comment; the weaver decides |
 | Looking for more work when the inbox is empty | You do not generate your own work | Report `idle` and end |
 | Running the real coding CLI to check something | One refresh rotates the token and signs every agent out, the weaver included | A fake CLI and a scratch config dir; say so in the PR if it truly needs the real one |
+| Running `weave login`/`weave context use` against the host's contexts | A scratch context's `current` outlives the scratch daemon and breaks every bare `weave` command on the host | `eval "$(scripts/scratch-daemon.sh env)"` (or `AC_CONTEXTS_FILE`) before any scratch `weave` command |
 | Pasting a credential into a comment or commit | Permanent leak in the record | `weave_ask` for it; never write it down |
 | Continuing after a worktree mismatch | You may be writing into the wrong checkout | Stop, report `blocked` |
 

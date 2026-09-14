@@ -80,3 +80,29 @@ describe('scripts/scratch-daemon.sh (VS-376)', () => {
     expect(isAlive(child.pid!)).toBe(false);
   });
 });
+
+// VS-399: a scratch `weave login` must write the scratch dir, not the host's contexts file.
+describe('scripts/scratch-daemon.sh env (VS-399)', () => {
+  it('prints an isolated contexts path under the scratch dir', async () => {
+    const dir = scratchDir();
+    const r = await runScript(['env', '--dir', dir]);
+    expect(r.status).toBe(0);
+
+    const line = r.stdout.split('\n').find((l) => l.includes('AC_CONTEXTS_FILE='));
+    expect(line, r.stdout).toBeDefined();
+    const value = /AC_CONTEXTS_FILE="?([^"\n]+)"?/.exec(line!)![1]!;
+    expect(resolve(value).startsWith(`${resolve(dir)}/`)).toBe(true);
+    expect(value).not.toContain('.config');
+  });
+
+  it('isolates the CLI config and state homes too', async () => {
+    const dir = scratchDir();
+    const r = await runScript(['env', '--dir', dir]);
+    for (const name of ['XDG_CONFIG_HOME', 'XDG_STATE_HOME']) {
+      const line = r.stdout.split('\n').find((l) => l.includes(`${name}=`));
+      expect(line, r.stdout).toBeDefined();
+      const value = new RegExp(`${name}="?([^"\\n]+)"?`).exec(line!)![1]!;
+      expect(resolve(value).startsWith(`${resolve(dir)}/`)).toBe(true);
+    }
+  });
+});

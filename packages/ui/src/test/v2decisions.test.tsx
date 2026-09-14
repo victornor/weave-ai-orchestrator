@@ -5,10 +5,17 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps, ReactNode } from 'react';
-import { decision as makeDecision, workProduct } from './factories';
+import type { Run } from '@weave-ai/shared';
+import { agent, decision as makeDecision, run as makeRun, ticket, workProduct } from './factories';
 
 const state = vi.hoisted(() => ({
   products: [] as ReturnType<typeof workProduct>[],
+  runs: [] as Run[],
+  detail: null as {
+    ticket: ReturnType<typeof ticket>;
+    worker: ReturnType<typeof agent> | null;
+    blockers: ReturnType<typeof ticket>[];
+  } | null,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -26,9 +33,10 @@ vi.mock('../app/link', () => ({
 }));
 vi.mock('../api/hooks', () => ({
   useTicketWorkProducts: () => ({ data: state.products, isLoading: false }),
+  useTicketFor: () => ({ data: state.detail }),
   useTicketDocument: () => ({ data: undefined, isLoading: false, isError: true }),
   useTicketDocumentById: () => ({ data: undefined, isLoading: false, isError: true }),
-  useRuns: () => ({ data: [] }),
+  useRuns: () => ({ data: state.runs }),
 }));
 vi.mock('../api/runStream', () => ({
   useRunEventStream: () => ({ events: [], status: { state: 'connected' }, retryNow: vi.fn() }),
@@ -44,6 +52,8 @@ function renderCard(props: Partial<ComponentProps<typeof V2DecisionCard>> = {}) 
 
 beforeEach(() => {
   state.products = [];
+  state.runs = [];
+  state.detail = null;
 });
 
 describe('the V2 decision card header', () => {
@@ -123,13 +133,56 @@ describe('the held card', () => {
     weaverReviewNote: 'Storage write runs on every render.',
   });
 
-  it('shows the objection, the revision row with Watch, a disabled Approve and the blocked copy', () => {
-    renderCard({ decision: held, ticketIdentifier: 'ACME-42' });
+  /** Seed the card's ticket detail so the held row can read the ticket's worker and status. */
+  function hold(worker: ReturnType<typeof agent> | null, over: { status?: 'blocked'; blockers?: ReturnType<typeof ticket>[] } = {}): void {
+    state.detail = { ticket: ticket({ ...(over.status ? { status: over.status } : {}) }), worker, blockers: over.blockers ?? [] };
+  }
+
+  /** The pulsing dot on the revision row, if the row is pulsing. */
+  const row = (): HTMLElement => document.querySelector('[data-revision-row]') as HTMLElement;
+  const pulsing = (): boolean => row().firstElementChild!.className.includes('animate-pulse');
+
+  it('shows the objection, a pulsing revision row when the worker is running, Watch, a disabled Approve and the blocked copy', () => {
+    hold(agent({ id: 'a1', status: 'running' }));
+    state.runs = [makeRun({ id: 'run_1', agentId: 'a1', status: 'running', startedAt: '2026-09-14T17:30:00.000Z' })];
+    renderCard({ decision: held, ticketIdentifier: 'ACME-42', askedBy: 'a1' });
     expect(screen.getByText('Storage write runs on every render.')).toBeInTheDocument();
     expect(screen.getByText(/Revision in progress/)).toBeInTheDocument();
+    expect(pulsing()).toBe(true);
     expect(screen.getByRole('button', { name: 'Watch' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve merge' })).toBeDisabled();
     expect(screen.getByText('Approval is blocked until a revision lands.')).toBeInTheDocument();
+  });
+
+  it('says the worker is paused, with the reason, instead of claiming a revision', () => {
+    hold(agent({ id: 'a1', status: 'paused', pauseReason: 'waiting on the npm publish' }));
+    renderCard({ decision: held, ticketIdentifier: 'ACME-42', askedBy: 'a1' });
+    expect(screen.getByText(/Held — worker paused: waiting on the npm publish/)).toBeInTheDocument();
+    expect(screen.queryByText(/Revision in progress/)).toBeNull();
+    expect(pulsing()).toBe(false);
+  });
+
+  it('says it is waiting on the worker between turns, timed from the last run', () => {
+    hold(agent({ id: 'a1', status: 'active' }));
+    state.runs = [makeRun({ id: 'run_1', agentId: 'a1', status: 'succeeded', startedAt: '2026-09-14T00:00:00.000Z', finishedAt: '2026-09-14T01:00:00.000Z' })];
+    renderCard({ decision: held, ticketIdentifier: 'ACME-42', askedBy: 'a1' });
+    expect(screen.getByText(/Held for a revision — waiting on the worker/)).toBeInTheDocument();
+    expect(screen.queryByText(/Revision in progress/)).toBeNull();
+    expect(pulsing()).toBe(false);
+  });
+
+  it('names the blocker when the ticket is blocked', () => {
+    hold(agent({ id: 'a1', status: 'active' }), { status: 'blocked', blockers: [ticket({ id: 'tk_7', identifier: 'ACME-7', status: 'todo' })] });
+    renderCard({ decision: held, ticketIdentifier: 'ACME-42', askedBy: 'a1' });
+    expect(screen.getByText('Held — blocked: ACME-7')).toBeInTheDocument();
+    expect(pulsing()).toBe(false);
+  });
+
+  it('says there is no worker when the ticket has none', () => {
+    hold(null);
+    renderCard({ decision: held, ticketIdentifier: 'ACME-42', askedBy: 'a1' });
+    expect(screen.getByText('Held — no worker')).toBeInTheDocument();
+    expect(pulsing()).toBe(false);
   });
 
   it('expands the worker feed on Watch, independently per card', () => {

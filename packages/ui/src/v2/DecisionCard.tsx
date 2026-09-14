@@ -15,20 +15,25 @@ import { useMemo, useState } from 'react';
 import {
   NAMED_CARD_OPTION_KEYS,
   documentTarget,
+  isActiveRun,
   weaverReviewCopy,
+  type Agent,
   type Decision,
   type DecisionAnswerInputs,
   type DecisionInput,
   type NamedCardKind,
+  type Run,
+  type Ticket,
 } from '@weave-ai/shared';
+import { workerPauseReason } from '@weave-ai/render';
 import { A } from '../app/link';
 import { DocumentPreview } from '../components/DocumentPreview';
 import { Markdown } from '../components/Markdown';
 import { PlanPreview } from '../components/PlanPreview';
-import { useTicketWorkProducts } from '../api/hooks';
+import { useTicketFor, useTicketWorkProducts } from '../api/hooks';
 import { ago } from '../lib/format';
 import { cx } from '../lib/cx';
-import { WorkerFeed } from './WorkerFeed';
+import { WorkerFeed, useWorkerRun } from './WorkerFeed';
 
 export interface V2Answer {
   key?: string;
@@ -115,6 +120,48 @@ function answerLine(decision: Decision): string | null {
   const text = decision.answerText?.trim() || null;
   if (chosen && text) return `${chosen} — ${text}`;
   return chosen ?? text;
+}
+
+/** The held card's revision row: one line, and whether it pulses. */
+export interface HeldRevisionRow { pulse: boolean; text: string }
+
+/** The first blocker that is not itself done — cancelled blockers never satisfy a dependency. */
+function firstOpenBlocker(blockers: readonly Ticket[] | null | undefined): Ticket | null {
+  return (blockers ?? []).find((b) => b.status !== 'done') ?? null;
+}
+
+/**
+ * The held card's revision row (VS-430): what the worker is actually doing, not a blanket "revision
+ * in progress". A paused worker, a blocked ticket or a worker between turns reads as such, and only
+ * a turn that is actually running pulses. The clock is the run's, never the review's.
+ */
+export function heldRevisionRow(input: {
+  worker: Agent | null | undefined;
+  ticket: Ticket | null | undefined;
+  blockers?: readonly Ticket[] | null;
+  run: Run | null | undefined;
+  now?: number;
+}): HeldRevisionRow {
+  const { worker, ticket, run } = input;
+  if (!worker) return { pulse: false, text: 'Held — no worker' };
+  const live = run ? isActiveRun(run.status) : worker.status === 'running';
+  if (live) {
+    const started = run?.startedAt ?? run?.createdAt;
+    return { pulse: true, text: started ? `Revision in progress · ${ago(started, input.now)}` : 'Revision in progress' };
+  }
+  if (worker.status === 'paused') {
+    const reason = workerPauseReason(worker);
+    return { pulse: false, text: reason ? `Held — worker paused: ${reason}` : 'Held — worker paused' };
+  }
+  if (ticket?.status === 'blocked') {
+    const blocker = firstOpenBlocker(input.blockers);
+    return { pulse: false, text: blocker ? `Held — blocked: ${blocker.identifier}` : 'Held — blocked' };
+  }
+  const lastActivity = run?.finishedAt ?? run?.createdAt ?? worker.lastRunAt;
+  return {
+    pulse: false,
+    text: `Held for a revision — waiting on the worker${lastActivity ? ` · ${ago(lastActivity, input.now)} ago` : ''}`,
+  };
 }
 
 function InputControl({ input, value, disabled, onChange }: {
@@ -284,6 +331,19 @@ export function V2DecisionCard({
   const answer = (key: string, extra?: Partial<V2Answer>): void => onAnswer(withInputs({ key, ...(extra ?? {}) }));
 
   const products = useTicketWorkProducts(decision.ticketId ?? '', ws ?? undefined);
+  // The held row reflects the worker, so it reads the ticket's own detail (its worker, its status
+  // and blockers) and the worker's current run, rather than counting from the weaver's review
+  // (VS-430). The detail query is enabled only while the row is on screen.
+  const heldRowVisible = concerns && !inert;
+  const detail = useTicketFor(ws ?? undefined, decision.ticketId ?? '', heldRowVisible && Boolean(decision.ticketId));
+  const heldWorker = detail.data?.worker ?? null;
+  const { run: heldRun } = useWorkerRun(heldWorker?.id ?? askedBy, ws ?? undefined);
+  const heldRow = heldRevisionRow({
+    worker: heldWorker,
+    ticket: detail.data?.ticket,
+    blockers: detail.data?.blockers,
+    run: heldRun,
+  });
   const artifact = useMemo(
     () => (products.data ?? []).find((p) => p.type === 'artifact' && p.externalId),
     [products.data],
@@ -359,10 +419,8 @@ export function V2DecisionCard({
         {concerns && !inert ? (
           <>
             <div className="flex items-center gap-2 rounded-r4 border border-line-1 bg-bg-2 px-2 py-1.5" data-revision-row>
-              <span className="size-1.5 flex-none animate-pulse rounded-pill bg-working" aria-hidden />
-              <span className="min-w-0 flex-1 truncate text-micro text-text-2">
-                Revision in progress{decision.weaverReviewedAt ? ` · ${ago(decision.weaverReviewedAt)}` : ''}
-              </span>
+              <span className={cx('size-1.5 flex-none rounded-pill', heldRow.pulse ? 'animate-pulse bg-working' : 'bg-idle')} aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-micro text-text-2">{heldRow.text}</span>
               <button
                 type="button"
                 aria-expanded={watchOpen}

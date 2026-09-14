@@ -110,6 +110,7 @@ vi.mock('../api/hooks', () => ({
   useThreadSearch: () => ({ data: state.search, isLoading: false, isError: false }),
   useRuns: () => ({ data: [] }),
   useTicketWorkProducts: () => ({ data: [], isLoading: false }),
+  useTicketFor: () => ({ data: undefined }),
   useTicketDocument: () => ({ data: undefined, isLoading: false, isError: true }),
   useTicketDocumentById: () => ({ data: undefined, isLoading: false, isError: true }),
   // VS-398: the Plan modal's own hooks — the modal itself is closed in every test here, so these

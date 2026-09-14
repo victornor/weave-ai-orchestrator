@@ -1024,6 +1024,20 @@ export function useTicket(id: string): UseQueryResult<T.TicketDetail> {
       }), enabled: Boolean(id) });
 }
 
+/**
+ * One ticket's detail from an explicit workspace, for a V2 card that may render outside a workspace
+ * route (global Needs you). Mirrors `useTicketWorkProducts`'s ws override and skips `useTicket`'s
+ * project/role lookups, which the card does not use.
+ */
+export function useTicketFor(ws: string | undefined, id: string, enabled = true): UseQueryResult<T.TicketDetail> {
+  const w = useHookWs(ws);
+  return useQuery({
+    queryKey: qk.ticket(w, id),
+    queryFn: () => api.ws<unknown>(w, `/tickets/${id}`).then(ticketDetail),
+    enabled: enabled && Boolean(id) && Boolean(w),
+  });
+}
+
 /** A project's merge queue: what is landing now and who is waiting, in order (PLAN §11.4). */
 export function useMergeQueue(projectId: string | null | undefined): UseQueryResult<T.MergeQueue> {
   const ws = useWs();

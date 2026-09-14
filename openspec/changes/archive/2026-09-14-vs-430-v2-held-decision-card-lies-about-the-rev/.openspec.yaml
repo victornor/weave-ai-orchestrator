@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: V2 held decision card row reflects the worker's real state, and the Watch
+  status line describes the run it shows
+skip_specs: true

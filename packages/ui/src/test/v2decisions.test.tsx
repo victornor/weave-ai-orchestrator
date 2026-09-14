@@ -91,6 +91,29 @@ describe('the card shell (VS-414)', () => {
   });
 });
 
+describe('the compact type scale (VS-418)', () => {
+  const context = 'Token layer first, then a theme provider, then sweep the 41 hard-coded colours.';
+
+  const assertCompact = (): void => {
+    const title = screen.getByRole('heading', { level: 3 });
+    expect(title).toHaveClass('text-ui');
+    expect(title).not.toHaveClass('text-head');
+    const body = screen.getByText(context).closest('.ac-prose');
+    expect(body).not.toBeNull();
+    expect(body).toHaveClass('text-meta');
+  };
+
+  it('renders the compact title and body tokens on the wide card', () => {
+    renderCard();
+    assertCompact();
+  });
+
+  it('renders the same compact title and body tokens on the narrow card', () => {
+    renderCard({ narrow: true, ticketIdentifier: 'ACME-42' });
+    assertCompact();
+  });
+});
+
 describe('the held card', () => {
   const held = makeDecision({
     kind: 'merge_approval',
@@ -276,5 +299,51 @@ describe('artifacts and the narrow variant', () => {
   it('renders the work-product link and Ask the worker in the narrow variant', () => {
     renderCard({ narrow: true, ticketIdentifier: 'ACME-42' });
     expect(screen.getByRole('link', { name: 'Ask the worker' })).toHaveAttribute('href', '/v2/w/ws1/tickets/tk_1');
+  });
+});
+
+describe('the approve call to action (VS-418)', () => {
+  it('fills the Approve button and greens a clean review when approval is ready', () => {
+    renderCard({
+      decision: makeDecision({ kind: 'merge_approval', weaverReviewStatus: 'looked', weaverReviewNote: 'Read the diff.' }),
+      ticketIdentifier: 'ACME-42',
+    });
+    const approve = screen.getByRole('button', { name: 'Approve merge' });
+    expect(approve).toBeEnabled();
+    expect(approve).toHaveAttribute('data-variant', 'primary');
+    expect(approve).toHaveAttribute('data-approve', 'ready');
+    expect(screen.getByText('Weaver reviewed — no concerns')).toHaveClass('text-approve');
+  });
+
+  it('mutes the Approve button and warns the review while the weaver holds concerns', () => {
+    renderCard({
+      decision: makeDecision({
+        kind: 'merge_approval',
+        weaverReviewStatus: 'concerns',
+        weaverReviewNote: 'Storage write runs on every render.',
+      }),
+      ticketIdentifier: 'ACME-42',
+    });
+    const approve = screen.getByRole('button', { name: 'Approve merge' });
+    expect(approve).toBeDisabled();
+    expect(approve).not.toHaveAttribute('data-variant');
+    expect(approve).toHaveAttribute('data-approve', 'blocked');
+    expect(screen.getByText('Weaver reviewed — has concerns')).toHaveClass('text-blocked');
+  });
+
+  it('treats a missing required input as blocked, not ready', () => {
+    renderCard({
+      decision: makeDecision({
+        kind: 'plan_approval',
+        weaverReviewStatus: 'looked',
+        options: [],
+        inputs: [{ key: 'note', label: 'Your note', type: 'text', required: true }],
+      }),
+      plan: <div>plan</div>,
+    });
+    const approve = screen.getByRole('button', { name: 'Approve' });
+    expect(approve).toBeDisabled();
+    expect(approve).toHaveAttribute('data-approve', 'blocked');
+    expect(approve).not.toHaveAttribute('data-variant');
   });
 });

@@ -19,6 +19,16 @@ interface StaleDetails {
   weaverReviewNote?: string;
 }
 
+/**
+ * Whether the refusal means the decision is already closed (answered, superseded, expired or
+ * withdrawn) — the answer did not reach an open decision, so the card is stale and has to go rather
+ * than be shown as an error. Distinct from a hold (`revision_pending`), where the card is still open
+ * and only the approving option was withheld (VS-266/VS-281, VS-369).
+ */
+export function isClosedRefusal(e: unknown): boolean {
+  return e instanceof ApiError && e.code === 'wrong_status';
+}
+
 /** `null` for anything that is not a stale-decision refusal — the caller falls back to `e.message`. */
 export function staleAnswerCopy(e: unknown, ticketId: string | null): StaleAnswerCopy | null {
   if (!(e instanceof ApiError)) return null;

@@ -14,7 +14,7 @@ import { useAnswerDecision, useDecisionsMany, useTicketsMany, useWeaverMany, use
 import { NetworkError } from '../api/client';
 import { enqueue } from '../lib/queue';
 import { decisionCarriesSecret } from '../lib/decisionSecrets';
-import { staleAnswerCopy } from '../lib/decisionStaleness';
+import { isClosedRefusal, staleAnswerCopy } from '../lib/decisionStaleness';
 import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { useV2Scope, V2Page } from './V2Page';
@@ -139,6 +139,9 @@ export function V2NeedsScreen(): React.ReactElement {
           enqueue({ kind: 'decision', path: `/decisions/${decision.id}/answer`, body: a, label: a.key ?? a.text ?? 'decision' });
           return;
         }
+        // The decision was already closed elsewhere: the card is gone and any replacement the refetch
+        // shows speaks for itself, so this is not an error (VS-369).
+        if (isClosedRefusal(e)) return;
         const stale = staleAnswerCopy(e, decision.ticketId);
         setAnswerError(stale ? `${stale.title}: ${stale.detail}` : e.message);
       },

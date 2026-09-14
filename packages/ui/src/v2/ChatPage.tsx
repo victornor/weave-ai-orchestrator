@@ -13,7 +13,7 @@ import { A, useGo } from '../app/link';
 import { ScrollToBottomButton } from '../components/ScrollToBottom';
 import { EmptyState } from '../components/States';
 import { decisionCarriesSecret } from '../lib/decisionSecrets';
-import { staleAnswerCopy } from '../lib/decisionStaleness';
+import { isClosedRefusal, staleAnswerCopy } from '../lib/decisionStaleness';
 import { chatEntries, chatRows } from '../lib/dispatch';
 import { draftKey, useDraft } from '../lib/drafts';
 import { enqueue, useQueueCount } from '../lib/queue';
@@ -372,6 +372,9 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
               enqueue({ kind: 'decision', path: `/decisions/${id}/answer`, body: a, label: a.key ?? a.text ?? 'decision' });
               return;
             }
+            // The decision was already closed elsewhere: the card is gone and any replacement the
+            // refetch shows speaks for itself, so this is not an error (VS-369).
+            if (isClosedRefusal(e)) return;
             const stale = staleAnswerCopy(e, d?.ticketId ?? null);
             setAnswerError(stale ? `${stale.title}: ${stale.detail}` : e instanceof Error && e.message ? e.message : 'Could not record that answer.');
           },

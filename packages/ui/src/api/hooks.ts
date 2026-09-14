@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
+import type { QueryClient, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary } from '@weave-ai/shared';
 import { dayKey } from '@weave-ai/render';
 import { listOf, api, qs } from './client';
@@ -9,6 +9,7 @@ import { useHookWs, useWs } from './context';
 import type * as T from './types';
 import { upgradePollInterval } from '../lib/upgrade';
 import { moveProject } from '../lib/moveProject';
+import { isClosedRefusal } from '../lib/decisionStaleness';
 
 /* ------------------------------------------------------------- shapes
  * The daemon answers in the shapes documented in docs/API.md (flat rows, `{ items, total }` pages,
@@ -1183,22 +1184,65 @@ export function useDecisionsMany(
   });
 }
 
+/**
+ * Every cached decisions *list* query, with the status set it was fetched for (VS-369). A list key
+ * is `[...qk.decisions(ws), params]`; the decision-detail key `qk.decision(ws, id)` ends in a string
+ * id and is skipped by the params check, exactly as `api/events.ts`'s `patchDecisionCaches` does.
+ */
+function decisionsLists(qc: QueryClient): Array<{ key: readonly unknown[]; statuses: readonly string[] | null }> {
+  const out: Array<{ key: readonly unknown[]; statuses: readonly string[] | null }> = [];
+  for (const q of qc.getQueryCache().findAll()) {
+    const key = q.queryKey;
+    if (!Array.isArray(key) || key.length < 3 || key[0] !== 'w' || key[2] !== 'decisions') continue;
+    const params = key[key.length - 1];
+    if (!params || typeof params !== 'object' || Array.isArray(params)) continue;
+    const status = (params as { status?: string | readonly string[] }).status;
+    out.push({ key, statuses: status === undefined ? null : Array.isArray(status) ? status : [status] });
+  }
+  return out;
+}
+
 export function useAnswerDecision(): UseMutationResult<unknown, Error, { id: string; ws?: string; key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string }> {
   const ctxWs = useHookWs();
   const qc = useQueryClient();
+  // VS-369: one POST per decision while it is in flight, so a double click cannot answer twice.
+  const inFlight = useRef(new Set<string>());
   return useMutation({
     mutationFn: ({ id, ws: wsArg, ...body }) => {
+      if (inFlight.current.has(id)) return Promise.resolve(undefined);
+      inFlight.current.add(id);
       const ws = wsArg ?? ctxWs;
-      return api.ws(ws, `/decisions/${id}/answer`, { method: 'POST', body });
+      return api.ws(ws, `/decisions/${id}/answer`, { method: 'POST', body }).finally(() => { inFlight.current.delete(id); });
     },
     onMutate: async (v) => {
       const ws = v.ws ?? ctxWs;
-      await qc.cancelQueries({ queryKey: qk.decisions(ws) });
+      // A list refetch already running would put the card back after we remove it, so stop those first.
+      const keys = ws ? [qk.decisions(ws)] : decisionsLists(qc).map((l) => l.key);
+      await Promise.all(keys.map((key) => qc.cancelQueries({ queryKey: key })));
+      const snapshots: Array<{ key: readonly unknown[]; data: Decision[] }> = [];
+      for (const { key, statuses } of decisionsLists(qc)) {
+        const data = qc.getQueryData<Decision[]>(key);
+        if (!data?.some((d) => d.id === v.id)) continue;
+        snapshots.push({ key, data });
+        // A list that keeps answered decisions (V1 chat's `['open', 'answered']` timeline) is the
+        // record of the conversation, not a to-do list: leave it and let the refetch reconcile it.
+        if (statuses === null || statuses.includes('answered')) continue;
+        qc.setQueryData<Decision[]>(key, data.filter((d) => d.id !== v.id));
+      }
+      return { snapshots };
+    },
+    onError: (e, _v, ctx) => {
+      // A closed decision is not a failed answer: it was answered/superseded/expired elsewhere, so it
+      // stays gone and the refetch below reveals any replacement. Every other failure restores the card.
+      if (isClosedRefusal(e) || !ctx) return;
+      for (const { key, data } of ctx.snapshots) qc.setQueryData(key, data);
     },
     onSettled: (_d, _e, v) => {
       const ws = v.ws ?? ctxWs;
-      void qc.invalidateQueries({ queryKey: qk.decisions(ws) });
-      void qc.invalidateQueries({ queryKey: qk.briefing(ws) });
+      const keys = ws ? [qk.decisions(ws)] : decisionsLists(qc).map((l) => l.key);
+      for (const key of keys) void qc.invalidateQueries({ queryKey: key });
+      if (ws) void qc.invalidateQueries({ queryKey: qk.briefing(ws) });
+      void qc.invalidateQueries({ queryKey: qk.workspaces() });
     },
   });
 }

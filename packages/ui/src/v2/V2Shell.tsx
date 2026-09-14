@@ -380,13 +380,18 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
   };
   const activeWsName = useV2WorkspaceName(scope);
   const initial = (ws ? activeWsName : (list[0]?.name ?? 'A')).slice(0, 1).toUpperCase();
+  // A V2 global page has no `WorkspaceProvider`, so nothing updates its cross-workspace decisions
+  // (a card created, answered, superseded or reviewed while it is open) until a stream is
+  // subscribed. Workspace pages get theirs from `V2Workspace`, and Global Chats opens one per pane,
+  // so neither fans in here (VS-369).
+  const fanIn = !ws && !path.startsWith('/v2/chats');
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
-      {/* A global V2 page has no `WorkspaceProvider`, so it holds no stream of its own: mirror V1's
-          global pages and fan in one per listed workspace, so the rail's counts invalidate live.
-          On `/v2/w/*` the workspace provider below owns the active workspace's stream. */}
-      {!ws ? <FanInStreams ids={ids} /> : null}
+      {/* One fan-in mount only: a global V2 page has no `WorkspaceProvider`, so it holds no stream
+          of its own — fan in one per listed workspace so decisions and the rail's counts update live
+          (VS-366, VS-369). `fanIn` also excludes Global Chats, whose panes open one each. */}
+      {fanIn ? <FanInStreams ids={ids} /> : null}
       {collapsed ? (
         <aside className="hidden w-[48px] flex-none flex-col items-center border-r border-line-1 bg-bg-1 py-2 md:flex">
           <button

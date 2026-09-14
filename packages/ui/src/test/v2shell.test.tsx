@@ -15,12 +15,21 @@ const state = vi.hoisted(() => ({
   } as Record<string, Array<{ id: string; kind: string; ticketId: string; status: string; createdAt: string }>>,
   decisionsByWs: { acme: [{ id: 'd1' }, { id: 'd2' }] } as Record<string, Array<{ id: string }>>,
   incidents: [{ resolvedAt: null }, { resolvedAt: '2026-09-01' }] as Array<{ resolvedAt: string | null }>,
+  fanIn: [] as string[][],
 }));
 
 vi.mock('@tanstack/react-router', () => ({
   Outlet: () => null,
   useRouterState: () => state.path,
   useParams: () => ({ ws: 'acme' }),
+}));
+
+vi.mock('../api/context', () => ({
+  // The shell fans in one stream per listed workspace on global pages (VS-366, VS-369); record the calls.
+  FanInStreams: ({ ids }: { ids: readonly string[] }) => {
+    state.fanIn.push([...ids]);
+    return null;
+  },
 }));
 
 vi.mock('../app/link', () => ({
@@ -31,10 +40,6 @@ vi.mock('../app/link', () => ({
   ),
   useGo: () => () => undefined,
 }));
-
-// A global page holds no `WorkspaceProvider`; the shell opens a stream per workspace. The unit
-// test only needs it to be inert.
-vi.mock('../api/context', () => ({ FanInStreams: () => null }));
 
 vi.mock('../api/hooks', () => ({
   useWorkspaces: () => ({ data: state.workspaces, isError: false }),
@@ -68,6 +73,7 @@ beforeEach(() => {
     ],
   };
   state.decisionsByWs = { acme: [{ id: 'd1' }, { id: 'd2' }] };
+  state.fanIn = [];
   onTheme.mockClear();
   localStorage.clear();
 });
@@ -198,6 +204,30 @@ describe('the one-click way back to V1', () => {
   it('links the rail footer to /', () => {
     mountShell();
     expect(screen.getByRole('link', { name: 'V1' })).toHaveAttribute('href', '/');
+  });
+});
+
+describe('live streams on global pages (VS-366, VS-369)', () => {
+  it('opens exactly one stream per listed workspace on a global page', () => {
+    state.path = '/v2/needs';
+    state.workspaces = [
+      { id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 },
+      { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 0 },
+    ];
+    mountShell();
+    // One fan-in mount carrying one id per workspace; a second mount would duplicate every stream.
+    expect(state.fanIn).toEqual([['acme', 'beta']]);
+  });
+
+  it('does not fan in on a workspace page (V2Workspace owns the stream)', () => {
+    mountShell();
+    expect(state.fanIn).toEqual([]);
+  });
+
+  it('does not fan in on Global Chats, which opens one per pane', () => {
+    state.path = '/v2/chats';
+    mountShell();
+    expect(state.fanIn).toEqual([]);
   });
 });
 

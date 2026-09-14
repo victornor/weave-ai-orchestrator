@@ -1,16 +1,17 @@
-/** The V2 Knowledge home (VS-347): the knowledge-base list with its meters, the cross-knowledge/spec
- * search and its kind filters, and the capability drill-down. Hooks and the router are mocked. */
+/** The V2 Knowledge tab (VS-371, from VS-347): the knowledge-base list with its meters, the
+ * cross-knowledge search, V1's document catalogue, and the artifacts list. The specs list is not
+ * here — it has its own tab (`v2knowledgespecs.test.tsx`). Hooks and the router are mocked. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
-import type { CapabilityDetail, CapabilitySummary, SearchHit, SpecChangeSummary, TicketArtifactSummary, WeaverArtifactSummary } from '../api/types';
+import type { CapabilitySummary, KnowledgeDocDetail, KnowledgeDocSummary, SearchHit, TicketArtifactSummary, WeaverArtifactSummary } from '../api/types';
 
 const state = vi.hoisted(() => ({
   files: [] as Array<Record<string, unknown>>,
   hits: [] as SearchHit[],
+  docs: [] as KnowledgeDocSummary[],
+  docDetail: null as KnowledgeDocDetail | null,
   capabilities: [] as CapabilitySummary[],
-  changes: [] as SpecChangeSummary[],
-  capability: null as CapabilityDetail | null,
   artifacts: [] as TicketArtifactSummary[],
   weaverArtifacts: [] as WeaverArtifactSummary[],
 }));
@@ -28,9 +29,10 @@ vi.mock('../api/hooks', () => ({
   useKnowledgeIndex: () => ({ data: { files: state.files, warnings: [] }, isLoading: false, isError: false, refetch: vi.fn() }),
   useProjects: () => ({ data: [{ id: 'p1', slug: 'web', name: 'web' }] }),
   useSearch: () => ({ data: state.hits, isLoading: false }),
+  useKnowledgeDocs: () => ({ data: state.docs, isLoading: false, isError: false, refetch: vi.fn() }),
   useCapabilities: () => ({ data: state.capabilities, isLoading: false, isError: false }),
-  useSpecChanges: () => ({ data: state.changes, isLoading: false, isError: false }),
-  useCapability: () => ({ data: state.capability, isLoading: false, isError: false }),
+  useSpecChanges: () => ({ data: [], isLoading: false, isError: false }),
+  useCapability: () => ({ data: null, isLoading: false, isError: false }),
   useSpecChange: () => ({ data: null, isLoading: false, isError: true }),
   useProjectArtifacts: () => ({ data: state.artifacts, isLoading: false }),
   useWorkspaceArtifacts: () => ({ data: state.weaverArtifacts, isLoading: false }),
@@ -38,7 +40,7 @@ vi.mock('../api/hooks', () => ({
   useKnowledgeDoc: () => ({ data: null, isLoading: false, refetch: vi.fn() }),
   useKnowledgeRevisions: () => ({ data: [] }),
   useKnowledgeMutation: () => ({ mutate: vi.fn() }),
-  useKnowledgeDocDetail: () => ({ data: null, isLoading: false, isError: true }),
+  useKnowledgeDocDetail: () => ({ data: state.docDetail, isLoading: false, isError: state.docDetail === null }),
   useKnowledgeDocMutation: () => ({ mutate: vi.fn() }),
   useKnowledgeMoveDoc: () => ({ mutate: vi.fn() }),
 }));
@@ -55,6 +57,14 @@ const KB_PROJECT = {
   tokenEstimate: 11600, budgetTokens: 12000, lastCuratedAt: null, curationPending: true,
   projectSlug: 'web', hash: 'b', updatedAt: '2026-09-12T00:00:00Z',
 };
+const DOC: KnowledgeDocSummary = {
+  path: 'projects/web/docs/theming.md', scope: 'project', projectId: 'p1', projectSlug: 'web',
+  slug: 'theming', folder: null, title: 'Theming decisions', summary: 'What the theme does.',
+  tokenEstimate: 50, budgetTokens: 10000, links: 0, backlinks: 1, updatedAt: '2026-09-12T00:00:00Z',
+};
+const DOC_DETAIL: KnowledgeDocDetail = {
+  ...DOC, body: '# Theming\n\nThe theme carries one accent.', revision: 2, linksTo: [], linkedFrom: [],
+};
 
 const TICKET_ARTIFACT = {
   id: 'wp1', ticketId: 'tk1', ticketIdentifier: 'ACME-42', ticketTitle: 'Add dark mode',
@@ -66,14 +76,14 @@ const WEAVER_ARTIFACT = { key: 'plan', title: 'Workspace overview', kind: 'plan'
 beforeEach(() => {
   state.files = [KB_WORKSPACE, KB_PROJECT];
   state.hits = [];
+  state.docs = [];
+  state.docDetail = null;
   state.capabilities = [];
-  state.changes = [];
-  state.capability = null;
   state.artifacts = [];
   state.weaverArtifacts = [];
 });
 
-describe('the V2 Knowledge home', () => {
+describe('the V2 Knowledge tab', () => {
   it('lists every knowledge base with its hue, meter and curation line', () => {
     render(<KnowledgeHome />);
     expect(screen.getByText('Knowledge bases')).toBeInTheDocument();
@@ -87,7 +97,18 @@ describe('the V2 Knowledge home', () => {
     expect(screen.getByText('curation due')).toBeInTheDocument();
   });
 
-  it('returns knowledge and spec hits for one query, and the chips narrow them', () => {
+  it('lists a seeded hub\u2019s documents and opens one to read it', () => {
+    state.docs = [DOC];
+    state.docDetail = DOC_DETAIL;
+    render(<KnowledgeHome />);
+
+    fireEvent.click(screen.getByText('Theming decisions'));
+    // The document panel renders the linked page's own path and body.
+    expect(screen.getByText('projects/web/docs/theming.md')).toBeInTheDocument();
+    expect(screen.getByText(/The theme carries one accent/)).toBeInTheDocument();
+  });
+
+  it('returns knowledge and spec hits for one query', () => {
     state.hits = [
       { kind: 'knowledge', projectId: 'p1', projectSlug: 'web', title: 'Theming decisions', subtitle: null, href: {} },
       { kind: 'capability', projectId: 'p1', projectSlug: 'web', title: 'theming', subtitle: null, href: {} },
@@ -97,32 +118,15 @@ describe('the V2 Knowledge home', () => {
 
     expect(screen.getByText('Theming decisions')).toBeInTheDocument();
     expect(screen.getByText('theming')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Knowledge' }));
-    expect(screen.getByText('Theming decisions')).toBeInTheDocument();
-    expect(screen.queryByText('theming')).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Specs' }));
-    expect(screen.queryByText('Theming decisions')).toBeNull();
-    expect(screen.getByText('theming')).toBeInTheDocument();
   });
 
-  it('opens a capability into its page with requirements and change history', () => {
+  it('no longer mixes the specs list into the Knowledge tab', () => {
     state.capabilities = [
       { id: 'c1', capability: 'auth', title: null, requirementCount: 1, lastArchivedChange: null, updatedAt: '', pendingChanges: [] },
     ];
-    state.capability = {
-      id: 'c1', capability: 'auth', title: null, body: '',
-      requirements: [{ name: 'Login', text: 'The system SHALL accept an email and password.', scenarios: [] }],
-      pending: [],
-      history: [{ changeName: 'acme-1-login', ticketId: null, ticketIdentifier: 'ACME-1', state: 'archived', archivedAs: null, archivedAt: null }],
-    };
     render(<KnowledgeHome />);
-
-    fireEvent.click(screen.getByText('auth').closest('button')!);
-    expect(screen.getByText('The system SHALL accept an email and password.')).toBeInTheDocument();
-    expect(screen.getByText('Change history')).toBeInTheDocument();
-    expect(screen.getByText('acme-1-login')).toBeInTheDocument();
+    expect(screen.queryByText('Capabilities')).toBeNull();
+    expect(screen.queryByText('auth')).toBeNull();
   });
 
   it('opens a ticket artifact in place, through its ticket-scoped raw route', () => {

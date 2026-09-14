@@ -29,12 +29,14 @@ vi.mock('../api/hooks', () => ({
   useWorkspaceProjects: (ids: string[]) => Object.fromEntries(ids.map((id) => [id, { status: 'success', projects: state.projects }])),
   useRuntimeModels: () => ({ data: [] }),
   useRuns: (params: { status?: string } = {}) => ({ data: state.runs.filter((r) => !params.status || r.status === params.status) }),
+  useDecisionsMany: (ids: string[]) => ids.map(() => ({ data: [] })),
+  useIncidents: () => ({ data: { items: [], total: 0 } }),
 }));
 vi.mock('../api/runStream', () => ({
   useRunEventStream: () => ({ events: [], status: { state: 'connected' }, retryNow: vi.fn() }),
 }));
 
-const { LiveBody } = await import('../v2/LivePage');
+const { LiveBody, V2LivePage } = await import('../v2/LivePage');
 
 function setMedia(phone: boolean): void {
   state.phone = phone;
@@ -213,5 +215,25 @@ describe('V2 Live tile height (VS-372)', () => {
     setMedia(true);
     render(<LiveBody />);
     expect(screen.queryByRole('separator', { name: 'Resize live tiles' })).toBeNull();
+  });
+});
+
+describe('the Live page frame', () => {
+  it('is fill-height with one scroll container, and every card sits inside it', () => {
+    render(<V2LivePage />);
+    const body = document.querySelector('[data-v2-page-body]') as HTMLElement;
+    // The page body does not scroll; the grid does. Two nested scroll containers clipped cards.
+    expect(body.getAttribute('data-v2-page-body')).toBe('fill');
+    expect(body.className).not.toContain('overflow-y-auto');
+
+    const scroll = document.querySelector('[data-v2-live-scroll]') as HTMLElement;
+    expect(scroll.className).toContain('flex-1');
+    expect(scroll.className).toContain('min-h-0');
+    expect(scroll.className).toContain('overflow-y-auto');
+    expect(scroll.contains(document.querySelector('[data-v2-live-grid]'))).toBe(true);
+
+    const cards = document.querySelectorAll('[data-v2-live-card]');
+    expect(cards.length).toBeGreaterThan(0);
+    for (const card of cards) expect(scroll.contains(card)).toBe(true);
   });
 });

@@ -222,8 +222,10 @@ const v2WsNeedsRoute = v2WsRouteFor('needs', 'V2NeedsPage');
 const v2WorkRoute = v2WsRouteFor('work', 'V2WorkPage');
 const v2RolesRoute = v2WsRouteFor('roles', 'V2RolesPage');
 const v2KnowledgeRoute = v2WsRouteFor('knowledge', 'V2KnowledgePage');
-const v2GraphRoute = v2WsRouteFor('knowledge/graph', 'V2GraphPage');
-const v2ExplorerRoute = v2WsRouteFor('knowledge/explorer', 'V2ExplorerPage');
+const v2KnowledgeGraphRoute = v2WsRouteFor('knowledge/graph', 'V2GraphPage');
+const v2KnowledgeExplorerRoute = v2WsRouteFor('knowledge/explorer', 'V2ExplorerPage');
+const v2KnowledgeChangelogRoute = v2WsRouteFor('knowledge/changelog', 'V2KnowledgeChangelogPage');
+const v2KnowledgeSpecsRoute = v2WsRouteFor('knowledge/specs', 'V2KnowledgeSpecsPage');
 const v2UsageRoute = v2WsRouteFor('usage', 'V2UsagePage');
 const v2ChangelogRoute = v2WsRouteFor('changelog', 'V2ChangelogPage');
 const v2ProjectRoute = v2WsRouteFor('p/$project', 'V2ProjectPage');
@@ -344,8 +346,10 @@ const routeTree = rootRoute.addChildren([
         v2WorkRoute,
         v2RolesRoute,
         v2KnowledgeRoute,
-        v2GraphRoute,
-        v2ExplorerRoute,
+        v2KnowledgeGraphRoute,
+        v2KnowledgeExplorerRoute,
+        v2KnowledgeChangelogRoute,
+        v2KnowledgeSpecsRoute,
         v2UsageRoute,
         v2ChangelogRoute,
         v2ProjectRoute,

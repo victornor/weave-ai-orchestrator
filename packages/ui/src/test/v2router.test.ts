@@ -83,6 +83,8 @@ describe('the V2 route tree (VS-343, VS-353)', () => {
         'knowledge',
         'knowledge/graph',
         'knowledge/explorer',
+        'knowledge/changelog',
+        'knowledge/specs',
         'usage',
         'changelog',
         'p/$project',

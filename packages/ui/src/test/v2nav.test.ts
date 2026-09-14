@@ -90,7 +90,14 @@ describe('the registry matches the design', () => {
 
   it('keeps Chats, Usage and Changelog as reachable destinations', () => {
     expect(V2_KEPT.map((d) => d.key)).toEqual(
-      expect.arrayContaining(['global-chats', 'ws-usage', 'ws-changelog', 'ws-graph', 'ws-explorer']),
+      expect.arrayContaining(['global-chats', 'ws-usage', 'ws-changelog']),
     );
+  });
+
+  it('keeps the knowledge graph and explorer out of the More registry (VS-371)', () => {
+    // They are reachable only as the Knowledge screen's Graph and Explorer tabs, so the desktop and
+    // phone More lists must not offer them.
+    expect(V2_KEPT.some((d) => d.key === 'ws-graph' || d.key === 'ws-explorer')).toBe(false);
+    expect(V2_KEPT.some((d) => d.path.includes('/knowledge/'))).toBe(false);
   });
 });

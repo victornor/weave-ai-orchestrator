@@ -27,9 +27,22 @@ const asDate = (day: string): Date => new Date(`${day}T12:00:00Z`);
 const weekLabel = (week: string): string => `Week of ${new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short' }).format(asDate(week))}`;
 
 export function V2ChangelogScreen(): React.ReactElement {
+  return (
+    <V2Page title="Changelog">
+      <ChangelogTimeline />
+    </V2Page>
+  );
+}
+
+/**
+ * The timeline itself, workspace-wide with no `project`, scoped to one with it. The V2 Changelog
+ * screen and the Knowledge screen's Changelog tab (VS-371) both render it, so a change to one is a
+ * change to both.
+ */
+export function ChangelogTimeline({ project }: { project?: string }): React.ReactElement {
   const tz = readerTimezone();
-  const history = useChangelog();
-  const heat = useChangelogHeatmap();
+  const history = useChangelog(project);
+  const heat = useChangelogHeatmap(project);
   const ws = useWs();
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const [jumping, setJumping] = useState(false);
@@ -58,49 +71,47 @@ export function V2ChangelogScreen(): React.ReactElement {
   }, [history]);
 
   return (
-    <V2Page title="Changelog">
-      <div className="mx-auto flex max-w-3xl flex-col gap-5 p-4 md:p-5" ref={bodyRef}>
-        {history.isLoading ? (
-          <SkeletonRows rows={6} />
-        ) : history.isError ? (
-          <ErrorState code="CHANGELOG_FAILED" message="The changelog could not be read." />
-        ) : (
-          <>
-            {heat.data ? (
-              <div className="v2-card p-3.5">
-                <ActivityHeatmap heatmap={heat.data} onSelect={(d) => void jumpTo(d)} />
-              </div>
-            ) : null}
-
-            {!groups.length ? (
-              <EmptyState title="Nothing has happened yet." detail="Tickets filed, plans approved, work landed and hires appear here as they happen." />
-            ) : (
-              <div className="flex flex-col">
-                {groups.map((g) => (
-                  <DayGroup key={g.day} group={g} ws={ws} />
-                ))}
-              </div>
-            )}
-
-            <div className="flex justify-center py-2">
-              {jumping || history.isLoadingOlder ? (
-                <span className="text-micro text-text-3">Loading older entries…</span>
-              ) : history.hasOlder ? (
-                <button
-                  type="button"
-                  onClick={() => history.loadOlder()}
-                  className="rounded-r4 border border-line-2 px-3 py-1.5 text-micro text-text-2 hover:bg-bg-2 hover:text-text-1"
-                >
-                  Load older
-                </button>
-              ) : groups.length ? (
-                <span className="text-micro text-text-4">That is the whole record.</span>
-              ) : null}
+    <div className="mx-auto flex max-w-3xl flex-col gap-5 p-4 md:p-5" ref={bodyRef}>
+      {history.isLoading ? (
+        <SkeletonRows rows={6} />
+      ) : history.isError ? (
+        <ErrorState code="CHANGELOG_FAILED" message="The changelog could not be read." />
+      ) : (
+        <>
+          {heat.data ? (
+            <div className="v2-card p-3.5">
+              <ActivityHeatmap heatmap={heat.data} onSelect={(d) => void jumpTo(d)} />
             </div>
-          </>
-        )}
-      </div>
-    </V2Page>
+          ) : null}
+
+          {!groups.length ? (
+            <EmptyState title="Nothing has happened yet." detail="Tickets filed, plans approved, work landed and hires appear here as they happen." />
+          ) : (
+            <div className="flex flex-col">
+              {groups.map((g) => (
+                <DayGroup key={g.day} group={g} ws={ws} />
+              ))}
+            </div>
+          )}
+
+          <div className="flex justify-center py-2">
+            {jumping || history.isLoadingOlder ? (
+              <span className="text-micro text-text-3">Loading older entries…</span>
+            ) : history.hasOlder ? (
+              <button
+                type="button"
+                onClick={() => history.loadOlder()}
+                className="rounded-r4 border border-line-2 px-3 py-1.5 text-micro text-text-2 hover:bg-bg-2 hover:text-text-1"
+              >
+                Load older
+              </button>
+            ) : groups.length ? (
+              <span className="text-micro text-text-4">That is the whole record.</span>
+            ) : null}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 

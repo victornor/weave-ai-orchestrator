@@ -1,44 +1,34 @@
 /**
- * The V2 Knowledge home (VS-347): one search across knowledge and specs for the current workspace,
- * a kind filter row, every workspace and project knowledge base as a row with its meter, the spec
- * capability and change pages, and the artifacts workers published.
+ * The V2 Knowledge tab (VS-371, formerly the whole Knowledge home from VS-347): one search across
+ * knowledge and specs, every workspace and project knowledge base as a row with its meter, the
+ * linked-document catalogue V1's `DocsPanel` renders, and the artifacts workers published.
  *
+ * The specs list moved to its own tab (see `KnowledgeSpecs.tsx`), so this page no longer mixes it in.
  * Reads every fact through V1's `api/hooks` and reuses V1's leaf viewers (`KnowledgeDocPanel`,
- * `DocPanel`, `Markdown`, `Badge`); the chrome is built from the V2 classes in `v2.css` and the
- * Tailwind token utilities, which resolve against the Mono tokens under `.v2-root`.
+ * `DocsPanel`); the chrome is built from the V2 classes in `v2.css` and the Tailwind token utilities,
+ * which resolve against the Mono tokens under `.v2-root`.
  */
-import { useEffect, useMemo, useState } from 'react';
-import { A, useGo, useSearchParams } from '../../app/link';
+import { useMemo, useState } from 'react';
+import { A } from '../../app/link';
 import { useWs } from '../../api/context';
 import {
-  useCapabilities,
-  useCapability,
   useKnowledgeIndex,
   useProjects,
   useProjectArtifacts,
   useSearch,
-  useSpecChange,
-  useSpecChanges,
   useTicketDocumentRevisions,
   useWorkspaceArtifacts,
 } from '../../api/hooks';
-import { Markdown } from '../../components/Markdown';
 import { ArtifactViewer } from '../../components/ArtifactViewer';
 import { Badge } from '../../components/StatusGlyph';
-import type { CapabilitySummary, Project, SearchHit, SpecChangeSummary, TicketArtifactSummary } from '../../api/types';
+import type { Project, SearchHit, TicketArtifactSummary } from '../../api/types';
 import { ago } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { projectColorVar } from '../../lib/projectColor';
 import { projectLabelFor } from '../../lib/projectName';
-import { DocPanel, KnowledgeDocPanel, type DocRef } from '../../routes/KnowledgeDocs';
-
-type Filter = 'everything' | 'knowledge' | 'specs' | 'artifacts';
-const FILTERS: Array<{ key: Filter; label: string }> = [
-  { key: 'everything', label: 'Everything' },
-  { key: 'knowledge', label: 'Knowledge' },
-  { key: 'specs', label: 'Specs' },
-  { key: 'artifacts', label: 'Artifacts' },
-];
+import { DocsPanel, KnowledgeDocPanel, type DocRef } from '../../routes/KnowledgeDocs';
+import { useProjectScope } from './KnowledgeFrame';
+import { Empty, Skeleton } from './KnowledgeParts';
 
 /** A hub row from `useKnowledgeIndex`, with the project facts its label and hue need. */
 interface Base {
@@ -56,35 +46,20 @@ interface Base {
 }
 
 export function KnowledgeHome(): React.ReactElement {
-  const url = useSearchParams();
-  const ws = useWs();
-  const go = useGo();
   const index = useKnowledgeIndex();
   const projects = useProjects();
   const projectList = projects.data ?? [];
-
-  const [project, setProject] = useState<string>(url['project'] ?? '');
-  useEffect(() => {
-    setProject(url['project'] ?? '');
-  }, [url['project']]);
-  const activeProject = project || projectList[0]?.id || '';
-  // The spec project picker is mirrored into `?project=` (as V1's Knowledge and the board do), so the
-  // choice survives a reload and a link can arrive on a project.
-  const pickProject = (id: string): void => {
-    setProject(id);
-    go('/v2/w/$ws/knowledge', { params: { ws }, search: { project: id }, replace: true });
-  };
+  const project = useProjectScope();
 
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<Filter>('everything');
   const [openBase, setOpenBase] = useState<Base | null>(null);
   const [openDoc, setOpenDoc] = useState<DocRef | null>(null);
-  const [capability, setCapability] = useState<string | null>(null);
-  const [change, setChange] = useState<string | null>(null);
 
   const siblingIds = useMemo(() => projectList.map((p) => p.id), [projectList]);
+  // V1's rule: with a project selected, show the workspace hubs and that project's own hub; with
+  // none, show every hub.
   const bases = useMemo<Base[]>(() => {
-    const files = (index.data?.files ?? []).filter((f) => f.kind !== 'doc');
+    const files = (index.data?.files ?? []).filter((f) => f.kind !== 'doc' && (!project || !f.projectId || f.projectId === project));
     return files.map((f) => {
       const basename = f.path.split('/').pop() ?? f.path;
       const projectId = f.scope === 'project' ? f.projectId : null;
@@ -102,70 +77,31 @@ export function KnowledgeHome(): React.ReactElement {
         dueInDays: f.curationDueInDays ?? null,
       };
     });
-  }, [index.data, projectList, siblingIds]);
+  }, [index.data, projectList, siblingIds, project]);
 
   const searching = query.trim().length > 1;
   const hits = useSearch(query, undefined);
 
-  // A search result never carries an artifact kind, so that chip always shows the artifacts list.
-  const showKnowledge = filter === 'everything' || filter === 'knowledge';
-  const showSpecs = filter === 'everything' || filter === 'specs';
-  const showArtifacts = filter === 'everything' || filter === 'artifacts';
-
-  if (change && activeProject) {
-    return (
-      <Body>
-        <ChangePage project={activeProject} name={change} onBack={() => setChange(null)} />
-      </Body>
-    );
-  }
-  if (capability && activeProject) {
-    return (
-      <Body>
-        <CapabilityPage project={activeProject} capability={capability} onBack={() => setCapability(null)} onOpenChange={setChange} />
-      </Body>
-    );
-  }
-
   return (
-    <Body>
-      <div className="flex flex-col gap-3">
-        <label className="flex items-center gap-2 rounded-r6 border border-line-2 bg-bg-input px-3 py-2">
-          <SearchGlyph />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search knowledge, specs and artifacts…"
-            aria-label="Search knowledge, specs and artifacts"
-            className="min-w-0 flex-1 bg-transparent text-ui text-text-1 outline-none placeholder:text-text-3"
-          />
-        </label>
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter">
-          {FILTERS.map((f) => (
-            <button
-              key={f.key}
-              type="button"
-              aria-pressed={filter === f.key}
-              onClick={() => setFilter(f.key)}
-              className={cx('v2-tag', filter === f.key ? 'text-accent-link' : 'text-text-3')}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className="mx-auto flex max-w-4xl flex-col gap-5 p-4 md:p-5">
+      <label className="flex items-center gap-2 rounded-r6 border border-line-2 bg-bg-input px-3 py-2">
+        <SearchGlyph />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search knowledge, specs and artifacts…"
+          aria-label="Search knowledge, specs and artifacts"
+          className="min-w-0 flex-1 bg-transparent text-ui text-text-1 outline-none placeholder:text-text-3"
+        />
+      </label>
 
       {searching ? (
-        <SearchResults
-          hits={(hits.data ?? []).filter((h) => (filter === 'knowledge' ? h.kind === 'knowledge' : filter === 'specs' ? h.kind !== 'knowledge' : true))}
-          loading={hits.isLoading}
-          projects={projectList}
-        />
+        <SearchResults hits={hits.data ?? []} loading={hits.isLoading} projects={projectList} />
       ) : (
         <>
-          {showKnowledge ? <BasesSection bases={bases} loading={index.isLoading} onOpen={setOpenBase} /> : null}
-          {showArtifacts ? <ArtifactsSection /> : null}
-          {showSpecs ? <SpecsSection project={activeProject} projects={projectList} onPickProject={pickProject} onOpenCapability={setCapability} onOpenChange={setChange} /> : null}
+          <BasesSection bases={bases} loading={index.isLoading} onOpen={setOpenBase} />
+          <DocsPanel project={project || undefined} open={openDoc} onOpen={(ref) => { setOpenBase(null); setOpenDoc(ref); }} />
+          <ArtifactsSection />
         </>
       )}
 
@@ -177,13 +113,8 @@ export function KnowledgeHome(): React.ReactElement {
           onOpenDoc={(ref) => { setOpenBase(null); setOpenDoc(ref); }}
         />
       ) : null}
-      {openDoc ? <DocPanel doc={openDoc} projects={projectList} onOpen={setOpenDoc} onClose={() => setOpenDoc(null)} /> : null}
-    </Body>
+    </div>
   );
-}
-
-function Body({ children }: { children: React.ReactNode }): React.ReactElement {
-  return <div className="mx-auto flex max-w-4xl flex-col gap-5 p-4 md:p-5">{children}</div>;
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -350,219 +281,5 @@ function ArtifactGlyph(): React.ReactElement {
       <rect x="2" y="2.5" width="12" height="11" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1" />
       <path d="M4.5 6h7M4.5 8.5h7M4.5 11h4" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
     </svg>
-  );
-}
-
-function SpecsSection({
-  project,
-  projects,
-  onPickProject,
-  onOpenCapability,
-  onOpenChange,
-}: {
-  project: string;
-  projects: Project[];
-  onPickProject: (id: string) => void;
-  onOpenCapability: (c: string) => void;
-  onOpenChange: (c: string) => void;
-}): React.ReactElement {
-  const capabilities = useCapabilities(project);
-  const changes = useSpecChanges(project);
-  const active = projects.find((p) => p.id === project);
-
-  return (
-    <section>
-      <div className="mb-2 flex items-center gap-2">
-        <span className="ac-label">Capabilities{active ? ` · ${active.name}` : ''}</span>
-        {projects.length > 1 ? (
-          <select
-            value={project}
-            onChange={(e) => onPickProject(e.target.value)}
-            aria-label="Project"
-            className="ac-mono ml-auto h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1"
-          >
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        ) : null}
-      </div>
-      {!project ? (
-        <Empty title="No project selected." detail="Pick a project to browse its specs." />
-      ) : capabilities.isLoading ? (
-        <Skeleton />
-      ) : capabilities.isError ? (
-        <Empty title="The spec index is unavailable." detail="It has not been built for this project yet." />
-      ) : (capabilities.data?.length ?? 0) === 0 ? (
-        <Empty title="No capabilities yet." detail="They appear once a change is archived into the main specs." />
-      ) : (
-        <div className="border-y border-line-1 bg-line-1">
-          {(capabilities.data ?? []).map((c: CapabilitySummary) => (
-            <button key={c.capability} type="button" onClick={() => onOpenCapability(c.capability)} className="flex w-full items-center gap-2.5 bg-bg-0 px-2 py-2.5 text-left hover:bg-bg-1">
-              <span className="ac-mono flex-1 text-meta text-text-1">{c.capability}</span>
-              {c.pendingChanges.length ? <span className="v2-tag text-accent-link">{c.pendingChanges.map((p) => p.ticketIdentifier ?? p.changeName).join(' · ')}</span> : null}
-              <span className="ac-mono text-nano text-text-2">{c.requirementCount} reqs</span>
-            </button>
-          ))}
-        </div>
-      )}
-
-      {(changes.data?.length ?? 0) > 0 ? (
-        <div className="mt-4">
-          <SectionLabel>Changes</SectionLabel>
-          <div className="border-y border-line-1">
-            {(changes.data ?? []).map((c: SpecChangeSummary) => (
-              <button key={c.changeName} type="button" onClick={() => onOpenChange(c.changeName)} className="flex w-full items-center gap-2.5 border-b border-line-1 px-2 py-2.5 text-left hover:bg-bg-1">
-                <Badge tone={c.state === 'active' ? 'modified' : 'neutral'}>{c.state}</Badge>
-                <span className="ac-mono min-w-0 flex-1 truncate text-meta text-text-1">{c.changeName}</span>
-                {c.taskProgress ? <span className="ac-mono text-nano text-text-3">{c.taskProgress.done}/{c.taskProgress.total} tasks</span> : null}
-                {c.ticketIdentifier ? <span className="ac-mono text-nano text-text-3">{c.ticketIdentifier}</span> : null}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-const DELTA_TONE = { ADDED: 'added', MODIFIED: 'modified', REMOVED: 'removed', RENAMED: 'modified' } as const;
-
-function BackLink({ label, onClick }: { label: string; onClick: () => void }): React.ReactElement {
-  return (
-    <button type="button" onClick={onClick} className="text-meta text-text-3 hover:text-text-1">
-      ← {label}
-    </button>
-  );
-}
-
-function CapabilityPage({ project, capability, onBack, onOpenChange }: { project: string; capability: string; onBack: () => void; onOpenChange: (name: string) => void }): React.ReactElement {
-  const detail = useCapability(project, capability);
-  if (detail.isLoading) return <Skeleton />;
-  if (detail.isError || !detail.data) return <Empty title="No such capability." detail="It is not in this project's spec index." />;
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <BackLink label="capabilities" onClick={onBack} />
-        <span className="ac-mono text-ui text-text-strong">{capability}</span>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-[1fr_15rem]">
-        <div className="flex flex-col gap-2">
-          {detail.data.requirements.map((r, i) => (
-            <article key={r.name || i} className={cx('v2-card p-3.5', r.delta?.kind === 'ADDED' && 'border-done/30', r.delta?.kind === 'REMOVED' && 'border-failed/30')}>
-              <div className="mb-1.5 flex items-center gap-2">
-                <span className="ac-mono text-micro text-text-3">{r.name}</span>
-                {r.delta ? <Badge tone={DELTA_TONE[r.delta.kind]}>{r.delta.kind}</Badge> : null}
-                <span className="flex-1" />
-                <span className="ac-mono text-nano text-text-3">{r.scenarios.length} scenarios</span>
-              </div>
-              <p className={cx('text-meta leading-relaxed', r.delta?.kind === 'REMOVED' ? 'text-text-3 line-through' : 'text-text-2')}>{r.text}</p>
-              {r.scenarios.length ? (
-                <details className="mt-2">
-                  <summary className="ac-mono cursor-pointer text-nano text-text-3">scenarios</summary>
-                  <div className="mt-2 flex flex-col gap-1">
-                    {r.scenarios.map((s, si) => (
-                      <div key={si} className="ac-mono text-micro text-text-2">
-                        {s.steps?.length ? s.steps.map((st) => `${st.word} ${st.text}`).join(' · ') : s.text}
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              ) : null}
-            </article>
-          ))}
-        </div>
-        <aside className="flex flex-col gap-2">
-          <SectionLabel>Change history</SectionLabel>
-          {detail.data.history.map((h) => (
-            <button key={h.changeName} type="button" onClick={() => onOpenChange(h.changeName)} className="v2-card px-3 py-2 text-left hover:bg-bg-2">
-              <div className="ac-mono text-micro text-text-1">{h.changeName}</div>
-              <div className="ac-mono mt-1 flex items-center gap-2 text-nano text-text-3">
-                {h.ticketIdentifier ? <span>{h.ticketIdentifier}</span> : null}
-                <span className={h.state === 'archived' ? 'text-done' : 'text-working'}>{h.state}</span>
-                {h.archivedAt ? <span>{ago(h.archivedAt)}</span> : null}
-              </div>
-            </button>
-          ))}
-        </aside>
-      </div>
-    </div>
-  );
-}
-
-function ChangePage({ project, name, onBack }: { project: string; name: string; onBack: () => void }): React.ReactElement {
-  const detail = useSpecChange(project, name);
-  if (detail.isLoading) return <Skeleton />;
-  if (detail.isError || !detail.data) return <Empty title="No such change." detail="It is not in this project's spec index." />;
-  const c = detail.data;
-  const tasks = c.tasks ?? [];
-  const done = tasks.filter((t) => t.done).length;
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-2">
-        <BackLink label="specs" onClick={onBack} />
-        <span className="ac-mono text-ui text-text-strong">{c.changeName}</span>
-        <Badge tone={c.state === 'active' ? 'modified' : 'neutral'}>{c.state}</Badge>
-      </div>
-      <div className="v2-card p-3.5">
-        <div className="ac-label mb-2">
-          Tasks · {done}/{tasks.length}
-        </div>
-        <div className="mb-3 h-1 overflow-hidden rounded-r4 bg-bg-3">
-          <div className="h-full bg-done" style={{ width: `${tasks.length ? (done / tasks.length) * 100 : 0}%` }} />
-        </div>
-        <ul className="flex flex-col gap-1.5">
-          {tasks.map((t, i) => (
-            <li key={i} className="flex items-start gap-2.5">
-              <span className={cx('mt-0.5 size-3 flex-none rounded-r4 border', t.done ? 'border-done bg-done/20' : 'border-line-3')} aria-hidden />
-              <span className={cx('text-meta', t.done ? 'text-text-3' : 'text-text-1')}>{t.text}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-      {c.proposal ? (
-        <section className="v2-card p-3.5">
-          <SectionLabel>Proposal</SectionLabel>
-          <Markdown source={c.proposal} />
-        </section>
-      ) : null}
-      {c.design ? (
-        <section className="v2-card p-3.5">
-          <SectionLabel>Design</SectionLabel>
-          <Markdown source={c.design} />
-        </section>
-      ) : null}
-      {c.deltas.map((d) => (
-        <section key={`${d.capability}-${d.kind}`} className="v2-card p-3.5">
-          <div className="ac-label mb-2">
-            {d.kind} · {d.capability}
-          </div>
-          <Markdown source={d.body} />
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function Skeleton(): React.ReactElement {
-  return (
-    <div className="flex flex-col gap-2" aria-hidden>
-      {[0, 1, 2, 3].map((i) => (
-        <div key={i} className="h-10 animate-pulse rounded-r4 bg-bg-2" />
-      ))}
-    </div>
-  );
-}
-
-function Empty({ title, detail }: { title: string; detail: string }): React.ReactElement {
-  return (
-    <div className="v2-card p-4">
-      <p className="text-ui font-medium text-text-2">{title}</p>
-      <p className="mt-1 text-meta text-text-3">{detail}</p>
-    </div>
   );
 }

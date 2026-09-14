@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: V2's Knowledge Explorer keeps the reader under /v2 when a document, hub,
+  archive file or artifact is opened
+skip_specs: true

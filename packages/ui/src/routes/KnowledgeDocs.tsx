@@ -16,6 +16,7 @@ import { ago } from '../lib/format';
 import { cx } from '../lib/cx';
 import { projectLabelFor } from '../lib/projectName';
 import { A } from '../app/link';
+import { useHostRoutes } from '../app/host';
 import { useWs } from '../api/context';
 
 export interface DocRef { scope: string; slug: string; project?: string }
@@ -264,6 +265,7 @@ export function KnowledgeDocPanel({ scope, project, onClose, onOpenDoc }: { scop
   };
   const revisions = useKnowledgeRevisions(scope, project);
   const mutate = useKnowledgeMutation();
+  const host = useHostRoutes();
   const ws = useWs();
   const [editing, setEditing] = useState(false);
   const [body, setBody] = useState('');
@@ -331,7 +333,7 @@ export function KnowledgeDocPanel({ scope, project, onClose, onOpenDoc }: { scop
                 <span className="ac-mono text-micro text-text-3">r{r.revision}</span>
                 <span className="flex-1 text-micro text-text-2">{r.reason}</span>
                 {r.ticketIdentifier ? (
-                  <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: r.ticketIdentifier }} className="ac-mono text-nano text-accent-link">
+                  <A to={host.ticket} params={{ ws, ticketId: r.ticketIdentifier }} className="ac-mono text-nano text-accent-link">
                     {r.ticketIdentifier}
                   </A>
                 ) : null}

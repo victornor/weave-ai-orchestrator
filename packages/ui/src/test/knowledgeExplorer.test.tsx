@@ -26,13 +26,17 @@ const state = vi.hoisted(() => ({
   artifacts: [] as TicketArtifactSummary[],
   artifactsLoading: false,
   weaverArtifacts: [] as WeaverArtifactSummary[],
+  revisions: [] as Array<{ revision: number; reason: string; ticketIdentifier: string | null; createdAt: string }>,
 }));
 
 const linkState = vi.hoisted(() => ({ search: {} as Record<string, string | undefined>, go: vi.fn() }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
 vi.mock('../app/link', () => ({
-  A: ({ to, children }: { to: string; children?: React.ReactNode }) => <a href={to}>{children}</a>,
+  A: ({ to, params, children, ...rest }: { to: string; params?: Record<string, unknown>; children?: React.ReactNode } & Record<string, unknown>) => {
+    const href = Object.entries(params ?? {}).reduce((acc, [k, v]) => acc.replace(`$${k}`, String(v)), to);
+    return <a href={href} {...rest}>{children}</a>;
+  },
   useSearchParams: () => linkState.search,
   useGo: () => linkState.go,
 }));
@@ -45,7 +49,7 @@ vi.mock('../api/hooks', () => ({
   useKnowledgeDocMutation: () => ({ mutate: vi.fn() }),
   useKnowledgeMoveDoc: () => ({ mutate: vi.fn() }),
   useKnowledgeDoc: () => ({ data: { path: 'projects/api/PROJECT.md', scope: 'project', body: '# api\n' }, isLoading: false }),
-  useKnowledgeRevisions: () => ({ data: [] }),
+  useKnowledgeRevisions: () => ({ data: state.revisions }),
   useKnowledgeMutation: () => ({ mutate: vi.fn() }),
   useKnowledgeArchiveMany: (roots: Array<{ scope: string; project?: string }>) =>
     roots.map(() => ({ data: state.archive, isLoading: state.archiveLoading })),
@@ -56,6 +60,8 @@ vi.mock('../api/hooks', () => ({
 }));
 
 const { KnowledgeExplorer } = await import('../routes/KnowledgeExplorer');
+const { KnowledgeDocPanel } = await import('../routes/KnowledgeDocs');
+const { HostRoutesProvider, V2_HOST_ROUTES } = await import('../app/host');
 
 /** Render with `matchMedia` forced to a narrow viewport, restoring it afterwards. */
 function renderNarrow(ui: React.ReactElement): ReturnType<typeof render> {
@@ -80,6 +86,7 @@ beforeEach(() => {
   state.artifacts = [];
   state.artifactsLoading = false;
   state.weaverArtifacts = [];
+  state.revisions = [];
   linkState.search = {};
   linkState.go.mockClear();
 });
@@ -358,5 +365,86 @@ describe('KnowledgeExplorer two-pane browser (VS-279)', () => {
     fireEvent.click(hubRow());
     expect(hubRow().getAttribute('aria-current')).toBe('true');
     expect(flatRow().getAttribute('aria-current')).toBeNull();
+  });
+});
+
+const HOST_WEAVER: WeaverArtifactSummary = { key: 'architecture', title: 'Architecture', kind: 'diagram', revision: 1, updatedAt: '2026-09-12T00:00:00Z' };
+
+/** Render the explorer under a host: V2 supplies `V2_HOST_ROUTES`, V1 uses the default. */
+function renderHosted(host: 'v1' | 'v2'): ReturnType<typeof render> {
+  const ui = <KnowledgeExplorer project="p1" />;
+  return host === 'v2' ? render(<HostRoutesProvider routes={V2_HOST_ROUTES}>{ui}</HostRoutesProvider>) : render(ui);
+}
+
+describe('KnowledgeExplorer writes to the host route (VS-434)', () => {
+  it('keeps a document selection under /v2, with replace, when hosted in V2', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.docs = [DOC_FLAT];
+    renderHosted('v2');
+
+    fireEvent.click(screen.getByText('The run engine'));
+    const call = linkState.go.mock.calls.at(-1);
+    expect(call?.[0]).toBe('/v2/w/$ws/knowledge/explorer');
+    expect(call?.[1]).toMatchObject({ params: { ws: 'ws1' }, replace: true, search: { project: 'p1', doc: 'project:run-engine' } });
+  });
+
+  it('keeps a hub and an archive selection under /v2 when hosted in V2', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.archive = [{ path: 'projects/api/docs/archive/2026-09-11.md', date: '2026-09-11' }];
+    renderHosted('v2');
+
+    fireEvent.click(screen.getByText('PROJECT.md').closest('button')!);
+    expect(linkState.go.mock.calls.at(-1)?.[0]).toBe('/v2/w/$ws/knowledge/explorer');
+    expect(linkState.go.mock.calls.at(-1)?.[1]).toMatchObject({ replace: true });
+
+    fireEvent.click(screen.getByText('archive'));
+    fireEvent.click(screen.getByText('2026-09-11'));
+    expect(linkState.go.mock.calls.at(-1)?.[0]).toBe('/v2/w/$ws/knowledge/explorer');
+    expect(linkState.go.mock.calls.at(-1)?.[1]).toMatchObject({ replace: true });
+  });
+
+  it('opens a weaver artifact and a ticket artifact under /v2 when hosted in V2', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.artifacts = [ARTIFACT];
+    state.weaverArtifacts = [HOST_WEAVER];
+    renderHosted('v2');
+
+    fireEvent.click(screen.getByText('Overview').closest('button')!);
+    expect(linkState.go.mock.calls.at(-1)?.[0]).toBe('/v2/w/$ws/knowledge/explorer');
+    expect(linkState.go.mock.calls.at(-1)?.[1]).toMatchObject({ replace: true });
+
+    fireEvent.click(screen.getByText('Architecture').closest('button')!);
+    expect(linkState.go).toHaveBeenLastCalledWith('/v2/w/$ws/artifacts/$key', { params: { ws: 'ws1', key: 'architecture' } });
+  });
+
+  it('leaves the V1 paths unchanged when hosted in V1', () => {
+    state.hubFiles = [PROJECT_HUB];
+    state.docs = [DOC_FLAT];
+    state.weaverArtifacts = [HOST_WEAVER];
+    renderHosted('v1');
+
+    fireEvent.click(screen.getByText('The run engine'));
+    expect(linkState.go.mock.calls.at(-1)?.[0]).toBe('/w/$ws/knowledge');
+    expect(linkState.go.mock.calls.at(-1)?.[1]).toMatchObject({ replace: true, search: { tab: 'explorer', project: 'p1', doc: 'project:run-engine' } });
+
+    fireEvent.click(screen.getByText('Architecture').closest('button')!);
+    expect(linkState.go).toHaveBeenLastCalledWith('/w/$ws/artifacts/$key', { params: { ws: 'ws1', key: 'architecture' } });
+  });
+});
+
+describe('KnowledgeDocPanel revision ticket link host (VS-434)', () => {
+  it('points the revision ticket link under /v2 in V2 and /w in V1', () => {
+    state.revisions = [{ revision: 2, reason: 'a worker wrote it', ticketIdentifier: 'ACME-42', createdAt: '2026-09-12T00:00:00Z' }];
+
+    const { unmount } = render(
+      <HostRoutesProvider routes={V2_HOST_ROUTES}>
+        <KnowledgeDocPanel scope="project" project="p1" />
+      </HostRoutesProvider>,
+    );
+    expect(screen.getByRole('link', { name: 'ACME-42' })).toHaveAttribute('href', '/v2/w/ws1/tickets/ACME-42');
+    unmount();
+
+    render(<KnowledgeDocPanel scope="project" project="p1" />);
+    expect(screen.getByRole('link', { name: 'ACME-42' })).toHaveAttribute('href', '/w/ws1/tickets/ACME-42');
   });
 });

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { OcError, ProjectConfigSchema, ProjectPoliciesSchema, ROADMAP_STATUSES } from '@weave-ai/shared';
+import { OcError, ProjectConfigSchema, ProjectPoliciesSchema, ROADMAP_STATUSES, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, TICKET_PRIORITIES, projectLabel } from '@weave-ai/shared';
 import type { CoreServices } from '@weave-ai/core';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
@@ -18,6 +18,19 @@ const RoadmapPatchSchema = z.object({
   status: z.enum(ROADMAP_STATUSES).optional(),
   position: z.number().int().optional(),
   ticketId: z.string().min(1).nullish(),
+}).strict();
+
+// VS-398: captain's own direct edit of a draft (add/reorder are the planner's; see design.md Decision 1).
+const PlanDraftPatchSchema = z.object({
+  title: z.string().min(1).optional(),
+  description: z.string().optional(),
+  kind: z.enum(PLAN_DRAFT_KINDS).optional(),
+  priority: z.enum(TICKET_PRIORITIES).optional(),
+  targetRoleId: z.string().min(1).nullish(),
+  suggestedTier: z.enum(PLAN_DRAFT_TIERS).optional(),
+  tierOverride: z.enum(PLAN_DRAFT_TIERS).nullish(),
+  blockedBy: z.array(z.string().min(1)).optional(),
+  position: z.number().int().min(0).optional(),
 }).strict();
 
 const AddSchema = z.object({
@@ -142,7 +155,78 @@ export function projectRoutes(): Hono<AppEnv> {
     s.roadmap.remove(c.get('actor'), scopedItemId(s.roadmap, s.projects.get(c.req.param('id')).id, c.req.param('itemId')));
     return c.json({ ok: true });
   });
+
+  // VS-398: a captain-authored draft plan. Reached only by an operator session — run tokens are
+  // hard-blocked by authMiddleware from any path outside /mcp and /api/w/:ws/agent/*, so no agent
+  // tool can ever reach these; only the planner's own read/draft-edit MCP tools exist for an agent.
+  app.post('/:id/plans/start', async (c) => {
+    const s = c.get('ws').services;
+    const project = s.projects.get(c.req.param('id'));
+    const input = await body(c, z.object({ title: z.string().min(1).optional() }).strict());
+    const { plan, agent } = await s.workers.startOrResumePlan(c.get('actor'), project.id, { title: input.title });
+    return c.json({ plan, agent: { id: agent.id, status: agent.status } });
+  });
+  app.get('/:id/plans/:planId', (c) => {
+    const s = c.get('ws').services;
+    const project = s.projects.get(c.req.param('id'));
+    const plan = scopedPlan(s.planning, project.id, c.req.param('planId'));
+    const drafts = s.planning.listDrafts(plan.id).map((d) => ({ ...d, blockedBy: s.planning.draftBlockers(d.id) }));
+    return c.json({ plan, drafts });
+  });
+  app.patch('/:id/plans/:planId/drafts/:draftId', async (c) => {
+    const s = c.get('ws').services;
+    const project = s.projects.get(c.req.param('id'));
+    const plan = scopedPlan(s.planning, project.id, c.req.param('planId'));
+    const draft = scopedDraft(s.planning, plan.id, c.req.param('draftId'));
+    const patch = await body(c, PlanDraftPatchSchema);
+    return c.json(s.planning.updateDraft(c.get('actor'), draft.id, patch));
+  });
+  app.delete('/:id/plans/:planId/drafts/:draftId', (c) => {
+    const s = c.get('ws').services;
+    const project = s.projects.get(c.req.param('id'));
+    const plan = scopedPlan(s.planning, project.id, c.req.param('planId'));
+    const draft = scopedDraft(s.planning, plan.id, c.req.param('draftId'));
+    s.planning.removeDraft(c.get('actor'), draft.id);
+    return c.json({ ok: true });
+  });
+  app.post('/:id/plans/:planId/submit', async (c) => {
+    const s = c.get('ws').services;
+    const project = s.projects.get(c.req.param('id'));
+    const plan = scopedPlan(s.planning, project.id, c.req.param('planId'));
+    const submitted = s.planning.submit(c.get('actor'), plan.id);
+    await s.workers.retirePlanner(plan.id);
+    s.wake.enqueue(s.workers.conductor().id, {
+      source: 'plan_submitted',
+      reason: `Draft plan "${submitted.title ?? 'Untitled'}" submitted for ${projectLabel(project)}`,
+      payload: { planId: plan.id },
+      requestedBy: c.get('actor'),
+    });
+    return c.json(submitted);
+  });
+  app.post('/:id/plans/:planId/discard', async (c) => {
+    const s = c.get('ws').services;
+    const project = s.projects.get(c.req.param('id'));
+    const plan = scopedPlan(s.planning, project.id, c.req.param('planId'));
+    const discarded = s.planning.discard(c.get('actor'), plan.id);
+    await s.workers.retirePlanner(plan.id);
+    return c.json(discarded);
+  });
+
   return app;
+}
+
+/** The `:planId` only when it belongs to this project; another project's plan id is `not_found`. */
+function scopedPlan(planning: CoreServices['planning'], projectId: string, planId: string) {
+  const plan = planning.get(planId);
+  if (plan.projectId !== projectId) throw new OcError('not_found', `plan ${planId} is not in this project`, {});
+  return plan;
+}
+
+/** The `:draftId` only when it belongs to this plan; another plan's draft id is `not_found`. */
+function scopedDraft(planning: CoreServices['planning'], planId: string, draftId: string) {
+  const draft = planning.getDraft(draftId);
+  if (draft.planId !== planId) throw new OcError('not_found', `draft ${draftId} is not in this plan`, {});
+  return draft;
 }
 
 /** The `:itemId` only when it is one of the project's own items; another project's id is `not_found`. */

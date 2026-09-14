@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, HUMAN_REPLY_TOOL, isHumanReplyToolEvent } from './tools.js';
+import { COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, PLANNER_TOOLS, HUMAN_REPLY_TOOL, isHumanReplyToolEvent } from './tools.js';
 import { ROADMAP_STATUSES, ROUTINE_ACTIONS, ROUTINE_STATUSES } from './enums.js';
 
 const event = (type: string, payload: Record<string, unknown> | null) => ({ type, payload });
@@ -37,6 +37,25 @@ describe('roadmap tools (VS-397)', () => {
 describe('roadmap statuses (VS-397)', () => {
   it('are idea, planned and dropped, in order', () => {
     expect(ROADMAP_STATUSES).toEqual(['idea', 'planned', 'dropped']);
+  });
+});
+
+describe('PLANNER_TOOLS (VS-398)', () => {
+  it('can read the plan and edit its own drafts, but has no ticket-creation, messaging, decision or submit tool', () => {
+    expect(PLANNER_TOOLS).toContain('weave_plan_get');
+    expect(PLANNER_TOOLS).toContain('weave_plan_draft_add');
+    expect(PLANNER_TOOLS).toContain('weave_plan_draft_update');
+    expect(PLANNER_TOOLS).toContain('weave_plan_draft_remove');
+    expect(PLANNER_TOOLS).toContain('weave_plan_draft_reorder');
+    expect(PLANNER_TOOLS).toContain('weave_plan_reply');
+    for (const forbidden of ['weave_ticket_create', 'weave_worker_message', 'weave_decision_answer', 'weave_human_send', 'weave_ask', 'weave_plan_submit']) {
+      expect(PLANNER_TOOLS as readonly string[]).not.toContain(forbidden);
+    }
+  });
+
+  it('links a draft to its created ticket only from the weaver, never the planner', () => {
+    expect(WEAVER_TOOLS).toContain('weave_plan_draft_link');
+    expect(PLANNER_TOOLS as readonly string[]).not.toContain('weave_plan_draft_link');
   });
 });
 
@@ -78,6 +97,11 @@ describe('isHumanReplyToolEvent', () => {
     expect(isHumanReplyToolEvent(event('tool.denied', { id: 't1', name: HUMAN_REPLY_TOOL }))).toBe(true);
   });
 
+  it('also matches the planner\'s own reply tool (VS-398)', () => {
+    expect(isHumanReplyToolEvent(event('tool.call', { name: 'weave_plan_reply' }))).toBe(true);
+    expect(isHumanReplyToolEvent(event('tool.result', { name: 'weave_plan_reply' }))).toBe(true);
+  });
+
   it('matches whichever name key the adapter used', () => {
     expect(isHumanReplyToolEvent(event('tool.call', { tool: HUMAN_REPLY_TOOL }))).toBe(true);
     expect(isHumanReplyToolEvent(event('tool.call', { toolName: HUMAN_REPLY_TOOL }))).toBe(true);
@@ -101,7 +125,7 @@ describe('isHumanReplyToolEvent', () => {
 });
 
 describe('agent-facing prose names only registered tools (VS-260)', () => {
-  const registered = new Set<string>([...COMMON_TOOLS, ...WEAVER_TOOLS, ...WORKER_ONLY_TOOLS, HUMAN_REPLY_TOOL]);
+  const registered = new Set<string>([...COMMON_TOOLS, ...WEAVER_TOOLS, ...WORKER_ONLY_TOOLS, ...PLANNER_TOOLS, HUMAN_REPLY_TOOL]);
   const repoRoot = fileURLToPath(new URL('../../../', import.meta.url));
   /**
    * `ac_`-prefixed identifiers that are deliberately not tool names (VS-260): the tmux pane option

@@ -1264,4 +1264,136 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0041_plan_drafts (VS-398)', () => {
+    const cols = (db: Db, table: string): string[] => db.all<{ name: string }>(`PRAGMA table_info(${table})`).map((c) => c.name);
+
+    function seedPlanProject(db: Db, id: string): void {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at)
+         VALUES (?, 'w1', ?, 'API', 'git@e:a/b.git', 'main', '/tmp/p', 4, 'git', 1, '{}', 'ready', 't0', 't0')`, [id, id]);
+      db.run(`INSERT INTO channels (id, workspace_id, kind) VALUES ('c1', 'w1', 'web')`);
+      db.run(`INSERT INTO channel_threads (id, channel_id, agent_id, created_at) VALUES ('th1', 'c1', 'a-planner', 't0')`);
+    }
+
+    const insertPlan = (db: Db, id: string, projectId: string, over: Record<string, unknown> = {}) =>
+      db.insert('plans', {
+        id, workspaceId: 'w1', projectId, threadId: 'th1', title: 'Dark mode rollout',
+        createdByKind: 'human', createdById: 'op1', createdAt: 't0', updatedAt: 't0', ...over,
+      });
+
+    const insertDraft = (db: Db, id: string, planId: string, over: Record<string, unknown> = {}) =>
+      db.insert('plan_drafts', {
+        id, planId, position: 0, title: 'Add token plumbing', description: '', kind: 'change',
+        suggestedTier: 'standard', createdAt: 't0', updatedAt: 't0', ...over,
+      });
+
+    it('creates plans, plan_drafts and plan_draft_blockers with their columns and indexes', () => {
+      const db = openDb(join(dir, 'plan-drafts.sqlite'));
+      expect(cols(db, 'plans')).toEqual(expect.arrayContaining([
+        'id', 'workspace_id', 'project_id', 'thread_id', 'agent_id', 'title', 'status',
+        'created_by_kind', 'created_by_id', 'submitted_at', 'discarded_at', 'created_at', 'updated_at',
+      ]));
+      expect(cols(db, 'plan_drafts')).toEqual(expect.arrayContaining([
+        'id', 'plan_id', 'position', 'title', 'description', 'kind', 'priority', 'target_role_id',
+        'suggested_tier', 'tier_override', 'status', 'created_ticket_id', 'failure_reason', 'created_at', 'updated_at',
+      ]));
+      expect(cols(db, 'plan_draft_blockers')).toEqual(['plan_draft_id', 'blocks_on_draft_id']);
+      const planIdx = db.all<{ name: string }>('PRAGMA index_list(plans)').map((i) => i.name);
+      expect(planIdx).toContain('plans_one_drafting_per_project');
+      const draftIdx = db.all<{ name: string }>('PRAGMA index_list(plan_drafts)').map((i) => i.name);
+      expect(draftIdx).toContain('plan_drafts_plan_position');
+      db.close();
+    });
+
+    it('round-trips a plan and a draft, and refuses an unknown draft kind or tier', () => {
+      const db = openDb(join(dir, 'plan-round-trip.sqlite'));
+      seedPlanProject(db, 'p1');
+      insertPlan(db, 'pl1', 'p1');
+      insertDraft(db, 'd1', 'pl1', { priority: 'high', suggestedTier: 'deep', tierOverride: 'standard' });
+      expect(db.get('SELECT * FROM plans WHERE id = ?', ['pl1'])).toMatchObject({
+        id: 'pl1', projectId: 'p1', threadId: 'th1', status: 'drafting', submittedAt: null, discardedAt: null,
+      });
+      expect(db.get('SELECT * FROM plan_drafts WHERE id = ?', ['d1'])).toMatchObject({
+        id: 'd1', planId: 'pl1', kind: 'change', priority: 'high', suggestedTier: 'deep', tierOverride: 'standard',
+        status: 'pending', createdTicketId: null, failureReason: null,
+      });
+      expect(() => insertDraft(db, 'd2', 'pl1', { kind: 'question' })).toThrow(/CHECK constraint failed/);
+      expect(() => insertDraft(db, 'd3', 'pl1', { suggestedTier: 'urgent' })).toThrow(/CHECK constraint failed/);
+      db.close();
+    });
+
+    it('allows only one drafting plan per project, but any number of submitted/discarded ones', () => {
+      const db = openDb(join(dir, 'plan-one-drafting.sqlite'));
+      seedPlanProject(db, 'p1');
+      insertPlan(db, 'pl1', 'p1');
+      expect(() => insertPlan(db, 'pl2', 'p1')).toThrow(/UNIQUE constraint failed/);
+      insertPlan(db, 'pl2', 'p1', { status: 'submitted', submittedAt: 't1' });
+      insertPlan(db, 'pl3', 'p1', { status: 'discarded', discardedAt: 't1' });
+      expect(db.all<{ id: string }>('SELECT id FROM plans WHERE project_id = ?', ['p1']).map((r) => r.id).sort())
+        .toEqual(['pl1', 'pl2', 'pl3']);
+      db.close();
+    });
+
+    it('round-trips a plan_draft_blockers row and cascades it away when either draft is deleted', () => {
+      const db = openDb(join(dir, 'plan-blockers.sqlite'));
+      seedPlanProject(db, 'p1');
+      insertPlan(db, 'pl1', 'p1');
+      insertDraft(db, 'd1', 'pl1');
+      insertDraft(db, 'd2', 'pl1', { position: 1 });
+      db.run('INSERT INTO plan_draft_blockers (plan_draft_id, blocks_on_draft_id) VALUES (?, ?)', ['d2', 'd1']);
+      expect(db.all('SELECT * FROM plan_draft_blockers')).toEqual([{ planDraftId: 'd2', blocksOnDraftId: 'd1' }]);
+      db.run('DELETE FROM plan_drafts WHERE id = ?', ['d1']);
+      expect(db.all('SELECT * FROM plan_draft_blockers')).toHaveLength(0);
+      db.close();
+    });
+
+    it('widens agents.kind to include planner and adds agents.plan_id, without disturbing existing agents', () => {
+      const path = join(dir, 'agents-planner.sqlite');
+      const before = openDbAsOf(path, '0040_roadmap_items.sql');
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      before.insert('agents', {
+        id: 'a-weaver', workspaceId: 'w1', kind: 'weaver', name: 'Weaver', runtimeId: 'claude',
+        homePath: '/tmp/weaver', createdAt: 't0', updatedAt: 't0',
+      });
+      before.insert('agents', {
+        id: 'a-worker', workspaceId: 'w1', kind: 'worker', name: 'Worker', ticketId: 't1', runtimeId: 'claude',
+        homePath: '/tmp/worker', createdAt: 't0', updatedAt: 't0',
+      });
+      before.close();
+
+      const db = openDb(path);
+      expect(cols(db, 'agents')).toContain('plan_id');
+      expect(db.get('SELECT id, kind, plan_id FROM agents WHERE id = ?', ['a-weaver'])).toMatchObject({ id: 'a-weaver', kind: 'weaver', planId: null });
+      expect(db.get('SELECT id, kind, ticket_id, plan_id FROM agents WHERE id = ?', ['a-worker']))
+        .toMatchObject({ id: 'a-worker', kind: 'worker', ticketId: 't1', planId: null });
+      expect(persistedKindCheck(db, 'agents')).toEqual(['weaver', 'worker', 'planner']);
+      db.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, created_at, updated_at)
+         VALUES ('p1', 'w1', 'p1', 'P1', 'git@x', '/tmp/p1', 't0', 't0')`,
+      );
+      db.run(`INSERT INTO channels (id, workspace_id, kind) VALUES ('c1', 'w1', 'web')`);
+      db.run(`INSERT INTO channel_threads (id, channel_id, agent_id, created_at) VALUES ('th1', 'c1', 'a-planner', 't0')`);
+      insertPlan(db, 'pl1', 'p1');
+      db.insert('agents', {
+        id: 'a-planner', workspaceId: 'w1', kind: 'planner', planId: 'pl1', name: 'Planner', runtimeId: 'claude',
+        homePath: '/tmp/planner', createdAt: 't0', updatedAt: 't0',
+      });
+      expect(db.get('SELECT id, kind, plan_id FROM agents WHERE id = ?', ['a-planner'])).toMatchObject({ id: 'a-planner', kind: 'planner', planId: 'pl1' });
+      expect(() => db.insert('agents', {
+        id: 'a-planner-2', workspaceId: 'w1', kind: 'planner', planId: 'pl1', name: 'Planner 2', runtimeId: 'claude',
+        homePath: '/tmp/planner2', createdAt: 't0', updatedAt: 't0',
+      })).toThrow(/UNIQUE constraint failed/);
+      expect(() => db.insert('agents', {
+        id: 'a-bad-kind', workspaceId: 'w1', kind: 'scheduler', name: 'Bad', runtimeId: 'claude',
+        homePath: '/tmp/bad', createdAt: 't0', updatedAt: 't0',
+      })).toThrow(/CHECK constraint failed/);
+      db.close();
+    });
+  });
 });

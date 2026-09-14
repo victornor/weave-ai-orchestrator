@@ -4,7 +4,7 @@
  */
 import { tmpdir } from 'node:os';
 import { Db } from '@weave-ai/db';
-import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, createRoadmapService, createRoutinesService, createPluginRegistry, getLogger, initLogger } from '@weave-ai/core';
+import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, createRoadmapService, createPlanningService, createRoutinesService, createPluginRegistry, getLogger, initLogger } from '@weave-ai/core';
 import type { Actor, CoreServices, HistoryQuery, WorkspaceContext } from '@weave-ai/core';
 import type { AuthService } from '@weave-ai/core';
 import {
@@ -269,10 +269,10 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
         return d;
       },
     }),
-    wake: impl('wake', { listForAgent: () => [wakeup()] }),
+    wake: impl('wake', { listForAgent: () => [wakeup()], enqueue: (agentId: string, input: Record<string, unknown>) => wakeup({ agentId, ...input }) }),
     runs: impl('runs', { get: () => ({ wakeupIds: ['wk_1'] }), list: () => ({ items: [], total: 0 }), events: () => [], onEvent: () => () => undefined }),
     briefing: impl('briefing', { snapshot: (): Briefing => ({ needsYou: [], landed: [], underway: [], queued: [], warnings: [], generatedAt: '2026-09-01T00:00:00.000Z' }) }),
-    workers: impl('workers', { list: () => [], conductor: () => ({ id: 'ag_conductor', kind: 'weaver' }) }),
+    workers: impl('workers', { list: () => [], conductor: () => ({ id: 'ag_conductor', kind: 'weaver' }), retirePlanner: async () => {}, startOrResumePlan: async () => { throw new Error('startOrResumePlan not stubbed for this test'); } }),
     dispatcher: impl('dispatcher', { start: () => undefined, stop: async () => true, running: () => 0, beginShutdown: () => undefined }),
     supervisor: impl('supervisor', { start: () => undefined, stop: () => undefined, running: () => true }),
     projects: impl('projects', {
@@ -374,6 +374,9 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   // And the roadmap (VS-397): real over this fake's own db and its real projects/tickets doubles, so a
   // route test asserts on the rows it really wrote.
   (services as { roadmap: CoreServices['roadmap'] }).roadmap = createRoadmapService(ctx, () => services as unknown as CoreServices);
+  // And planning (VS-398): real over this fake's own db, so a tool test asserts on the plan/draft
+  // rows it really wrote rather than on a hand-written double.
+  (services as { planning: CoreServices['planning'] }).planning = createPlanningService(ctx, () => services as unknown as CoreServices);
 
   const runtime: WorkspaceRuntime = { id: workspaceId, ctx, services, channels: null, webhooks: null, push: null };
 

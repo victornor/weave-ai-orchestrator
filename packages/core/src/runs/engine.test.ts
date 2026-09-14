@@ -369,6 +369,54 @@ describe('run engine', () => {
     expect(h.db.get<{ executionRunId: string | null }>('SELECT execution_run_id FROM tickets WHERE id = ?', [ticketId])!.executionRunId).toBeNull();
   });
 
+  describe('planning agent turn (VS-398)', () => {
+    function seedPlanner(over: Record<string, unknown> = {}): string {
+      const id = newId();
+      const now = nowIso();
+      h.db.insert('agents', {
+        id, workspaceId: h.workspaceId, kind: 'planner', projectId: h.projectId, planId: null,
+        name: 'Planner', runtimeId: 'fake', status: 'active', homePath: join(h.ctx.paths.workers, id),
+        turnEpoch: 0, turnCount: 0, spawnedBy: 'human', briefRevision: 1, createdAt: now, updatedAt: now, ...over,
+      });
+      return id;
+    }
+
+    it('restricts every turn to the planner allowlist, mode restricted, no built-in write tool', async () => {
+      const plannerId = seedPlanner();
+      h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'let’s plan the redesign' });
+      runtime.queue.push({ structured: { state: 'working', summary: 'drafting', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce(plannerId);
+
+      expect(runtime.inputs[0]!.permission.mode).toBe('restricted');
+      expect(runtime.inputs[0]!.permission.allowedTools).toEqual(expect.arrayContaining(['Read', 'Grep', 'Glob', 'weave_plan_draft_add', 'weave_plan_reply']));
+      for (const denied of ['Write', 'Edit', 'NotebookEdit', 'Bash', 'weave_ticket_create', 'weave_plan_submit']) {
+        expect(runtime.inputs[0]!.permission.allowedTools).not.toContain(denied);
+      }
+    });
+
+    it('keeps the same allowlist on a later turn, not only the first (unlike the interactive-session hold)', async () => {
+      const plannerId = seedPlanner({ turnCount: 5 });
+      h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'one more thing' });
+      runtime.queue.push({ structured: { state: 'working', summary: 'still drafting', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      await runOnce(plannerId);
+
+      expect(runtime.inputs[0]!.permission.allowedTools).toContain('weave_plan_draft_update');
+      expect(runtime.inputs[0]!.permission.allowedTools).not.toContain('Write');
+    });
+
+    it('fails closed rather than run unrestricted when the runtime cannot enforce restricted mode', async () => {
+      runtime.permissionModes = ['auto'];
+      const plannerId = seedPlanner();
+      h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'hello' });
+      const run = await runOnce(plannerId);
+
+      expect(run.status).toBe('failed');
+      expect(run.errorFamily).toBe('tooling');
+      expect(run.errorCode).toBe('runtime_unreachable');
+      expect(runtime.inputs).toHaveLength(0);
+    });
+  });
+
   describe('interactive session first-turn hold (VS-101)', () => {
     it('restricts the first turn to the read-and-report allowlist', async () => {
       const ticketId = seedTicket(h, { interactiveSession: true });

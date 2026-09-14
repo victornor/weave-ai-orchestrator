@@ -6,7 +6,7 @@ import type * as S from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { renderTemplate } from './template.js';
-import { BRIEF_TMPL, CHARTER_TMPL, WEAVER_TMPL, WORKER_TMPL } from './defaults.js';
+import { BRIEF_TMPL, CHARTER_TMPL, PLANNER_TMPL, WEAVER_TMPL, WORKER_TMPL } from './defaults.js';
 import { worktreeState } from '../util/git.js';
 
 export { renderTemplate, truthy } from './template.js';
@@ -207,6 +207,19 @@ export function renderConductorInstructions(ctx: WorkspaceContext, deps: () => C
   });
 }
 
+/** Planner AGENTS.md (VS-398): identity + boundaries only — a planner has no ticket, no charter, no brief. */
+export function renderPlannerInstructions(ctx: WorkspaceContext, deps: () => CoreServices, agent: S.Agent): string {
+  const tmpl = loadTemplate(ctx, 'planner.AGENTS.md.tmpl', PLANNER_TMPL);
+  const plan = agent.planId ? deps().planning.get(agent.planId) : null;
+  const project = plan ? deps().projects.get(plan.projectId) : null;
+  return renderTemplate(tmpl, {
+    human: { name: humanName(ctx) },
+    planner: { name: agent.name },
+    project: { id: project?.slug ?? '?' },
+    plan: { title: plan?.title ?? null },
+  });
+}
+
 // ---------- turn prompt (PLAN §9.3) ----------
 
 export interface TurnPromptOptions {
@@ -378,6 +391,15 @@ export async function buildTurnPrompt(
       '- Your previous turn was interrupted to deliver the live message above; verify what you had already done before redoing it or acting on the message. If a `git` command now fails with "Unable to create \'.../index.lock\': File exists", that is a stale lock left by the interrupt — remove it and retry, it is not a real conflict.',
     );
   }
+  // VS-398: a submitted draft plan. The payload carries only the plan id (never the drafts
+  // themselves) so the weaver always reads the current, authoritative state via `weave_plan_get`.
+  for (const w of flat) {
+    if (w.source !== 'plan_submitted') continue;
+    const planId = typeof w.payload?.planId === 'string' ? w.payload.planId : null;
+    notes.push(planId
+      ? `- A draft plan was submitted (plan \`${planId}\`): call \`weave_plan_get\` to read it, then create one real ticket per draft, in \`creationOrder\`, via \`weave_ticket_create\` — its role, priority and effective tier (the tier override when one is set, else the suggested tier) carried over exactly, and \`blockedBy\` naming the tickets already created from its dependencies. Call \`weave_plan_draft_link\` once per draft as you create it (or once you know it cannot be created, with why) — never leave one unaccounted for. If a draft's own dependency could not be created, mark that draft failed too, naming the missing dependency, rather than creating it without the blocker it was supposed to have — then continue with the rest of the plan. This is captain's already-decided plan: create it as given, not as you would have decomposed it yourself — do not re-split, re-merge or reorder drafts on your own judgement. Report the outcome, including any draft that could not be created and why, in your own chat with captain.`
+      : '- A draft plan was submitted, but its id was missing from the wake payload; call `weave_inbox` for the raw wake.');
+  }
   if (opts.isFirstTurn || opts.sessionStale) {
     let digest = '';
     try {
@@ -403,12 +425,14 @@ export async function buildTurnPrompt(
 }
 
 const WEAVER_NOW = 'Call `weave_inbox` if you need details. Handle human messages first, then ticket events. Reply to the human only through `weave_human_send`. Finish with the structured final report.';
+const PLANNER_NOW = 'Call `weave_inbox` if you need details. This is a conversation with captain about this plan: read, discuss, and add/edit/remove/reorder drafts as you go — read the plan back so you see any edit captain made directly. Reply only through `weave_plan_reply`. You never submit the plan yourself; only captain does, from the modal.';
 const WORKER_DELIVERY_NOW = 'Call `weave_inbox` if you need details, do the phase your ticket status asks for, leave durable progress on the ticket, and finish with the structured final report. Ask with `weave_ask` instead of guessing; report `blocked` with a routable path if you are stuck.';
 const INTERACTIVE_FIRST_TURN_NOW = 'This is an interactive session: a human is about to work with you directly on this ticket. Read the ticket and its existing context, then post exactly one `weave_ticket_comment` stating what you understand the ticket to be and what you are ready to do. Do not edit anything, run anything, transition the ticket, or take any other action this turn — only the tools needed to read and to post that one comment are available to you right now. Stop after posting it and wait for the human\'s first message; the tools you need for the rest return on your next turn.';
 const INTERACTIVE_CONVERSATION_NOW = 'This is an interactive session: a conversation with the human on this ticket. Answer, investigate, read and explain. Do not write code, transition the ticket toward delivery, or create a plan or merge approval unless the human asked for changes in this conversation. If you think a change is warranted and they have not asked, say so in the conversation and wait — do not start planning while you ask. A conversation that ends with a good answer and nothing delivered is complete success; the ticket is a container, not a mandate. The ordinary plan-approval and merge-approval gates still apply if they ask you to make a change.';
 
 function whatToDoNow(agent: S.Agent, workerTicket: S.Ticket | null): string {
   if (agent.kind === 'weaver') return WEAVER_NOW;
+  if (agent.kind === 'planner') return PLANNER_NOW;
   if (workerTicket && Boolean(workerTicket.interactiveSession)) {
     return agent.turnCount === 0 ? INTERACTIVE_FIRST_TURN_NOW : INTERACTIVE_CONVERSATION_NOW;
   }

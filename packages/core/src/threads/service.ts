@@ -141,17 +141,41 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       });
     },
 
+    // VS-398: a fresh `web`-kind thread owned by a specific agent (a planning agent's own plan
+    // conversation) — never bound to an external channel thread id, and never primary, unlike
+    // `bindOrGet`'s. Always creates; there is nothing to match against for a brand-new plan.
+    createOwned(agentId, opts = {}) {
+      return tx(db, () => {
+        const cid = channelId('web');
+        const id = newId();
+        db.insert('channel_threads', {
+          id, channelId: cid, agentId, ticketId: null, externalThreadId: `internal-${id}`, externalUserId: null,
+          humanLabel: opts.humanLabel ?? null, isPrimary: false, createdAt: nowIso(), lastMessageAt: null,
+        });
+        const t = get(id);
+        recordActivity(db, ws, { kind: 'system', id: null }, 'thread.created', 'channel_thread', id, { channelKind: 'web', agentId });
+        return t as ChannelThread;
+      });
+    },
+
     get,
 
     list(filter = {}) {
-      const where: string[] = ['c.workspace_id = ?'];
+      // VS-398: a planner's own plan conversation (`createOwned`) is a channel_thread like any
+      // other, never `isPrimary`, and often the most recently active one the moment captain talks
+      // to it — left in, it would outrank the weaver's own thread here and in the Chats page, and
+      // ChatPage's default-thread pick would open the plan conversation instead of the weaver's.
+      // Excluded unconditionally rather than behind an opt-in flag: nothing today ever wants a
+      // planner's thread through this general listing — the plan modal reads its own thread by id.
+      const where: string[] = ['c.workspace_id = ?', "(a.kind IS NULL OR a.kind != 'planner')"];
       const params: Array<string> = [ws];
       if (filter.channelKind) { where.push('c.kind = ?'); params.push(filter.channelKind); }
       if (filter.agentId) { where.push('t.agent_id = ?'); params.push(filter.agentId); }
       if (filter.ticketId) { where.push('t.ticket_id = ?'); params.push(filter.ticketId); }
       return db
         .all<Record<string, unknown>>(
-          `SELECT t.* FROM channel_threads t JOIN channels c ON c.id = t.channel_id WHERE ${where.join(' AND ')} ORDER BY COALESCE(t.last_message_at, t.created_at) DESC`,
+          `SELECT t.* FROM channel_threads t JOIN channels c ON c.id = t.channel_id LEFT JOIN agents a ON a.id = t.agent_id
+           WHERE ${where.join(' AND ')} ORDER BY t.is_primary DESC, COALESCE(t.last_message_at, t.created_at) DESC`,
           params,
         )
         .map(row) as ChannelThread[];

@@ -5,8 +5,8 @@ import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
 import {
   AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents, OcError, landingBranchOf,
-  isWorkerOptionConfigured, MCP_SERVER_NAME,
-  type Agent, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
+  isWorkerOptionConfigured, MCP_SERVER_NAME, PLANNER_TOOLS,
+  type Agent, type AgentKind, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
   type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
 } from '@weave-ai/shared';
 import type { McpServerConfig, RuntimeEvent, TurnHandle, TurnInput, TurnResult } from '@weave-ai/runtime-sdk';
@@ -29,6 +29,13 @@ import { runTokenSecret, signRunToken } from './runtoken.js';
  * agent understands and is ready to do.
  */
 export const FIRST_TURN_ALLOWLIST = ['weave_inbox', 'weave_ticket_get', 'weave_ticket_comments', 'weave_ticket_comment', 'weave_ticket_document_get', 'weave_worktree_status', 'Read', 'Grep', 'Glob'];
+
+/**
+ * A planning agent's entire turn (VS-398): read-only, enforced by the runtime's own `--allowedTools`
+ * for the whole session, not just the first turn — `PLANNER_TOOLS` plus the built-in read tools it
+ * needs to read its disposable worktree. No `Write`/`Edit`/`NotebookEdit`/`Bash`/… is ever reachable.
+ */
+export const PLANNER_ALLOWLIST = [...PLANNER_TOOLS, 'Read', 'Grep', 'Glob'];
 
 const PAYLOAD_LIMIT = 8 * 1024;
 const RETRY_BACKOFF_MS = [30_000, 120_000, 600_000];
@@ -74,11 +81,11 @@ function boundPayload(payload: unknown): Record<string, unknown> {
 // ---------- run token ----------
 
 /** Mint the run's MCP bearer token (PLAN §9.1); the claim shape lives in runtoken.ts. */
-export async function mintRunToken(ctx: WorkspaceContext, claims: { agentId: string; runId: string; ticketId: string | null; kind: string; projectId: string | null; roleId: string | null }): Promise<string> {
+export async function mintRunToken(ctx: WorkspaceContext, claims: { agentId: string; runId: string; ticketId: string | null; planId: string | null; kind: AgentKind; projectId: string | null; roleId: string | null }): Promise<string> {
   return signRunToken(runTokenSecret(ctx.db), {
     workspaceId: ctx.workspaceId, runId: claims.runId, agentId: claims.agentId,
-    agentKind: claims.kind === 'weaver' ? 'weaver' : 'worker',
-    projectId: claims.projectId, ticketId: claims.ticketId, roleId: claims.roleId,
+    agentKind: claims.kind,
+    projectId: claims.projectId, ticketId: claims.ticketId, planId: claims.planId, roleId: claims.roleId,
   });
 }
 
@@ -203,7 +210,7 @@ function ticketStatusAsOf(ctx: WorkspaceContext, ticketId: string, atIso: string
 }
 
 function sessionPolicyFor(agent: Agent, role: Role | null): SessionPolicy {
-  if (agent.kind === 'weaver') return 'persistent';
+  if (agent.kind === 'weaver' || agent.kind === 'planner') return 'persistent';
   return (role?.sessionPolicy ?? 'per_ticket') as SessionPolicy;
 }
 
@@ -380,7 +387,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     });
 
     // 4. run token + MCP config + env
-    const token = await mintRunToken(ctx, { agentId: agent.id, runId, ticketId: agent.ticketId, kind: agent.kind, projectId: agent.projectId, roleId: agent.roleId });
+    const token = await mintRunToken(ctx, { agentId: agent.id, runId, ticketId: agent.ticketId, planId: agent.planId, kind: agent.kind, projectId: agent.projectId, roleId: agent.roleId });
     const mcpServers: Record<string, McpServerConfig> = {
       [MCP_SERVER_NAME]: { type: 'http', url: `${ctx.loopbackUrl.replace(/\/$/, '')}/mcp/runs/${runId}`, headers: { Authorization: `Bearer ${token}` } },
     };
@@ -405,6 +412,15 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
 
     const runtime = ctx.registries.runtimes.get(setting.runtime);
     if (!runtime) throw Object.assign(new Error(`runtime ${setting.runtime} is not registered`), { ocFamily: 'tooling' as RunErrorFamily, ocCode: 'runtime_unreachable' });
+    // VS-398: a planning agent must never run unless its runtime can actually enforce a tool
+    // allowlist — fail closed rather than let it run with every built-in write tool "restricted"
+    // would otherwise have denied.
+    if (agent.kind === 'planner' && !runtime.capabilities.permissionModes.includes('restricted')) {
+      throw Object.assign(
+        new Error(`runtime ${setting.runtime} cannot enforce a tool allowlist (no 'restricted' permission mode); refusing to run a planning agent unrestricted`),
+        { ocFamily: 'tooling' as RunErrorFamily, ocCode: 'runtime_unreachable' },
+      );
+    }
 
     const permission = (role?.permission ?? {}) as { mode?: PermissionMode; allowed?: string[]; denied?: string[] };
     // An interactive session's very first turn (VS-101) is held to reading its ticket and posting
@@ -417,10 +433,14 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     const workerDenied = agent.kind === 'worker' ? (runtime.workerDeniedTools ?? []) : [];
     const deniedTools = workerDenied.length ? [...new Set([...(permission.denied ?? []), ...workerDenied])] : permission.denied;
     const deniedSet = new Set(permission.denied ?? []);
-    const allowedTools = isFirstInteractiveTurn
-      ? (permission.allowed?.length ? permission.allowed.filter((t) => FIRST_TURN_ALLOWLIST.includes(t)) : FIRST_TURN_ALLOWLIST)
-          .filter((t) => !deniedSet.has(t))
-      : permission.allowed;
+    // VS-398: a planning agent's allowlist applies to every turn, not only the first, and is never
+    // widened by a role's own `allowed` (a planner has no role to widen it from in the first place).
+    const allowedTools = agent.kind === 'planner'
+      ? PLANNER_ALLOWLIST
+      : isFirstInteractiveTurn
+        ? (permission.allowed?.length ? permission.allowed.filter((t) => FIRST_TURN_ALLOWLIST.includes(t)) : FIRST_TURN_ALLOWLIST)
+            .filter((t) => !deniedSet.has(t))
+        : permission.allowed;
     const instructionsPath = join(agent.homePath, 'AGENTS.md');
     let systemPromptText = '';
     try { systemPromptText = readFileSync(instructionsPath, 'utf8'); } catch { systemPromptText = ''; }
@@ -453,7 +473,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       limits: { timeoutMs: turnTimeoutMs },
       permission: {
         // VS-171: Claude auto-mode can classify away weave_*; skip-permissions is only on for bypass.
-        mode: agent.kind === 'weaver' ? 'bypass' : (permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto'),
+        mode: agent.kind === 'weaver' ? 'bypass' : agent.kind === 'planner' ? 'restricted' : (permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto'),
         allowedTools,
         deniedTools,
       },

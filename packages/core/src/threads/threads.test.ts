@@ -36,6 +36,48 @@ describe('threads', () => {
     expect(h.db.get('SELECT id FROM channels WHERE workspace_id = ? AND kind = ?', [h.workspaceId, 'telegram'])).toBeTruthy();
   });
 
+  it('createOwned makes a fresh, non-primary thread for a non-weaver agent, never matching an existing one (VS-398)', () => {
+    const a = threads.createOwned('ag_planner', { humanLabel: 'Redesign the settings page' });
+    expect(a.agentId).toBe('ag_planner');
+    expect(a.humanLabel).toBe('Redesign the settings page');
+    expect(a.ticketId).toBeNull();
+
+    const b = threads.createOwned('ag_planner');
+    expect(b.id).not.toBe(a.id);
+
+    // Posting and reading work exactly like any other thread — createOwned only changes creation.
+    expect(threads.messages(a.id)).toEqual([]);
+    expect(h.db.get('SELECT id FROM channels WHERE workspace_id = ? AND kind = ?', [h.workspaceId, 'web'])).toBeTruthy();
+  });
+
+  it('list() excludes a planner-owned thread even when it is the most recently active one, and keeps it primary-first otherwise (VS-398 merge review)', async () => {
+    h.db.insert('agents', {
+      id: 'agent-planner-1', workspaceId: h.workspaceId, kind: 'planner', name: 'Planner', runtimeId: 'claude',
+      homePath: '/tmp/planner-1', createdAt: 't0', updatedAt: 't0',
+    });
+    const primary = threads.bindOrGet('web', 'web-1', null, 'Victor');
+    const plan = threads.createOwned('agent-planner-1', { humanLabel: 'Redesign the settings page' });
+    // The plan thread gets the newer activity — on unpatched `list()` (ordered only by recency,
+    // no ownership filter) this is exactly what put it ahead of the weaver's own primary thread.
+    await threads.inbound(HUMAN, plan.id, 'Let’s plan the redesign');
+
+    const ids = threads.list().map((t) => t.id);
+    expect(ids).not.toContain(plan.id);
+    expect(ids[0]).toBe(primary.id);
+  });
+
+  it('a thread owned by a non-weaver agent posts and reads messages like any other', async () => {
+    const t = threads.createOwned('ag_planner');
+    const inbound = await threads.inbound(HUMAN, t.id, 'Let’s plan the redesign');
+    const outbound = await threads.outbound({ kind: 'agent', id: 'ag_planner' }, t.id, 'Sure, where should we start?');
+    expect(threads.messages(t.id).map((m) => ({ direction: m.direction, body: m.body }))).toEqual([
+      { direction: 'inbound', body: 'Let’s plan the redesign' },
+      { direction: 'outbound', body: 'Sure, where should we start?' },
+    ]);
+    expect(inbound.authorKind).toBe('human');
+    expect(outbound.authorKind).toBe('agent');
+  });
+
   it('stores an inbound message and wakes the thread agent', async () => {
     const t = threads.bindOrGet('web', 'web-1', null, 'Victor');
     const msg = await threads.inbound(HUMAN, t.id, 'Add dark mode to the dashboard');

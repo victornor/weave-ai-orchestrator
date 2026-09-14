@@ -2,7 +2,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 
 import { dirname, join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
 import {
-  HANDOVER_PAUSE_CODE, OcError, TERMINAL_TICKET_STATUSES, heldByHuman, landingBranchOf, projectLabel, waitingOnRuntimeLogin, type Agent, type Project, type Role, type Ticket, type TicketStatus,
+  HANDOVER_PAUSE_CODE, OcError, TERMINAL_TICKET_STATUSES, heldByHuman, landingBranchOf, projectLabel, waitingOnRuntimeLogin, type Agent, type Plan, type Project, type Role, type Ticket, type TicketStatus,
 } from '@weave-ai/shared';
 import type { WorktreeProvider } from '@weave-ai/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
@@ -86,6 +86,8 @@ export function branchSlug(title: string): string {
 /** `ac/<identifier-lowercase>-<slug>` (PLAN §11.2); the OpenSpec change name is the same without the prefix. */
 export function ticketBranch(ticket: Ticket): string { return `ac/${ticket.identifier.toLowerCase()}-${branchSlug(ticket.title)}`; }
 export function openspecChangeName(ticket: Ticket): string { return `${ticket.identifier.toLowerCase()}-${branchSlug(ticket.title)}`; }
+/** VS-398: a planner's disposable worktree never commits or opens a pull request, so its branch name only needs to be valid and unique — never pushed, never read back. */
+export function planBranch(plan: Plan): string { return `plan/${plan.id.toLowerCase()}`; }
 
 export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServices): WorkersService {
   const log = ctx.log('daemon');
@@ -273,6 +275,105 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     },
 
     spawnForTicket(actor: Actor, ticketId: string): Promise<Agent> { return spawn(actor, ticketId); },
+
+    async ensurePlanner(actor: Actor, planId: string, opts: { agentId?: string } = {}): Promise<Agent> {
+      const plan = deps().planning.get(planId);
+      const existing = ctx.db.get<Agent>(`SELECT * FROM agents WHERE plan_id = ? AND kind = 'planner' AND status IN ${LIVE}`, [planId]);
+      if (existing) return existing;
+      const project = projectOf(plan.projectId);
+      const setting = modelSettingFor(modelsFor(ctx), 'planner');
+
+      // VS-398: `opts.agentId` lets `startOrResumePlan` mint the agent id up front, so it can create
+      // the plan's own thread (whose `agent_id` is NOT NULL) before this agent row exists — otherwise
+      // thread, plan and agent each need one of the other two to exist first.
+      const id = opts.agentId ?? newId();
+      const home = join(ctx.paths.workers, id);
+      const now = nowIso();
+      const branch = planBranch(plan);
+      const spawnedBy = actor.kind === 'human' ? 'human' : actor.kind === 'agent' ? 'weaver' : 'system';
+
+      ctx.db.insert('agents', {
+        id, workspaceId: ctx.workspaceId, kind: 'planner', projectId: project.id, roleId: null, roleRevision: null,
+        ticketId: null, planId: plan.id, name: `Planner — ${projectLabel(project)}`, runtimeId: setting.runtime,
+        status: 'provisioning', homePath: home, worktreePath: null, branch: null,
+        turnEpoch: 0, turnCount: 0, spawnedBy, spawnReason: `plan ${plan.id}`,
+        briefRevision: 1, createdAt: now, updatedAt: now,
+      });
+
+      let worktreeRowId: string | null = null;
+      try {
+        mkdirSync(home, { recursive: true });
+        const provider = providerFor(project);
+        const targetPath = join(home, 'work');
+        // VS-398: a disposable checkout, never the project's shared clone — isolated from concurrent
+        // daemon fetch/landing operations, and never committed to or opened as a pull request.
+        const info = await provider.create({
+          repoPath: project.clonePath, branch, base: landingBranchOf(project), targetPath, configPath: ctx.paths.wtConfig,
+        });
+        worktreeRowId = newId();
+        ctx.db.insert('worktrees', {
+          id: worktreeRowId, projectId: project.id, ticketId: null, agentId: id, provider: provider.id,
+          path: info.path, branch: info.branch || branch, status: 'active', createdAt: now, lastVerifiedAt: now,
+        });
+        ctx.db.update('agents', id, { worktreePath: info.path, branch: info.branch || branch, updatedAt: nowIso() });
+
+        const agent = get(id);
+        await renderHome(ctx, deps, agent);
+        ctx.db.update('agents', id, { status: 'active', updatedAt: nowIso() });
+        sessions.forTurn({ id, kind: 'planner', runtimeId: setting.runtime }, 'persistent');
+        deps().planning.setAgent(plan.id, id);
+      } catch (e) {
+        log.error({ err: String(e), planId }, 'planner spawn failed; rolling back');
+        try {
+          const provider = providerFor(project);
+          await provider.remove({ repoPath: project.clonePath, path: join(home, 'work'), branch, deleteBranch: true, force: true, configPath: ctx.paths.wtConfig }).catch(() => undefined);
+        } catch { /* best effort */ }
+        if (worktreeRowId) ctx.db.run('DELETE FROM worktrees WHERE id = ?', [worktreeRowId]);
+        ctx.db.run('DELETE FROM agent_sessions WHERE agent_id = ?', [id]);
+        ctx.db.run('DELETE FROM agents WHERE id = ?', [id]);
+        try { rmSync(home, { recursive: true, force: true }); } catch { /* leave the directory for inspection */ }
+        throw e instanceof OcError ? e : new OcError('internal', `planner spawn failed: ${String(e)}`);
+      }
+
+      const agent = get(id);
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.spawn', 'agent', id, { planId: plan.id, projectId: project.id, branch });
+      ctx.events.emit('worker.spawned', 'agent', id, { name: agent.name, kind: 'planner', planId: plan.id, projectId: project.id, branch: agent.branch });
+      log.info({ plannerId: id, planId }, 'planner spawned');
+      return agent;
+    },
+
+    async retirePlanner(planId: string): Promise<void> {
+      const agent = ctx.db.get<Agent>(`SELECT * FROM agents WHERE plan_id = ? AND kind = 'planner' AND status IN ${LIVE}`, [planId]);
+      if (!agent) return;
+      if (agent.projectId && agent.worktreePath && agent.branch) {
+        const project = projectOf(agent.projectId);
+        const provider = providerFor(project);
+        await provider.remove({ repoPath: project.clonePath, path: agent.worktreePath, branch: agent.branch, deleteBranch: true, force: true, configPath: ctx.paths.wtConfig }).catch(() => undefined);
+        ctx.db.run("UPDATE worktrees SET status = 'removed', removed_at = ? WHERE agent_id = ?", [nowIso(), agent.id]);
+      }
+      ctx.db.update('agents', agent.id, { status: 'retired', retiredAt: nowIso(), updatedAt: nowIso() });
+      ctx.db.run('DELETE FROM wakeups WHERE agent_id = ?', [agent.id]);
+      deps().planning.setAgent(planId, null);
+      ctx.events.emit('worker.retired', 'agent', agent.id, { kind: 'planner', planId });
+    },
+
+    async startOrResumePlan(actor: Actor, projectId: string, opts: { title?: string | null } = {}): Promise<{ plan: Plan; agent: Agent }> {
+      const project = projectOf(projectId);
+      const existing = deps().planning.getDrafting(project.id);
+      if (existing) {
+        const agent = await service.ensurePlanner(actor, existing.id);
+        return { plan: existing, agent };
+      }
+      // The thread needs an owning agent id before the agent row can exist (its FK is NOT NULL), and
+      // the agent needs a plan id before it can be spawned, and the plan needs the thread id before
+      // it can be created — so the agent id is minted here, up front, and handed to `ensurePlanner`
+      // to use instead of minting its own.
+      const plannerAgentId = newId();
+      const thread = deps().threads.createOwned(plannerAgentId, opts.title ? { humanLabel: opts.title } : {});
+      const plan = deps().planning.create(actor, project.id, { threadId: thread.id, title: opts.title ?? null });
+      const agent = await service.ensurePlanner(actor, plan.id, { agentId: plannerAgentId });
+      return { plan, agent };
+    },
 
     async spawnCurator(actor: Actor, projectId: string): Promise<Agent> {
       const project = projectOf(projectId);

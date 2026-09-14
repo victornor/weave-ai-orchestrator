@@ -98,7 +98,7 @@ export const HANDOVER_PAUSE_CODE = 'held_by_human';
 export function heldByHuman(agent: { status?: string; pauseDetail?: AgentPauseDetail | null } | null | undefined): boolean {
   return agent?.status === 'paused' && agent.pauseDetail?.code === HANDOVER_PAUSE_CODE;
 }
-export interface Agent { id: string; workspaceId: string; kind: E.AgentKind; projectId: string | null; roleId: string | null; roleRevision: number | null; ticketId: string | null; name: string; runtimeId: string; status: E.AgentStatus; pauseReason: string | null; pauseDetail: AgentPauseDetail | null; errorText: string | null; homePath: string; worktreePath: string | null; branch: string | null; turnEpoch: number; turnCount: number; spawnedBy: string; spawnReason: string | null; briefRevision: number; lastRunAt: string | null; retiredAt: string | null; createdAt: string; updatedAt: string }
+export interface Agent { id: string; workspaceId: string; kind: E.AgentKind; projectId: string | null; roleId: string | null; roleRevision: number | null; ticketId: string | null; /** VS-398: the plan a `planner`-kind agent belongs to; null for every other kind. */ planId: string | null; name: string; runtimeId: string; status: E.AgentStatus; pauseReason: string | null; pauseDetail: AgentPauseDetail | null; errorText: string | null; homePath: string; worktreePath: string | null; branch: string | null; turnEpoch: number; turnCount: number; spawnedBy: string; spawnReason: string | null; briefRevision: number; lastRunAt: string | null; retiredAt: string | null; createdAt: string; updatedAt: string }
 export interface Ticket { id: string; workspaceId: string; projectId: string | null; number: number; identifier: string; kind: E.TicketKind; title: string; description: string; /** One-line why (VS-146); shown on plan-approval cards. Null until set. */ summary: string | null; status: E.TicketStatus; priority: E.TicketPriority; autoMerge: boolean; assigneeRoleId: string | null; workerId: string | null; assigneeHuman: boolean; /** A human is conversing with this ticket's worker directly (VS-101): the session's whole persistent record. */ interactiveSession: boolean; /** Overrides the project's landing branch for this ticket alone (VS-119); set only at creation. */ landingBranch: string | null; /** Workspace catalog option this ticket's worker runs on (VS-162); null means `models.workers`. */ workerModelId: string | null; parentId: string | null; createdByKind: string; createdById: string | null; createdRunId: string | null; originKind: string | null; originFingerprint: string | null; checkoutRunId: string | null; executionRunId: string | null; openspecChangeName: string | null; openspecState: Record<string, unknown> | null; delivery: Record<string, unknown> | null; unblock: { owner: string; action: string } | null; blockedFromStatus: E.TicketStatus | null; monitorNextCheckAt: string | null; blockedTransitionAt: string | null; mergeQueuedAt: string | null; mergeStartedAt: string | null; /** How many times this waiting ticket has been passed over (VS-390). */ mergeBypasses: number; startedAt: string | null; completedAt: string | null; cancelledAt: string | null; createdAt: string; updatedAt: string }
 export interface TicketComment { id: string; ticketId: string; authorKind: E.AuthorKind; authorId: string | null; runId: string | null; body: string; kind: E.CommentKind; sourceTrust: E.SourceTrust; createdAt: string }
 /** One of a `single_choice` or `multiselect` input's choices. Keys are unique within that input. */
@@ -450,6 +450,52 @@ export interface RoadmapItem {
   ticketId: string | null;
   createdByKind: E.AuthorKind;
   createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A captain-authored, pre-ticket planning session (VS-398): a read-only planning agent chats with
+ * captain in `threadId` while `PlanDraft` rows accumulate a draft ticket plan. At most one `drafting`
+ * plan per project; submitting hands the whole thing to the weaver as one structured wake.
+ */
+export interface Plan {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  threadId: string;
+  /** The live planning agent for this plan; null once it has retired (submit or discard). */
+  agentId: string | null;
+  title: string | null;
+  status: E.PlanStatus;
+  createdByKind: E.AuthorKind;
+  createdById: string;
+  submittedAt: string | null;
+  discardedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * One draft ticket in a `Plan`'s ordered list. `suggestedTier` is the planner's pick; `tierOverride`
+ * is captain's and takes precedence when set — neither carries an explanatory reason. `blockedBy` is
+ * populated separately from `plan_draft_blockers` (other draft ids in the same plan), since real
+ * tickets do not exist yet to use `ticket_relations`.
+ */
+export interface PlanDraft {
+  id: string;
+  planId: string;
+  position: number;
+  title: string;
+  description: string;
+  kind: E.PlanDraftKind;
+  priority: E.TicketPriority;
+  targetRoleId: string | null;
+  suggestedTier: E.PlanDraftTier;
+  tierOverride: E.PlanDraftTier | null;
+  status: E.PlanDraftStatus;
+  createdTicketId: string | null;
+  failureReason: string | null;
   createdAt: string;
   updatedAt: string;
 }

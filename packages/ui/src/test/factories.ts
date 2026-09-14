@@ -86,6 +86,7 @@ export function agent(over: Partial<Agent> = {}): Agent {
     roleId: 'r1',
     roleRevision: 1,
     ticketId: 'tk_1',
+    planId: null,
     name: 'Frontend Engineer #7',
     runtimeId: 'claude-code',
     status: 'running',

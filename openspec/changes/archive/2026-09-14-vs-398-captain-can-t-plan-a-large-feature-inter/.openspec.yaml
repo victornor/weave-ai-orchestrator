@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Add a Plan button to V2 chat that opens a planning agent in a modal,
+  drafts an ordered ticket plan captain can edit, and submits it to the weaver

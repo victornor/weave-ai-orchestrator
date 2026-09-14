@@ -73,6 +73,7 @@ function Harness({ onSubmit }: { onSubmit: (text: string, files: File[], opts: {
       onChange={setText}
       onSubmit={onSubmit}
       onOpenSearch={vi.fn()}
+      onOpenPlan={vi.fn()}
     />
   );
 }
@@ -115,6 +116,28 @@ describe('the V2 chat composer', () => {
     expect(screen.getByRole('button', { name: 'Attach a file' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Dictate' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+  });
+
+  it('renders a Plan button beside Search and calls onOpenPlan (VS-398)', () => {
+    const onOpenPlan = vi.fn();
+    render(
+      <ChatComposer
+        projects={PROJECTS}
+        projectId={null}
+        onChangeProject={vi.fn()}
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onOpenSearch={vi.fn()}
+        onOpenPlan={onOpenPlan}
+      />,
+    );
+    const search = screen.getByRole('button', { name: 'Search this conversation' });
+    const plan = screen.getByRole('button', { name: 'Plan a body of work interactively' });
+    expect(plan.textContent?.trim()).toBe('Plan');
+    expect(plan.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    fireEvent.click(plan);
+    expect(onOpenPlan).toHaveBeenCalledTimes(1);
   });
 
   it('sends the typed text once, with an idempotency key', () => {

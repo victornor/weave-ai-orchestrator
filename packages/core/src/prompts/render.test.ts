@@ -456,6 +456,41 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('SHARED.md + PROJECT.md digest');
   });
 
+  it('tells a planning agent to reply through weave_plan_reply, never the ticket-delivery instruction (VS-398)', async () => {
+    const now = nowIso();
+    h.db.insert('channels', { id: 'ch1', workspaceId: h.workspaceId, kind: 'web' });
+    h.db.insert('channel_threads', { id: 'th1', channelId: 'ch1', agentId: h.conductorId, createdAt: now });
+    const planId = newId();
+    h.db.insert('plans', {
+      id: planId, workspaceId: h.workspaceId, projectId: h.projectId, threadId: 'th1', status: 'drafting',
+      createdByKind: 'human', createdById: 'victor', createdAt: now, updatedAt: now,
+    });
+    const plannerId = newId();
+    h.db.insert('agents', {
+      id: plannerId, workspaceId: h.workspaceId, kind: 'planner', projectId: h.projectId, planId,
+      name: 'Planner', runtimeId: 'claude', status: 'active', homePath: '/tmp/planner',
+      turnEpoch: 0, turnCount: 0, spawnedBy: 'human', briefRevision: 1, createdAt: now, updatedAt: now,
+    });
+    const planner = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [plannerId])!;
+    const wake = { id: 'w-p1', workspaceId: h.workspaceId, agentId: plannerId, source: 'human_message', reason: 'captain: let\'s plan the redesign', payload: {}, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, planner, [wake], {});
+    expect(prompt).toContain('weave_plan_reply');
+    expect(prompt).toContain('You never submit the plan yourself');
+    expect(prompt).not.toContain('do the phase your ticket status asks for');
+    expect(prompt).not.toContain('weave_human_send');
+  });
+
+  it('tells the weaver to read, create from and report on a submitted plan (VS-398)', async () => {
+    const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
+    const wake = { id: 'w-plan', workspaceId: h.workspaceId, agentId: conductor.id, source: 'plan_submitted', reason: 'Draft plan "Redesign" submitted for API', payload: { planId: 'pl-42' }, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [wake], {});
+    expect(prompt).toContain('plan `pl-42`');
+    expect(prompt).toContain('weave_plan_get');
+    expect(prompt).toContain('weave_plan_draft_link');
+    expect(prompt).toContain('do not re-split, re-merge or reorder drafts on your own judgement');
+    expect(prompt).toContain('mark that draft failed too, naming the missing dependency');
+  });
+
   it('names the decision in the weaver\'s wake line (VS-361)', async () => {
     const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
     const wake = { id: 'w-d', workspaceId: h.workspaceId, agentId: conductor.id, source: 'system', reason: 'decision plan_approval awaits your review', payload: { decisionId: 'd-42', ticketId }, status: 'claimed' } as never;

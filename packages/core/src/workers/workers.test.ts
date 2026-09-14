@@ -8,6 +8,8 @@ import type { Agent, Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createWorkersService, ticketBranch, branchSlug } from './index.js';
 import { createRolesService } from '../roles/index.js';
+import { createPlanningService } from '../planning/index.js';
+import { createThreadsService } from '../threads/service.js';
 import { GitWorktreeProvider } from '../worktrees/git.js';
 import { git } from '../util/git.js';
 import { runState } from '../runs/active.js';
@@ -876,6 +878,125 @@ describe('workers', () => {
     it('endHandover refuses a worker with no open hold', async () => {
       const worker = await spawnWithSession();
       await expect(workers.endHandover(HUMAN, worker.id, 'note')).rejects.toThrow(/not currently held/i);
+    });
+  });
+
+  describe('ensurePlanner / retirePlanner (VS-398)', () => {
+    beforeEach(() => {
+      h.services.projects = { get: () => ({ id: h.projectId }), list: () => [] } as never;
+      h.services.planning = createPlanningService(h.ctx, h.deps);
+      h.services.threads = createThreadsService(h.ctx, h.deps);
+      h.db.insert('channels', { id: 'ch1', workspaceId: h.workspaceId, kind: 'web' });
+      h.db.insert('channel_threads', { id: 'th1', channelId: 'ch1', agentId: h.conductorId, createdAt: nowIso() });
+    });
+
+    const startPlan = () => h.services.planning!.create(HUMAN, h.projectId, { threadId: 'th1', title: 'Redesign the settings page' });
+
+    it('spawns a planner: home, disposable worktree, persistent session, no ticket', async () => {
+      const plan = startPlan();
+      const planner = await workers.ensurePlanner(HUMAN, plan.id);
+
+      expect(planner.kind).toBe('planner');
+      expect(planner.status).toBe('active');
+      expect(planner.ticketId).toBeNull();
+      expect(planner.roleId).toBeNull();
+      expect(planner.planId).toBe(plan.id);
+      expect(planner.branch).toBe(`plan/${plan.id.toLowerCase()}`);
+      expect(existsSync(join(planner.homePath, 'AGENTS.md'))).toBe(true);
+      expect(existsSync(join(planner.homePath, 'brief.md'))).toBe(false);
+      expect(existsSync(join(planner.worktreePath!, 'README.md'))).toBe(true);
+
+      const wt = h.db.get<{ ticketId: string | null; status: string }>('SELECT * FROM worktrees WHERE agent_id = ?', [planner.id])!;
+      expect(wt).toMatchObject({ ticketId: null, status: 'active' });
+
+      expect(h.db.get<{ n: number }>('SELECT COUNT(*) n FROM agent_sessions WHERE agent_id = ?', [planner.id])!.n).toBe(1);
+      expect(h.services.planning!.get(plan.id).agentId).toBe(planner.id);
+      // No first-turn wake — the planner waits for captain's first message, unlike a worker's ticket_assigned.
+      expect(wake.calls).toHaveLength(0);
+    });
+
+    it('returns the existing live planner instead of spawning a second one', async () => {
+      const plan = startPlan();
+      const first = await workers.ensurePlanner(HUMAN, plan.id);
+      const second = await workers.ensurePlanner(HUMAN, plan.id);
+      expect(second.id).toBe(first.id);
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM agents WHERE plan_id = ? AND kind = 'planner'", [plan.id])!.n).toBe(1);
+    });
+
+    it('runs the planner on the weaver\'s own model, not a worker option (VS-398)', async () => {
+      h.ctx.config = { ...h.ctx.config, models: { weaver: { runtime: 'codex', model: 'gpt-5' } } } as never;
+      const plan = startPlan();
+      const planner = await workers.ensurePlanner(HUMAN, plan.id);
+      expect(planner.runtimeId).toBe('codex');
+    });
+
+    it('retires the planner and removes its worktree, clearing the plan\'s agent', async () => {
+      const plan = startPlan();
+      const planner = await workers.ensurePlanner(HUMAN, plan.id);
+      const worktreePath = planner.worktreePath!;
+      expect(existsSync(worktreePath)).toBe(true);
+
+      await workers.retirePlanner(plan.id);
+
+      expect(existsSync(worktreePath)).toBe(false);
+      expect(workers.get(planner.id).status).toBe('retired');
+      expect(h.db.get<{ status: string }>('SELECT status FROM worktrees WHERE agent_id = ?', [planner.id])!.status).toBe('removed');
+      expect(h.services.planning!.get(plan.id).agentId).toBeNull();
+    });
+
+    it('retiring a plan with no planner is a no-op', async () => {
+      const plan = startPlan();
+      await expect(workers.retirePlanner(plan.id)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('startOrResumePlan (VS-398)', () => {
+    beforeEach(() => {
+      h.services.projects = { get: () => ({ id: h.projectId }), list: () => [] } as never;
+      h.services.planning = createPlanningService(h.ctx, h.deps);
+      h.services.threads = createThreadsService(h.ctx, h.deps);
+    });
+
+    it('creates a fresh plan, its own thread and a live planner when none exists', async () => {
+      const { plan, agent } = await workers.startOrResumePlan(HUMAN, h.projectId, { title: 'Redesign the settings page' });
+      expect(plan.status).toBe('drafting');
+      expect(plan.projectId).toBe(h.projectId);
+      expect(agent.kind).toBe('planner');
+      expect(agent.planId).toBe(plan.id);
+      expect(agent.status).toBe('active');
+
+      const thread = h.services.threads!.get(plan.threadId);
+      expect(thread.agentId).toBe(agent.id);
+
+      expect(existsSync(join(agent.homePath, 'AGENTS.md'))).toBe(true);
+      expect(existsSync(join(agent.worktreePath!, 'README.md'))).toBe(true);
+    });
+
+    it('resumes the existing drafting plan and its live planner instead of creating a second one', async () => {
+      const first = await workers.startOrResumePlan(HUMAN, h.projectId, { title: 'Redesign' });
+      const second = await workers.startOrResumePlan(HUMAN, h.projectId);
+      expect(second.plan.id).toBe(first.plan.id);
+      expect(second.agent.id).toBe(first.agent.id);
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM agents WHERE plan_id = ? AND kind = 'planner'", [first.plan.id])!.n).toBe(1);
+      expect(h.db.get<{ n: number }>('SELECT COUNT(*) n FROM plans WHERE project_id = ?', [h.projectId])!.n).toBe(1);
+    });
+
+    it('resumes an existing plan whose planner was retired mid-session (turn crash) by spawning a fresh one', async () => {
+      const first = await workers.startOrResumePlan(HUMAN, h.projectId);
+      await workers.retirePlanner(first.plan.id);
+      const second = await workers.startOrResumePlan(HUMAN, h.projectId);
+      expect(second.plan.id).toBe(first.plan.id);
+      expect(second.agent.id).not.toBe(first.agent.id);
+      expect(workers.get(second.agent.id).status).toBe('active');
+    });
+
+    it('starting a new plan after the first is submitted creates a second, separate plan', async () => {
+      const first = await workers.startOrResumePlan(HUMAN, h.projectId);
+      h.services.planning!.submit(HUMAN, first.plan.id);
+      await workers.retirePlanner(first.plan.id);
+      const second = await workers.startOrResumePlan(HUMAN, h.projectId);
+      expect(second.plan.id).not.toBe(first.plan.id);
+      expect(second.plan.status).toBe('drafting');
     });
   });
 });

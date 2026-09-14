@@ -48,6 +48,12 @@ vi.mock('../api/context', () => ({
   useConnection: () => ({ state: 'connected', capturedAt: null, lastSeq: 0, attempts: 0 }),
   useWorkspaceEvents: () => undefined,
 }));
+// ChatPage always renders PlanModal, which calls useQueryClient() to invalidate on `plan.*` events (VS-398)
+// — these tests never mount a real QueryClientProvider, so stub it rather than pull one in unused.
+vi.mock('@tanstack/react-query', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-query')>();
+  return { ...actual, useQueryClient: () => ({ invalidateQueries: () => undefined }) };
+});
 vi.mock('../api/runStream', () => ({
   useRunEventStream: (id: string | null, opts?: { live?: boolean }) => {
     state.runStreams.push({ id, live: opts?.live ?? false });
@@ -106,6 +112,16 @@ vi.mock('../api/hooks', () => ({
   useTicketWorkProducts: () => ({ data: [], isLoading: false }),
   useTicketDocument: () => ({ data: undefined, isLoading: false, isError: true }),
   useTicketDocumentById: () => ({ data: undefined, isLoading: false, isError: true }),
+  // VS-398: the Plan modal's own hooks — the modal itself is closed in every test here, so these
+  // never actually run, but they must exist or mounting ChatPage (which always renders PlanModal)
+  // throws on the first hook call.
+  useStartOrResumePlan: () => ({ mutate: vi.fn() }),
+  usePlan: () => ({ data: undefined }),
+  useRoles: () => ({ data: [] }),
+  usePatchPlanDraft: () => ({ mutate: vi.fn() }),
+  useRemovePlanDraft: () => ({ mutate: vi.fn() }),
+  useSubmitPlan: () => ({ mutate: vi.fn(), isPending: false }),
+  useDiscardPlan: () => ({ mutate: vi.fn() }),
 }));
 
 const { V2ChatPage } = await import('../v2/ChatPage');

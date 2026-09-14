@@ -131,7 +131,7 @@ describe('the V2 chat trace', () => {
         events={[event({ id: 'e1', seq: 1, type: 'tool.call', payload: { name: 'Edit', callId: 'c1', input: { file_path: 'src/a.ts', old_string: 'const x = 1;', new_string: 'const x = 2;' } } })]}
       />,
     );
-    expect(screen.getByText('src/a.ts')).toBeInTheDocument();
+    expect(screen.getByText('a.ts')).toHaveAttribute('title', 'src/a.ts');
     // VS-413: visible on first render, not behind a click.
     const body = document.querySelector('[data-trace-edit]') as HTMLElement;
     expect(body).not.toBeNull();
@@ -148,8 +148,22 @@ describe('the V2 chat trace', () => {
         events={[event({ id: 'e1', seq: 1, type: 'tool.call', payload: { name: 'Write', callId: 'c1', input: { file_path: 'src/b.ts', content: 'export const b = 1;\nexport const c = 2;' } } })]}
       />,
     );
-    expect(screen.getByText('src/b.ts')).toBeInTheDocument();
+    expect(screen.getByText('b.ts')).toHaveAttribute('title', 'src/b.ts');
     expect(document.querySelector('[data-trace-edit]') as HTMLElement).toHaveTextContent('export const b = 1;');
+  });
+
+  it('shows only a file target\'s base name, keeping the whole path in the title (VS-437)', () => {
+    render(
+      <ChatTrace
+        events={[
+          event({ id: 'e1', seq: 1, type: 'tool.call', payload: { name: 'Read', callId: 'c1', input: { file_path: '/abs/dir/readme.md' } } }),
+          event({ id: 'e2', seq: 2, type: 'tool.call', payload: { name: 'Bash', callId: 'c2', input: { command: 'cd /abs/dir && ls' } } }),
+        ]}
+      />,
+    );
+    expect(screen.getByText('readme.md')).toHaveAttribute('title', '/abs/dir/readme.md');
+    // A shell command keeps the whole command, and gains no tooltip.
+    expect(screen.getByText('cd /abs/dir && ls')).not.toHaveAttribute('title');
   });
 
   it('never folds consecutive edits into a collapsed group: three edits are three expanded diffs', () => {

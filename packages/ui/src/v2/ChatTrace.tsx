@@ -19,7 +19,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { RunEvent, RunTrace } from '@weave-ai/shared';
 import { contextStrip } from '@weave-ai/render';
-import { groupConsecutiveTools, runEventsToTranscript } from '../lib/transcript';
+import { groupConsecutiveTools, runEventsToTranscript, targetBaseName } from '../lib/transcript';
 import type { ToolBlock, TranscriptBlock, TranscriptRow } from '../lib/transcript';
 import { Markdown } from '../components/Markdown';
 import { EditPayloadBody } from '../components/Transcript';
@@ -79,15 +79,19 @@ function ToolRow({ block, marker = '▸', reveal = false }: { block: ToolBlock; 
   // content the human asked for, not a second click to reveal it. Every other tool row — reads,
   // searches, shell output — keeps starting collapsed (VS-370).
   const [open, setOpen] = useState(() => Boolean(block.editPayload));
-  // The argument streams in when the row is new (VS-433); the tool name is its fixed label.
-  const target = useStreamReveal(block.target, reveal);
   const expandable = Boolean(block.diff) || Boolean(block.editPayload);
+  // A file tool shows only the file name (VS-437); the whole path stays on the element as a title.
+  // A command, a pattern or a url has no `targetPath` and renders exactly as it always did.
+  const targetLabel = block.targetPath ? targetBaseName(block.targetPath) : block.target;
+  // The argument streams in when the row is new (VS-433); the tool name is its fixed label. It is
+  // the label (VS-437) that streams, not the raw target — a new file row reveals `MEMORY.md`.
+  const target = useStreamReveal(targetLabel, reveal);
   const tone = block.denied ? 'text-needs-you' : block.error ? 'text-failed' : 'text-text-2';
   const head = (
     <div className="flex items-center gap-2" data-trace-tool>
       <span className="ac-mono flex-none text-nano text-text-4">{expandable ? (open ? '▾' : '▸') : marker}</span>
       <span className={cx('ac-mono flex-none text-nano', tone)}>{block.tool}</span>
-      {block.target ? <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{target}</span> : <span className="flex-1" />}
+      {targetLabel ? <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3" title={block.targetPath ?? undefined}>{target}</span> : <span className="flex-1" />}
       {block.adds != null || block.dels != null ? (
         <span className="ac-mono flex-none text-nano">
           {block.adds != null ? <span className="text-done">+{block.adds}</span> : null}

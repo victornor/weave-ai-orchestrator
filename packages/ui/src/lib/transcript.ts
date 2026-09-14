@@ -10,7 +10,7 @@ export type EditPayload =
 
 export type TranscriptBlock =
   | { id: string; type: 'text'; text: string; thinking?: boolean; thinkingDurationMs?: number | null }
-  | { id: string; type: 'tool'; tool: string; target: string; durationMs: number | null; adds: number | null; dels: number | null; diff: string | null; error?: boolean; pending?: boolean; denied?: boolean; editPayload?: EditPayload | null }
+  | { id: string; type: 'tool'; tool: string; target: string; targetPath: string | null; durationMs: number | null; adds: number | null; dels: number | null; diff: string | null; error?: boolean; pending?: boolean; denied?: boolean; editPayload?: EditPayload | null }
   | { id: string; type: 'phase'; phase: string; durationMs: number | null; tokens: number | null }
   | { id: string; type: 'status'; text: string; status: 'needs-you' | 'blocked' | 'failed' | 'done' | 'working' }
   | { id: string; type: 'command'; command: string; exitCode: number | null; output: string | null }
@@ -182,6 +182,7 @@ export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBl
           type: 'tool',
           tool: name,
           target: str(p['target']) || summariseInput(input),
+          targetPath: pathInput(input),
           durationMs: null,
           adds: null,
           dels: null,
@@ -221,6 +222,7 @@ export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBl
             type: 'tool',
             tool: name,
             target: detail ? detail.slice(0, 60) : '',
+            targetPath: null,
             durationMs: num(p['durationMs']),
             adds: num(p['additions']),
             dels: num(p['deletions']),
@@ -233,11 +235,13 @@ export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBl
         break;
       }
       case 'file.changed': {
+        const path = str(p['path']) || null;
         out.push({
           id: e.id,
           type: 'tool',
           tool: str(p['operation'], 'Edit'),
-          target: str(p['path']),
+          target: path ?? '',
+          targetPath: path,
           durationMs: null,
           adds: num(p['additions']),
           dels: num(p['deletions']),
@@ -312,10 +316,35 @@ function summariseInput(input: unknown): string {
   if (typeof input === 'string') return input.slice(0, 120);
   if (input && typeof input === 'object') {
     const o = input as Record<string, unknown>;
-    for (const k of ['file_path', 'filePath', 'path', 'pattern', 'command', 'query', 'url']) {
+    for (const k of ['file_path', 'filePath', 'path', 'notebook_path', 'notebookPath', 'pattern', 'command', 'query', 'url']) {
       const v = o[k];
       if (typeof v === 'string') return v.slice(0, 120);
     }
   }
   return '';
+}
+
+/**
+ * The filesystem path a tool call's input named, when it named one (VS-437). It is what tells a
+ * renderer that a target is a file — rather than a shell command, a search pattern or a url — so it
+ * can show the base name and keep the whole path in a `title`. Null when the input named no path.
+ */
+function pathInput(input: unknown): string | null {
+  if (!input || typeof input !== 'object') return null;
+  const o = input as Record<string, unknown>;
+  for (const k of ['file_path', 'filePath', 'path', 'notebook_path', 'notebookPath']) {
+    const v = o[k];
+    if (typeof v === 'string' && v) return v;
+  }
+  return null;
+}
+
+/**
+ * The last segment of a filesystem path, for a trace row that only needs the file name: `/a/b/c.ts`
+ * → `c.ts`, `C:\Users\me\c.ts` → `c.ts`, a trailing `/` is dropped, and a bare `c.ts` is unchanged.
+ * An input that resolves to nothing (empty, or just separators) falls back to itself.
+ */
+export function targetBaseName(path: string): string {
+  const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean);
+  return parts[parts.length - 1] ?? path;
 }

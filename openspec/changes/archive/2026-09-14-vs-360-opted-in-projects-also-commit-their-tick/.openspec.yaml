@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Opted-in projects also commit their ticket artifacts into the repo
+  (.weave/artifacts/), synced back on merge and rendered through the same
+  sandbox

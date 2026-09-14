@@ -62,8 +62,8 @@ export interface TicketsService {
   /** The most recent worker to have held this ticket, even after it retired — `ticket.workerId` is
    * nulled on retirement, so this is the only way to name who built a ticket that has since landed. */
   lastWorker(id: string): S.Agent | null;
-  /** `opts.system` is for the daemon's own internal write of the `plan` digest, and for `putArtifactWorkProduct`'s caller writing an `artifact:`-prefixed key — never set it from a tool or route handling external input directly; every other write to `key: 'plan'` or an `artifact:`-prefixed key is refused. */
-  putDocument(actor: Actor, id: string, key: string, body: string, opts?: { system?: boolean }): { documentId: string; revision: number };
+  /** `opts.system` is for the daemon's own internal write of the `plan` digest, and for `putArtifactWorkProduct`'s caller writing an `artifact:`-prefixed key — never set it from a tool or route handling external input directly; every other write to `key: 'plan'` or an `artifact:`-prefixed key is refused. `opts.mirror` (VS-360) additionally mirrors an `artifact:`-prefixed write into a worker's worktree at `.weave/artifacts/<ticket identifier>/<key>` for a project that has opted in to `knowledgeRepo`, and refuses the write outright if the body looks secret-shaped. */
+  putDocument(actor: Actor, id: string, key: string, body: string, opts?: { system?: boolean; mirror?: { worktreePath: string; title?: string; kind?: string } }): { documentId: string; revision: number };
   getDocument(id: string, key: string, revision?: number): { documentId: string; revision: number; body: string; createdAt: string } | null;
   /** Read one of the ticket's documents by its id (VS-224) — how a decision's document target is followed; scoped to the ticket. */
   getDocumentById(id: string, documentId: string, revision?: number): { key: string; documentId: string; revision: number; currentRevision: number; body: string; createdAt: string } | null;

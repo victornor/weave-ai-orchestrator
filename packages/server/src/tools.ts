@@ -113,6 +113,22 @@ function mirrorTargetFor(ctx: ToolCtx, resolvedScope: string, resolvedProjectId:
 }
 
 /**
+ * VS-360: the worktree to also mirror a ticket artifact publish into, or `undefined` when none
+ * applies — a weaver caller (structurally impossible here: `weave_artifact_put` is the separate,
+ * scope-`weaver` tool and never reaches this function), a worker with no worktree, or a ticket
+ * whose project has not opted in to `knowledgeRepo`. The path itself is never computed here —
+ * `putDocument`'s own `repoArtifactPath` is the single enforcement point.
+ */
+function artifactMirrorTargetFor(ctx: ToolCtx, ticket: Ticket, title: string | undefined, kind: string | undefined): { worktreePath: string; title?: string; kind?: string } | undefined {
+  if (ctx.claims.agentKind !== 'worker') return undefined;
+  const agent = svc(ctx).workers.get(ctx.claims.agentId);
+  if (!agent.worktreePath || !ticket.projectId) return undefined;
+  const project = safe(() => svc(ctx).projects.get(ticket.projectId!));
+  if (!project?.knowledgeRepoEnabled) return undefined;
+  return { worktreePath: agent.worktreePath, title, kind };
+}
+
+/**
  * VS-110: record that this run's explicit knowledge read returned `tokens`, isolated from the read
  * itself — a recording failure must never turn a successful `weave_knowledge_get`/`weave_knowledge_doc_get`
  * into a tool error.
@@ -668,7 +684,8 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx, i) => {
       validateArtifactHtml(i.html);
       const ticket = writeTicket(ctx, i.id);
-      const { revision } = svc(ctx).tickets.putDocument(ctx.actor, ticket.id, `artifact:${i.key}`, i.html, { system: true });
+      const mirror = artifactMirrorTargetFor(ctx, ticket, i.title, i.kind);
+      const { revision } = svc(ctx).tickets.putDocument(ctx.actor, ticket.id, `artifact:${i.key}`, i.html, { system: true, mirror });
       const url = `/api/w/${ctx.ws.id}/tickets/${ticket.id}/artifacts/${i.key}/raw`;
       svc(ctx).tickets.putArtifactWorkProduct(ctx.actor, ticket.id, i.key, { url, title: i.title, kind: i.kind });
       return { url, revision };

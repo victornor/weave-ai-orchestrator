@@ -2,12 +2,15 @@
  * End-to-end against the real core services (not the fakes), so route wiring and service
  * signatures stay honest. Uses core's own test harness for the temp workspace.
  */
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createCore, initLogger } from '@weave-ai/core';
 import { DaemonConfigSchema } from '@weave-ai/shared';
 import { makeHarness } from '../../core/src/testing/context.js';
+import { reconcileProjectArtifactsFromRepo } from '../../core/src/tickets/artifactRepoSync.js';
+import { git } from '../../core/src/util/git.js';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import type { AppDeps, WorkspaceRuntime } from '../src/types.js';
@@ -904,6 +907,127 @@ describe('real core services over HTTP', () => {
       expect(forOther).toEqual([]);
       const unfiltered = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/knowledge/artifacts`, { headers: H }))).json();
       expect(unfiltered).toHaveLength(1);
+    });
+
+    describe('opted-in repo mirror (VS-360)', () => {
+      function setKnowledgeRepoEnabled(harness: ReturnType<typeof makeHarness>, enabled: boolean): void {
+        harness.db.update('projects', harness.projectId, { knowledgeRepoEnabled: enabled });
+      }
+
+      it('mirrors a published artifact into the worker\'s worktree for an opted-in project', async () => {
+        const { harness, app, services, ticket, agentId } = bootWithWorkerTicket();
+        setKnowledgeRepoEnabled(harness, true);
+        const token = await workerToken(harness, agentId, ticket.id);
+        const worktreePath = services.workers.get(agentId).worktreePath!;
+
+        const published = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', {
+          id: ticket.identifier, key: 'overview', html: SAMPLE_HTML, title: 'Overview', kind: 'diagram',
+        });
+        expect(published.ok).toBe(true);
+
+        const htmlPath = join(worktreePath, '.weave', 'artifacts', ticket.identifier, 'overview.html');
+        const metaPath = join(worktreePath, '.weave', 'artifacts', ticket.identifier, 'overview.meta.json');
+        expect(readFileSync(htmlPath, 'utf8')).toBe(SAMPLE_HTML);
+        expect(JSON.parse(readFileSync(metaPath, 'utf8'))).toEqual({ title: 'Overview', kind: 'diagram' });
+
+        // Republishing under the same key replaces the mirrored file's content, not merges into it.
+        const HTML_V2 = '<!doctype html><html><body><h1>v2</h1></body></html>';
+        await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: HTML_V2 });
+        expect(readFileSync(htmlPath, 'utf8')).toBe(HTML_V2);
+        expect(JSON.parse(readFileSync(metaPath, 'utf8'))).toEqual({ title: null, kind: null });
+      });
+
+      it('writes nothing extra for an opted-out project', async () => {
+        const { harness, app, services, ticket, agentId } = bootWithWorkerTicket();
+        const token = await workerToken(harness, agentId, ticket.id);
+        const worktreePath = services.workers.get(agentId).worktreePath!;
+
+        const published = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: SAMPLE_HTML });
+        expect(published.ok).toBe(true);
+        expect(existsSync(join(worktreePath, '.weave', 'artifacts'))).toBe(false);
+      });
+
+      it('writes nothing extra for a worker with no worktree', async () => {
+        const { deps, harness } = boot();
+        const app = createApp(deps);
+        const servicesX = deps.workspaces.get(harness.workspaceId)!.services;
+        const ticket = servicesX.tickets.create({ kind: 'human', id: null }, { projectId: harness.projectId, kind: 'task', title: 'No worktree' });
+        setKnowledgeRepoEnabled(harness, true);
+        const agentId = harness.addWorker(ticket.id, { worktreePath: null, branch: null });
+        const token = await workerToken(harness, agentId, ticket.id);
+
+        const published = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'overview', html: SAMPLE_HTML });
+        expect(published.ok).toBe(true); // no crash resolving a mirror target with no worktree to mirror into
+      });
+
+      it('refuses to publish secret-shaped HTML for an opted-in project, recording nothing', async () => {
+        const { harness, app, services, ticket, agentId } = bootWithWorkerTicket();
+        setKnowledgeRepoEnabled(harness, true);
+        const token = await workerToken(harness, agentId, ticket.id);
+        const worktreePath = services.workers.get(agentId).worktreePath!;
+        const secretHtml = `<html><body>token ghp-${'a'.repeat(36)}</body></html>`;
+
+        const rejected = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'leaky', html: secretHtml });
+        expect(rejected.ok).toBe(false);
+        expect(services.tickets.workProducts(ticket.id)).toHaveLength(0);
+        expect(existsSync(join(worktreePath, '.weave', 'artifacts', ticket.identifier))).toBe(false);
+      });
+
+      it('accepts the same secret-shaped HTML unchanged for an opted-out project', async () => {
+        const { harness, app, ticket, agentId } = bootWithWorkerTicket();
+        const token = await workerToken(harness, agentId, ticket.id);
+        const secretHtml = `<html><body>token ghp-${'a'.repeat(36)}</body></html>`;
+
+        const accepted = await callTool(app, harness.workspaceId, token, 'weave_ticket_artifact_put', { id: ticket.identifier, key: 'leaky', html: secretHtml });
+        expect(accepted.ok).toBe(true);
+      });
+
+      it('renders a merge-sync-reconciled artifact through the existing sandboxed raw route unchanged (VS-360 task 2.5)', async () => {
+        const { deps, harness } = boot();
+        const app = createApp(deps);
+        const services = deps.workspaces.get(harness.workspaceId)!.services;
+        const ticket = services.tickets.create({ kind: 'human', id: null }, { projectId: harness.projectId, kind: 'task', title: 'Reconciled artifact' });
+
+        const cloneDir = mkdtempSync(join(tmpdir(), 'ac-artifact-route-sync-'));
+        await git(['init', '-b', 'main'], cloneDir);
+        await git(['config', 'user.email', 't@e.com'], cloneDir);
+        await git(['config', 'user.name', 'T'], cloneDir);
+        writeFileSync(join(cloneDir, 'README.md'), '# api\n');
+        await git(['add', '-A'], cloneDir);
+        await git(['commit', '-m', 'init'], cloneDir);
+        const beforeSha = (await git(['rev-parse', 'HEAD'], cloneDir)).stdout.trim();
+        mkdirSync(join(cloneDir, '.weave', 'artifacts', ticket.identifier), { recursive: true });
+        writeFileSync(join(cloneDir, '.weave', 'artifacts', ticket.identifier, 'overview.html'), SAMPLE_HTML);
+        await git(['add', '-A'], cloneDir);
+        await git(['commit', '-m', 'human adds an artifact directly'], cloneDir);
+        const afterSha = (await git(['rev-parse', 'HEAD'], cloneDir)).stdout.trim();
+
+        harness.db.update('projects', harness.projectId, { clonePath: cloneDir, knowledgeRepoEnabled: true });
+        const project = services.projects.get(harness.projectId);
+        await reconcileProjectArtifactsFromRepo(harness.ctx, () => services, project, beforeSha, afterSha);
+
+        const url = `/api/w/${harness.workspaceId}/tickets/${ticket.id}/artifacts/overview/raw`;
+        const res = await app.fetch(new Request(`http://127.0.0.1${url}`, { headers: H }));
+        expect(res.status).toBe(200);
+        expect(await res.text()).toBe(SAMPLE_HTML);
+        expect(res.headers.get('content-security-policy')).toBe(
+          "sandbox allow-scripts allow-forms allow-popups allow-downloads; default-src 'none'; style-src 'self' 'unsafe-inline'; img-src data: 'self'; font-src data:; connect-src 'none'",
+        );
+        rmSync(cloneDir, { recursive: true, force: true });
+      });
+
+      it('never mirrors a weaver\'s workspace-scoped artifact into any project\'s worktree, opted in or not', async () => {
+        const { harness, app, services, agentId } = bootWithWorkerTicket();
+        setKnowledgeRepoEnabled(harness, true);
+        const worktreePath = services.workers.get(agentId).worktreePath!;
+        const weaverToken = await signRunToken(runTokenSecret(harness.ctx.db), {
+          workspaceId: harness.workspaceId, runId: 'run_weaver', agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,
+        });
+
+        const published = await callTool(app, harness.workspaceId, weaverToken, 'weave_artifact_put', { key: 'portfolio', html: SAMPLE_HTML });
+        expect(published.ok).toBe(true);
+        expect(existsSync(join(worktreePath, '.weave', 'artifacts'))).toBe(false);
+      });
     });
   });
 

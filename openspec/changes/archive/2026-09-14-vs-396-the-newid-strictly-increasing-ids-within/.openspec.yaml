@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-14
+goal: The newId same-millisecond test proves strict monotonicity deterministically,
+  without depending on wall-clock timing, so a busy runner cannot turn a green
+  pull request red
+skip_specs: true

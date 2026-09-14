@@ -66,6 +66,13 @@ export interface Dictation {
    * which has no such gap (VS-195).
    */
   transcribing: boolean;
+  /**
+   * False from the moment a session starts until the attempt has settled: the recognizer's final
+   * result on the speech path, or the transcription response on the daemon path. A send queued
+   * while dictating waits for `true` so it submits the completed text, never the pre-dictation
+   * value (VS-416).
+   */
+  settled: boolean;
   /** seconds since the mic opened, for the 0:06 timer. */
   elapsed: number;
   /** Live analyser for the voice meter while the mic is open; read it from a rAF loop, never from render. */
@@ -142,11 +149,26 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
 } = {}): Dictation {
   const [listening, setListening] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
+  /**
+   * True once a stop has been followed by the end of the attempt: the recognizer's final result
+   * for the speech path, the transcript (or failure) for the daemon path. A send queued while
+   * dictating waits for this instead of submitting the pre-dictation text (VS-416).
+   */
+  const [settled, setSettled] = useState(true);
   const transcribingRef = useRef(false);
   const setTranscribingState = useCallback((v: boolean) => {
     transcribingRef.current = v;
     setTranscribing(v);
   }, []);
+  /**
+   * End of a dictation attempt: the transcript has landed (or failed), so a send queued while
+   * dictating may now submit. `transcribing` and `settled` flip in one statement so the composer
+   * never reads a half-settled attempt.
+   */
+  const finishAttempt = useCallback(() => {
+    setTranscribingState(false);
+    setSettled(true);
+  }, [setTranscribingState]);
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<DictationMode>(() => pickMode({ backend: opts.backend, hostReady: Boolean(opts.serverConfigured) }));
@@ -242,7 +264,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
 
   const postWav = useCallback((blob: Blob) => {
     if (!blob.size) {
-      setTranscribingState(false);
+      finishAttempt();
       return;
     }
     const fd = new FormData();
@@ -250,16 +272,16 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     // `transcribing` clears in the same statement as whatever else each branch sets — never behind
     // a trailing `.finally()`. A `.catch().finally()` tail sets them across two separate promise
     // continuations, which land in two separate React commits often enough to matter: the composer's
-    // queued-send effect reads `error` and `transcribing` together, and a render where `error` is
-    // already set but `transcribing` is still true briefly shows both the failure alert and the
-    // "waiting for the transcript" banner at once (found via VS-294, ~20% of runs).
+    // queued-send effect reads `error`, `transcribing` and `settled` together, and a render where
+    // `error` is already set but the attempt is not yet settled briefly shows both the failure alert
+    // and the "waiting for the transcript" banner at once (found via VS-294, ~20% of runs).
     void (async () => {
       try {
         const res = await fetch(transcribeUrlRef.current ?? '/api/transcribe', { method: 'POST', credentials: 'include', body: fd });
         if (res.status === 501) {
           setMode(speechCtor() ? 'speech' : 'unavailable');
           setError('No transcription provider is configured on the daemon. Set one in Settings → Dictation.');
-          setTranscribingState(false);
+          finishAttempt();
           return;
         }
         if (!res.ok) throw new Error(String(res.status));
@@ -269,13 +291,13 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         } else {
           setError(NO_TRANSCRIPT_UPLOAD);
         }
-        setTranscribingState(false);
+        finishAttempt();
       } catch {
         setError('Transcription failed on the daemon. Type instead, or retry.');
-        setTranscribingState(false);
+        finishAttempt();
       }
     })();
-  }, [setTranscribingState]);
+  }, [finishAttempt]);
 
   const stop = useCallback(() => {
     const uploading = uploadLive.current;
@@ -303,8 +325,12 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     if (wav) {
       setTranscribingState(true);
       postWav(wav);
+    } else if (mode === 'upload') {
+      // Upload mode with no captured audio and no wav to post: there is no attempt left to await,
+      // so a send queued at this moment must not wait forever (VS-416).
+      setSettled(true);
     }
-  }, [stopMeters, postWav, setTranscribingState]);
+  }, [mode, stopMeters, postWav, setTranscribingState]);
 
   const start = useCallback(() => {
     if (transcribingRef.current) return; // nothing left to stop mid-flight; wait for it to land
@@ -323,6 +349,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     }
     setListening(true);
     wantListening.current = true;
+    setSettled(false);
     gotResult.current = false;
     heardAudio.current = false;
     committed.current = '';
@@ -372,6 +399,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         wantListening.current = false;
         setListening(false);
         stopMeters();
+        setSettled(true);
       };
       r.onend = () => {
         // Browsers end continuous recognition on their own (silence, ~60 s cap). Keep going until
@@ -383,6 +411,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
             wantListening.current = false;
             setListening(false);
             stopMeters();
+            setSettled(true);
             return;
           }
           // The next session starts a fresh results list, so what this one heard has to move into
@@ -397,6 +426,10 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
           setListening(false);
           stopMeters();
         }
+        // A stop() nulls `rec.current` before the recognizer ends, so the final result for a
+        // stopped session arrives after both branches above have been skipped: settle here, not
+        // inside the `rec.current === r` block (VS-416).
+        if (!wantListening.current) setSettled(true);
       };
       rec.current = r;
       try {
@@ -405,6 +438,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         setListening(false);
         wantListening.current = false;
         stopMeters();
+        setSettled(true);
       }
       // No getUserMedia here. The Web Speech API opens its own capture, and a second concurrent one
       // starves it on mobile browsers, where the microphone is effectively exclusive: the meter
@@ -442,6 +476,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
         setError('Microphone permission was denied.');
         setListening(false);
         stopMeters();
+        setSettled(true);
       });
   }, [mode, meter, stopMeters]);
 
@@ -457,6 +492,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     mode,
     listening,
     transcribing,
+    settled,
     elapsed,
     analyser: analyserNode,
     metered,

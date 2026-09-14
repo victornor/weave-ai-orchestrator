@@ -12,6 +12,7 @@ import type { Project } from '@weave-ai/shared';
 import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYPES } from '@weave-ai/shared';
 import { projectLabel } from '@weave-ai/shared';
 import { useDictation } from '../lib/dictation';
+import { dictationHint } from '../lib/dictationHint';
 import { projectColorVar } from '../lib/projectColor';
 import { VoiceMeter } from '../components/VoiceMeter';
 import { cx } from '../lib/cx';
@@ -46,6 +47,14 @@ function SendIcon(): React.ReactElement {
   return (
     <svg viewBox="0 0 12 12" className="size-3.5" aria-hidden>
       <path d="M0 0 L12 6 L0 12 L2.6 6 Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function StopIcon(): React.ReactElement {
+  return (
+    <svg viewBox="0 0 12 12" className="size-3.5" aria-hidden>
+      <rect x="2.5" y="2.5" width="7" height="7" rx="1.4" fill="currentColor" />
     </svg>
   );
 }
@@ -94,13 +103,18 @@ export function ChatComposer({
   const dragDepth = useRef(0);
   const [freeText, setFreeText] = useState(false);
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
+  const [pendingSend, setPendingSend] = useState(false);
+  const pendingSendRef = useRef(false);
   const base = useRef('');
+  /** Set by the dictation callback; consumed by the layout effect so an insert scrolls to its end. */
+  const dictated = useRef(false);
 
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches;
 
   const dictation = useDictation((transcript) => {
     const piece = transcript.trim();
     if (!piece) return;
+    dictated.current = true;
     onChange(`${base.current}${base.current && !base.current.endsWith(' ') ? ' ' : ''}${piece}`);
   });
 
@@ -129,12 +143,23 @@ export function ChatComposer({
     };
   }, [isTouch, dictation, startMic]);
 
+  // Grow to fit, then scroll inside. Measuring collapses the box and throws the scroll position
+  // away, so it is put back: at the end when the insert came from dictation or the caret is already
+  // there, otherwise where the browser left it. A dictated insert also moves the caret to the end,
+  // which is what "the newest text is visible" means for a long transcript (VS-416). While
+  // listening there is no textarea — the flag survives until it returns, so the remount scrolls.
   useLayoutEffect(() => {
     const el = ta.current;
     if (!el) return;
+    const fromDictation = dictated.current;
+    dictated.current = false;
+    const atEnd = fromDictation || (el.selectionStart === el.value.length && el.selectionEnd === el.value.length);
+    const prev = el.scrollTop;
     el.style.height = 'auto';
     el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_PX)}px`;
-  }, [value]);
+    if (fromDictation) el.setSelectionRange(el.value.length, el.value.length);
+    el.scrollTop = atEnd ? el.scrollHeight : prev;
+  }, [value, dictation.listening, dictation.transcribing]);
 
   const addFiles = useCallback((incoming: File[]): void => {
     const accepted = incoming.filter((f) => ACCEPTED.includes(f.type));
@@ -143,12 +168,8 @@ export function ChatComposer({
     setFiles((cur) => [...cur, ...accepted].slice(0, ATTACHMENT_MAX_PER_MESSAGE));
   }, []);
 
-  const send = useCallback((): void => {
+  const doSubmit = useCallback((t: string): void => {
     if (disabled || submittingRef.current) return;
-    setPendingNotice(null);
-    if (dictation.listening) dictation.stop();
-    const t = value.trim();
-    if (!t && files.length === 0) return;
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
@@ -166,7 +187,42 @@ export function ChatComposer({
         submittingRef.current = false;
         setSubmitting(false);
       });
-  }, [disabled, value, files, dictation, onSubmit, projectId, replyToMessageId]);
+  }, [disabled, files, onSubmit, projectId, replyToMessageId]);
+
+  const send = useCallback((): void => {
+    if (disabled || submittingRef.current) return;
+    setPendingNotice(null);
+    // Send means "finish the dictation and send it". The transcript lands only after `stop()` —
+    // synchronously-late for Web Speech, as a daemon response for Voxtype — so the send queues and
+    // the effect below submits once the attempt has settled, with whatever text landed. A second
+    // press while queued is a no-op, and an empty result submits nothing (V1's pendingSend, VS-282).
+    if (dictation.listening || dictation.transcribing) {
+      if (pendingSendRef.current) return;
+      pendingSendRef.current = true;
+      setPendingSend(true);
+      if (dictation.listening) dictation.stop();
+      return;
+    }
+    const t = value.trim();
+    if (!t && files.length === 0) return;
+    doSubmit(t);
+  }, [disabled, value, files, dictation, doSubmit]);
+
+  // A queued send submits when the attempt settles; reading `value` here — not a value captured at
+  // press time — keeps the transcript that landed (VS-282). A failed or empty transcript submits
+  // nothing, so an empty body is never sent mid-dictation (VS-416).
+  useEffect(() => {
+    if (!pendingSend || !dictation.settled) return;
+    pendingSendRef.current = false;
+    setPendingSend(false);
+    if (dictation.error) return;
+    const t = value.trim();
+    if (!t && files.length === 0) {
+      setPendingNotice('Nothing was recognized, so nothing was sent.');
+      return;
+    }
+    doSubmit(t);
+  }, [pendingSend, dictation.settled, dictation.error, value, files.length, doSubmit]);
 
   const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
     const pasted = Array.from(e.clipboardData?.items ?? [])
@@ -215,7 +271,7 @@ export function ChatComposer({
             {projectLabel(p)}
           </button>
         ))}
-        <span className="ac-mono ml-auto flex-none whitespace-nowrap text-nano text-text-3">{isTouch ? 'tap the mic to dictate' : '⌘⇧M to dictate'}</span>
+        <span className="ac-mono ml-auto flex-none whitespace-nowrap text-nano text-text-3">{dictationHint({ isTouch })}</span>
       </div>
 
       {replyToExcerpt ? (
@@ -247,18 +303,34 @@ export function ChatComposer({
         onDrop={(e) => { if (!dragHasFiles(e.dataTransfer)) return; e.preventDefault(); dragDepth.current = 0; setDragActive(false); addFiles(Array.from(e.dataTransfer.files)); }}
         className={cx('flex items-end gap-2 rounded-r4 border bg-bg-input px-2.5 py-1.5', dragActive || dictation.listening ? 'border-accent' : 'border-line-2')}
       >
-        <textarea
-          ref={ta}
-          rows={1}
-          value={value}
-          disabled={disabled || submitting}
-          placeholder="Message the weaver…"
-          aria-label="Message the weaver"
-          onChange={(e) => onChange(e.target.value)}
-          onPaste={onPaste}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isTouch) { e.preventDefault(); send(); } }}
-          className="max-h-[12rem] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-body text-text-1 outline-none placeholder:text-text-4 focus-visible:[box-shadow:none]"
-        />
+        {dictation.listening ? (
+          <div data-testid="v2-composer-listening" className="flex min-w-0 flex-1 items-center gap-2.5 py-1">
+            {dictation.metered ? (
+              <VoiceMeter analyser={dictation.analyser} active className="h-6 min-w-0 flex-1" />
+            ) : (
+              <span className="flex h-6 min-w-0 flex-1 items-center gap-2 text-micro text-text-3">
+                <span className="size-1.5 flex-none animate-pulse rounded-full bg-accent-link" aria-hidden />
+                Listening…
+              </span>
+            )}
+            <span className="ac-mono flex-none text-nano tabular-nums text-text-3">
+              {Math.floor(dictation.elapsed / 60)}:{String(dictation.elapsed % 60).padStart(2, '0')}
+            </span>
+          </div>
+        ) : (
+          <textarea
+            ref={ta}
+            rows={1}
+            value={value}
+            disabled={disabled || submitting}
+            placeholder="Message the weaver…"
+            aria-label="Message the weaver"
+            onChange={(e) => onChange(e.target.value)}
+            onPaste={onPaste}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isTouch) { e.preventDefault(); send(); } }}
+            className="max-h-[12rem] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-body text-text-1 outline-none placeholder:text-text-4 focus-visible:[box-shadow:none]"
+          />
+        )}
         <input
           ref={fileInput}
           type="file"
@@ -278,28 +350,13 @@ export function ChatComposer({
           aria-pressed={dictation.listening}
           onClick={() => { if (dictation.listening) dictation.stop(); else if (dictation.mode === 'unavailable') { setFreeText(true); setPendingNotice('Dictation is unavailable: this browser has no Web Speech API and the daemon has no transcription provider.'); } else startMic(); }}
         >
-          <MicIcon slashed={dictation.mode === 'unavailable'} />
+          {dictation.listening ? <StopIcon /> : <MicIcon slashed={dictation.mode === 'unavailable'} />}
         </button>
-        <button type="button" className={BUTTON} aria-label="Send" disabled={disabled || submitting || (!value.trim() && files.length === 0)} onClick={send}>
+        <button type="button" className={BUTTON} aria-label="Send" disabled={disabled || submitting || pendingSend || (!value.trim() && files.length === 0 && !dictation.listening && !dictation.transcribing)} onClick={send}>
           <SendIcon />
         </button>
       </div>
 
-      {dictation.listening ? (
-        <div className="flex h-8 items-center gap-3 rounded-r4 border border-line-1 bg-bg-2 px-3">
-          {dictation.metered ? (
-            <VoiceMeter analyser={dictation.analyser} active className="h-6 min-w-0 flex-1" />
-          ) : (
-            <span className="flex h-6 min-w-0 flex-1 items-center gap-2 text-micro text-text-3">
-              <span className="size-1.5 flex-none animate-pulse rounded-full bg-accent-link" aria-hidden />
-              Listening…
-            </span>
-          )}
-          <span className="ac-mono text-nano tabular-nums text-text-3">
-            {Math.floor(dictation.elapsed / 60)}:{String(dictation.elapsed % 60).padStart(2, '0')}
-          </span>
-        </div>
-      ) : null}
       {dictation.error ? <p role="alert" className="rounded-r4 border border-blocked/35 px-3 py-2 text-micro text-text-1">{dictation.error}</p> : null}
       {pendingNotice && !dictation.error ? <p role="status" className="rounded-r4 border border-line-1 px-3 py-2 text-micro text-text-3">{pendingNotice}</p> : null}
       {freeText && dictation.error ? (

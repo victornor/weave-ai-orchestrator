@@ -64,6 +64,7 @@ import { useGo, useSearchParams } from '../app/link';
 import { useTheme } from '../lib/theme';
 import { readShowSilentTurns, writeShowSilentTurns } from '../lib/chatPrefs';
 import { useDictationDiagnosticsEnabled, writeDictationDiagnosticsEnabled } from '../lib/dictationDiagnostics';
+import { useDictationAutoSend, writeDictationAutoSend } from '../lib/dictationAutoSend';
 import { isRuntimeAvailable, modelOptionLabel, runtimeStatusLabel } from '../lib/runtime';
 import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, runningVersionLabel, shortSha, updateEntry, updateEntryLabel } from '../lib/upgrade';
 import { cx } from '../lib/cx';
@@ -2290,6 +2291,7 @@ export function DictationSection(): React.ReactElement {
   const installed = Boolean(tx.data?.voxtype.installed);
   const models = (tx.data?.voxtype.models ?? []).filter((m) => m.installed);
   const model = tx.data?.model ?? models[0]?.id ?? '';
+  const autoSend = useDictationAutoSend();
 
   return (
     <section className="flex flex-col gap-4">
@@ -2332,6 +2334,31 @@ export function DictationSection(): React.ReactElement {
         {backend === 'voxtype' && installed && models.length === 0 ? (
           <p className="px-3.5 py-3 text-micro text-text-3">No Voxtype model is installed on the host.</p>
         ) : null}
+      </div>
+
+      <div className="ac-card">
+        <label className="flex items-center gap-3 px-3.5 py-3">
+          <span className="min-w-0 flex-1">
+            <span className="block text-meta text-text-1">Send automatically when dictation ends</span>
+            <span className="block text-micro text-text-3">
+              When on, finishing a dictation sends the whole draft once the transcript lands — as if you pressed send. Releasing the hold, pressing a
+              toggle session off and the mic button all do it. Stored in this browser, not on the daemon.
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={autoSend}
+            aria-label="Send automatically when dictation ends"
+            onClick={() => writeDictationAutoSend(!autoSend)}
+            className={cx(
+              'flex h-5 w-9 flex-none items-center rounded-pill border px-0.5 transition-colors duration-(--dur-fast) ease-ac',
+              autoSend ? 'justify-end border-accent bg-accent' : 'justify-start border-line-2 bg-bg-3',
+            )}
+          >
+            <span className={cx('size-3.5 rounded-pill', autoSend ? 'bg-accent-on' : 'bg-text-nav')} />
+          </button>
+        </label>
       </div>
     </section>
   );

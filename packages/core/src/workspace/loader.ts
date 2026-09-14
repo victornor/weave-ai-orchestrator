@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, chmodSync, lstatSync, readlinkSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, chmodSync, lstatSync, readlinkSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import YAML from 'yaml';
@@ -429,9 +429,12 @@ export const loader: WorkspaceLoader = new Loader();
  * refresh, so two live copies race and whichever refreshes first invalidates the other; the outage
  * of 2026-09-07 was exactly that. Session history and project state stay per workspace.
  *
- * OpenCode also shares the host config (`opencode.json` / `opencode.jsonc`): that is where custom
- * providers and their keys live, so a model the owner's CLI can run is a model a turn can run.
- * Isolated daemons (VS-143) still never resolve to the real host path.
+ * OpenCode's config (`opencode.json` / `opencode.jsonc`) is *generated* per workspace rather than
+ * linked (VS-443): it carries the owner's `provider` definitions, so a model the owner's CLI can run
+ * is a model a turn can run, but not the owner's `mcp` servers or `plugin` entries — a worker must
+ * not load another workspace's tools into its prompt. It is regenerated on every launch, so a
+ * provider edited in the owner's config reaches the next turn. Isolated daemons (VS-143) still never
+ * resolve to the real host path.
  */
 
 /**
@@ -447,16 +450,167 @@ function credentialPaths(runtimeId: string, home: string, host: { isolated: bool
     claude: [[join(h, '.claude', '.credentials.json'), join(home, '.credentials.json')]],
     codex: [[join(h, '.codex', 'auth.json'), join(home, 'auth.json')]],
     gemini: [[join(h, '.gemini', 'oauth_creds.json'), join(home, 'oauth_creds.json')], [join(h, '.gemini', 'google_accounts.json'), join(home, 'google_accounts.json')]],
-      opencode: [
-        [join(h, '.local', 'share', 'opencode', 'auth.json'), join(home, 'opencode', 'auth.json')],
-        [join(h, '.config', 'opencode', 'opencode.json'), join(home, 'opencode', 'opencode.json')],
-        [join(h, '.config', 'opencode', 'opencode.jsonc'), join(home, 'opencode', 'opencode.jsonc')],
-      ],
+    // VS-443: opencode's config files are generated, not linked — see `generateOpencodeWorkerConfig`.
+    opencode: [[join(h, '.local', 'share', 'opencode', 'auth.json'), join(home, 'opencode', 'auth.json')]],
       cursor: [[join(h, '.config', 'cursor', 'auth.json'), join(home, 'auth.json')]],
   };
   const pairs = candidates[runtimeId] ?? [];
   if (!host.isolated) return pairs;
   return pairs.map(([, dst]) => [join(host.daemonConfigDir, 'credentials', runtimeId, basename(dst)), dst]);
+}
+
+/** VS-443: the keys a worker needs from the owner's opencode config; everything else is personal. */
+const OPENCODE_WORKER_CONFIG_KEYS = ['$schema', 'autoupdate', 'provider'] as const;
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** Strip `//` and block comments from JSONC, string-aware so a `//` inside a URL is left alone. */
+function stripJsonComments(text: string): string {
+  let out = '';
+  let inString = false;
+  let inLine = false;
+  let inBlock = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i]!;
+    if (inLine) { if (c === '\n') { inLine = false; out += c; } continue; }
+    if (inBlock) { if (c === '*' && text[i + 1] === '/') { inBlock = false; i += 1; } continue; }
+    if (inString) {
+      out += c;
+      if (c === '\\') { const esc = text[i + 1]; if (esc !== undefined) { out += esc; i += 1; } continue; }
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; out += c; continue; }
+    if (c === '/' && text[i + 1] === '/') { inLine = true; i += 1; continue; }
+    if (c === '/' && text[i + 1] === '*') { inBlock = true; i += 1; continue; }
+    out += c;
+  }
+  return out;
+}
+
+/** Drop a comma immediately before a closing brace/bracket, string-aware (JSONC trailing commas). */
+function stripTrailingCommas(text: string): string {
+  let out = '';
+  let inString = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i]!;
+    if (inString) {
+      out += c;
+      if (c === '\\') { const esc = text[i + 1]; if (esc !== undefined) { out += esc; i += 1; } continue; }
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; out += c; continue; }
+    if (c === ',') {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j]!)) j += 1;
+      if (text[j] === '}' || text[j] === ']') continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
+/** Parse an opencode config file, tolerating JSONC. Throws when it cannot be read or parsed. */
+function parseOpencodeConfig(path: string): Record<string, unknown> {
+  const parsed = JSON.parse(stripTrailingCommas(stripJsonComments(readFileSync(path, 'utf8')))) as unknown;
+  if (!isRecord(parsed)) throw new Error('opencode config is not a JSON object');
+  return parsed;
+}
+
+/** Where the owner's opencode config lives: the host's, or an isolated daemon's own credential dir. */
+function opencodeHostConfigDir(host: { isolated: boolean; daemonConfigDir: string }): string {
+  const h = process.env.HOME ?? '';
+  return host.isolated ? join(host.daemonConfigDir, 'credentials', 'opencode') : join(h, '.config', 'opencode');
+}
+
+/** A symlink test that does not throw on a missing path. */
+function isSymlink(path: string): boolean {
+  try { return lstatSync(path).isSymbolicLink(); } catch { return false; }
+}
+
+/**
+ * VS-443: write the per-workspace opencode config a worker may load.
+ *
+ * Carries only `$schema`, `autoupdate` and `provider` from the owner's own `opencode.json` /
+ * `opencode.jsonc`. A worker must never inherit the owner's `mcp` servers (another workspace's tools
+ * would load into every request) or `plugin` entries, so neither is copied. `auth.json` stays the
+ * shared credential.
+ *
+ * The generated file is 0600: it copies the owner's inline provider keys, which the owner's own
+ * 0600 file keeps private, so a default 0644 would leak them. It is written atomically via a 0600
+ * temp file and a rename, so a worker starting mid-regeneration never sees a missing or partial
+ * config (which would drop the owner's custom providers). A read or write failure leaves the
+ * previous generated file in place and deletes nothing.
+ *
+ * Returns true only when a config was generated.
+ */
+export function generateOpencodeWorkerConfig(hostConfigDir: string, workspaceConfigHome: string): boolean {
+  const dir = join(workspaceConfigHome, 'opencode');
+  const dst = join(dir, 'opencode.json');
+  const dstc = join(dir, 'opencode.jsonc');
+
+  const merged: Record<string, unknown> = {};
+  let sawSource = false;
+  for (const name of ['opencode.jsonc', 'opencode.json']) {
+    const path = join(hostConfigDir, name);
+    if (!existsSync(path)) continue;
+    let parsed: Record<string, unknown>;
+    try { parsed = parseOpencodeConfig(path); }
+    catch (e) {
+      // Keep last time's generated file rather than delete it and drop the owner's providers.
+      getLogger('runtime').warn({ runtime: 'opencode', source: name, err: String(e) }, 'opencode config unreadable; keeping the previous worker config');
+      return false;
+    }
+    sawSource = true;
+    for (const key of OPENCODE_WORKER_CONFIG_KEYS) {
+      const value = parsed[key];
+      if (value === undefined) continue;
+      merged[key] = key === 'provider' && isRecord(value) && isRecord(merged[key])
+        ? { ...(merged[key] as Record<string, unknown>), ...value }
+        : value;
+    }
+  }
+
+  if (!sawSource || Object.keys(merged).length === 0) {
+    // The owner has no config, or nothing a worker needs: drop our own stale output and the old
+    // host symlink, and write nothing.
+    try {
+      rmSync(dst, { force: true });
+      if (isSymlink(dstc)) rmSync(dstc, { force: true });
+    } catch (e) {
+      getLogger('runtime').warn({ runtime: 'opencode', err: String(e) }, 'could not clear the stale opencode worker config');
+    }
+    return false;
+  }
+
+  let tmp: string | null = null;
+  try {
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      chmodSync(dir, 0o700);
+    }
+    // An upgraded workspace holds the *host's* file here as a symlink. Unlink it first so nothing
+    // ever writes through it into the owner's own config; a regular generated file needs no unlink —
+    // the rename below replaces it atomically.
+    if (isSymlink(dst)) rmSync(dst, { force: true });
+    tmp = join(dir, `.opencode.json.${process.pid}.${Date.now()}.tmp`);
+    writeFileSync(tmp, `${JSON.stringify(merged, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
+    chmodSync(tmp, 0o600);
+    renameSync(tmp, dst);
+    tmp = null;
+    chmodSync(dst, 0o600);
+    try { chmodSync(dir, 0o700); } catch { /* the file itself is 0600; the dir mode is best-effort */ }
+    // opencode would merge a personal `opencode.jsonc`; only a previous version ever put one here.
+    if (isSymlink(dstc)) rmSync(dstc, { force: true });
+    return true;
+  } catch (e) {
+    if (tmp) { try { rmSync(tmp, { force: true }); } catch { /* nothing to clean */ } }
+    getLogger('runtime').warn({ runtime: 'opencode', err: String(e) }, 'could not write the opencode worker config; keeping the previous one');
+    return false;
+  }
 }
 
 /**
@@ -533,6 +687,14 @@ export function linkRuntimeCredentials(
   const host = { isolated: opts.isolated ?? false, daemonConfigDir: opts.daemonConfigDir ?? '' };
   for (const [src, dst] of credentialPaths(runtimeId, home, host)) {
     try { reconcileOne(src, dst, opts.readCredential); } catch { /* best effort */ }
+  }
+  // VS-443: opencode's config is generated, not linked, so a worker keeps the owner's providers but
+  // never their `mcp` servers or plugins. Regenerated here on load and on every turn.
+  if (runtimeId === 'opencode') {
+    try { generateOpencodeWorkerConfig(opencodeHostConfigDir(host), home); }
+    catch (e) {
+      getLogger('runtime').warn({ runtime: 'opencode', err: String(e) }, 'opencode worker config generation failed');
+    }
   }
 }
 

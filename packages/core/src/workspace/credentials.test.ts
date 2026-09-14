@@ -6,7 +6,7 @@
  * write, which is deliberately unverified: the design has to be correct under either style, so both
  * are pinned here instead of one being assumed.
  */
-import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -316,30 +316,159 @@ describe('an isolated daemon (VS-143)', () => {
   });
 });
 
-describe('opencode shares the host config, not only auth.json', () => {
-  // Custom providers and their keys live in opencode.json / opencode.jsonc. Sharing only
-  // auth.json made OAuth providers work and every custom provider fail at spawn.
+describe('opencode generates its own config instead of sharing the host config (VS-443)', () => {
+  // Custom providers live in opencode.json / opencode.jsonc and must reach a turn; the owner's
+  // `mcp` servers (another workspace's tools) and plugins must not.
   const ocAuthHost = (): string => join(home, '.local', 'share', 'opencode', 'auth.json');
   const ocJsonHost = (): string => join(home, '.config', 'opencode', 'opencode.json');
   const ocJsoncHost = (): string => join(home, '.config', 'opencode', 'opencode.jsonc');
   const ocHome = (): string => join(wsHome, 'opencode');
+  const ocConfig = (): string => join(ocHome(), 'opencode.json');
   const linkOc = (): void => linkRuntimeCredentials('opencode', wsHome);
+  const readConfig = (): Record<string, unknown> => JSON.parse(readFileSync(ocConfig(), 'utf8')) as Record<string, unknown>;
 
-  it('links auth.json and the host config files that define custom providers', () => {
+  it('generates a config with the host providers, without the host mcp servers or plugins', () => {
     mkdirSync(dirname(ocAuthHost()), { recursive: true });
     mkdirSync(dirname(ocJsonHost()), { recursive: true });
     writeFileSync(ocAuthHost(), '{"zai-coding-plan":{}}');
-    writeFileSync(ocJsonHost(), '{"provider":{"codeify":{"options":{"apiKey":"k"}}}}');
-    writeFileSync(ocJsoncHost(), '{"provider":{"other":{}}}');
+    writeFileSync(ocJsonHost(), JSON.stringify({
+      $schema: 'https://opencode.ai/config.json',
+      autoupdate: true,
+      provider: { codeify: { options: { apiKey: 'k' } } },
+      mcp: { vautoig: { type: 'remote', url: 'http://192.168.1.221:3333', enabled: true } },
+      plugin: ['some-plugin'],
+    }));
 
     linkOc();
 
     expect(isLink(join(ocHome(), 'auth.json'))).toBe(true);
     expect(readlinkSync(join(ocHome(), 'auth.json'))).toBe(ocAuthHost());
-    expect(isLink(join(ocHome(), 'opencode.json'))).toBe(true);
-    expect(readlinkSync(join(ocHome(), 'opencode.json'))).toBe(ocJsonHost());
-    expect(isLink(join(ocHome(), 'opencode.jsonc'))).toBe(true);
-    expect(readFileSync(join(ocHome(), 'opencode.json'), 'utf8')).toContain('codeify');
+    // The config is a real workspace file now, not a link back at the owner's.
+    expect(isLink(ocConfig())).toBe(false);
+    const config = readConfig();
+    expect(config.provider).toEqual({ codeify: { options: { apiKey: 'k' } } });
+    expect(config.$schema).toBe('https://opencode.ai/config.json');
+    expect(config.autoupdate).toBe(true);
+    expect(config.mcp).toBeUndefined();
+    expect(config.plugin).toBeUndefined();
+  });
+
+  it('never carries the host mcp servers into the worker config', () => {
+    mkdirSync(dirname(ocJsonHost()), { recursive: true });
+    writeFileSync(ocJsonHost(), JSON.stringify({
+      provider: { codeify: {} },
+      mcp: { vautoig: { type: 'remote', url: 'http://192.168.1.221:3333', enabled: true } },
+    }));
+
+    linkOc();
+
+    const text = readFileSync(ocConfig(), 'utf8');
+    expect('mcp' in readConfig()).toBe(false);
+    expect(text).not.toContain('vautoig');
+    expect(text).not.toContain('192.168.1.221');
+  });
+
+  it('reflects a provider change on the next link', () => {
+    mkdirSync(dirname(ocJsonHost()), { recursive: true });
+    writeFileSync(ocJsonHost(), JSON.stringify({ provider: { codeify: {} } }));
+    linkOc();
+    expect(Object.keys(readConfig().provider as object)).toEqual(['codeify']);
+
+    writeFileSync(ocJsonHost(), JSON.stringify({ provider: { codeify: {}, cheaper: {} } }));
+    linkOc();
+    expect(Object.keys(readConfig().provider as object)).toEqual(['codeify', 'cheaper']);
+  });
+
+  it('reads providers from a JSONC host config', () => {
+    mkdirSync(dirname(ocJsoncHost()), { recursive: true });
+    writeFileSync(ocJsoncHost(), `{
+      // the owner's config may be JSONC
+      "provider": { "cheaper-inference": { "options": { "baseURL": "https://example.test/v1" } } },
+    }`);
+
+    linkOc();
+
+    expect(readConfig().provider).toEqual({ 'cheaper-inference': { options: { baseURL: 'https://example.test/v1' } } });
+  });
+
+  it('replaces the old host-config symlink without writing through it', () => {
+    mkdirSync(dirname(ocJsonHost()), { recursive: true });
+    const hostBody = JSON.stringify({ provider: { codeify: {} }, mcp: { vautoig: {} } });
+    writeFileSync(ocJsonHost(), hostBody);
+    chmodSync(ocJsonHost(), 0o640);
+    // A workspace upgraded from VS-161 holds the owner's file here as a symlink.
+    mkdirSync(ocHome(), { recursive: true });
+    symlinkSync(ocJsonHost(), ocConfig());
+    expect(isLink(ocConfig())).toBe(true);
+
+    linkOc();
+
+    expect(isLink(ocConfig())).toBe(false);
+    // The owner's own file is never written through, and keeps its own mode.
+    expect(readFileSync(ocJsonHost(), 'utf8')).toBe(hostBody);
+    expect(statSync(ocJsonHost()).mode & 0o777).toBe(0o640);
+  });
+
+  it('creates the generated config owner-only (0600), never world-readable', () => {
+    mkdirSync(dirname(ocJsonHost()), { recursive: true });
+    writeFileSync(ocJsonHost(), JSON.stringify({ provider: { codeify: { options: { apiKey: 'secret' } } } }));
+    linkOc();
+    expect(statSync(ocConfig()).mode & 0o777).toBe(0o600);
+    expect(statSync(dirname(ocConfig())).mode & 0o777).toBe(0o700);
+  });
+
+  it('re-enforces 0600 when regenerating over a world-readable file', () => {
+    mkdirSync(dirname(ocJsonHost()), { recursive: true });
+    writeFileSync(ocJsonHost(), JSON.stringify({ provider: { codeify: {} } }));
+    linkOc();
+    chmodSync(ocConfig(), 0o644);
+    expect(statSync(ocConfig()).mode & 0o777).toBe(0o644);
+
+    linkOc();
+
+    expect(statSync(ocConfig()).mode & 0o777).toBe(0o600);
+  });
+
+  it('keeps the previous generated config when regeneration cannot write', () => {
+    mkdirSync(dirname(ocJsonHost()), { recursive: true });
+    writeFileSync(ocJsonHost(), JSON.stringify({ provider: { codeify: {} } }));
+    linkOc();
+    const before = readFileSync(ocConfig(), 'utf8');
+    const dir = dirname(ocConfig());
+    chmodSync(dir, 0o500); // no write permission on the directory: the atomic temp write fails
+    try {
+      linkOc();
+      expect(readFileSync(ocConfig(), 'utf8')).toBe(before);
+      expect(statSync(ocConfig()).mode & 0o777).toBe(0o600);
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+  });
+
+  it('keeps the previous generated config when the owner config cannot be read', () => {
+    mkdirSync(dirname(ocJsonHost()), { recursive: true });
+    writeFileSync(ocJsonHost(), JSON.stringify({ provider: { codeify: {} } }));
+    linkOc();
+    const before = readFileSync(ocConfig(), 'utf8');
+
+    writeFileSync(ocJsonHost(), '{ not json'); // malformed: a read/parse failure, not "no config"
+    linkOc();
+
+    expect(readFileSync(ocConfig(), 'utf8')).toBe(before);
+    expect(readConfig().provider).toEqual({ codeify: {} });
+  });
+
+  it('removes a stale opencode.jsonc symlink so opencode cannot merge personal mcp', () => {
+    mkdirSync(dirname(ocJsoncHost()), { recursive: true });
+    writeFileSync(ocJsoncHost(), '{"mcp":{"vautoig":{}}}');
+    mkdirSync(dirname(ocJsonHost()), { recursive: true });
+    writeFileSync(ocJsonHost(), JSON.stringify({ provider: { codeify: {} } }));
+    mkdirSync(ocHome(), { recursive: true });
+    symlinkSync(ocJsoncHost(), join(ocHome(), 'opencode.jsonc'));
+
+    linkOc();
+
+    expect(() => lstatSync(join(ocHome(), 'opencode.jsonc'))).toThrow();
   });
 
   it('does not invent a config file the host does not have', () => {
@@ -347,7 +476,7 @@ describe('opencode shares the host config, not only auth.json', () => {
     writeFileSync(ocAuthHost(), '{}');
     linkOc();
     expect(isLink(join(ocHome(), 'auth.json'))).toBe(true);
-    expect(() => lstatSync(join(ocHome(), 'opencode.json'))).toThrow();
+    expect(() => lstatSync(ocConfig())).toThrow();
     expect(() => lstatSync(join(ocHome(), 'opencode.jsonc'))).toThrow();
   });
 
@@ -356,7 +485,7 @@ describe('opencode shares the host config, not only auth.json', () => {
     mkdirSync(dirname(ocJsonHost()), { recursive: true });
     writeFileSync(ocJsonHost(), '{"provider":{"codeify":{}}}');
     linkRuntimeCredentials('opencode', wsHome, { isolated: true, daemonConfigDir: configDir });
-    expect(() => lstatSync(join(ocHome(), 'opencode.json'))).toThrow();
+    expect(() => lstatSync(ocConfig())).toThrow();
     expect(readFileSync(ocJsonHost(), 'utf8')).toContain('codeify');
     rmSync(configDir, { recursive: true, force: true });
   });

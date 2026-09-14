@@ -51,28 +51,46 @@ function currentViewportHeight(): number {
   return typeof window === 'undefined' ? 900 : window.innerHeight;
 }
 
-function clampPaneHeight(px: number, viewportHeight: number): number {
-  return Math.min(Math.max(Math.round(px), TRACE_PANE_HEIGHT_MIN), tracePaneHeightMax(viewportHeight));
+export interface ResizeGripProps {
+  /** The height the grip currently represents; a drag is measured from it. */
+  height: number;
+  /** Bounds the height; the grip clamps every new value into this range. */
+  min: number;
+  max: number;
+  /** The height one arrow-key press moves. */
+  step: number;
+  /** Names the region for assistive tech. */
+  label: string;
+  onHeight: (px: number) => void;
+  /** Called once a change is settled — pointer released, key pressed, double-clicked — for persistence. */
+  onCommit?: () => void;
+  onReset: () => void;
 }
 
 /**
- * A pane's corner grip. Dragging it, or focusing it and pressing the up/down arrows, changes the
- * pane's height; a double-click returns it to its opening height. Live has its own grid-level grip
- * (VS-372) and never renders this one.
+ * A pane's or tile's corner grip. Dragging it, or focusing it and pressing the up/down arrows,
+ * changes the height; a double-click calls `onReset`. Range and step come from the caller, so a
+ * trace pane (VS-409) and Live's shared tile height (VS-429) share one component. Callbacks and
+ * bounds are read through a ref so a parent re-rendering with fresh callbacks (Live does this on
+ * every drag move) does not re-subscribe the window listeners.
  */
-function PaneResizeGrip({ height, onHeight, onReset }: { height: number; onHeight: (px: number) => void; onReset: () => void }): React.ReactElement {
+export function ResizeGrip({ height, min, max, step, label, onHeight, onCommit, onReset }: ResizeGripProps): React.ReactElement {
   const start = useRef<{ y: number; height: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const live = useRef({ onHeight, onCommit, onReset, height, min, max, step });
+  live.current = { onHeight, onCommit, onReset, height, min, max, step };
   useEffect(() => {
     if (!dragging) return;
     const move = (e: PointerEvent): void => {
       const from = start.current;
       if (!from) return;
-      onHeight(clampPaneHeight(from.height + (e.clientY - from.y), currentViewportHeight()));
+      const cur = live.current;
+      cur.onHeight(Math.min(Math.max(Math.round(from.height + (e.clientY - from.y)), cur.min), cur.max));
     };
     const end = (): void => {
       setDragging(false);
       start.current = null;
+      live.current.onCommit?.();
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', end);
@@ -82,32 +100,33 @@ function PaneResizeGrip({ height, onHeight, onReset }: { height: number; onHeigh
       window.removeEventListener('pointerup', end);
       window.removeEventListener('pointercancel', end);
     };
-  }, [dragging, onHeight]);
-  const step = (delta: number): void => onHeight(clampPaneHeight(height + delta, currentViewportHeight()));
+  }, [dragging]);
   return (
     <div
       role="separator"
       aria-orientation="horizontal"
-      aria-label="Resize trace pane"
+      aria-label={label}
       aria-valuenow={height}
-      aria-valuemin={TRACE_PANE_HEIGHT_MIN}
-      aria-valuemax={tracePaneHeightMax(currentViewportHeight())}
+      aria-valuemin={min}
+      aria-valuemax={max}
       tabIndex={0}
       title="Drag to resize · double-click to reset"
       data-v2-pane-grip
       onPointerDown={(e) => {
         e.preventDefault();
         e.currentTarget.setPointerCapture?.(e.pointerId);
-        start.current = { y: e.clientY, height };
+        start.current = { y: e.clientY, height: live.current.height };
         setDragging(true);
       }}
       onKeyDown={(e) => {
-        const delta = e.key === 'ArrowDown' ? TRACE_PANE_HEIGHT_STEP : e.key === 'ArrowUp' ? -TRACE_PANE_HEIGHT_STEP : null;
+        const cur = live.current;
+        const delta = e.key === 'ArrowDown' ? cur.step : e.key === 'ArrowUp' ? -cur.step : null;
         if (delta === null) return;
         e.preventDefault();
-        step(delta);
+        cur.onHeight(Math.min(Math.max(Math.round(cur.height + delta), cur.min), cur.max));
+        cur.onCommit?.();
       }}
-      onDoubleClick={onReset}
+      onDoubleClick={() => live.current.onReset()}
       className="absolute bottom-0 right-0 z-10 flex size-5 cursor-ns-resize touch-none select-none items-end justify-end text-text-4 hover:text-text-2"
     >
       <svg viewBox="0 0 16 16" className="size-3.5" aria-hidden fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -225,7 +244,15 @@ export function WorkerFeed({ agentId, runId, ws, compact = false, bodyHeight, re
           />
         )}
         {resizable ? (
-          <PaneResizeGrip height={fixedHeight ?? TRACE_PANE_MAX_HEIGHT} onHeight={setPaneHeight} onReset={() => setPaneHeight(TRACE_PANE_HEIGHT_DEFAULT)} />
+          <ResizeGrip
+            height={fixedHeight ?? TRACE_PANE_MAX_HEIGHT}
+            min={TRACE_PANE_HEIGHT_MIN}
+            max={tracePaneHeightMax(currentViewportHeight())}
+            step={TRACE_PANE_HEIGHT_STEP}
+            label="Resize trace pane"
+            onHeight={setPaneHeight}
+            onReset={() => setPaneHeight(TRACE_PANE_HEIGHT_DEFAULT)}
+          />
         ) : null}
       </div>
       {dropped ? (

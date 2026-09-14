@@ -1,5 +1,5 @@
 /** VS-350: the V2 Live floor — grid, scope chips, one-source counts and the per-row control. */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Agent, Project, Run, Ticket } from '@weave-ai/shared';
 import { agent, project, run as makeRun, ticket as makeTicket } from './factories';
@@ -231,36 +231,47 @@ describe('V2 Live working-first order (VS-415)', () => {
   });
 });
 
-describe('V2 Live tile height (VS-372)', () => {
-  const grip = (): HTMLElement => screen.getByRole('separator', { name: 'Resize live tiles' });
+describe('V2 Live tile height (VS-372, VS-429)', () => {
+  const grips = (): HTMLElement[] => screen.getAllByRole('separator', { name: 'Resize all live tiles' });
+  const gripFor = (id: string): HTMLElement =>
+    within(document.querySelector(`[data-v2-live-card="${id}"]`) as HTMLElement).getByRole('separator', { name: 'Resize all live tiles' });
   const bodyHeights = (): number[] =>
     [...document.querySelectorAll<HTMLElement>('[data-worker-feed] > div')].map((el) => parseInt(el.style.height, 10));
-  const drag = (by: number): void => {
-    fireEvent.pointerDown(grip(), { pointerId: 1, clientY: 100 });
+  const drag = (el: HTMLElement, by: number): void => {
+    fireEvent.pointerDown(el, { pointerId: 1, clientY: 100 });
     fireEvent.pointerMove(window, { pointerId: 1, clientY: 100 + by });
     fireEvent.pointerUp(window, { pointerId: 1 });
   };
 
-  it('drags one shared height onto every tile and remembers it', () => {
+  it('puts a corner grip inside every tile, not a bar above the grid', () => {
+    render(<LiveBody />);
+    expect(grips()).toHaveLength(3);
+    for (const g of grips()) expect(g.closest('[data-v2-live-card]')).toBeTruthy();
+    // The toolbar is now the scroll container's previous sibling: the 8px separator is gone.
+    const scroll = document.querySelector('[data-v2-live-scroll]') as HTMLElement;
+    expect(scroll.previousElementSibling?.querySelector('[data-v2-live-cols]')).toBeTruthy();
+  });
+
+  it('drags one tile grip to resize every tile together and remembers it', () => {
     render(<LiveBody />);
     expect(bodyHeights()).toEqual([300, 300, 300]);
-    drag(80);
+    drag(gripFor('a1'), 80);
     expect(bodyHeights()).toEqual([380, 380, 380]);
     expect(localStorage.getItem('weave.v2.live.height')).toBe('380');
   });
 
   it('clamps the drag to the minimum and to most of the viewport', () => {
     render(<LiveBody />);
-    drag(-5000);
+    drag(gripFor('a1'), -5000);
     expect(bodyHeights()).toEqual([LIVE_HEIGHT_MIN, LIVE_HEIGHT_MIN, LIVE_HEIGHT_MIN]);
-    drag(9000);
+    drag(gripFor('a2'), 9000);
     const cap = Math.round(window.innerHeight * 0.85);
     expect(bodyHeights()).toEqual([cap, cap, cap]);
   });
 
   it('remembers the tile height across a remount', () => {
     const first = render(<LiveBody />);
-    drag(80);
+    drag(gripFor('a1'), 80);
     first.unmount();
     render(<LiveBody />);
     expect(bodyHeights()).toEqual([380, 380, 380]);
@@ -268,34 +279,34 @@ describe('V2 Live tile height (VS-372)', () => {
 
   it('keeps the chosen height when the per-row count changes', () => {
     render(<LiveBody />);
-    drag(80);
+    drag(gripFor('a1'), 80);
     fireEvent.click(screen.getByRole('button', { name: 'More per row' }));
     expect(grid().getAttribute('data-cols')).toBe('3');
     expect(bodyHeights()).toEqual([380, 380, 380]);
   });
 
-  it('double-click returns to the per-row default', () => {
+  it('double-click on any tile grip returns to the per-row default', () => {
     render(<LiveBody />);
-    drag(80);
-    fireEvent.doubleClick(grip());
+    drag(gripFor('a1'), 80);
+    fireEvent.doubleClick(gripFor('a2'));
     expect(bodyHeights()).toEqual([300, 300, 300]);
     expect(localStorage.getItem('weave.v2.live.height')).toBeNull();
   });
 
-  it('steps the height with the arrow keys', () => {
+  it('steps the shared height with the arrow keys', () => {
     render(<LiveBody />);
-    fireEvent.keyDown(grip(), { key: 'ArrowDown' });
+    fireEvent.keyDown(gripFor('a1'), { key: 'ArrowDown' });
     expect(bodyHeights()).toEqual([324, 324, 324]);
-    fireEvent.keyDown(grip(), { key: 'ArrowUp' });
-    fireEvent.keyDown(grip(), { key: 'ArrowUp' });
+    fireEvent.keyDown(gripFor('a2'), { key: 'ArrowUp' });
+    fireEvent.keyDown(gripFor('a3'), { key: 'ArrowUp' });
     expect(bodyHeights()).toEqual([276, 276, 276]);
     expect(localStorage.getItem('weave.v2.live.height')).toBe('276');
   });
 
-  it('has no resize grip on the phone', () => {
+  it('has no tile grip on the phone', () => {
     setMedia(true);
     render(<LiveBody />);
-    expect(screen.queryByRole('separator', { name: 'Resize live tiles' })).toBeNull();
+    expect(screen.queryByRole('separator', { name: 'Resize all live tiles' })).toBeNull();
   });
 });
 

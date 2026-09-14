@@ -2,7 +2,9 @@ import type * as E from './enums.js';
 import type { TestTally } from './test-summary.js';
 
 export interface Workspace { id: string; slug: string; name: string; ticketPrefix: string; status: E.WorkspaceStatus; rootPath: string; createdAt: string; updatedAt: string }
-export interface Project { id: string; workspaceId: string; slug: string; name: string; gitUrl: string; defaultBranch: string; landingBranch: string | null; clonePath: string; maxWorkers: number; setupCommand: string | null; worktreeProvider: E.WorktreeProviderId; openspecEnabled: boolean; openspecVersion: string | null; knowledgeRepoEnabled: boolean; policies: Record<string, unknown>; status: E.ProjectStatus; syncState: E.ProjectSyncState; lastFetchedAt: string | null; errorText: string | null }
+/** VS-359: a project's in-flight knowledge-repo switch — one pull request whose merge (or close) resolves the opt-in. */
+export interface ProjectKnowledgeSwitch { direction: 'on' | 'off'; branch: string; prUrl: string; startedAt: string }
+export interface Project { id: string; workspaceId: string; slug: string; name: string; gitUrl: string; defaultBranch: string; landingBranch: string | null; clonePath: string; maxWorkers: number; setupCommand: string | null; worktreeProvider: E.WorktreeProviderId; openspecEnabled: boolean; openspecVersion: string | null; knowledgeRepoEnabled: boolean; /** VS-359: set while a switch is waiting on its pull request. */ knowledgeSwitch: ProjectKnowledgeSwitch | null; policies: Record<string, unknown>; status: E.ProjectStatus; syncState: E.ProjectSyncState; lastFetchedAt: string | null; errorText: string | null }
 /**
  * Where a ticket's work actually lands (VS-119): the ticket's own declaration first, else the
  * project's, else the project's default branch. The one place every merge-verification, worktree,

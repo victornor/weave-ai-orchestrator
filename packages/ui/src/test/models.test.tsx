@@ -47,6 +47,7 @@ vi.mock('../api/hooks', () => ({
   useAddProject: () => ({ mutate: vi.fn(), isPending: false }),
   usePatchProject: () => ({ mutate: vi.fn(), isPending: false }),
   useRemoveProject: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useRepoInfo: () => ({ mutateAsync: vi.fn(async () => null), isPending: false }),
   useMoveProject: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useWorkers: () => ({ data: [], isLoading: false }),
   useWorkspaceSummary: () => ({ data: undefined, isLoading: false }),

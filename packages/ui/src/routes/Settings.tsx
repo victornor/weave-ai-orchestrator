@@ -39,6 +39,7 @@ import {
   usePresentationSurfaces,
   useProjects,
   useRemoveProject,
+  useRepoInfo,
   usePutPresentation,
   useRefreshDaemonUpdate,
   useRequestUpgrade,
@@ -690,8 +691,10 @@ function ActiveProjectRow({
   destinations: T.WorkspaceListItem[];
 }): React.ReactElement {
   const patch = usePatchProject();
+  const repoInfo = useRepoInfo();
   const [sheet, setSheet] = useState<null | 'remove' | 'move'>(null);
   const [open, setOpen] = useState(false);
+  const [publicWarning, setPublicWarning] = useState(false);
   const blocked = liveCount > 0;
   const blockReason = blocked ? liveWorkersReason(p.slug, liveCount) : null;
 
@@ -752,6 +755,22 @@ function ActiveProjectRow({
 
   const setPolicy = (key: string, value: unknown): void => {
     patch.mutate({ id: p.id, patch: { policies: withPolicy(p.policies, key, value) } });
+  };
+
+  /**
+   * VS-359: enabling the knowledge-repo opt-in consults the forge first and, when the repository is
+   * reported public, shows a warning before confirming; any other case patches immediately. The
+   * warning is advisory — an unreachable forge never blocks the change.
+   */
+  const changeKnowledgeRepo = async (next: 'on' | 'off'): Promise<void> => {
+    if (next === 'on' && !p.knowledgeRepoEnabled) {
+      try {
+        const info = await repoInfo.mutateAsync({ id: p.id });
+        if (info?.private === false) { setPublicWarning(true); return; }
+      } catch { /* advisory only: proceed when the forge cannot answer */ }
+    }
+    setPublicWarning(false);
+    patch.mutate({ id: p.id, patch: { knowledgeRepo: { enabled: next === 'on' } } });
   };
 
   return (
@@ -911,18 +930,38 @@ function ActiveProjectRow({
             toValue={(raw) => raw === 'on'}
             onSelect={setPolicy}
           />
-          <label className="flex items-center justify-between gap-2">
-            <span className="ac-label">commit knowledge to repo</span>
-            <select
-              aria-label={`commit knowledge to repo for ${p.slug}`}
-              className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
-              value={p.knowledgeRepoEnabled ? 'on' : 'off'}
-              onChange={(e) => patch.mutate({ id: p.id, patch: { knowledgeRepo: { enabled: e.target.value === 'on' } } })}
-            >
-              <option value="off">off</option>
-              <option value="on">on</option>
-            </select>
-          </label>
+          {p.knowledgeSwitch ? (
+            <div className="flex flex-wrap items-center gap-2 sm:col-span-2" aria-label={`knowledge-repo switch for ${p.slug}`}>
+              <span className="text-micro text-stalled">Waiting for the pull request to merge.</span>
+              <a href={p.knowledgeSwitch.prUrl} target="_blank" rel="noreferrer" className="ac-mono ac-truncate max-w-full text-micro text-accent-link hover:underline">
+                {p.knowledgeSwitch.prUrl}
+              </a>
+              <span className="text-micro text-text-3">Close the pull request to cancel the change.</span>
+            </div>
+          ) : publicWarning ? (
+            <div className="flex flex-wrap items-center gap-2 sm:col-span-2" aria-label={`public repository warning for ${p.slug}`}>
+              <span className="text-micro text-stalled">
+                This repository is public — {p.slug}&apos;s knowledge would be committed where anyone can read it.
+              </span>
+              <Button size="sm" variant="ghost" onClick={() => { setPublicWarning(false); patch.mutate({ id: p.id, patch: { knowledgeRepo: { enabled: true } } }); }}>
+                Turn on anyway
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setPublicWarning(false)}>Cancel</Button>
+            </div>
+          ) : (
+            <label className="flex items-center justify-between gap-2">
+              <span className="ac-label">commit knowledge to repo</span>
+              <select
+                aria-label={`commit knowledge to repo for ${p.slug}`}
+                className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+                value={p.knowledgeRepoEnabled ? 'on' : 'off'}
+                onChange={(e) => void changeKnowledgeRepo(e.target.value === 'on' ? 'on' : 'off')}
+              >
+                <option value="off">off</option>
+                <option value="on">on</option>
+              </select>
+            </label>
+          )}
           <Field label="Merge concurrency" hint="How many of this project's tickets may be in the active merge step at once.">
             <div className="flex items-center gap-2">
               <input
@@ -980,6 +1019,8 @@ export function ProjectsSection(): React.ReactElement {
   const [setupCommand, setSetupCommand] = useState('');
   const [autoMergeDefault, setAutoMergeDefault] = useState(false);
   const [knowledgeRepoEnabled, setKnowledgeRepoEnabled] = useState(false);
+  const [createPublicWarning, setCreatePublicWarning] = useState(false);
+  const repoInfo = useRepoInfo();
   const config = useWorkspaceSummary().data?.config ?? {};
   const workspaceOn = workspaceYolo(config);
   const workspaceDefaults = workspacePolicyDefaults(config);
@@ -997,6 +1038,17 @@ export function ProjectsSection(): React.ReactElement {
         : maxWorkersIssues.byPath['']
       : undefined;
   const maxWorkers = Number(maxWorkersText);
+
+  /** VS-359: checking the box consults the forge for the URL and warns when the repository is public. */
+  const changeCreateKnowledgeRepo = async (checked: boolean): Promise<void> => {
+    setKnowledgeRepoEnabled(checked);
+    setCreatePublicWarning(false);
+    if (!checked || !url) return;
+    try {
+      const info = await repoInfo.mutateAsync({ url });
+      if (info?.private === false) setCreatePublicWarning(true);
+    } catch { /* advisory only: proceed when the forge cannot answer */ }
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -1031,10 +1083,15 @@ export function ProjectsSection(): React.ReactElement {
             type="checkbox"
             aria-label="Commit knowledge to repo"
             checked={knowledgeRepoEnabled}
-            onChange={(e) => setKnowledgeRepoEnabled(e.target.checked)}
+            onChange={(e) => void changeCreateKnowledgeRepo(e.target.checked)}
           />
           Commit this project&apos;s knowledge to its own repo, at <code className="ac-mono">.weave/knowledge/</code>.
         </label>
+        {createPublicWarning ? (
+          <div className="mt-1 text-micro text-stalled" role="status" aria-label="public repository warning">
+            This repository is public — its knowledge would be committed where anyone can read it.
+          </div>
+        ) : null}
         <Button
           variant="primary"
           disabled={!url || !maxWorkersValid || add.isPending}

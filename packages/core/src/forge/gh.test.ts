@@ -10,7 +10,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GhForge, checkTally, parsePullRequestUrl, pullRequestDetailFromGh, pullRequestFromGh } from './gh.js';
+import { GhForge, checkTally, parsePullRequestUrl, pullRequestDetailFromGh, pullRequestFromGh, repoVisibilityFromGh } from './gh.js';
 
 let home: string;
 
@@ -269,5 +269,36 @@ describe('prState', () => {
     fakeGh(JSON.stringify({ state: 'OPEN' }));
     const state = await new GhForge().prState(home, 'https://github.com/acme/api/pull/77');
     expect(state.headSha).toBeUndefined();
+  });
+});
+
+describe('repoInfo (VS-359)', () => {
+  it('maps gh visibility PUBLIC to not private, PRIVATE and INTERNAL to private', () => {
+    expect(repoVisibilityFromGh('{"visibility":"PUBLIC"}')).toEqual({ private: false });
+    expect(repoVisibilityFromGh('{"visibility":"PRIVATE"}')).toEqual({ private: true });
+    expect(repoVisibilityFromGh('{"visibility":"INTERNAL"}')).toEqual({ private: true });
+  });
+
+  it('answers null for an unparseable body or an unrecognised visibility', () => {
+    expect(repoVisibilityFromGh('not json')).toBeNull();
+    expect(repoVisibilityFromGh('{}')).toBeNull();
+    expect(repoVisibilityFromGh('{"visibility":"SOMETHING"}')).toBeNull();
+  });
+
+  it('asks gh for the visibility of the cwd repository', async () => {
+    fakeGh('{"visibility":"PUBLIC"}');
+    await expect(new GhForge().repoInfo(home)).resolves.toEqual({ private: false });
+    expect(argsList()).toEqual(['repo', 'view', '--json', 'visibility']);
+  });
+
+  it('names the remote when one is given, for a project that is not cloned yet', async () => {
+    fakeGh('{"visibility":"PRIVATE"}');
+    await expect(new GhForge().repoInfo(home, 'git@github.com:acme/api.git')).resolves.toEqual({ private: true });
+    expect(argsList()).toEqual(['repo', 'view', 'git@github.com:acme/api.git', '--json', 'visibility']);
+  });
+
+  it('answers null when gh fails, so an unreachable forge shows no warning', async () => {
+    fakeGh('', 1, 'gh: not logged in');
+    await expect(new GhForge().repoInfo(home)).resolves.toBeNull();
   });
 });

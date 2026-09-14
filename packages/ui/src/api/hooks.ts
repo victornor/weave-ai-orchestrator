@@ -544,6 +544,22 @@ export function useProjectFetch(id: string): UseMutationResult<{ head: string; f
   });
 }
 
+export interface RepoInfo { private: boolean }
+
+/**
+ * VS-359: ask the forge whether a repository is public before enabling the knowledge-repo opt-in.
+ * One identifier at a time — a project id for an existing row, or a git URL for the creation form.
+ * `null` means the forge could not say; the caller shows no warning and proceeds.
+ */
+export function useRepoInfo(): UseMutationResult<RepoInfo | null, Error, { id?: string; url?: string }> {
+  const ws = useWs();
+  return useMutation({
+    mutationFn: ({ id, url }) => url
+      ? api.ws<RepoInfo | null>(ws, `/projects/repo-info?url=${encodeURIComponent(url)}`)
+      : api.ws<RepoInfo | null>(ws, `/projects/${id}/repo-info`),
+  });
+}
+
 export function usePatchConfig(): UseMutationResult<unknown, Error, Record<string, unknown>> {
   const ws = useWs();
   const qc = useQueryClient();

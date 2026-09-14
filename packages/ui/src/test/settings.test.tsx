@@ -28,6 +28,9 @@ const state = vi.hoisted(() => ({
   disableAllowAllCalls: 0,
   toasts: [] as Array<{ title: string; detail?: string; status?: string }>,
   addCalls: [] as Array<Record<string, unknown>>,
+  repoInfo: null as { private: boolean } | null,
+  repoInfoError: null as unknown,
+  repoInfoCalls: [] as Array<{ id?: string; url?: string }>,
   transcription: { backend: 'chrome' as 'chrome' | 'voxtype', model: null as string | null, voxtype: { installed: false, models: [] as Array<{ id: string; engine: string; installed: boolean }> } },
   transcriptionPuts: [] as Array<{ backend: 'chrome' | 'voxtype'; model?: string }>,
 }));
@@ -61,6 +64,14 @@ vi.mock('../api/hooks', () => ({
     mutateAsync: async ({ id }: { id: string }) => {
       if (state.removeError) throw state.removeError;
       state.removeCalls.push(id);
+    },
+    isPending: false,
+  }),
+  useRepoInfo: () => ({
+    mutateAsync: async (args: { id?: string; url?: string }) => {
+      state.repoInfoCalls.push(args);
+      if (state.repoInfoError) throw state.repoInfoError;
+      return state.repoInfo;
     },
     isPending: false,
   }),
@@ -166,6 +177,9 @@ beforeEach(() => {
   state.disableAllowAllCalls = 0;
   state.toasts = [];
   state.addCalls = [];
+  state.repoInfo = null;
+  state.repoInfoError = null;
+  state.repoInfoCalls = [];
   state.transcription = { backend: 'chrome', model: null, voxtype: { installed: false, models: [] } };
   state.transcriptionPuts = [];
 });
@@ -339,14 +353,68 @@ describe('Settings — a project knowledge-repo toggle (VS-358)', () => {
     state.projects = [{ id: 'p1', slug: 'api', status: 'ready', gitUrl: 'g', maxWorkers: 2, defaultBranch: 'main', landingBranch: null, policies: {}, knowledgeRepoEnabled: false }];
   });
 
-  it('shows the toggle off by default and switches it on', () => {
+  it('shows the toggle off by default and switches it on', async () => {
     render(<WorkspaceSettingsRoute />);
     fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delivery and setup for api' }));
     const select = screen.getByLabelText('commit knowledge to repo for api');
     expect(select).toHaveValue('off');
     fireEvent.change(select, { target: { value: 'on' } });
+    await waitFor(() => expect(state.projectPatches).toContainEqual({ id: 'p1', patch: { knowledgeRepo: { enabled: true } } }));
+  });
+});
+
+describe('Settings — public-repo warning and pending switch (VS-359)', () => {
+  beforeEach(() => {
+    state.projects = [{ id: 'p1', slug: 'api', status: 'ready', gitUrl: 'g', maxWorkers: 2, defaultBranch: 'main', landingBranch: null, policies: {}, knowledgeRepoEnabled: false }];
+  });
+
+  function openRow(): void {
+    render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delivery and setup for api' }));
+  }
+
+  it('warns before enabling on a public repository and only patches after confirming', async () => {
+    state.repoInfo = { private: false };
+    openRow();
+    fireEvent.change(screen.getByLabelText('commit knowledge to repo for api'), { target: { value: 'on' } });
+
+    await screen.findByLabelText('public repository warning for api');
+    expect(state.repoInfoCalls).toContainEqual({ id: 'p1' });
+    expect(state.projectPatches).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Turn on anyway' }));
     expect(state.projectPatches).toContainEqual({ id: 'p1', patch: { knowledgeRepo: { enabled: true } } });
+  });
+
+  it('enables without a warning on a private repository', async () => {
+    state.repoInfo = { private: true };
+    openRow();
+    fireEvent.change(screen.getByLabelText('commit knowledge to repo for api'), { target: { value: 'on' } });
+
+    await waitFor(() => expect(state.projectPatches).toContainEqual({ id: 'p1', patch: { knowledgeRepo: { enabled: true } } }));
+    expect(screen.queryByLabelText('public repository warning for api')).toBeNull();
+  });
+
+  it('shows the pending switch with its pull request instead of the toggle', () => {
+    state.projects = [{ id: 'p1', slug: 'api', status: 'ready', gitUrl: 'g', maxWorkers: 2, defaultBranch: 'main', landingBranch: null, policies: {}, knowledgeRepoEnabled: false, knowledgeSwitch: { direction: 'on', branch: 'ac/knowledge-api-on', prUrl: 'https://example.com/pr/3', startedAt: '2026-09-14T00:00:00Z' } }];
+    openRow();
+    const status = screen.getByLabelText('knowledge-repo switch for api');
+    expect(status).toHaveTextContent('Waiting for the pull request to merge');
+    expect(screen.getByRole('link', { name: 'https://example.com/pr/3' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('commit knowledge to repo for api')).toBeNull();
+  });
+
+  it('warns on the add form when the checked repository is public', async () => {
+    state.repoInfo = { private: false };
+    render(<WorkspaceSettingsRoute />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Projects' }));
+    fireEvent.change(screen.getByPlaceholderText('git@github.com:acme/api.git'), { target: { value: 'git@github.com:acme/api.git' } });
+    fireEvent.click(screen.getByLabelText('Commit knowledge to repo'));
+
+    await screen.findByLabelText('public repository warning');
+    expect(state.repoInfoCalls).toContainEqual({ url: 'git@github.com:acme/api.git' });
   });
 });
 

@@ -67,6 +67,14 @@ export interface ForgeAdapter {
    * request and skipping forever.
    */
   pullRequestForBranch?(cwd: string, branch: string): Promise<{ url: string; number: number } | null>;
+  /**
+   * Optional (VS-359): whether a repository is public, or `null` when the forge cannot say. `cwd` is
+   * where the forge runs; the optional `remote` names the repository to inspect and defaults to
+   * `cwd`'s own origin — the URL form lets the project-creation form ask before a clone exists, so
+   * the switch can warn before a project's knowledge is committed somewhere public. A forge that
+   * cannot answer simply omits it, and the caller shows no warning rather than failing.
+   */
+  repoInfo?(cwd: string, remote?: string): Promise<{ private: boolean } | null>;
 }
 export interface Logger { debug(msg: string, data?: Record<string, unknown>): void; info(msg: string, data?: Record<string, unknown>): void; warn(msg: string, data?: Record<string, unknown>): void; error(msg: string, data?: Record<string, unknown>): void }
 /** A plugin's own namespaced, durable document store (VS-334). One value per key, JSON-shaped. */

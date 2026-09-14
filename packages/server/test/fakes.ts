@@ -281,6 +281,9 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       commit: (id: string, sha: string) => historyReader.commit(getProject(id), sha),
       checkSync: async () => ({ syncState: 'in_sync' as const, behindBy: null }),
       fetch: async () => ({ head: 'deadbeef', fastForwarded: false }),
+      repoInfo: async () => null,
+      repoInfoForUrl: async () => null,
+      applyKnowledgeRepoSwitch: async () => {},
     }),
     roles: impl('roles', {
       list: () => [],

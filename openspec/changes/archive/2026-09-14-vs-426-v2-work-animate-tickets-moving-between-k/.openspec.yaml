@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "V2 Work: tickets glide between kanban columns when their status changes
+  live, fade in and out as they appear or leave, and do neither on load or a filter
+  switch; reduced motion is instant"
+skip_specs: true

@@ -596,3 +596,90 @@ describe('V2 Work search', () => {
     expect(searchBox()).toHaveFocus();
   });
 });
+
+/** jsdom ships no `Element.animate`, so the motion tests install a spy one; put the original back. */
+function installElementAnimate(): { spy: ReturnType<typeof vi.fn>; restore: () => void } {
+  const proto = Element.prototype as unknown as { animate?: unknown };
+  const original = proto.animate;
+  const spy = vi.fn(() => ({ finished: Promise.resolve(), cancel: () => undefined }) as unknown as Animation);
+  proto.animate = spy;
+  return {
+    spy,
+    restore: () => {
+      if (original === undefined) delete proto.animate;
+      else proto.animate = original;
+    },
+  };
+}
+
+describe('V2 Work motion', () => {
+  it('moves a card to the new column when its status changes, and keeps it openable', () => {
+    const view = render(<V2WorkScreen />);
+    expect(within(column('in_progress')).getByText('Moving')).toBeInTheDocument();
+
+    act(() => {
+      state.active = state.active.map((t) => (t.id === 'tk_3' ? { ...t, status: 'in_review' as const } : t));
+    });
+    view.rerender(<V2WorkScreen />);
+
+    expect(within(column('in_review')).getByText('Moving')).toBeInTheDocument();
+    expect(within(column('in_progress')).queryByText('Moving')).toBeNull();
+    const card = document.querySelector('[data-v2-card="ACME-3"]') as HTMLElement;
+    fireEvent.click(card);
+    expect(state.go).toHaveBeenCalledWith(
+      '/v2/w/$ws/tickets/$ticketId',
+      expect.objectContaining({ params: { ws: 'ws1', ticketId: 'ACME-3' } }),
+    );
+  });
+
+  it('animates a live status move but not a filter switch', () => {
+    const { spy, restore } = installElementAnimate();
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const el = this as HTMLElement;
+      const key = el.closest?.('[data-v2-column]')?.getAttribute('data-v2-column') ?? '';
+      const left = ['todo', 'proposed', 'in_progress', 'in_review', 'blocked', 'done'].indexOf(key) * 236;
+      return { left, top: 0, width: 236, height: 80, right: left + 236, bottom: 80, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+    });
+    const view = render(<V2WorkScreen />);
+    spy.mockClear();
+
+    act(() => {
+      state.active = state.active.map((t) => (t.id === 'tk_3' ? { ...t, status: 'in_review' as const } : t));
+    });
+    view.rerender(<V2WorkScreen />);
+    expect(spy).toHaveBeenCalled();
+
+    spy.mockClear();
+    fireEvent.change(screen.getByLabelText('Filter by project'), { target: { value: 'p1' } });
+    expect(spy).not.toHaveBeenCalled();
+
+    rect.mockRestore();
+    restore();
+  });
+
+  it('animates nothing under prefers-reduced-motion', () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = ((q: string) => ({
+      matches: q.includes('prefers-reduced-motion'),
+      media: q,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    const { spy, restore } = installElementAnimate();
+    const view = render(<V2WorkScreen />);
+    spy.mockClear();
+
+    act(() => {
+      state.active = state.active.map((t) => (t.id === 'tk_3' ? { ...t, status: 'in_review' as const } : t));
+    });
+    view.rerender(<V2WorkScreen />);
+    expect(spy).not.toHaveBeenCalled();
+
+    restore();
+    window.matchMedia = originalMatchMedia;
+  });
+});

@@ -4,7 +4,7 @@ import { Page, PageBody, PageHeader } from '../components/Page';
 import { Segmented } from '../components/Tabs';
 import { SkeletonRows } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
-import { StatusGlyph } from '../components/StatusGlyph';
+import { Badge, StatusGlyph } from '../components/StatusGlyph';
 import { useMergeQueue, useProjects, useWorkers } from '../api/hooks';
 import { useWs } from '../api/context';
 import { useGo, useSearchParams } from '../app/link';
@@ -215,6 +215,7 @@ function QueueRow({ entry, onOpen }: { entry: MergeQueueEntry; onOpen: () => voi
       <span className="ac-mono w-6 shrink-0 text-nano text-text-4">#{entry.position}</span>
       <span className="ac-mono shrink-0 text-nano text-text-3">{entry.identifier}</span>
       <span className="min-w-0 flex-1 truncate text-meta text-text-2">{entry.title}</span>
+      {entry.ahead ? <Badge tone="accent">{entry.priority}</Badge> : null}
       <span className="ac-mono shrink-0 text-nano text-text-4">waited {ago(entry.queuedAt)}</span>
     </button>
   );

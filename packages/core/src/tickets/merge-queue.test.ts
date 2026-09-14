@@ -143,6 +143,165 @@ describe('merge queue', () => {
     });
   });
 
+  describe('priority ordering and starvation (VS-390)', () => {
+    const setPriority = (id: string, p: string): void => { h.db.update('tickets', id, { priority: p }); };
+    const waiting = (): string[] => tickets.mergeQueue.forProject(h.projectId).waiting.map((e) => e.ticketId);
+
+    it('admits a critical ahead of earlier-joined mediums', async () => {
+      const m1 = approved('M1');
+      const m2 = approved('M2');
+      const m3 = approved('M3');
+      const critical = approved('Critical');
+      for (const t of [m1, m2, m3]) setPriority(t.id, 'medium');
+      setPriority(critical.id, 'critical');
+      await approve(m1);
+      await approve(m2);
+      await approve(m3);
+      await approve(critical);
+
+      await tickets.mergeDone(AGENT, m1.id, { mergeCommit: 'aaa' });
+
+      expect(tickets.get(critical.id).mergeStartedAt).not.toBeNull();
+      expect(tickets.get(m2.id).mergeStartedAt).toBeNull();
+      expect(waiting()).toEqual([m2.id, m3.id]);
+    });
+
+    it('does not starve a ticket merely for waiting a long time', async () => {
+      const active = approved('Active');
+      const mediums = ['A', 'B', 'C', 'D', 'E', 'F'].map((n) => approved(n));
+      for (const t of mediums) setPriority(t.id, 'medium');
+      await approve(active);
+      for (const t of mediums) await approve(t);
+      // Every waiting ticket joined long before the critical did; bypasses, not elapsed time, decide.
+      const critical = approved('Critical');
+      setPriority(critical.id, 'critical');
+      await approve(critical);
+
+      await tickets.mergeDone(AGENT, active.id, { mergeCommit: 'aaa' });
+
+      expect(tickets.get(critical.id).mergeStartedAt).not.toBeNull();
+      for (const t of mediums) expect(tickets.get(t.id).mergeStartedAt).toBeNull();
+    });
+
+    it('admits a low ticket bypassed the limit ahead of a newer critical', async () => {
+      const active = approved('Active');
+      setPriority(active.id, 'critical');
+      const low = approved('Low');
+      setPriority(low.id, 'low');
+      const criticals = ['C1', 'C2', 'C3'].map((n) => approved(n));
+      for (const t of criticals) setPriority(t.id, 'critical');
+      await approve(active);
+      await approve(low);
+      for (const t of criticals) await approve(t);
+
+      await tickets.mergeDone(AGENT, active.id, { mergeCommit: 'a' });
+      await tickets.mergeDone(AGENT, criticals[0]!.id, { mergeCommit: 'b' });
+      await tickets.mergeDone(AGENT, criticals[1]!.id, { mergeCommit: 'c' });
+      expect(tickets.get(low.id).mergeBypasses).toBe(3);
+
+      const newer = approved('Newer');
+      setPriority(newer.id, 'critical');
+      await approve(newer);
+
+      await tickets.mergeDone(AGENT, criticals[2]!.id, { mergeCommit: 'd' });
+
+      expect(tickets.get(low.id).mergeStartedAt).not.toBeNull();
+      expect(tickets.get(newer.id).mergeStartedAt).toBeNull();
+    });
+
+    it('credits a bypass only when a ticket is actually admitted', async () => {
+      const active = approved('Active');
+      const low = approved('Low');
+      setPriority(low.id, 'low');
+      const critical = approved('Critical');
+      setPriority(critical.id, 'critical');
+      await approve(active);
+      await approve(low);
+      await approve(critical);
+      expect(tickets.get(low.id).mergeBypasses).toBe(0);
+
+      await tickets.mergeDone(AGENT, active.id, { mergeCommit: 'a' });
+
+      expect(tickets.get(low.id).mergeBypasses).toBe(1);
+    });
+
+    it('credits nothing when the head cannot be admitted', async () => {
+      const active = approved('Active');
+      const low = approved('Low');
+      setPriority(low.id, 'low');
+      const critical = approved('Critical', { worker: false });
+      setPriority(critical.id, 'critical');
+      await approve(active);
+      await approve(low);
+      await approve(critical);
+      workers.spawnForTicket.mockRejectedValueOnce(Object.assign(new Error('role is full'), { code: 'role_full' }));
+
+      await tickets.mergeDone(AGENT, active.id, { mergeCommit: 'a' });
+
+      expect(tickets.get(critical.id).mergeStartedAt).toBeNull();
+      expect(tickets.get(low.id).mergeBypasses).toBe(0);
+    });
+
+    it('never pre-empts an active merge when a critical joins', async () => {
+      const active = approved('Active');
+      setPriority(active.id, 'low');
+      await approve(active);
+      const critical = approved('Critical');
+      setPriority(critical.id, 'critical');
+      await approve(critical);
+
+      expect(tickets.get(active.id).mergeStartedAt).not.toBeNull();
+      expect(tickets.get(critical.id).mergeStartedAt).toBeNull();
+      expect(tickets.mergeQueue.positionOf(critical.id)).toBe(1);
+    });
+
+    it('reorders waiting tickets when a priority changes', async () => {
+      const active = approved('Active');
+      await approve(active);
+      const a = approved('A');
+      const b = approved('B');
+      setPriority(a.id, 'low');
+      setPriority(b.id, 'low');
+      await approve(a);
+      await approve(b);
+      expect(waiting()).toEqual([a.id, b.id]);
+
+      setPriority(b.id, 'critical');
+      expect(waiting()).toEqual([b.id, a.id]);
+      await tickets.mergeDone(AGENT, active.id, { mergeCommit: 'a' });
+      expect(tickets.get(b.id).mergeStartedAt).not.toBeNull();
+    });
+
+    it('reports a waiting ticket that jumped an earlier join, with its priority', async () => {
+      const active = approved('Active');
+      await approve(active);
+      const early = approved('Early');
+      const critical = approved('Critical');
+      setPriority(early.id, 'medium');
+      setPriority(critical.id, 'critical');
+      await approve(early);
+      await approve(critical);
+
+      const rows = tickets.mergeQueue.forProject(h.projectId).waiting;
+      expect(rows.map((e) => [e.ticketId, e.position, e.priority, e.ahead])).toEqual([
+        [critical.id, 1, 'critical', true],
+        [early.id, 2, 'medium', false],
+      ]);
+    });
+
+    it('clears the bypass count when a waiting ticket leaves the queue', async () => {
+      const active = approved('Active');
+      await approve(active);
+      const low = approved('Low');
+      await approve(low);
+      h.db.update('tickets', low.id, { mergeBypasses: 2 });
+
+      await tickets.transition(AGENT, low.id, { to: 'in_review' });
+
+      expect(tickets.get(low.id).mergeBypasses).toBe(0);
+    });
+  });
+
   describe('the concurrency limit', () => {
     it('lands one at a time by default', async () => {
       const ts = [approved('One'), approved('Two'), approved('Three')];

@@ -20,6 +20,7 @@ import type {
   RunEvent,
   Ticket,
   TicketComment,
+  TicketPriority,
   TicketStatus,
   ThreadMessage,
   ThreadSearchResult,
@@ -231,6 +232,9 @@ export interface MergeQueueEntry {
   queuedAt: string | null;
   startedAt: string | null;
   workerId: string | null;
+  /** The ticket's priority, and whether its position is ahead of an earlier join (VS-390). */
+  priority: TicketPriority;
+  ahead: boolean;
   /** VS-391: the active merge's pull-request check state and when it was first observed. */
   ciState: 'pending' | 'success' | 'failure' | 'none' | null;
   ciStateAt: string | null;

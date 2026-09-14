@@ -38,6 +38,7 @@ export function ticket(over: Partial<Ticket> = {}): Ticket {
     blockedTransitionAt: null,
     mergeQueuedAt: null,
     mergeStartedAt: null,
+    mergeBypasses: 0,
     startedAt: null,
     completedAt: null,
     cancelledAt: null,

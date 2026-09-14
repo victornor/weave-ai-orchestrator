@@ -283,6 +283,26 @@ describe('V2 Work merge strip', () => {
     render(<V2WorkScreen />);
     expect(screen.getByText(/1 landing · 1 waiting · on CI/)).toBeInTheDocument();
   });
+
+  it('names the next waiting ticket and its priority when it jumped an earlier join (VS-390)', () => {
+    state.active = [
+      ticket({ id: 'tk_1', identifier: 'ACME-1', status: 'merging', mergeStartedAt: '2026-09-10T00:00:00.000Z' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-2', status: 'merging', priority: 'medium', mergeQueuedAt: '2026-09-10T00:05:00.000Z', mergeStartedAt: null }),
+      ticket({ id: 'tk_3', identifier: 'ACME-3', status: 'merging', priority: 'critical', mergeQueuedAt: '2026-09-10T00:06:00.000Z', mergeStartedAt: null }),
+    ];
+    render(<V2WorkScreen />);
+    expect(screen.getByText(/1 landing · 2 waiting · on the worker · next: ACME-3 \(critical, jumped ahead\)/)).toBeInTheDocument();
+  });
+
+  it('names the next waiting ticket without a reason when it is in join order', () => {
+    state.active = [
+      ticket({ id: 'tk_1', identifier: 'ACME-1', status: 'merging', mergeStartedAt: '2026-09-10T00:00:00.000Z' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-2', status: 'merging', priority: 'medium', mergeQueuedAt: '2026-09-10T00:05:00.000Z', mergeStartedAt: null }),
+      ticket({ id: 'tk_3', identifier: 'ACME-3', status: 'merging', priority: 'medium', mergeQueuedAt: '2026-09-10T00:06:00.000Z', mergeStartedAt: null }),
+    ];
+    render(<V2WorkScreen />);
+    expect(screen.getByText(/on the worker · next: ACME-2$/)).toBeInTheDocument();
+  });
 });
 
 describe('V2 Work new ticket', () => {

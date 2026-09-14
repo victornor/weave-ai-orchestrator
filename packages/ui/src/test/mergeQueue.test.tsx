@@ -30,8 +30,7 @@ const minutesAgo = (n: number): string => new Date(NOW.getTime() - n * 60_000).t
 
 const entry = (over: Partial<MergeQueueEntry> = {}): MergeQueueEntry => ({
   ticketId: 'tk_1', identifier: 'VS-53', title: 'Full test suite exits cleanly', projectId: 'p1',
-  position: null, queuedAt: minutesAgo(9), startedAt: minutesAgo(4), workerId: 'ag_1', ...over,
-  ciState: over.ciState ?? null, ciStateAt: over.ciStateAt ?? null,
+  position: null, queuedAt: minutesAgo(9), startedAt: minutesAgo(4), workerId: 'ag_1', priority: 'medium', ahead: false, ciState: null, ciStateAt: null, ...over,
 });
 
 const outcome = (over: Partial<MergeQueueOutcome> = {}): MergeQueueOutcome => ({
@@ -114,6 +113,19 @@ describe('MergeQueueRoute', () => {
     expect(rows[0]).toHaveTextContent('waited 8m');
     expect(rows[1]).toHaveTextContent('#2');
     expect(rows[1]).toHaveTextContent('VS-57');
+  });
+
+  it('labels a waiting ticket that jumped an earlier join with its priority (VS-390)', () => {
+    state.queue = queue({
+      waiting: [
+        entry({ ticketId: 'tk_2', identifier: 'VS-56', title: 'Critical fix', position: 1, startedAt: null, queuedAt: minutesAgo(8), priority: 'critical', ahead: true }),
+        entry({ ticketId: 'tk_3', identifier: 'VS-57', title: 'Routine work', position: 2, startedAt: null, queuedAt: minutesAgo(3), priority: 'medium', ahead: false }),
+      ],
+    });
+    render(<MergeQueueRoute />);
+    const rows = within(section('Waiting')).getAllByRole('button');
+    expect(within(rows[0]!).getByText('critical')).toBeInTheDocument();
+    expect(within(rows[1]!).queryByText('medium')).toBeNull();
   });
 
   it('names every outcome that recently left the queue', () => {

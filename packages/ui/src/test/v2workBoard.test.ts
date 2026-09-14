@@ -4,6 +4,7 @@ import type { TicketStatus } from '@weave-ai/shared';
 import { ticket } from './factories';
 import {
   foldV2Board,
+  highlightSegments,
   needsYouTicketIds,
   v2ColumnFor,
   v2ShownFinished,
@@ -110,5 +111,25 @@ describe('the finished window', () => {
   it('shows every finished ticket under all, and none under hide', () => {
     expect(v2ShownFinished([recentCancelled, oldDone], 'all', now)).toHaveLength(2);
     expect(v2ShownFinished([recentCancelled, oldDone], 'hide', now)).toHaveLength(0);
+  });
+});
+
+describe('title highlights', () => {
+  it('splits on a case-insensitive substring', () => {
+    expect(highlightSegments('Deploy the pipeline', 'deploy')).toEqual([
+      { text: 'Deploy', match: true },
+      { text: ' the pipeline', match: false },
+    ]);
+  });
+
+  it('escapes regex metacharacters so the query matches literally', () => {
+    expect(highlightSegments('a.b.c', 'a.b')).toEqual([
+      { text: 'a.b', match: true },
+      { text: '.c', match: false },
+    ]);
+  });
+
+  it('leaves the text alone for an empty query', () => {
+    expect(highlightSegments('nothing', '')).toEqual([{ text: 'nothing', match: false }]);
   });
 });

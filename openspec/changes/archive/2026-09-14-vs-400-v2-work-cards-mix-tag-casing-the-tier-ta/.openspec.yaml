@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: A V2 Work card's kind, tier and needs-you tags all render in one casing
+skip_specs: true

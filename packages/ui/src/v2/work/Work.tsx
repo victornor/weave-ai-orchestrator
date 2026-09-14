@@ -12,7 +12,7 @@ import { Button } from '../../components/Button';
 import { StatusGlyph, Badge } from '../../components/StatusGlyph';
 import { TestTally } from '../../components/TicketCard';
 import { LiveActivityLine } from '../../components/LiveActivityLine';
-import { WorkerModelTag } from '../../components/WorkerModelTag';
+import { WorkerModelTag, workerModelTagLabel } from '../../components/WorkerModelTag';
 import { SkeletonRows } from '../../components/Skeleton';
 import { EmptyState, ErrorState } from '../../components/States';
 import { useWs } from '../../api/context';
@@ -541,6 +541,9 @@ function WorkCard({
 }): React.ReactElement {
   const { ticket } = row;
   const archive = openspecArchive(ticket);
+  // The card's tags share one uppercase casing (VS-400): the tier through the same `.v2-tag`
+  // recipe as its neighbours, never `Badge`, whose uppercase is not the card's recipe.
+  const tier = workerModelTagLabel(ticket, workerOptions);
   return (
     <button
       type="button"
@@ -566,12 +569,12 @@ function WorkCard({
         </div>
       ) : null}
       <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-        <span className="v2-tag text-text-3">{ticket.kind}</span>
-        <WorkerModelTag ticket={ticket} options={workerOptions} />
+        <span className="v2-tag uppercase text-text-3">{ticket.kind}</span>
+        {tier ? <span className="v2-tag uppercase text-text-3">{tier}</span> : null}
         {row.tests ? <TestTally tests={row.tests} /> : null}
-        {row.needsYou ? <span className="v2-tag text-needs-you">needs you</span> : null}
+        {row.needsYou ? <span className="v2-tag uppercase text-needs-you">needs you</span> : null}
         {archive?.state === 'pending' ? (
-          <span className="v2-tag text-needs-you" data-v2-archive-pending title={archive.pendingPrUrl ?? undefined}>spec archive pending</span>
+          <span className="v2-tag uppercase text-needs-you" data-v2-archive-pending title={archive.pendingPrUrl ?? undefined}>spec archive pending</span>
         ) : null}
       </div>
       <div className="flex items-baseline gap-2 border-t border-line-1 pt-1.5">

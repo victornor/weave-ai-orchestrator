@@ -197,6 +197,22 @@ describe('V2 Work columns', () => {
     expect(within(withCatalog).getByText('default')).toBeInTheDocument();
   });
 
+  it('renders the tier, kind and needs-you tags in one casing (VS-400)', () => {
+    // The tier goes through the card's `.v2-tag` recipe, not `Badge`, so all three tags carry the
+    // same casing instead of `task`/`needs you` beside `DEFAULT`.
+    state.workerOptions = [
+      { id: 'quick', description: 'Fast.', runtime: 'claude', model: null },
+      { id: 'standard', description: 'Default.', runtime: 'claude', model: null },
+    ];
+    render(<V2WorkScreen />);
+    const card = document.querySelector('[data-v2-card="ACME-2"]') as HTMLElement;
+    const tags = ['change', 'default', 'needs you'].map((label) => within(card).getByText(label));
+    for (const tag of tags) {
+      const casings = ['uppercase', 'lowercase', 'capitalize'].filter((c) => tag.classList.contains(c));
+      expect(casings).toEqual(['uppercase']);
+    }
+  });
+
   it('derives the column count from the cards rendered', () => {
     render(<V2WorkScreen />);
     const cards = column('todo').querySelectorAll('[data-v2-card]');

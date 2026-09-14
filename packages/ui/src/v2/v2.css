@@ -43,6 +43,12 @@
   --accent-edge: rgb(61 65 72 / 0.34);
   --focus-ring: rgb(61 65 72 / 0.18);
 
+  /* The one affirmative action hue (VS-418, captain): an Approve that is actually available is the
+     card's call to action, so it gets a filled green the greyscale accent cannot give it. On dark,
+     a bright fill carries a near-black ink. */
+  --approve: #34d399;
+  --approve-ink: #041608;
+
   /* Hue only where work is live — working amber, needs-you indigo, blocked red. done / merging /
      idle stay greyscale (HANDOFF §2). stalled and failed keep the design's base values, which
      `themeVars()` does not override; `paused` is gone from Mono (it becomes a caption on idle),
@@ -111,6 +117,11 @@
   --accent-tint-strong: rgb(61 65 72 / 0.18);
   --accent-edge: rgb(61 65 72 / 0.34);
   --focus-ring: rgb(61 65 72 / 0.18);
+
+  /* The available Approve fill in light: a deep green with white ink (≥4.5:1 both as text on paper
+     and as a fill under white). */
+  --approve: #15803d;
+  --approve-ink: #ffffff;
 
   --status-idle: #6b7078;
   --status-working: #8a5e14;
@@ -294,12 +305,13 @@
 }
 .v2-button[data-variant='primary'] {
   border-color: transparent;
-  background: var(--accent);
-  color: var(--accent-on);
-  font-weight: 500;
+  background: var(--approve);
+  color: var(--approve-ink);
+  font-weight: 600;
 }
 .v2-button[data-variant='primary']:hover {
-  background: var(--accent);
+  background: var(--approve);
+  filter: brightness(1.08);
 }
 
 /* Shared input recipe (VS-385), lifted from the settings-density input used across Workspace,

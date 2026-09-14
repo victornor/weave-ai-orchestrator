@@ -125,7 +125,7 @@ function InputControl({ input, value, disabled, onChange }: {
 }): React.ReactElement {
   const id = `v2-dc-input-${input.key}`;
   const field =
-    'w-full rounded-r4 border border-line-2 bg-bg-input px-2.5 text-meta text-text-1 outline-none placeholder:text-text-4 focus:border-accent-edge';
+    'w-full rounded-r4 border border-line-2 bg-bg-input px-2 text-meta text-text-1 outline-none placeholder:text-text-4 focus:border-accent-edge';
   const chosen = Array.isArray(value) ? value : [];
   const chosenOne = typeof value === 'string' ? value : '';
   const choiceKeys = (input.choices ?? []).map((c) => c.key);
@@ -133,7 +133,7 @@ function InputControl({ input, value, disabled, onChange }: {
   const other = input.type === 'single_choice' && input.allowOther === true;
   const otherSelected = other && (otherActive || (chosenOne !== '' && !choiceKeys.includes(chosenOne)));
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex flex-col gap-1">
       <label htmlFor={input.type === 'single_choice' || input.type === 'multiselect' ? undefined : id} className="text-micro font-medium text-text-2">
         {input.label}
         {input.required ? <span className="ml-1 text-needs-you" aria-hidden>*</span> : null}
@@ -143,17 +143,17 @@ function InputControl({ input, value, disabled, onChange }: {
         <textarea
           id={id} rows={3} disabled={disabled} value={typeof value === 'string' ? value : ''}
           placeholder={input.placeholder} aria-required={input.required}
-          onChange={(e) => onChange(e.target.value)} className={cx(field, 'resize-y py-2')}
+          onChange={(e) => onChange(e.target.value)} className={cx(field, 'resize-y py-1.5')}
         />
       ) : input.type === 'single_choice' ? (
-        <div role="radiogroup" aria-label={input.label} className="flex flex-col gap-1.5">
+        <div role="radiogroup" aria-label={input.label} className="flex flex-col gap-1">
           {(input.choices ?? []).map((c) => {
             const on = !otherSelected && chosenOne === c.key;
             return (
               <button
                 key={c.key} type="button" role="radio" aria-checked={on} disabled={disabled}
                 onClick={() => { setOtherActive(false); onChange(c.key); }}
-                className={cx('rounded-r4 border p-2 text-left', on ? 'border-accent-edge bg-accent-tint' : 'border-line-2 hover:bg-bg-2')}
+                className={cx('rounded-r4 border p-1.5 text-left', on ? 'border-accent-edge bg-accent-tint' : 'border-line-2 hover:bg-bg-2')}
               >
                 <span className="flex items-center gap-2">
                   <span className="text-meta font-medium text-text-strong">{c.label}</span>
@@ -167,7 +167,7 @@ function InputControl({ input, value, disabled, onChange }: {
             <button
               type="button" role="radio" aria-checked={otherSelected} disabled={disabled}
               onClick={() => { setOtherActive(true); onChange(''); }}
-              className={cx('rounded-r4 border border-dashed p-2 text-left text-meta', otherSelected ? 'border-accent-edge bg-accent-tint text-text-strong' : 'border-line-2 text-text-4 hover:text-text-2')}
+              className={cx('rounded-r4 border border-dashed p-1.5 text-left text-meta', otherSelected ? 'border-accent-edge bg-accent-tint text-text-strong' : 'border-line-2 text-text-4 hover:text-text-2')}
             >
               Write your own…
             </button>
@@ -176,7 +176,7 @@ function InputControl({ input, value, disabled, onChange }: {
             <input
               type="text" disabled={disabled} value={chosenOne} placeholder={input.placeholder}
               aria-label={`${input.label} — your own answer`}
-              onChange={(e) => onChange(e.target.value)} className={cx(field, 'h-9')}
+              onChange={(e) => onChange(e.target.value)} className={cx(field, 'h-8')}
             />
           ) : null}
         </div>
@@ -200,7 +200,7 @@ function InputControl({ input, value, disabled, onChange }: {
           id={id} type={input.type === 'secret' ? 'password' : 'text'} disabled={disabled}
           value={typeof value === 'string' ? value : ''} placeholder={input.placeholder} aria-required={input.required}
           autoComplete={input.type === 'secret' ? 'off' : undefined}
-          onChange={(e) => onChange(e.target.value)} className={cx(field, 'h-9')}
+          onChange={(e) => onChange(e.target.value)} className={cx(field, 'h-8')}
         />
       )}
       {input.type === 'secret' ? (
@@ -260,6 +260,10 @@ export function V2DecisionCard({
   const openEnded = !named && decision.options.length === 0 && (decision.inputs ?? []).length === 0 && decision.allowFreeText;
   const inputs = decision.inputs ?? [];
   const missing = inputs.filter((i) => i.required && isEmpty(values[i.key]));
+  // VS-418: an approval that is neither held nor missing a required input is ready — its primary
+  // button carries the filled `approve` treatment; every other state stays the neutral recipe so a
+  // blocked card cannot be mistaken for an actionable one.
+  const approveReady = !blocked && missing.length === 0;
   const destructive = decision.kind === 'discard_approval';
   const docTarget = documentTarget(decision);
   // Never join the raw agent id into captain-visible text (VS-403): the caller resolves the name,
@@ -307,7 +311,7 @@ export function V2DecisionCard({
       )}
       aria-label={`${label}: ${title}`}
     >
-      <div className={cx('flex items-center gap-2 border-b border-line-1', narrow ? 'px-3 py-2' : 'px-3.5 py-2.5')}>
+      <div className={cx('flex items-center gap-2 border-b border-line-1', narrow ? 'px-2.5 py-1.5' : 'px-3 py-2')}>
         <span className="text-meta font-medium text-text-1">{label}</span>
         <div className="flex-1" />
         {artifactHref ? (
@@ -318,22 +322,31 @@ export function V2DecisionCard({
         {meta ? <span className="ac-mono truncate text-micro text-text-3">{meta}</span> : null}
       </div>
 
-      <div className={narrow ? 'p-3' : 'p-3.5'}>
-        <h3 className="mb-1.5 text-head font-semibold leading-snug tracking-head text-text-strong">{title}</h3>
-        {decision.context ? <Markdown source={decision.context} className="mb-3 text-meta leading-relaxed text-text-2" /> : null}
+      <div className={narrow ? 'p-2.5' : 'p-3'}>
+        <h3 className="mb-1 text-ui font-semibold leading-snug tracking-head text-text-strong">{title}</h3>
+        {decision.context ? <Markdown source={decision.context} className="mb-2 text-meta leading-normal text-text-2" /> : null}
 
         {docTarget && decision.kind !== 'plan_approval' ? <DocumentPreview decision={decision} ws={ws ?? undefined} /> : null}
         {decision.kind === 'plan_approval' && !inert ? (plan ?? <PlanPreview decision={decision} ws={ws ?? undefined} />) : null}
 
         {review ? (
-          <div className="mb-2" data-weaver-review={reviewTone}>
-            <p className={cx('text-micro', reviewTone === 'concerns' ? 'font-medium text-blocked' : 'text-text-3')}>{review.line}</p>
+          <div className="mb-1.5" data-weaver-review={reviewTone}>
+            {reviewTone === 'concerns' ? (
+              <p className="text-micro font-medium text-blocked">{review.line}</p>
+            ) : reviewTone === 'looked' || reviewTone === 'after' ? (
+              <p className="flex items-center gap-1 text-micro font-medium text-approve">
+                <span aria-hidden>✓</span>
+                {review.line}
+              </p>
+            ) : (
+              <p className="text-micro text-text-3">{review.line}</p>
+            )}
             {objection ? <p className="mt-1 whitespace-pre-wrap text-meta text-text-1">{objection}</p> : null}
           </div>
         ) : null}
 
         {artifact ? (
-          <div className="mb-3 flex items-center gap-2">
+          <div className="mb-2 flex items-center gap-2">
             <span className="v2-tag text-text-3">Artifact</span>
             {artifactHref ? (
               <A to={artifactHref} className="v2-link min-w-0 truncate text-meta">
@@ -345,7 +358,7 @@ export function V2DecisionCard({
 
         {concerns && !inert ? (
           <>
-            <div className="flex items-center gap-2 rounded-r4 border border-line-1 bg-bg-2 px-2.5 py-2" data-revision-row>
+            <div className="flex items-center gap-2 rounded-r4 border border-line-1 bg-bg-2 px-2 py-1.5" data-revision-row>
               <span className="size-1.5 flex-none animate-pulse rounded-pill bg-working" aria-hidden />
               <span className="min-w-0 flex-1 truncate text-micro text-text-2">
                 Revision in progress{decision.weaverReviewedAt ? ` · ${ago(decision.weaverReviewedAt)}` : ''}
@@ -360,7 +373,7 @@ export function V2DecisionCard({
               </button>
             </div>
             {watchOpen ? (
-              <div className="mb-3">
+              <div className="mb-2">
                 <WorkerFeed agentId={askedBy} runId={decision.askedInRunId} ws={ws ?? undefined} compact resizable label={`Live feed for ${ticketIdentifier ?? 'the worker'}`} />
               </div>
             ) : null}
@@ -368,7 +381,7 @@ export function V2DecisionCard({
         ) : null}
 
         {optionList && !inert ? (
-          <div className="mb-3 flex flex-col gap-2" role="radiogroup" aria-label="Options">
+          <div className="mb-2 flex flex-col gap-1.5" role="radiogroup" aria-label="Options">
             {decision.options.map((o) => {
               const picked = o.recommended || o.key === decision.recommendation;
               const chosen = selected === o.key;
@@ -376,7 +389,7 @@ export function V2DecisionCard({
                 <button
                   key={o.key} type="button" role="radio" aria-checked={chosen} disabled={busy}
                   onClick={() => { setSelected(o.key); setFreeText(false); }}
-                  className={cx('rounded-r4 border p-2.5 text-left', chosen ? 'border-accent-edge bg-accent-tint' : 'border-line-2 hover:bg-bg-2')}
+                  className={cx('rounded-r4 border p-2 text-left', chosen ? 'border-accent-edge bg-accent-tint' : 'border-line-2 hover:bg-bg-2')}
                 >
                   <span className="flex items-center gap-2">
                     <span className="text-meta font-medium text-text-strong">{o.label}</span>
@@ -390,7 +403,7 @@ export function V2DecisionCard({
               <button
                 type="button" aria-expanded={freeText}
                 onClick={() => { setSelected(null); setFreeText((v) => !v); }}
-                className="rounded-r4 border border-dashed border-line-2 p-2.5 text-left text-meta text-text-4 hover:text-text-2"
+                className="rounded-r4 border border-dashed border-line-2 p-2 text-left text-meta text-text-4 hover:text-text-2"
               >
                 Write your own…
               </button>
@@ -399,7 +412,7 @@ export function V2DecisionCard({
         ) : null}
 
         {inputs.length && !inert ? (
-          <div className="mb-3 flex flex-col gap-3 rounded-r4 border border-line-1 bg-bg-2 p-3">
+          <div className="mb-2 flex flex-col gap-2 rounded-r4 border border-line-1 bg-bg-2 p-2.5">
             {inputs.map((i) => (
               <InputControl
                 key={i.key}
@@ -416,7 +429,7 @@ export function V2DecisionCard({
           <textarea
             autoFocus rows={2} value={text} onChange={(e) => setText(e.target.value)}
             placeholder="Answer in your own words…" aria-label="Answer in your own words"
-            className="mb-3 w-full rounded-r4 border border-line-2 bg-bg-input px-3 py-2 text-meta text-text-1 outline-none placeholder:text-text-4"
+            className="mb-2 w-full rounded-r4 border border-line-2 bg-bg-input px-2.5 py-1.5 text-meta text-text-1 outline-none placeholder:text-text-4"
           />
         ) : null}
 
@@ -425,12 +438,12 @@ export function V2DecisionCard({
             value={confirm} onChange={(e) => setConfirm(e.target.value)}
             placeholder={`type ${ticketIdentifier ?? 'the ticket id'} to confirm`}
             aria-label="Type the ticket identifier to confirm"
-            className="ac-mono mb-2.5 h-9 w-full rounded-r4 border border-line-2 bg-bg-input px-3 text-meta text-text-1 outline-none placeholder:text-text-4"
+            className="ac-mono mb-2 h-8 w-full rounded-r4 border border-line-2 bg-bg-input px-2.5 text-meta text-text-1 outline-none placeholder:text-text-4"
           />
         ) : null}
 
         {answered ? (
-          <div className="mb-3 rounded-r4 border border-line-1 bg-bg-2 p-3" aria-label="The answer given">
+          <div className="mb-2 rounded-r4 border border-line-1 bg-bg-2 p-2.5" aria-label="The answer given">
             {answerLine(decision) || !answeredInputs(decision).length ? (
               <p className="text-meta leading-relaxed text-text-1">{answerLine(decision) ?? 'No answer recorded.'}</p>
             ) : null}
@@ -453,8 +466,8 @@ export function V2DecisionCard({
         ) : null}
 
         {overriding && !inert ? (
-          <div className="mb-3 rounded-r4 border border-line-2 bg-bg-2 p-3">
-            <p className="mb-3 text-micro leading-snug text-text-1">
+          <div className="mb-2 rounded-r4 border border-line-2 bg-bg-2 p-2.5">
+            <p className="mb-2 text-micro leading-snug text-text-1">
               {concerns
                 ? `Overriding records your reason on ${ticketIdentifier ?? 'the ticket'} and tells the weaver to stand down on this decision.`
                 : `Overriding records your reason on ${ticketIdentifier ?? 'the ticket'} and approves without waiting for the weaver's review.`}
@@ -462,7 +475,7 @@ export function V2DecisionCard({
             <textarea
               autoFocus rows={2} value={reason} onChange={(e) => setReason(e.target.value)}
               placeholder="Why override the hold?" aria-label="Why override the hold?"
-              className="mb-2.5 w-full rounded-r4 border border-accent-edge bg-bg-input px-3 py-2 text-meta text-text-1 outline-none placeholder:text-text-4"
+              className="mb-2 w-full rounded-r4 border border-accent-edge bg-bg-input px-2.5 py-1.5 text-meta text-text-1 outline-none placeholder:text-text-4"
             />
             <div className="flex items-center gap-2">
               <button
@@ -472,7 +485,7 @@ export function V2DecisionCard({
               >
                 Override and approve
               </button>
-              <button type="button" onClick={() => setOverriding(false)} className="h-9 rounded-r4 border border-line-2 px-3 text-meta text-text-2">
+              <button type="button" onClick={() => setOverriding(false)} className="h-9 rounded-r4 border border-line-2 px-2.5 text-meta text-text-2">
                 Cancel
               </button>
             </div>
@@ -480,21 +493,21 @@ export function V2DecisionCard({
         ) : null}
 
         {revising && !inert ? (
-          <div className="mb-3 rounded-r4 border border-line-2 bg-bg-2 p-3">
+          <div className="mb-2 rounded-r4 border border-line-2 bg-bg-2 p-2.5">
             <textarea
               autoFocus rows={3} value={revision} onChange={(e) => setRevision(e.target.value)}
               placeholder="What should change?" aria-label="What should change?"
-              className="mb-2.5 w-full rounded-r4 border border-line-2 bg-bg-input px-3 py-2 text-meta text-text-1 outline-none placeholder:text-text-4"
+              className="mb-2 w-full rounded-r4 border border-line-2 bg-bg-input px-2.5 py-1.5 text-meta text-text-1 outline-none placeholder:text-text-4"
             />
             <div className="flex items-center gap-2">
               <button
                 type="button" disabled={busy || revision.trim() === ''}
                 onClick={() => { onAnswer(withInputs({ key: reviseKey, text: revision })); setRevising(false); }}
-                className="h-9 rounded-r4 border-0 bg-accent px-3 text-meta font-medium text-white disabled:cursor-not-allowed disabled:opacity-55"
+                className="h-9 rounded-r4 border-0 bg-accent px-2.5 text-meta font-medium text-white disabled:cursor-not-allowed disabled:opacity-55"
               >
                 Send revision
               </button>
-              <button type="button" onClick={() => setRevising(false)} className="h-9 rounded-r4 border border-line-2 px-3 text-meta text-text-2">
+              <button type="button" onClick={() => setRevising(false)} className="h-9 rounded-r4 border border-line-2 px-2.5 text-meta text-text-2">
                 Cancel
               </button>
             </div>
@@ -502,21 +515,21 @@ export function V2DecisionCard({
         ) : null}
 
         {requestingChanges && !inert ? (
-          <div className="mb-3 rounded-r4 border border-line-2 bg-bg-2 p-3">
+          <div className="mb-2 rounded-r4 border border-line-2 bg-bg-2 p-2.5">
             <textarea
               autoFocus rows={3} value={changeText} onChange={(e) => setChangeText(e.target.value)}
               placeholder="What should change before this merges?" aria-label="What should change before this merges?"
-              className="mb-2.5 w-full rounded-r4 border border-line-2 bg-bg-input px-3 py-2 text-meta text-text-1 outline-none placeholder:text-text-4"
+              className="mb-2 w-full rounded-r4 border border-line-2 bg-bg-input px-2.5 py-1.5 text-meta text-text-1 outline-none placeholder:text-text-4"
             />
             <div className="flex items-center gap-2">
               <button
                 type="button" disabled={busy || changeText.trim() === ''}
                 onClick={() => { onAnswer(withInputs({ key: 'changes', text: changeText })); setRequestingChanges(false); }}
-                className="h-9 rounded-r4 border-0 bg-accent px-3 text-meta font-medium text-white disabled:cursor-not-allowed disabled:opacity-55"
+                className="h-9 rounded-r4 border-0 bg-accent px-2.5 text-meta font-medium text-white disabled:cursor-not-allowed disabled:opacity-55"
               >
                 Send request
               </button>
-              <button type="button" onClick={() => setRequestingChanges(false)} className="h-9 rounded-r4 border border-line-2 px-3 text-meta text-text-2">
+              <button type="button" onClick={() => setRequestingChanges(false)} className="h-9 rounded-r4 border border-line-2 px-2.5 text-meta text-text-2">
                 Cancel
               </button>
             </div>
@@ -537,7 +550,8 @@ export function V2DecisionCard({
               <button
                 type="button" disabled={busy || blocked || missing.length > 0}
                 onClick={() => answer(approveKey)}
-                data-variant="primary"
+                data-variant={approveReady ? 'primary' : undefined}
+                data-approve={approveReady ? 'ready' : 'blocked'}
                 className={cx('v2-button', 'flex-1')}
               >
                 Approve
@@ -562,7 +576,9 @@ export function V2DecisionCard({
               <button
                 type="button" disabled={busy || blocked || missing.length > 0}
                 onClick={() => answer(approveKey)}
-                className="h-9 flex-1 rounded-r4 border-0 bg-accent px-3 text-meta font-medium text-white disabled:cursor-not-allowed disabled:opacity-55"
+                data-variant={approveReady ? 'primary' : undefined}
+                data-approve={approveReady ? 'ready' : 'blocked'}
+                className={cx('v2-button', 'flex-1')}
               >
                 Approve merge
               </button>
@@ -579,7 +595,9 @@ export function V2DecisionCard({
               <button
                 type="button" disabled={busy || blocked}
                 onClick={() => answer(approveKey)}
-                className="h-9 flex-1 rounded-r4 border-0 bg-accent px-3 text-meta font-medium text-white disabled:cursor-not-allowed disabled:opacity-55"
+                data-variant={approveReady ? 'primary' : undefined}
+                data-approve={approveReady ? 'ready' : 'blocked'}
+                className={cx('v2-button', 'flex-1')}
               >
                 Approve
               </button>

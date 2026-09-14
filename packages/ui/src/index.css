@@ -279,6 +279,8 @@
   --color-accent-tint: var(--accent-tint);
   --color-accent-tint-strong: var(--accent-tint-strong);
   --color-accent-edge: var(--accent-edge);
+  --color-approve: var(--approve);
+  --color-approve-ink: var(--approve-ink);
 
   --color-idle: var(--status-idle);
   --color-working: var(--status-working);

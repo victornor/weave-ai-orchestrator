@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "V2 decision cards use oversized text: make the card compact (smaller
+  title, body, choice and input text, tighter spacing) so the buttons always
+  fit, especially in the chat decision pane"
+skip_specs: true

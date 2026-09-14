@@ -142,6 +142,12 @@ export type RunStatus = (typeof RUN_STATUSES)[number];
 export const ACTIVE_RUN_STATUSES: readonly RunStatus[] = ['queued', 'running'];
 export const isActiveRun = (status: string | null | undefined): boolean => ACTIVE_RUN_STATUSES.includes(status as RunStatus);
 
+/** The runs list's ordering keys (VS-410). `createdAt` is the default (newest first). */
+export const RUN_SORT_KEYS = ['createdAt', 'cost', 'duration', 'tokens'] as const;
+export type RunSortKey = (typeof RUN_SORT_KEYS)[number];
+export const RUN_SORT_DIRS = ['asc', 'desc'] as const;
+export type RunSortDir = (typeof RUN_SORT_DIRS)[number];
+
 export const RUN_ERROR_FAMILIES = ['transient_upstream', 'provider_quota', 'model_refusal', 'auth', 'tooling', 'unknown'] as const;
 export type RunErrorFamily = (typeof RUN_ERROR_FAMILIES)[number];
 

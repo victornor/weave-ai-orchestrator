@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary } from '@weave-ai/shared';
+import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary } from '@weave-ai/shared';
 import { dayKey } from '@weave-ai/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -1339,7 +1339,18 @@ export function useAnswerDecision(): UseMutationResult<unknown, Error, { id: str
 
 /* ------------------------------------------------------------------ runs */
 
-export function useRuns(params: { agent?: string; ticket?: string; status?: string; limit?: number; offset?: number } = {}, wsOverride?: string): UseQueryResult<Run[]> {
+/** The runs list's filter and ordering query (VS-410), shared by every runs hook. */
+export type RunQueryParams = {
+  agent?: string;
+  ticket?: string;
+  status?: string;
+  sort?: RunSortKey;
+  dir?: RunSortDir;
+  limit?: number;
+  offset?: number;
+};
+
+export function useRuns(params: RunQueryParams = {}, wsOverride?: string): UseQueryResult<Run[]> {
   const ws = useHookWs(wsOverride);
   return useQuery({
     queryKey: [...qk.runs(ws), params],
@@ -1350,7 +1361,7 @@ export function useRuns(params: { agent?: string; ticket?: string; status?: stri
 
 export function useRunsMany(
   ids: readonly string[],
-  params: { agent?: string; ticket?: string; status?: string; limit?: number; offset?: number } = {},
+  params: RunQueryParams = {},
 ): UseQueryResult<Run[]>[] {
   return useQueries({
     queries: ids.map((id) => ({
@@ -1365,10 +1376,7 @@ export function useRunsMany(
  * these out and merges by recency, so it can offer a real load-more rather than guessing from a
  * full page. The key stays under `qk.runs(id)` so a runs invalidation still refreshes it.
  */
-export function useRunPagesMany(
-  ids: readonly string[],
-  params: { agent?: string; ticket?: string; status?: string; limit?: number; offset?: number } = {},
-): UseQueryResult<{ runs: Run[]; total: number }>[] {
+export function useRunPagesMany(ids: readonly string[], params: RunQueryParams = {}): UseQueryResult<{ runs: Run[]; total: number }>[] {
   return useQueries({
     queries: ids.map((id) => ({
       queryKey: [...qk.runs(id), 'page', params],

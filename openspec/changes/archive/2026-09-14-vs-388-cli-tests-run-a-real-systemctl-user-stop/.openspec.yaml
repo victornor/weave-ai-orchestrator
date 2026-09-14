@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Isolate every test that can reach the installed unit; make the real
+  systemctl runner impossible to reach from tests
+skip_specs: true

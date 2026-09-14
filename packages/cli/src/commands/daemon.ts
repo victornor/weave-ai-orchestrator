@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { join } from 'node:path';
 import { configHome } from '../contexts.js';
-import { LAUNCHD_LABEL, followLog, installLaunchdAgent, installService, isRunning, logFile, pidFile, readPid, renderLaunchdPlist, renderServiceUnit, resolveServerBin, startDaemon, startDaemonService, stopDaemon, stopDaemonService, systemdMainPid, tailLog } from '../daemon.js';
+import { LAUNCHD_LABEL, followLog, installLaunchdAgent, installService, isRunning, logFile, pidFile, readPid, realRun, renderLaunchdPlist, renderServiceUnit, resolveServerBin, startDaemon, startDaemonService, stopDaemon, stopDaemonService, systemdMainPid, tailLog } from '../daemon.js';
 import { buildRelease, currentLink, listReleases, previousLink, pruneReleases, readLink, releaseStamp, resolveInstalledUnit, resolveWorkspaceStateDir, switchRelease, writeUserShims, type ShimWriteResult } from '../release.js';
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -600,10 +600,11 @@ async function drainAndRestart(command: Command, drainTimeoutSec: number): Promi
   // then restart from under us.
   const unit = process.platform === 'linux' ? resolveInstalledUnit() : null;
   if (unit) {
-    const r = spawnSync('systemctl', ['--user', 'restart', unit.name], { encoding: 'utf8' });
+    // VS-388: through the guarded `realRun`, so a test that reaches this cannot restart the live unit.
+    const r = realRun('systemctl', ['--user', 'restart', unit.name]);
     if (r.status !== 0) {
       await client?.post('/api/daemon/undrain', {}).catch(() => undefined);
-      throw new ApiError('internal', `systemctl --user restart ${unit.name} failed: ${r.stderr.trim()}`, 500);
+      throw new ApiError('internal', `systemctl --user restart ${unit.name} failed: ${(r.stderr || r.stdout).trim()}`, 500);
     }
     how = `systemctl --user restart ${unit.name}`;
   } else {

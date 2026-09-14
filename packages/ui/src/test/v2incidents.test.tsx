@@ -12,7 +12,15 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('../app/link', () => ({ useSearchParams: () => ({}), useGo: () => vi.fn() }));
 vi.mock('../api/hooks', () => ({
   useIncidents: () => ({ data: { items: state.items, total: state.items.length }, isLoading: false, isError: false, refetch: vi.fn() }),
-  useWorkspaces: () => ({ data: [{ id: 'ws1', name: 'Acme' }], isLoading: false, isError: false, refetch: vi.fn() }),
+  useWorkspaces: () => ({
+    data: [
+      { id: 'ws1', internalId: '01M2F5WS1ULID', name: 'Acme' },
+      { id: 'ws2', internalId: '01M2F5WS2ULID', name: 'Fernwood' },
+    ],
+    isLoading: false,
+    isError: false,
+    refetch: vi.fn(),
+  }),
   useWorkers: () => ({ data: [] }),
 }));
 
@@ -56,6 +64,18 @@ describe('V2 Incidents', () => {
     expect(screen.queryByText('Old outage')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Resolved' }));
     expect(screen.getByText('Old outage')).toBeInTheDocument();
+  });
+
+  it('resolves the workspace name from whichever id the incident carries, never the ULID', () => {
+    // The run-token claim stores the workspace's internal id; the slug is what the list sends as `id`.
+    state.items = [
+      incident({ id: 'i1', workspaceId: 'ws1' }),
+      incident({ id: 'i2', title: 'Internal-id incident', workspaceId: '01M2F5WS2ULID' }),
+    ];
+    render(<IncidentsBody />);
+    expect(screen.getByText('Acme')).toBeInTheDocument();
+    expect(screen.getByText('Fernwood')).toBeInTheDocument();
+    expect(screen.queryByText(/01M2F5WS2ULID/)).toBeNull();
   });
 
   it('pulses the dot only while open', () => {

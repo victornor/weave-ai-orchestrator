@@ -7,7 +7,7 @@
  */
 import { useMemo, useState } from 'react';
 import { RUN_STATUSES, type Run, type RunStatus, type UiStatus } from '@weave-ai/shared';
-import { useRunPagesMany, useWorkersMany, useWorkspaces } from '../api/hooks';
+import { useRunPagesMany, useWeaverMany, useWorkersMany, useWorkspaces } from '../api/hooks';
 import { useGo, useSearchParams } from '../app/link';
 import { EmptyState, ErrorState } from '../components/States';
 import { SkeletonRows } from '../components/Skeleton';
@@ -77,12 +77,19 @@ export function RunsBody(): React.ReactElement {
   const params = useMemo(() => (status ? { status, limit: pageSize } : { limit: pageSize }), [status, pageSize]);
   const pages = useRunPagesMany(ids, params);
   const workers = useWorkersMany(ids, { includeRetired: true });
+  const weavers = useWeaverMany(ids);
 
+  // A run's agent is a worker or its workspace's weaver, so resolve both; an unresolved agent reads
+  // as a neutral label rather than a sliced id (VS-403).
   const nameById = useMemo(() => {
     const m = new Map<string, string>();
     for (const q of workers) for (const w of q.data ?? []) m.set(w.id, w.name);
+    for (const q of weavers) {
+      const agent = q.data?.agent;
+      if (agent) m.set(agent.id, agent.name);
+    }
     return m;
-  }, [workers]);
+  }, [workers, weavers]);
 
   const rows = useMemo(() => mergeRuns(pages.flatMap((q) => q.data?.runs ?? [])), [pages]);
   const total = useMemo(() => pages.reduce((n, q) => n + (q.data?.total ?? 0), 0), [pages]);
@@ -90,7 +97,7 @@ export function RunsBody(): React.ReactElement {
   const loaded = Boolean(workspaces.data) && pages.every((q) => q.data !== undefined || q.isError);
   const errored = pages.length > 0 && pages.every((q) => q.isError);
 
-  const nameOf = (id: string): string => nameById.get(id) ?? id.slice(0, 8);
+  const nameOf = (id: string): string => nameById.get(id) ?? 'Unknown agent';
   const open = (r: Run): void => go('/v2/runs/$runId', { params: { runId: r.id } });
 
   const stateChips = (

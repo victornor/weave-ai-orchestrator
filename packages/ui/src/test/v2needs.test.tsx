@@ -11,6 +11,7 @@ import { decision as makeDecision } from './factories';
 const state = vi.hoisted(() => ({
   path: '/v2/needs',
   decisions: [] as Decision[],
+  workers: {} as Record<string, Array<{ id: string; name: string }>>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -29,18 +30,18 @@ vi.mock('../app/link', () => ({
 vi.mock('../api/hooks', () => ({
   useWorkspaces: () => ({
     data: [
-      { id: 'ws1', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 1 },
-      { id: 'ws2', name: 'Fernwood', ticketPrefix: 'VS', root: '', projects: [], needsYou: 1 },
+      { id: 'ws1', internalId: 'ulid-ws1', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 1 },
+      { id: 'ws2', internalId: 'ulid-ws2', name: 'Fernwood', ticketPrefix: 'VS', root: '', projects: [], needsYou: 1 },
     ],
     isError: false,
     refetch: vi.fn(),
   }),
   useWorkspaceProjects: () => ({}),
   useWorkers: () => ({ data: [] }),
-  useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
+  useWorkersMany: (ids: readonly string[]) => ids.map((id) => ({ data: state.workers[id] ?? [] })),
   useIncidents: () => ({ data: { items: [], total: 0 } }),
   useDecisionsMany: (ids: readonly string[]) =>
-    ids.map((id) => ({ data: state.decisions.filter((d) => d.workspaceId === id), isError: false, refetch: vi.fn() })),
+    ids.map((id) => ({ data: state.decisions.filter((d) => d.workspaceId === id || d.workspaceId === `ulid-${id}`), isError: false, refetch: vi.fn() })),
   useTicketsMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
   useAnswerDecision: () => ({ mutate: vi.fn(), isPending: false }),
   useTicketWorkProducts: () => ({ data: [], isLoading: false }),
@@ -57,6 +58,7 @@ const { V2NeedsPage } = await import('../v2/NeedsYouPage');
 
 beforeEach(() => {
   state.path = '/v2/needs';
+  state.workers = {};
   state.decisions = [
     makeDecision({ id: 'd1', workspaceId: 'ws1', title: 'Approve the plan for ACME-51', kind: 'plan_approval', options: [{ key: 'approve', label: 'Approve' }] }),
     makeDecision({ id: 'd2', workspaceId: 'ws2', title: 'Where should the theme preference live?', kind: 'question', options: [{ key: 'cookie', label: 'Cookie' }] }),
@@ -75,6 +77,17 @@ describe('the V2 Needs you screen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
     expect(screen.getByText('Approve the plan for ACME-51')).toBeInTheDocument();
     expect(screen.queryByText('Where should the theme preference live?')).toBeNull();
+  });
+
+  it('keeps a decision carrying the internal id when a workspace chip is selected on the global screen', () => {
+    state.decisions = [
+      makeDecision({ id: 'd1', workspaceId: 'ulid-ws1', title: 'Internal-id decision', kind: 'question', options: [], allowFreeText: true }),
+    ];
+    render(<V2NeedsPage />);
+    expect(screen.getByText('Internal-id decision')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
+    expect(screen.getByText('Internal-id decision')).toBeInTheDocument();
+    expect(screen.getByText('1 waiting')).toBeInTheDocument();
   });
 
   it('filters by decision-kind chip', () => {
@@ -99,6 +112,16 @@ describe('the V2 Needs you screen', () => {
     expect(screen.queryByText('Where should the theme preference live?')).toBeNull();
   });
 
+  it('shows a decision whose workspace id is the internal id on the workspace-scoped screen', () => {
+    state.path = '/v2/w/ws1/needs';
+    state.decisions = [
+      makeDecision({ id: 'd1', workspaceId: 'ulid-ws1', title: 'Scoped decision', kind: 'question', options: [], allowFreeText: true }),
+    ];
+    render(<V2NeedsPage />);
+    expect(screen.getByText('Scoped decision')).toBeInTheDocument();
+    expect(screen.getByText('1 waiting')).toBeInTheDocument();
+  });
+
   it('shows an empty state when nothing is waiting', () => {
     state.decisions = [];
     render(<V2NeedsPage />);
@@ -114,5 +137,20 @@ describe('the V2 Needs you screen', () => {
     expect(screen.getByRole('article', { name: 'Weaver asks: Asked by the weaver' })).toBeInTheDocument();
     expect(screen.getByRole('article', { name: 'Needs you: Asked by nobody we know' })).toBeInTheDocument();
     expect(screen.queryByText('Worker question')).toBeNull();
+    expect(screen.getByText('tk_1 · Workspace · Weaver')).toBeInTheDocument();
+    expect(screen.getByText('tk_1 · Workspace · an agent')).toBeInTheDocument();
+  });
+
+  it('shows the asking worker its name, never its raw id, and a neutral label when unknown', () => {
+    state.workers = { ws2: [{ id: '01M2F4K267XGRT5F4E8B4F63AD', name: 'Platform Engineer #12' }] };
+    state.decisions = [
+      makeDecision({ id: 'd1', workspaceId: 'ws2', kind: 'question', options: [], allowFreeText: true, askedByAgentId: '01M2F4K267XGRT5F4E8B4F63AD', title: 'Asked by a worker' }),
+      makeDecision({ id: 'd2', workspaceId: 'ws2', kind: 'question', options: [], allowFreeText: true, askedByAgentId: 'nobody-we-know', title: 'Asked by an unknown agent' }),
+    ];
+    render(<V2NeedsPage />);
+    expect(screen.getByText(/Platform Engineer #12/)).toBeInTheDocument();
+    expect(screen.queryByText(/01M2F4K267XGRT5F4E8B4F63AD/)).toBeNull();
+    expect(screen.queryByText(/nobody-we-know/)).toBeNull();
+    expect(screen.getByText(/an agent/)).toBeInTheDocument();
   });
 });

@@ -15,6 +15,7 @@ vi.mock('../api/runStream', () => ({ useRunEventStream: () => ({ events: [] as R
 vi.mock('../api/hooks', () => ({
   useRunGlobal: () => ({ data: state.run ? { run: state.run, agent: null, ticket: null, phases: [], usage: state.run.usage } : undefined, isLoading: false, isError: false }),
   useWorkersMany: () => [{ data: [{ id: 'a1', name: 'Backend Engineer #7' }] }],
+  useWeaverMany: () => [{ data: { agent: { id: 'weaver-1', name: 'Acme Weaver' } } }],
   useRuntimeModels: () => ({ data: [{ id: 'sonnet-4.6', label: 'Sonnet', contextWindowTokens: 200_000 }] }),
   useRuns: () => ({ data: [] }),
 }));
@@ -50,6 +51,20 @@ describe('V2 Run detail', () => {
     state.run = makeRun({ id: 'run_1', status: 'running', retryOfRunId: 'run_previous_abcdef', startedAt: '2026-09-01T09:00:00.000Z' });
     render(<RunBody runId="run_1" />);
     expect((document.querySelector('[data-v2-run-meta]') as HTMLElement).textContent).toContain('Retry of run_prev');
+  });
+
+  it('names the weaver when the run is the weaver\u2019s', () => {
+    state.run = makeRun({ id: 'run_1', agentId: 'weaver-1', status: 'succeeded', startedAt: '2026-09-01T09:00:00.000Z', finishedAt: '2026-09-01T09:00:51.000Z' });
+    render(<RunBody runId="run_1" />);
+    expect((document.querySelector('[data-v2-run-meta]') as HTMLElement).textContent).toContain('Acme Weaver');
+  });
+
+  it('never shows a raw agent id when the agent is unknown', () => {
+    state.run = makeRun({ id: 'run_1', agentId: 'ghost-agent', status: 'succeeded', startedAt: '2026-09-01T09:00:00.000Z', finishedAt: '2026-09-01T09:00:51.000Z' });
+    render(<RunBody runId="run_1" />);
+    const meta = document.querySelector('[data-v2-run-meta]') as HTMLElement;
+    expect(meta.textContent).toContain('Unknown agent');
+    expect(meta.textContent).not.toContain('ghost');
   });
 
   it('says a run was started by a wake when it carries wakes', () => {

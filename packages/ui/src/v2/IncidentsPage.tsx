@@ -53,7 +53,14 @@ export function IncidentsBody(): React.ReactElement {
     () => all.filter((i) => (filter === 'all' ? true : filter === 'open' ? i.resolvedAt === null : i.resolvedAt !== null)),
     [all, filter],
   );
-  const scopeName = (workspaceId: string | null): string => (workspaceId ? (workspaces.data?.find((w) => w.id === workspaceId)?.name ?? workspaceId) : 'Daemon');
+  // An incident carries the workspace's internal id (minted from the run token), while the workspaces
+  // list sends the slug as `id` and the row's ULID as `internalId` — match whichever it carries, and
+  // fall back to a neutral label rather than the raw id (VS-403).
+  const scopeName = (workspaceId: string | null): string => {
+    if (!workspaceId) return 'Daemon';
+    const ws = workspaces.data?.find((w) => w.internalId === workspaceId || w.id === workspaceId);
+    return ws?.name ?? 'Unknown workspace';
+  };
   const toggle = (id: string): void => {
     setExpanded((current) => {
       const next = new Set(current);

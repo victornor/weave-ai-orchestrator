@@ -29,7 +29,7 @@ vi.mock('../app/link', () => ({
 const { WorkspaceNav } = await import('../app/WorkspaceNav');
 
 const workspace = (over: Partial<WorkspaceListItem> = {}): WorkspaceListItem => ({
-  id: 'alpha', name: 'Alpha', ticketPrefix: 'ALP', root: '/tmp/alpha', projects: [], needsYou: 0, ...over,
+  id: 'alpha', internalId: 'ulid-alpha', name: 'Alpha', ticketPrefix: 'ALP', root: '/tmp/alpha', projects: [], needsYou: 0, ...over,
 });
 
 const WORKSPACES = [

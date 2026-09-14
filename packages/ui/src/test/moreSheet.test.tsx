@@ -33,7 +33,7 @@ vi.mock('../app/link', () => ({
 const { MoreSheet } = await import('../app/MoreSheet');
 
 const listItem = (over: Partial<WorkspaceListItem> = {}): WorkspaceListItem => ({
-  id: 'ws1', name: 'Acme', ticketPrefix: 'ACME', root: '/tmp/ws1', projects: [], needsYou: 0, ...over,
+  id: 'ws1', internalId: 'ulid-ws1', name: 'Acme', ticketPrefix: 'ACME', root: '/tmp/ws1', projects: [], needsYou: 0, ...over,
 });
 
 const onClose = vi.fn();

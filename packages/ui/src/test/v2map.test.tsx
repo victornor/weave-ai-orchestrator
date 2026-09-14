@@ -83,6 +83,24 @@ describe('V2 Map', () => {
     expect(state.go).toHaveBeenCalledWith('/v2/w/$ws/chat', { params: { ws: 'ws1' } });
   });
 
+  it('draws a shape per node kind', () => {
+    render(<MapBody />);
+    const workspace = document.querySelector('[data-node="workspace:ws1"]') as HTMLElement;
+    expect(workspace.querySelector('circle')).not.toBeNull();
+    expect(workspace.querySelector('rect')).toBeNull();
+    expect(workspace.querySelector('polygon')).toBeNull();
+
+    const proj = document.querySelector('[data-node="project:p1"]') as HTMLElement;
+    expect(proj.querySelector('rect')).not.toBeNull();
+    expect(proj.querySelector('circle')).toBeNull();
+    expect(proj.querySelector('polygon')).toBeNull();
+
+    const worker = document.querySelector('[data-node="worker:a1"]') as HTMLElement;
+    expect(worker.querySelector('polygon')).not.toBeNull();
+    expect(worker.querySelector('circle')).toBeNull();
+    expect(worker.querySelector('rect')).toBeNull();
+  });
+
   it('pans the graph with a drag through the viewport module', () => {
     render(<MapBody />);
     const svg = document.querySelector('[data-v2-map-canvas] svg') as SVGSVGElement;

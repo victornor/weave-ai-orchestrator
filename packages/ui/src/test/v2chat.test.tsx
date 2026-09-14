@@ -69,7 +69,10 @@ vi.mock('../api/hooks', () => ({
     loadOlder: vi.fn(),
   }),
   usePostThreadMessage: () => ({ mutateAsync: state.post, mutate: state.post, isPending: false }),
-  useDecisions: () => ({ data: state.decisions, isSuccess: true }),
+  useDecisions: (params: { status?: string | string[] } = {}) => {
+    const wanted = params.status === undefined ? ['open'] : Array.isArray(params.status) ? params.status : [params.status];
+    return { data: state.decisions.filter((d) => wanted.includes(d.status)), isSuccess: true };
+  },
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
   useWorkers: () => ({ data: [{ id: 'w1', status: 'running' }, { id: 'w2', status: 'idle' }] }),
   useProjects: () => ({ data: [{ id: 'p1', workspaceId: 'ws1', slug: 'web', name: 'web' }] }),
@@ -271,6 +274,111 @@ describe('the V2 Chat screen', () => {
 
     expect(screen.getByText('main').tagName).toBe('CODE');
     expect(screen.getByText('docs').getAttribute('href')).toBe('/guide');
+  });
+
+  it('renders an open decision inline on phone and nothing in the desktop conversation', async () => {
+    const card = { type: 'card', title: 'Approve the plan', body: 'Cache GET /projects', actions: [], ref: { kind: 'decision', id: 'd1' } };
+    state.messages = [
+      message({ id: 'm1', body: 'A real reply' }),
+      message({ id: 'm2', body: 'Approve the plan\n\nCache GET /projects', parts: [card] }),
+    ];
+    state.decisions = [question({ id: 'd1', title: 'Approve the plan' })];
+
+    // Phone: the pane is absent, so the card renders inline in the conversation and is answerable.
+    state.width = 500;
+    const phone = render(<V2ChatPage />);
+    expect(await screen.findByText('A real reply')).toBeInTheDocument();
+    expect(document.querySelector('[data-decisions-pane]')).toBeNull();
+    expect(document.querySelectorAll('[data-chat-message]')).toHaveLength(1);
+    expect(document.querySelectorAll('[data-inline-decision-card]')).toHaveLength(1);
+    expect(screen.getByRole('radio', { name: /Option A/ })).toBeInTheDocument();
+    // The card's prose fallback is not rendered as a message.
+    expect(screen.queryByText(/Cache GET/)).toBeNull();
+    phone.unmount();
+
+    // Desktop: the pane carries the open decision; the conversation shows nothing for it.
+    state.width = 900;
+    render(<V2ChatPage />);
+    expect(await screen.findByText('A real reply')).toBeInTheDocument();
+    expect(document.querySelector('[data-decisions-pane]')).not.toBeNull();
+    expect(document.querySelectorAll('[data-inline-decision-card]')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-decision-note]')).toHaveLength(0);
+    expect(document.querySelectorAll('[data-chat-message]')).toHaveLength(1);
+    expect(screen.getByText(/1 need you/)).toBeInTheDocument();
+  });
+
+  it('swaps the inline phone card for its note the moment it is answered', async () => {
+    const card = { type: 'card', title: 'Approve the plan', body: 'Cache GET /projects', actions: [], ref: { kind: 'decision', id: 'd1' } };
+    state.messages = [message({ id: 'm2', body: 'Approve the plan\n\nCache GET /projects', parts: [card] })];
+    state.decisions = [question({ id: 'd1', title: 'Approve the plan' })];
+    state.width = 500;
+    render(<V2ChatPage />);
+    expect(document.querySelectorAll('[data-inline-decision-card]')).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole('radio', { name: /Option A/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+
+    // In place, before any refetch: the card is gone and its note stands where it sat.
+    expect(document.querySelectorAll('[data-inline-decision-card]')).toHaveLength(0);
+    expect(document.querySelector('[data-decision-note]')?.textContent).toBe('You answered: Option A — Approve the plan');
+  });
+
+  it('leaves one muted note where an answered question’s card sat, at phone and desktop', async () => {
+    const card = { type: 'card', title: 'Which key?', body: 'Cache GET /projects', actions: [], ref: { kind: 'decision', id: 'd1' } };
+    state.messages = [
+      message({ id: 'm1', body: 'A real reply' }),
+      message({ id: 'm2', body: 'Which rate-limit key should we use?\n\nThe endpoint sits behind a proxy.', parts: [card] }),
+    ];
+    state.decisions = [
+      question({
+        id: 'd1',
+        title: 'Which rate-limit key should we use?',
+        status: 'answered',
+        answerKey: 'api_key',
+        options: [{ key: 'api_key', label: 'API key' }, { key: 'ip', label: 'Client IP' }],
+      }),
+    ];
+
+    state.width = 500;
+    const phone = render(<V2ChatPage />);
+    expect(await screen.findByText('A real reply')).toBeInTheDocument();
+    const phoneNotes = document.querySelectorAll('[data-decision-note]');
+    expect(phoneNotes).toHaveLength(1);
+    expect(phoneNotes[0]!.textContent).toBe('You answered: API key — Which rate-limit key should we use?');
+    // A decision with no ticket links to Needs you.
+    expect(phoneNotes[0]!.querySelector('a')?.getAttribute('href')).toBe('/v2/needs');
+    // The real message is untouched; the card's prose fallback is not a message.
+    expect(document.querySelectorAll('[data-chat-message]')).toHaveLength(1);
+    expect(screen.queryByText(/endpoint sits behind/)).toBeNull();
+    phone.unmount();
+
+    state.width = 900;
+    render(<V2ChatPage />);
+    expect(await screen.findByText('A real reply')).toBeInTheDocument();
+    const desktopNotes = document.querySelectorAll('[data-decision-note]');
+    expect(desktopNotes).toHaveLength(1);
+    expect(desktopNotes[0]!.textContent).toBe('You answered: API key — Which rate-limit key should we use?');
+    expect(document.querySelectorAll('[data-chat-message]')).toHaveLength(1);
+  });
+
+  it('reads “You decided” for an answered approval, using the option label', async () => {
+    const card = { type: 'card', title: 'Approve merge', body: 'PR #2 is green.', actions: [], ref: { kind: 'decision', id: 'd1' } };
+    state.messages = [message({ id: 'm2', body: 'Approve merge\n\nPR #2 is green.', parts: [card] })];
+    state.decisions = [
+      question({
+        id: 'd1',
+        kind: 'merge_approval',
+        title: 'Approve the merge for VS-360',
+        status: 'answered',
+        answerKey: 'approve',
+        options: [{ key: 'approve', label: 'Approve merge' }],
+      }),
+    ];
+    state.width = 500;
+    render(<V2ChatPage />);
+    const note = document.querySelector('[data-decision-note]');
+    expect(note).not.toBeNull();
+    expect(note!.textContent).toBe('You decided: Approve merge — Approve the merge for VS-360');
   });
 
   it('renders a message’s attachments as rows with a glyph, byline and kind', async () => {

@@ -17,19 +17,19 @@ import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { git } from '../util/git.js';
 import { landLock } from '../util/land-lock.js';
-import { scratchBranchFrom } from '../tickets/archive-before-merge.js';
+import { scratchBranchFrom } from '../tickets/scratch.js';
 import * as cli from './cli.js';
 import { fillArchivedCapabilityPurposes } from './purpose.js';
 import { findUndeclaredCapabilityRetirements } from './retirement.js';
 
 const SYSTEM: Actor = { kind: 'system', id: null };
 
-export interface ProjectRow { id: string; clonePath: string; defaultBranch: string; landingBranch: string | null; openspecEnabled: number; policies: Record<string, unknown> }
+export interface ProjectRow { id: string; slug: string; clonePath: string; defaultBranch: string; landingBranch: string | null; openspecEnabled: number; policies: Record<string, unknown> }
 
 /** The project row read straight from the db (camelCased, `policies_json` decoded). */
 export function projectRow(db: Db, projectId: string | null | undefined): ProjectRow | undefined {
   if (!projectId) return undefined;
-  return db.get<ProjectRow>('SELECT id, clone_path, default_branch, landing_branch, openspec_enabled, policies_json FROM projects WHERE id = ? OR slug = ?', [projectId, projectId]);
+  return db.get<ProjectRow>('SELECT id, slug, clone_path, default_branch, landing_branch, openspec_enabled, policies_json FROM projects WHERE id = ? OR slug = ?', [projectId, projectId]);
 }
 
 /** The live worker's worktree for a ticket, when it exists on disk. */
@@ -215,7 +215,7 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
           ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecArchivePendingPrUrl: pr.url });
           return { archivedAs: null, skipped: null, pendingPrUrl: pr.url };
         }
-        const scratch = await scratchBranchFrom(project.clonePath, 'HEAD', newBranch);
+        const scratch = await scratchBranchFrom(project.clonePath, 'HEAD', newBranch, { stateDir: ctx.paths.state, projectSlug: project.slug, label: ticket.identifier });
         try {
           const o = { cwd: scratch.path, root: scratch.path };
           let result: cli.ArchiveResult;

@@ -13,7 +13,8 @@ import type { CoreServices } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { git } from '../util/git.js';
 import { createSerializer } from '../util/serialize.js';
-import { isFreshAgainstLanding, rebaseOntoLanding, scratchBranchFrom, scratchLandWorktree } from '../tickets/archive-before-merge.js';
+import { isFreshAgainstLanding, rebaseOntoLanding } from '../tickets/archive-before-merge.js';
+import { scratchBranchFrom, scratchLandWorktree, type ScratchTarget } from '../tickets/scratch.js';
 import { repoKnowledgePath } from './files.js';
 
 export type KnowledgeSwitchDirection = 'on' | 'off';
@@ -106,9 +107,11 @@ async function startLocked(
   }
 
   const hasBranch = (await git(['ls-remote', '--exit-code', '--heads', 'origin', branch], project.clonePath, 60_000)).ok;
+  // VS-383: the switch's scratch worktree lives under the workspace state dir, like every other one.
+  const scratchTarget: ScratchTarget = { stateDir: ctx.paths.state, projectSlug: project.slug, label: `knowledge-switch-${project.slug}-${direction}` };
   const scratch = hasBranch
-    ? await scratchLandWorktree(project.clonePath, branch)
-    : await (async () => { try { await deps().projects.fetch(project.id); } catch { /* best effort: the scratch branch below still fetches what it needs */ } return scratchBranchFrom(project.clonePath, 'HEAD', branch); })();
+    ? await scratchLandWorktree(project.clonePath, branch, scratchTarget)
+    : await (async () => { try { await deps().projects.fetch(project.id); } catch { /* best effort: the scratch branch below still fetches what it needs */ } return scratchBranchFrom(project.clonePath, 'HEAD', branch, scratchTarget); })();
 
   try {
     if (hasBranch) {

@@ -23,6 +23,7 @@ export { signRunToken, verifyRunToken, runTokenSecret, peekWorkspaceId, isRunTok
 export { describeLiveInput, type LiveInputStatus } from './runs/active.js';
 export * from './workspace/index.js';
 export { registerBuiltinWorktreeProviders, GitWorktreeProvider, WorktrunkProvider, landedWorkTest, renderWtConfig, writeWtConfig, type LandedInput, type LandedVerdict } from './worktrees/index.js';
+export { listScratchTrees, sweepScratchWorktrees, activeScratchWorktrees, scratchRoot, SCRATCH_STALE_MS, type ScratchTarget, type ScratchLand, type ScratchTreeInfo, type ScratchClone } from './tickets/scratch.js';
 export { registerBuiltinForges, GhForge } from './forge/index.js';
 export { humanName, buildTurnPrompt, renderTemplate, renderCharter, renderBrief, renderWorkerInstructions, renderConductorInstructions, flattenWakes, type TurnPromptOptions } from './prompts/index.js';
 export { createSessions, type SessionsService, type SessionRow } from './sessions/index.js';

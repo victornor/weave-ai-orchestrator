@@ -11,6 +11,7 @@ import { CURATION_BUDGET_FRACTION, budgetOf, isDocPath } from '../knowledge/file
 import { sh } from '../util/exec.js';
 import { sessionActivitySignal } from '../workers/activity-signal.js';
 import { handoverCommentBody, reconcileHandover, type HandoverSnapshot } from '../workers/handover-reconcile.js';
+import { sweepScratchWorktrees } from '../tickets/scratch.js';
 
 const TICK_MS = 15_000;
 const LIVENESS_EVERY_MS = 60_000;
@@ -46,6 +47,11 @@ const ACCOUNTS_EVERY_MS = 5 * 60_000;
  */
 const LOGIN_RECHECK_EVERY_MS = 60_000;
 const RETENTION_EVERY_MS = DAY_MS;
+/**
+ * VS-383: how often stale scratch landing worktrees are reclaimed. Well above any landing's runtime,
+ * so a tree still in flight (the in-process set also protects it) is never swept.
+ */
+const SCRATCH_SWEEP_EVERY_MS = 15 * 60_000;
 
 const SYSTEM: Actor = { kind: 'system', id: null };
 
@@ -162,6 +168,18 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         deps().wake.enqueue(run.agentId, { source: 'retry', reason: 'previous turn was interrupted', payload: { retryOfRunId: run.id, interrupted: true }, idempotencyKey: `boot-retry:${run.id}`, requestedBy: { kind: 'system', id: null } });
       } catch (e) { log.warn({ err: String(e) }, 'could not re-queue the interrupted run'); }
     }
+  }
+
+  /**
+   * VS-383: reclaim scratch landing worktrees a failed or interrupted landing left behind. A daemon
+   * killed mid-landing skips its `finally`, and before VS-383 a refused checkout leaked the tree with
+   * no handle at all — on a RAM-backed `/tmp` that is real memory. Runs once at boot and on a period.
+   */
+  async function sweepScratch(): Promise<void> {
+    const clones = deps().projects.list().map((p) => ({ clonePath: p.clonePath, slug: p.slug }));
+    if (clones.length === 0) return;
+    const { removed, bytes } = await sweepScratchWorktrees({ clones, stateDir: ctx.paths.state });
+    if (removed.length > 0) log.info({ removed: removed.length, bytes, paths: removed.map((r) => r.path) }, 'swept stale scratch worktrees');
   }
 
   async function watchdog(): Promise<void> {
@@ -914,6 +932,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         if (!bootRecovered) {
           bootRecovered = true;
           await bootRecovery().catch((e) => log.error({ err: String(e) }, 'boot recovery failed'));
+          await sweepScratch().catch((e) => log.error({ err: String(e) }, 'scratch sweep at boot failed'));
           try { nudgeIdleConductor(); } catch (e) { log.warn({ err: String(e) }, 'idle conductor nudge failed'); }
         }
         await watchdog().catch((e) => log.error({ err: String(e) }, 'watchdog failed'));
@@ -942,6 +961,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         if (due('supervisor:login_recheck_at', LOGIN_RECHECK_EVERY_MS)) await loginRecheck().catch((e) => log.error({ err: String(e) }, 'runtime login recheck failed'));
         if (due('supervisor:reconcile_at', RECONCILE_EVERY_MS)) await reconcilePass().catch((e) => log.error({ err: String(e) }, 'reconcile pass failed'));
         if (due('supervisor:retention_at', RETENTION_EVERY_MS)) { try { retentionPass(); } catch (e) { log.error({ err: String(e) }, 'retention pass failed'); } }
+        if (due('supervisor:scratch_at', SCRATCH_SWEEP_EVERY_MS)) await sweepScratch().catch((e) => log.error({ err: String(e) }, 'scratch sweep failed'));
       } finally {
         ticking = false;
       }

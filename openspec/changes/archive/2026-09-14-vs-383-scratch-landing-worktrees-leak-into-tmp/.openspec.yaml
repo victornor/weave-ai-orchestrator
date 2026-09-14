@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Scratch landing worktrees live under the workspace state dir, are always
+  cleaned up after a landing, and stale ones are swept and surfaced
+skip_specs: true

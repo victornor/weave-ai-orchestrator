@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -51,6 +51,19 @@ describe('startKnowledgeRepoSwitch (VS-359)', () => {
   };
   const subjectLog = async (ref: string): Promise<string[]> =>
     (await git(['log', '--format=%s', `main..${ref}`], origin)).stdout.trim().split('\n').filter(Boolean);
+  /** VS-383: a finished switch leaves no scratch worktree registered and no directory holding one. */
+  const expectNoScratch = async (): Promise<void> => {
+    const listed = await git(['worktree', 'list', '--porcelain'], clone);
+    const registered = listed.stdout.split('\n')
+      .filter((l) => l.startsWith('worktree '))
+      .map((l) => l.slice('worktree '.length).trim())
+      .filter((p) => p.startsWith(join(dir, 'state', 'scratch')));
+    expect(registered).toEqual([]);
+    const root = join(dir, 'state', 'scratch');
+    const leftovers: string[] = [];
+    if (existsSync(root)) for (const proj of readdirSync(root)) for (const tree of readdirSync(join(root, proj))) leftovers.push(join(proj, tree));
+    expect(leftovers).toEqual([]);
+  };
 
   beforeEach(async () => {
     dir = mkdtempSync(join(tmpdir(), 'ac-knowledge-switch-'));
@@ -90,7 +103,8 @@ describe('startKnowledgeRepoSwitch (VS-359)', () => {
       },
     };
     ctx = {
-      paths: { knowledge: knowledgeRoot },
+      // VS-383: the scratch worktree a switch uses is created under the workspace state dir.
+      paths: { knowledge: knowledgeRoot, state: join(dir, 'state') },
       db: { update: (_table: string, id: string, obj: Record<string, unknown>) => { recorded.push({ id, ...obj }); return 1; } },
       registries: { forges: new Map([['github', forge]]) },
     } as unknown as WorkspaceContext;
@@ -115,6 +129,7 @@ describe('startKnowledgeRepoSwitch (VS-359)', () => {
     expect(await subjectLog(`refs/heads/${BRANCH_ON}`)).toEqual(['chore(knowledge): commit api knowledge in the repository']);
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({ id: 'p1', knowledgeSwitchJson: { direction: 'on', branch: BRANCH_ON, prUrl: 'https://example.com/pr/1' } });
+    await expectNoScratch();
   });
 
   it('disabling opens one PR removing the tree and leaves the workspace copy untouched', async () => {
@@ -145,6 +160,7 @@ describe('startKnowledgeRepoSwitch (VS-359)', () => {
     expect(openedPrs).toHaveLength(2);
     expect(openedPrs[1]).toMatchObject({ branch: BRANCH_ON });
     expect((await git(['ls-remote', '--heads', 'origin', BRANCH_ON], clone)).stdout.trim().split('\n')).toHaveLength(1);
+    await expectNoScratch();
   });
 
   it('disabling a repository with no .weave/knowledge applies directly with no PR', async () => {

@@ -18,6 +18,16 @@ interface Check { name: string; ok: boolean | null; detail: string; fix?: string
 interface CredentialState { runtimeId: string; present: boolean; expiresAt: string | null; lastVerifiedAt: string | null; refreshFailedAt: string | null; needsLogin: boolean }
 interface HostTool { id: string; available: boolean; version: string | null; need: 'required' | 'recommended'; purpose: string }
 interface HealthHost { platform?: string; hostname?: string; tools?: Record<string, HostTool> }
+/** `GET /daemon/scratch` (VS-383). */
+interface ScratchReport { count: number; bytes: number }
+
+/** A short human size for the scratch report. */
+function humanBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GiB`;
+}
 
 function localTool(binary: string, args: string[]): { ok: boolean; detail: string } {
   try {
@@ -135,6 +145,18 @@ export function register(program: Command): void {
           detail: workspaces.map((w) => String(w['id'])).join(', ') || 'none yet — onboarding not completed',
           fix: workspaces.length > 0 ? undefined : `create the first one in the web app (${String(health['publicUrl'] ?? client.baseUrl)}) or with \`weave init <dir> --id <slug> --prefix <PFX> --name "…"\``,
         });
+
+        // VS-383: leftover scratch landing worktrees are real memory when /tmp is a tmpfs. The daemon
+        // sweeps stale ones at boot and on a period, so a non-zero count is a warning, not a failure.
+        const scratch = await client.wget<ScratchReport>('/daemon/scratch').catch(() => null);
+        if (scratch) {
+          checks.push({
+            name: 'scratch worktrees',
+            ok: scratch.count === 0 ? true : null,
+            detail: scratch.count === 0 ? 'none left behind' : `${scratch.count} left behind (${humanBytes(scratch.bytes)}) — the daemon reclaims stale ones on its next sweep`,
+            fix: scratch.count === 0 ? undefined : 'a count that keeps growing is a cleanup bug; see the daemon log for `swept stale scratch worktrees`',
+          });
+        }
 
         const host = (health['host'] ?? null) as HealthHost | null;
         daemonIsThisHost = host?.hostname ? host.hostname === hostname() : isRunning(pid);

@@ -4,75 +4,16 @@
  * small, independently testable step; `tickets/service.ts`'s `mergeDone` composes them into the
  * full archive-then-merge sequence (design.md Decision 1).
  */
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { OcError } from '@weave-ai/shared';
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 import { git } from '../util/git.js';
 import * as cli from '../openspec/cli.js';
 import { fillArchivedCapabilityPurposes } from '../openspec/purpose.js';
+import { scratchLandWorktree, type ScratchTarget } from './scratch.js';
 
-export interface ScratchLand {
-  /**
-   * The scratch worktree's path — a detached checkout at `origin/<branch>`, outside the primary clone.
-   * Commit in it and push `HEAD` to `refs/heads/<branch>`; no local branch of that name is created,
-   * so it works even while another worktree (the requesting worker's) has the branch checked out.
-   */
-  path: string;
-  /** Removes the scratch worktree. Safe to call once; idempotent on later calls. */
-  dispose(): Promise<void>;
-}
-
-/**
- * Creates a throwaway detached worktree of the project's primary clone at `origin/<branch>`
- * (design.md Decision 3), so archiving and rebasing a ticket's branch never disturbs the primary
- * clone's own checkout on the landing branch — and never requires a local checkout of `<branch>`,
- * which git refuses while the requesting worker's worktree holds it (VS-363). The primary clone's
- * object store is reused — no re-clone — only its working tree is not touched.
- */
-export async function scratchLandWorktree(repoPath: string, branch: string): Promise<ScratchLand> {
-  const dir = mkdtempSync(join(tmpdir(), 'ac-land-'));
-  const fetch = await git(['fetch', 'origin', branch], repoPath, 300_000);
-  if (!fetch.ok) throw new OcError('internal', `fetch of ${branch} failed: ${fetch.stderr.trim().slice(0, 300)}`, { branch });
-  const add = await git(['worktree', 'add', '--detach', dir, `origin/${branch}`], repoPath, 120_000);
-  if (!add.ok) throw new OcError('internal', `git worktree add for ${branch} failed: ${add.stderr.trim().slice(0, 300)}`, { branch, dir });
-  let disposed = false;
-  return {
-    path: dir,
-    async dispose() {
-      if (disposed) return;
-      disposed = true;
-      await git(['worktree', 'remove', '--force', dir], repoPath, 60_000).catch(() => {});
-      rmSync(dir, { recursive: true, force: true });
-      await git(['worktree', 'prune'], repoPath, 30_000).catch(() => {});
-    },
-  };
-}
-
-/**
- * Creates a brand-new local branch from `baseRef`, checked out in a throwaway worktree of the
- * project's primary clone — used by OpenSpec archive backfill (VS-327 task 4) to carry a
- * left-behind change's archive on its own branch, so it can be opened as a pull request rather than
- * pushed straight to the landing branch.
- */
-export async function scratchBranchFrom(repoPath: string, baseRef: string, newBranch: string): Promise<ScratchLand> {
-  const dir = mkdtempSync(join(tmpdir(), 'ac-land-'));
-  const add = await git(['worktree', 'add', '-b', newBranch, dir, baseRef], repoPath, 120_000);
-  if (!add.ok) throw new OcError('internal', `git worktree add for ${newBranch} from ${baseRef} failed: ${add.stderr.trim().slice(0, 300)}`, { baseRef, newBranch, dir });
-  let disposed = false;
-  return {
-    path: dir,
-    async dispose() {
-      if (disposed) return;
-      disposed = true;
-      await git(['worktree', 'remove', '--force', dir], repoPath, 60_000).catch(() => {});
-      rmSync(dir, { recursive: true, force: true });
-      await git(['worktree', 'prune'], repoPath, 30_000).catch(() => {});
-      await git(['branch', '-D', newBranch], repoPath, 30_000).catch(() => {});
-    },
-  };
-}
+export type { ScratchLand } from './scratch.js';
 
 /**
  * Is `landingRef`'s tip already reachable from `branchRef`? True means the branch is a fast-forward
@@ -141,6 +82,8 @@ export interface ArchiveThenMergeOpts {
   forge: ForgeAdapter;
   prUrl: string;
   method: string;
+  /** VS-383: where the scratch worktree is created — under the workspace state dir, never `/tmp`. */
+  scratch: ScratchTarget;
 }
 
 export type ArchiveThenMergeOutcome =
@@ -163,10 +106,10 @@ export type ArchiveThenMergeOutcome =
  * common case this project itself is in (no CI).
  */
 export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promise<ArchiveThenMergeOutcome> {
-  const { clonePath, branch, landingBranch, changeName, forge, prUrl, method } = opts;
+  const { clonePath, branch, landingBranch, changeName, forge, prUrl, method, scratch: scratchTarget } = opts;
   await git(['fetch', 'origin', landingBranch], clonePath, 300_000);
   const landingRef = `origin/${landingBranch}`;
-  const scratch = await scratchLandWorktree(clonePath, branch);
+  const scratch = await scratchLandWorktree(clonePath, branch, scratchTarget);
   try {
     let changed = false;
     let archivedAs: string | null = null;

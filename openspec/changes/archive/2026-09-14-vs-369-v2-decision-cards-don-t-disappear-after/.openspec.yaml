@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: V2 decision cards leave the screen at once after answering, a double click
+  cannot post twice, and a closed or held answer is handled as such.
+skip_specs: true

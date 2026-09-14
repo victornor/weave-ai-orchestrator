@@ -88,8 +88,9 @@ export interface V2PageProps {
   subnav?: ReactNode;
   /**
    * Whether this page's body is the single scroll container (default). A screen that fills the
-   * frame and scrolls its own region — chips pinned, list scrolling (HANDOFF §8) — passes `false`,
-   * so the shell bounds the frame and there is exactly one scroll container, never two nested.
+   * frame and scrolls its own region — chips pinned, list scrolling (HANDOFF §8), or an iframe
+   * filling the body (the V2 plugin page, VS-385) — passes `false`, so the shell bounds the frame
+   * and there is exactly one scroll container, never two nested.
    */
   scroll?: boolean;
   children?: ReactNode;

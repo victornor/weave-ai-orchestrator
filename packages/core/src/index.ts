@@ -35,6 +35,9 @@ export {
   ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks, type ArtifactKitTokens, type ArtifactKitComponent,
 } from './artifacts/kit.js';
 export {
+  V2_THEME_MARKERS, V2_THEME_TOKEN_NAMES, V2_BASE_TOKEN_NAMES, V2_STATUS_TONE_NAMES, WEAVE_PLUGIN_CLASS, generateV2PluginCss,
+} from './artifacts/v2-theme.js';
+export {
   createPluginRegistry, isNamespacedToolName, PLUGIN_TOOL_NAME_RE, PLUGIN_ID_RE,
   type PluginRegistry, type PluginRuntime, type PluginRouteDef, type PluginHookDef,
 } from './plugins/index.js';

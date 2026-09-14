@@ -10,9 +10,9 @@ import { A } from '../app/link';
 import { cx } from '../lib/cx';
 import { projectColorVar } from '../lib/projectColor';
 import { FanInStreams } from '../api/context';
-import { useMe, useWorkspaceProjects, useWorkspaces, type WorkspaceProjectsState } from '../api/hooks';
+import { useMe, useWorkspacePlugins, useWorkspaceProjects, useWorkspaces, type WorkspaceProjectsState } from '../api/hooks';
 import { WeaveMark } from '../components/WeaveMark';
-import type { WorkspaceListItem } from '../api/types';
+import type { WorkspaceListItem, WorkspacePlugin } from '../api/types';
 import { V2Glyph } from './Glyph';
 import {
   activeNavKey,
@@ -30,6 +30,15 @@ import {
 import { useV2Counts, useV2WorkspaceName, type V2Counts } from './V2Page';
 import { readRailCollapsed, writeRailCollapsed } from './prefs';
 import type { V2Theme } from './theme';
+
+/**
+ * A loaded plugin as a `V2Dest` (VS-385), so `RailRow`/`CollapsedRow`/`MoreRow` render it unchanged
+ * — it needs no rendering path of its own, the same way a plugin's V1 nav entry needed no
+ * build-time array entry (VS-334's precedent).
+ */
+function pluginDest(p: WorkspacePlugin): V2Dest {
+  return { key: `plugin:${p.id}`, label: p.name ?? p.id, glyph: 'plugin', scopeKind: 'workspace', path: `/w/$ws/plugins/${p.id}` };
+}
 
 function countOf(dest: V2Dest, scope: V2Scope, counts: V2Counts): number {
   // An Everywhere row carries the global figure; a workspace row its own workspace's. The row's
@@ -197,6 +206,7 @@ function WorkspaceGroups({
   activeKey,
   counts,
   projectsByWs,
+  pluginsByWs,
   onNavigate,
 }: {
   workspaces: WorkspaceListItem[];
@@ -204,6 +214,7 @@ function WorkspaceGroups({
   activeKey: string | null;
   counts: V2Counts;
   projectsByWs: Record<string, WorkspaceProjectsState>;
+  pluginsByWs: Record<string, WorkspacePlugin[]>;
   onNavigate?: () => void;
 }): React.ReactElement {
   const [collapsedWs, setCollapsedWs] = useState<Record<string, boolean>>({});
@@ -267,6 +278,17 @@ function WorkspaceGroups({
                     </A>
                   );
                 })}
+                {(pluginsByWs[w.id] ?? []).map((p) => (
+                  <RailRow
+                    key={p.id}
+                    dest={pluginDest(p)}
+                    scope={wsScope}
+                    fallbackWs={w.id}
+                    activeKey={isActive ? activeKey : null}
+                    counts={counts}
+                    onNavigate={onNavigate}
+                  />
+                ))}
               </div>
             ) : null}
           </div>
@@ -282,6 +304,7 @@ function MoreList({
   activeKey,
   counts,
   workspaces,
+  plugins,
   onNavigate,
 }: {
   scope: V2Scope;
@@ -289,6 +312,7 @@ function MoreList({
   activeKey: string | null;
   counts: V2Counts;
   workspaces: WorkspaceListItem[];
+  plugins: WorkspacePlugin[];
   onNavigate: () => void;
 }): React.ReactElement {
   const wsScope: V2Scope = scope.kind === 'workspace' ? scope : { kind: 'workspace', ws: fallbackWs };
@@ -300,7 +324,7 @@ function MoreList({
         ))}
       </MoreGroup>
       <MoreGroup title={workspaces.find((w) => w.id === (scope.kind === 'workspace' ? scope.ws : ''))?.name ?? 'Workspace'}>
-        {[...V2_WORKSPACE, ...V2_KEPT.filter((d) => d.scopeKind === 'workspace')].map((d) => (
+        {[...V2_WORKSPACE, ...V2_KEPT.filter((d) => d.scopeKind === 'workspace'), ...plugins.map(pluginDest)].map((d) => (
           <MoreRow key={d.key} dest={d} scope={wsScope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} onNavigate={onNavigate} />
         ))}
       </MoreGroup>
@@ -367,6 +391,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
   // renders only its own (VS-366). `useWorkspaceProjects` keeps a fetched result cached.
   const ids = useMemo(() => list.map((w) => w.id), [list]);
   const projectsByWs = useWorkspaceProjects(ids);
+  const pluginsByWs = useWorkspacePlugins(ids);
   const counts = useV2Counts(scope);
   const me = useMe();
   const username = me.data?.operator.username ? `${me.data.operator.username} · weave` : 'weave';
@@ -421,6 +446,16 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
                 counts={counts}
               />
             ))}
+            {(pluginsByWs[fallbackWs] ?? []).map((p) => (
+              <CollapsedRow
+                key={p.id}
+                dest={pluginDest(p)}
+                scope={ws ? scope : { kind: 'workspace', ws: fallbackWs }}
+                fallbackWs={fallbackWs}
+                activeKey={activeKey}
+                counts={counts}
+              />
+            ))}
           </div>
           <div className="pt-2">
             <ThemeSwitch theme={theme} onTheme={onTheme} variant="collapsed" />
@@ -453,6 +488,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
             activeKey={activeKey}
             counts={counts}
             projectsByWs={projectsByWs}
+            pluginsByWs={pluginsByWs}
           />
           <div className="px-2.5 pb-2 pt-1">
             <button
@@ -503,6 +539,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
               activeKey={activeKey}
               counts={counts}
               workspaces={list}
+              plugins={pluginsByWs[fallbackWs] ?? []}
               onNavigate={() => setMoreOpen(false)}
             />
           </div>

@@ -5,6 +5,20 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist/index.js",
+    "dist/index.js.map",
+    "dist/index.d.ts",
+    "dist/index.d.ts.map"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/victornor/agent-conductor.git",
+    "directory": "packages/plugin-sdk"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -12,12 +26,16 @@
     }
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "build:publish": "tsc -b && dts-bundle-generator -o dist/index.d.ts src/index.ts --no-banner && node scripts/write-publish-package-json.mjs"
   },
   "dependencies": {
-    "@weave-ai/shared": "workspace:*",
-    "@weave-ai/runtime-sdk": "workspace:*",
     "@weave-ai/channel-sdk": "workspace:*",
+    "@weave-ai/runtime-sdk": "workspace:*",
+    "@weave-ai/shared": "workspace:*",
     "@weave-ai/surface-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "dts-bundle-generator": "^9.5.1"
   }
 }

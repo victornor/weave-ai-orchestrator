@@ -7,11 +7,35 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WEAVE_PLUGIN_CLIENT_JS } from './index.js';
 
+interface FakeStyleElement { id: string; textContent: string }
+interface FakeDocument {
+  elements: Record<string, FakeStyleElement>;
+  documentElement: { dataset: Record<string, string> };
+  head: { appendChild: (el: FakeStyleElement) => void };
+  getElementById(id: string): FakeStyleElement | null;
+  createElement(tag: string): FakeStyleElement;
+}
 interface FakeWindow {
   listeners: Array<(e: { data: unknown }) => void>;
   addEventListener(type: string, fn: (e: { data: unknown }) => void): void;
   parent: { postMessage: ReturnType<typeof vi.fn> };
-  weavePluginClient?: () => { request: (m: string, p: string, b?: unknown) => Promise<unknown>; onEvent: (k: string, h: (p: unknown) => void) => void };
+  document: FakeDocument;
+  weavePluginClient?: () => {
+    request: (m: string, p: string, b?: unknown) => Promise<unknown>;
+    onEvent: (k: string, h: (p: unknown) => void) => void;
+    onTheme: (h: (t: string) => void) => void;
+  };
+}
+
+function makeDocument(): FakeDocument {
+  const elements: Record<string, FakeStyleElement> = {};
+  return {
+    elements,
+    documentElement: { dataset: {} },
+    head: { appendChild: (el) => { elements[el.id] = el; } },
+    getElementById: (id) => elements[id] ?? null,
+    createElement: () => ({ id: '', textContent: '' }),
+  };
 }
 
 function makeWindow(): FakeWindow {
@@ -19,6 +43,7 @@ function makeWindow(): FakeWindow {
     listeners: [],
     addEventListener(type, fn) { if (type === 'message') this.listeners.push(fn); },
     parent: { postMessage: vi.fn() },
+    document: makeDocument(),
   };
   return w;
 }
@@ -77,5 +102,35 @@ describe('WEAVE_PLUGIN_CLIENT_JS (VS-334)', () => {
     w.weavePluginClient!();
     expect(() => { for (const l of w.listeners) l({ data: 'garbage' }); }).not.toThrow();
     expect(() => { for (const l of w.listeners) l({ data: null }); }).not.toThrow();
+  });
+
+  it('a stylesheet message sets the injected <style> element\'s content, with no plugin callback', () => {
+    const w = makeWindow();
+    evalClient(w);
+    w.weavePluginClient!();
+
+    for (const l of w.listeners) l({ data: { type: 'stylesheet', css: '.v2-card { background: red; }' } });
+    expect(w.document.elements['weave-plugin-styles']?.textContent).toBe('.v2-card { background: red; }');
+  });
+
+  it('a theme message sets documentElement.dataset.theme automatically, with no onTheme registered', () => {
+    const w = makeWindow();
+    evalClient(w);
+    w.weavePluginClient!();
+
+    for (const l of w.listeners) l({ data: { type: 'theme', theme: 'light' } });
+    expect(w.document.documentElement.dataset.theme).toBe('light');
+  });
+
+  it('onTheme is an additional subscription, invoked alongside the automatic application', () => {
+    const w = makeWindow();
+    evalClient(w);
+    const client = w.weavePluginClient!();
+    const handler = vi.fn();
+    client.onTheme(handler);
+
+    for (const l of w.listeners) l({ data: { type: 'theme', theme: 'dark' } });
+    expect(w.document.documentElement.dataset.theme).toBe('dark');
+    expect(handler).toHaveBeenCalledWith('dark');
   });
 });

@@ -233,6 +233,7 @@ const v2TicketRoute = v2WsRouteFor('tickets/$ticketId', 'V2TicketPage');
 const v2TicketArtifactRoute = v2WsRouteFor('tickets/$ticketId/artifacts/$key', 'V2TicketArtifactReader');
 const v2ArtifactRoute = v2WsRouteFor('artifacts/$key', 'V2ArtifactPage');
 const v2WorkerRoute = v2WsRouteFor('workers/$workerId', 'V2WorkerPage');
+const v2PluginPageRoute = v2WsRouteFor('plugins/$pluginId', 'V2PluginPage');
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -357,6 +358,7 @@ const routeTree = rootRoute.addChildren([
         v2TicketArtifactRoute,
         v2ArtifactRoute,
         v2WorkerRoute,
+        v2PluginPageRoute,
       ]),
     ]),
   ]),

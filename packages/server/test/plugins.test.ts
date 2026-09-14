@@ -174,23 +174,38 @@ describe('plugin storage (VS-334)', () => {
   }, 30_000);
 });
 
-describe('plugin page kit CSS (VS-334)', () => {
-  it("the notes plugin's page inlines host.kitCss(), the same Artifact Kit CSS the artifact route serves", async () => {
+describe('plugin page styling (VS-334, VS-385)', () => {
+  it("the notes plugin's page inlines host.themeCss(), the same generated stylesheet GET /plugins/theme.css serves", async () => {
     const configDir = mkdtempSync(join(tmpdir(), 'ac-cfg-'));
     dirs.push(configDir);
     await makeWorkspace(configDir, 'pagecss', [notesPlugin]);
     const d = await boot(configDir);
     const ws = d.workspaces.get('pagecss')!;
 
-    const kit = await fetch(new URL(`/api/w/${ws.id}/artifacts/kit.css`, d.loopbackUrl));
-    const kitCss = await kit.text();
-    expect(kitCss.length).toBeGreaterThan(0);
+    const theme = await fetch(new URL(`/api/w/${ws.id}/plugins/theme.css`, d.loopbackUrl));
+    const themeCss = await theme.text();
+    expect(themeCss.length).toBeGreaterThan(0);
 
     const page = await fetch(new URL(`/api/w/${ws.id}/plugins/notes/page`, d.loopbackUrl));
     expect(page.status).toBe(200);
     expect(page.headers.get('content-security-policy')).toContain('connect-src \'none\'');
     const html = await page.text();
-    expect(html).toContain(kitCss);
+    expect(html).toContain(themeCss);
+  }, 30_000);
+
+  it("host.kitCss() (VS-334) stays the untouched Artifact Kit CSS, independent of themeCss()", async () => {
+    const configDir = mkdtempSync(join(tmpdir(), 'ac-cfg-'));
+    dirs.push(configDir);
+    await makeWorkspace(configDir, 'pagekit', [notesPlugin]);
+    const d = await boot(configDir);
+    const ws = d.workspaces.get('pagekit')!;
+
+    const kit = await fetch(new URL(`/api/w/${ws.id}/artifacts/kit.css`, d.loopbackUrl));
+    const kitCss = await kit.text();
+    const theme = await fetch(new URL(`/api/w/${ws.id}/plugins/theme.css`, d.loopbackUrl));
+    const themeCss = await theme.text();
+    expect(kitCss.length).toBeGreaterThan(0);
+    expect(kitCss).not.toBe(themeCss);
   }, 30_000);
 });
 

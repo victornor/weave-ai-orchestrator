@@ -1,0 +1,36 @@
+# Publishes @weave-ai/plugin-sdk to public npm on a tag (VS-385, design.md Decision 5).
+# Never run from a ticket: a human tags a release (`plugin-sdk-v*`) to trigger this.
+name: publish-plugin-sdk
+
+on:
+  push:
+    tags:
+      - 'plugin-sdk-v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '26'
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+      - run: pnpm install --frozen-lockfile
+      # `build:publish` bundles the four adapter/shared SDK packages' referenced types into a
+      # single self-contained `dist/index.d.ts` and writes a publish-only `dist/package.json` with
+      # no `workspace:*` dependency (nothing in the compiled JS imports them at runtime — every
+      # reference in the source is `import type`, erased at compile time).
+      - run: pnpm --filter @weave-ai/plugin-sdk run build:publish
+      - run: npm publish --access public --provenance
+        working-directory: packages/plugin-sdk/dist
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

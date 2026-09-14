@@ -525,14 +525,15 @@ export function V2DecisionCard({
               <button
                 type="button" disabled={busy || blocked || missing.length > 0}
                 onClick={() => answer(approveKey)}
-                className="h-9 flex-1 rounded-r4 border-0 bg-accent px-3 text-meta font-medium text-white disabled:cursor-not-allowed disabled:opacity-55"
+                data-variant="primary"
+                className={cx('v2-button', 'flex-1')}
               >
                 Approve
               </button>
               <button
                 type="button" disabled={busy}
                 onClick={() => { setRevising((v) => !v); setOverriding(false); }}
-                className="h-9 rounded-r4 border border-line-2 px-3 text-meta text-text-1"
+                className="v2-button"
               >
                 Revise…
               </button>

@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
     ],
   } as Record<string, Array<{ id: string; kind: string; ticketId: string; status: string; createdAt: string }>>,
   decisionsByWs: { acme: [{ id: 'd1' }, { id: 'd2' }] } as Record<string, Array<{ id: string }>>,
+  pluginsByWs: {} as Record<string, Array<{ id: string; version: string | null; name: string | null; source: 'workspace' | 'daemon'; loaded: boolean; error: string | null; hasPage: boolean }>>,
   incidents: [{ resolvedAt: null }, { resolvedAt: '2026-09-01' }] as Array<{ resolvedAt: string | null }>,
   fanIn: [] as string[][],
 }));
@@ -45,6 +46,8 @@ vi.mock('../api/hooks', () => ({
   useWorkspaces: () => ({ data: state.workspaces, isError: false }),
   useWorkspaceProjects: (ids: readonly string[]) =>
     Object.fromEntries(ids.map((id) => [id, { status: 'success', projects: state.projectsByWs[id] ?? [] }])),
+  useWorkspacePlugins: (ids: readonly string[]) =>
+    Object.fromEntries(ids.map((id) => [id, state.pluginsByWs[id] ?? []])),
   useWorkersMany: (ids: readonly string[]) => ids.map((id) => ({ data: state.workersByWs[id] ?? [] })),
   useDecisionsMany: (ids: readonly string[]) => ids.map((id) => (id in state.decisionsByWs ? { data: state.decisionsByWs[id] } : { data: undefined })),
   useIncidents: () => ({ data: { items: state.incidents, total: state.incidents.length } }),
@@ -73,6 +76,7 @@ beforeEach(() => {
     ],
   };
   state.decisionsByWs = { acme: [{ id: 'd1' }, { id: 'd2' }] };
+  state.pluginsByWs = {};
   state.fanIn = [];
   onTheme.mockClear();
   localStorage.clear();
@@ -145,6 +149,58 @@ describe('each workspace group lists its own projects', () => {
       expect(within(rail).getByRole('link', { name: 'api' })).toHaveAttribute('href', '/v2/w/beta/p/api');
       cleanup();
     }
+  });
+});
+
+describe('the V2 rail shows a workspace\'s own loaded plugins with a page (VS-385)', () => {
+  it('shows only its own plugin\'s row, in the expanded rail, the collapsed rail and the More list', () => {
+    state.workspaces = [
+      { id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 },
+      { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 0 },
+    ];
+    state.decisionsByWs = { acme: [], beta: [] };
+    state.pluginsByWs = {
+      acme: [{ id: 'notes', version: '0.1.0', name: 'Notes', source: 'workspace', loaded: true, error: null, hasPage: true }],
+      beta: [{ id: 'services', version: '0.1.0', name: null, source: 'workspace', loaded: true, error: null, hasPage: true }],
+    };
+
+    // Every workspace group is expanded by default (the same as for projects), so both plugin
+    // rows are present — each correctly scoped to its own workspace's href — and only the one
+    // matching the current path is highlighted.
+    state.path = '/v2/w/acme/plugins/notes';
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    const notesLink = within(rail).getByRole('link', { name: 'Notes' });
+    expect(notesLink).toHaveAttribute('href', '/v2/w/acme/plugins/notes');
+    expect(notesLink).toHaveAttribute('aria-current', 'page');
+    // "services" declares no name, so its row falls back to its id (VS-385 Decision 2).
+    const servicesLink = within(rail).getByRole('link', { name: 'services' });
+    expect(servicesLink).toHaveAttribute('href', '/v2/w/beta/plugins/services');
+    expect(servicesLink).not.toHaveAttribute('aria-current');
+    cleanup();
+
+    // Collapsed rail (single active workspace only): the active workspace's own plugin, icon-only,
+    // reachable by its title/aria-label.
+    localStorage.setItem('weave.v2.rail', 'collapsed');
+    mountShell();
+    expect(screen.getByRole('link', { name: 'Notes' })).toHaveAttribute('href', '/v2/w/acme/plugins/notes');
+    expect(screen.queryByRole('link', { name: 'services' })).not.toBeInTheDocument();
+    localStorage.clear();
+    cleanup();
+
+    // The phone/collapsed-rail More list's "Workspace" group is scoped the same way: only the
+    // active workspace's own plugin, not the other workspace's.
+    mountShell();
+    fireEvent.click(within(screen.getByRole('complementary')).getByText('More…'));
+    const dialog = screen.getByRole('dialog', { name: 'More' });
+    expect(within(dialog).getByRole('link', { name: 'Notes' })).toHaveAttribute('href', '/v2/w/acme/plugins/notes');
+    expect(within(dialog).queryByRole('link', { name: 'services' })).not.toBeInTheDocument();
+  });
+
+  it('shows no plugin row for a workspace with no loaded plugin with a page', () => {
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).queryByRole('link', { name: 'notes' })).not.toBeInTheDocument();
   });
 });
 

@@ -10,6 +10,11 @@ export interface PluginBridgeRequestMessage { type: 'request'; id: string; metho
 export interface PluginBridgeSubscribeMessage { type: 'subscribe'; kind: string }
 export type PluginBridgeMessage = PluginBridgeRequestMessage | PluginBridgeSubscribeMessage;
 
+/** Host→page only (VS-385): the generated plugin stylesheet, pushed once when the page becomes available. Never validated by `isPluginBridgeMessage`, which guards page→host traffic only. */
+export interface PluginBridgeStylesheetMessage { type: 'stylesheet'; css: string }
+/** Host→page only (VS-385): the app's current theme, pushed on load and on every later change. */
+export interface PluginBridgeThemeMessage { type: 'theme'; theme: 'dark' | 'light' }
+
 export function isPluginBridgeMessage(v: unknown): v is PluginBridgeMessage {
   if (!v || typeof v !== 'object') return false;
   const t = (v as { type?: unknown }).type;

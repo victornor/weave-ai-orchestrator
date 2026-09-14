@@ -141,25 +141,73 @@ export interface PluginHost {
   emit(kind: string, entityId: string, payload: unknown): void;
   /** The Artifact Kit CSS, for a plugin's page to inline into a `<style>` block (VS-334) — a method, not a static import, so `@weave-ai/plugin-sdk` never has to depend on `@weave-ai/core` to expose it. */
   kitCss(): string;
+  /**
+   * The generated stylesheet backing `WEAVE_PLUGIN_CLASS` (VS-385) — V2's real Mono tokens (both
+   * themes) plus the vocabulary's component classes, produced from `packages/ui/src/v2/v2.css`'s
+   * own current text, never a literal this package carries. A plugin rarely needs to call this
+   * directly: the bridge already pushes the same string to the page and the client applies it
+   * automatically. It exists only for an optional server-rendered first paint, to avoid a flash of
+   * unstyled content before that push arrives.
+   */
+  themeCss(): string;
   config<T = Record<string, unknown>>(): T;
   logger: Logger;
 }
-export interface WeaveAIPlugin { id: string; version: string; apiVersion: 1; register(host: PluginHost): void | Promise<void> }
+export interface WeaveAIPlugin {
+  id: string;
+  version: string;
+  /** A human-readable display name (VS-385) — used as the page title and rail label where present, falling back to `id`. */
+  name?: string;
+  apiVersion: 1;
+  register(host: PluginHost): void | Promise<void>;
+}
 export function definePlugin(p: WeaveAIPlugin): WeaveAIPlugin { return p; }
 
 /**
+ * The plugin page's styling vocabulary (VS-385): class names only, never a colour, spacing or font
+ * value — the actual CSS behind them is generated and served by the running daemon (`host.themeCss()`,
+ * and the bridge's `stylesheet` push), so restyling the app never requires a plugin rebuild or a new
+ * `@weave-ai/plugin-sdk` version. Changing this object's own shape is the only thing that does.
+ * `section`/`badge` are the app's own real classes (`.v2-card`/`.v2-tag`); the other four are shared
+ * classes added to `packages/ui/src/v2/v2.css` alongside real screens that use them.
+ */
+export const WEAVE_PLUGIN_CLASS = {
+  section: 'v2-card',
+  table: 'v2-table',
+  badge: 'v2-tag',
+  button: 'v2-button',
+  input: 'v2-input',
+  formRow: 'v2-form-row',
+} as const;
+
+/**
  * Vanilla JS (no imports, no bundler) a plugin's own page route inlines in a `<script>` tag before
- * its own script (VS-334). Defines `window.weavePluginClient()`, returning `{ request, onEvent }`:
- * `request(method, path, body?)` posts to the parent frame and resolves on the matching reply;
- * `onEvent(kind, handler)` subscribes to this plugin's own live events, forwarded by the host page's
- * postMessage bridge. The page itself can make no other network call — its CSP's `connect-src`
- * is `'none'`; this is the only channel to the daemon.
+ * its own script (VS-334). Defines `window.weavePluginClient()`, returning `{ request, onEvent,
+ * onTheme }`: `request(method, path, body?)` posts to the parent frame and resolves on the
+ * matching reply; `onEvent(kind, handler)` subscribes to this plugin's own live events, forwarded
+ * by the host page's postMessage bridge. The page itself can make no other network call — its
+ * CSP's `connect-src` is `'none'`; this is the only channel to the daemon.
+ *
+ * VS-385: calling `weavePluginClient()` also, unconditionally and with no further plugin code,
+ * applies the host-pushed stylesheet and theme — injecting a `<style>` element on a `stylesheet`
+ * message and setting `documentElement.dataset.theme` on a `theme` message. A plugin written to
+ * `WEAVE_PLUGIN_CLASS`'s vocabulary needs nothing else to be fully styled and theme-aware.
+ * `onTheme(handler)` is an *additional*, optional subscription for a plugin that wants to react
+ * further (e.g. redraw a canvas) — it does not replace the automatic application above.
  */
 export const WEAVE_PLUGIN_CLIENT_JS = `
 window.weavePluginClient = function weavePluginClient() {
   var pending = Object.create(null);
   var eventHandlers = Object.create(null);
+  var themeHandlers = [];
   var nextId = 1;
+  var doc = window.document;
+  var styleEl = doc.getElementById('weave-plugin-styles');
+  if (!styleEl) {
+    styleEl = doc.createElement('style');
+    styleEl.id = 'weave-plugin-styles';
+    doc.head.appendChild(styleEl);
+  }
   window.addEventListener('message', function (event) {
     var msg = event.data;
     if (!msg || typeof msg !== 'object') return;
@@ -171,6 +219,11 @@ window.weavePluginClient = function weavePluginClient() {
     } else if (msg.type === 'event') {
       var handlers = eventHandlers[msg.kind];
       if (handlers) for (var i = 0; i < handlers.length; i++) handlers[i](msg.payload);
+    } else if (msg.type === 'stylesheet') {
+      styleEl.textContent = msg.css;
+    } else if (msg.type === 'theme') {
+      doc.documentElement.dataset.theme = msg.theme;
+      for (var j = 0; j < themeHandlers.length; j++) themeHandlers[j](msg.theme);
     }
   });
   return {
@@ -185,6 +238,9 @@ window.weavePluginClient = function weavePluginClient() {
       if (!eventHandlers[kind]) eventHandlers[kind] = [];
       eventHandlers[kind].push(handler);
       window.parent.postMessage({ type: 'subscribe', kind: kind }, '*');
+    },
+    onTheme: function (handler) {
+      themeHandlers.push(handler);
     },
   };
 };

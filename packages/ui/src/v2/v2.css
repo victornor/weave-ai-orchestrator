@@ -250,3 +250,122 @@
   text-decoration-thickness: 1px;
   text-underline-offset: 2px;
 }
+
+/* Shared action-button recipe (VS-385), lifted from DecisionCard's own Approve/Revise buttons so
+   the app and a plugin page's generated stylesheet share one source: `.v2-button` is the
+   bordered/transparent shape (DecisionCard's secondary recipe), `[data-variant='primary']` is the
+   accent-filled shape (DecisionCard's Approve recipe). Every rule's selector starts with
+   `.v2-button`, flat (no nesting), so it stays within this file's own scoping rule (every V2
+   selector starts with `.v2-`, checked by `v2theme.test.ts`) and each rule is independently
+   extractable by a generator matching on that prefix. */
+.v2-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 12px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.v2-button:hover {
+  background: var(--bg-2);
+}
+.v2-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.v2-button[data-variant='primary'] {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-on);
+  font-weight: 500;
+}
+.v2-button[data-variant='primary']:hover {
+  background: var(--accent);
+}
+
+/* Shared input recipe (VS-385), lifted from the settings-density input used across Workspace,
+   Scheduled and Models settings (`inputCx`), the same density a plugin's own form uses. */
+.v2-input {
+  display: block;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text-1);
+  font-size: 11px;
+  outline: none;
+}
+.v2-input:focus {
+  border-color: var(--accent);
+}
+
+/* Shared form-row recipe (VS-385), lifted from Workspace settings' `GeneralSection`: a stacked
+   label-over-control row, divided from its siblings the same way its real `.v2-card divide-y
+   divide-line-1` wrapper divides them. The label text (this row's first child span, plain or
+   inside a `<label>`) is styled to `.ac-label`'s exact values so a plugin needs no separate class
+   for it. */
+.v2-form-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+}
+.v2-form-row + .v2-form-row {
+  border-top: 1px solid var(--line-1);
+}
+.v2-form-row > span:first-child,
+.v2-form-row > label > span:first-child {
+  font-family: var(--ff-mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* Shared record-list recipe (VS-385) — generalized, not lifted from one real component: no V2
+   screen has a literal table today. Modeled on the `.v2-card divide-y divide-line-1` + flex-row
+   shape every real record list (commit history, pull requests, the plugin list) already shares. */
+.v2-table {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.v2-table [data-row] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--text-1);
+}
+.v2-table [data-row] + [data-row] {
+  border-top: 1px solid var(--line-1);
+}
+.v2-table [data-row]:hover {
+  background: var(--bg-2);
+}
+.v2-table [data-cell='primary'] {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.v2-table [data-cell='secondary'] {
+  flex: 0 0 auto;
+  font-family: var(--ff-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}

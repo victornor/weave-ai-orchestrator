@@ -95,6 +95,7 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
     loopbackUrl: 'http://127.0.0.1:7433',
     skillsDir: join(root, 'skills'),
     templatesDir: join(root, 'templates'),
+    v2ThemeCss: ':root { --bg-0: #050506; }',
     isolated: opts.isolated ?? false,
     daemonConfigDir: join(root, 'daemon-config'),
     // The real loader replaces `ctx.config` with what it validated, and code that changes a

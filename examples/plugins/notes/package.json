@@ -9,7 +9,10 @@
   "exports": {
     ".": "./index.js"
   },
-  "dependencies": {
+  "peerDependencies": {
+    "@weave-ai/plugin-sdk": "*"
+  },
+  "devDependencies": {
     "@weave-ai/plugin-sdk": "workspace:*"
   }
 }

@@ -57,6 +57,8 @@ export const qk = {
 
   runs: (ws: string) => ['w', ws, 'runs'] as const,
   run: (ws: string, id: string) => ['w', ws, 'runs', id] as const,
+  /** The global run detail (VS-386): resolved across workspaces, so it is keyed above any one. */
+  runGlobal: (id: string) => ['runs-global', id] as const,
   runEvents: (ws: string, id: string) => ['w', ws, 'runs', id, 'events'] as const,
   /** Run trace summaries for a set of runs; under `runs`, so `run.started`/`run.finished` already refresh them. */
   runTraces: (ws: string, params: Record<string, unknown>) => ['w', ws, 'runs', 'traces', params] as const,

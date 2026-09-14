@@ -120,6 +120,8 @@ A decision carries `projectId` (the ticket's project, else the one the asker nam
 ### Runs
 `GET /runs?agent=&ticket=&status=&limit=&offset=` · `GET /runs/traces?ids=&agent=&since=&limit=` (per-run counts of tool calls, distinct files, errors and assistant text plus timing, model and token usage, oldest first; `ids` and the agent window are a union; unknown ids omitted) · `GET /runs/:id` · `GET /runs/:id/events?after=&limit=&tail=` (`tail` returns the newest N events, oldest-first, for reading back a finished run; `after`/`limit` return the head page) · `GET /runs/:id/events/stream` (SSE) · `POST /runs/:id/cancel` `{ mode }` · `GET /runs/:id/log` (raw jsonl)
 
+`GET /api/runs/:id` (daemon-level, VS-386) resolves a run by id alone across the loaded workspaces and returns the same bare `Run` as `GET /api/w/:ws/runs/:id`, including its `workspaceId`; `not_found` when no workspace has it. It backs the global V2 run detail (`/v2/runs/$runId`), which has no workspace in its route.
+
 ### Knowledge & specs
 `GET /knowledge` (lint) · `GET /knowledge/:scope?project=` · `PUT /knowledge/:scope?project=` `{ body }` (human replace) · `POST /knowledge/:scope/note?project=` `{ section, text, doc? }` (`doc` appends into that linked document's section instead of the hub; the document must already exist — VS-109) · `GET /knowledge/:scope/revisions?project=` → each revision also carries `ticketId, ticketIdentifier` (nullable; VS-102) · `POST /knowledge/:scope/revert?project=` `{ revision }` · `POST /knowledge/:scope/curate?project=` · `GET /search?q=&project=` (knowledge + specs)
 

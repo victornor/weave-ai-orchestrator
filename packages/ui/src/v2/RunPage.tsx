@@ -8,7 +8,7 @@
 import { useParams } from '@tanstack/react-router';
 import { isActiveRun } from '@weave-ai/shared';
 import { contextStrip, resolveModel } from '@weave-ai/render';
-import { useRun, useRuntimeModels, useWorkersMany } from '../api/hooks';
+import { useRunGlobal, useRuntimeModels, useWorkersMany } from '../api/hooks';
 import { useRunEventStream } from '../api/runStream';
 import { useGo } from '../app/link';
 import { ErrorState } from '../components/States';
@@ -39,11 +39,13 @@ export function V2RunPage(): React.ReactElement {
 
 export function RunBody({ runId }: { runId: string }): React.ReactElement {
   const go = useGo();
-  const detail = useRun(runId);
+  // The global route has no WorkspaceProvider; the run's own workspace comes back with the run, so
+  // the stream and the worker-name lookup take it explicitly (VS-386).
+  const detail = useRunGlobal(runId);
   const live = isActiveRun(detail.data?.run.status);
-  const { events } = useRunEventStream(runId, { live });
-
   const ws = detail.data?.run.workspaceId ?? '';
+  const { events } = useRunEventStream(runId, { live, ws });
+
   const workers = useWorkersMany(ws ? [ws] : [], { includeRetired: true });
   const runtimeModels = useRuntimeModels(detail.data?.run.runtimeId ?? null);
 

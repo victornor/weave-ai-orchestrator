@@ -1313,6 +1313,15 @@ export function useRun(id: string): UseQueryResult<T.RunDetail> {
   return useQuery({ queryKey: qk.run(ws, id), queryFn: () => api.ws<unknown>(ws, `/runs/${id}`).then(runDetail), enabled: Boolean(id) });
 }
 
+/**
+ * One run by id alone, for the global `/v2/runs/$runId` route (VS-386). The run's own workspace is
+ * resolved daemon-side, so the screen needs no `WorkspaceProvider` and does not assume which
+ * workspace is first. Run started/finished events invalidate this key alongside `qk.run`.
+ */
+export function useRunGlobal(id: string): UseQueryResult<T.RunDetail> {
+  return useQuery({ queryKey: qk.runGlobal(id), queryFn: () => api.root<unknown>(`/runs/${id}`).then(runDetail), enabled: Boolean(id) });
+}
+
 /** Events per page for `useRunEvents`; `newest` reads this many from the end of the run (VS-332). */
 export const RUN_EVENT_PAGE = 500;
 

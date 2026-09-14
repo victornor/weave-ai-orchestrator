@@ -240,7 +240,8 @@
    Non-inline broke `.v2-root[data-theme='light']`: every Tailwind utility class ignored its scoped
    token override and kept resolving `<html>`'s value, since `--color-bg-1` never re-declares inside
    `.v2-root`. `inline` still repaints on a runtime `[data-theme]` switch — it defers to `--bg-1`
-   directly, one level of `var()`, which cascades normally per element (VS-367). */
+   directly, one level of `var()`, which cascades normally per element (VS-367; also VS-386's
+   dark-mode primary titles). */
 @theme inline {
   --color-bg-0: var(--bg-0);
   --color-bg-1: var(--bg-1);

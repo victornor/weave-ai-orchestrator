@@ -21,9 +21,10 @@ import {
 } from '@weave-ai/shared';
 import { getLogger, recordActivity } from '@weave-ai/core';
 import {
-  buildRelease, cliBinIn, commitSubjectsInRange, currentLink, inOwnScope, migrationsIn, planRestart,
-  pruneReleases, readLink, releaseSha, resolveInstalledLaunchdAgent, resolveInstalledUnit,
-  resolveWorkspaceStateDir, switchRelease, writeUserShims,
+  buildRelease, cliBinIn, commitSubjectsInRange, currentLink, findPortHolder, inOwnScope,
+  isServerProcessCmdline, migrationsIn, parseListenPort, planRestart, pruneReleases, readLink,
+  readUnitRuntimeState, realRunCommand, releaseSha, resolveInstalledLaunchdAgent, resolveInstalledUnit,
+  resolveWorkspaceStateDir, switchRelease, writeUserShims, type InstalledUnit,
 } from '@weave-ai/release';
 import type { WorkspaceRuntime } from './types.js';
 import type { UpdateChecker } from './release-info.js';
@@ -93,6 +94,18 @@ export interface UpgradeDeps {
    * `check` synchronously instead of waiting 10 real minutes.
    */
   armRestartWatchdog?: (o: { upgradeId: string; check: () => void }) => void;
+  /**
+   * VS-407: refuses to build and switch when a process outside the installed unit holds the daemon's
+   * listen address, so the upgrade fails with the cause instead of the unit crash-looping on
+   * `EADDRINUSE`. Refuses only — the daemon's self-upgrade never signals a process. Defaults to the
+   * real check; tests replace it.
+   */
+  restartPreflight?: () => { ok: true } | { ok: false; message: string };
+  /**
+   * VS-407: what actually restarted the daemon, for a pre-`restarting` record reconciled as abandoned
+   * — a restart-looping unit, or a daemon running outside its unit. `null` when unknown.
+   */
+  restartCause?: () => string | null;
 }
 
 const uniqueWorkspaces = (workspaces: Map<string, WorkspaceRuntime>): WorkspaceRuntime[] => [...new Set(workspaces.values())];
@@ -107,6 +120,8 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
   const writeShims = deps.writeShims ?? (() => { writeUserShims(); });
   const spawnRunner = deps.spawnRunner ?? ((o) => launchRunner(o.release, o.upgradeId, deps.configDir));
   const armRestartWatchdog = deps.armRestartWatchdog ?? ((o) => { const t = setTimeout(o.check, RESTART_VERIFY_MS); t.unref?.(); });
+  const restartPreflight = deps.restartPreflight ?? (() => defaultRestartPreflight(deps.configDir));
+  const restartCause = deps.restartCause ?? (() => defaultRestartCause(deps.configDir));
 
   let pipeline: Promise<void> = Promise.resolve();
 
@@ -246,6 +261,14 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
       set(id, { interruptedRuns });
     }
     if (cancelledMidway(id)) return;
+
+    // ---- preflight: never build or switch for a restart that cannot take (VS-407) ----
+    const pre = restartPreflight();
+    if (!pre.ok) {
+      fail(id, 'restart_failed', pre.message);
+      resumeDispatch();
+      return;
+    }
 
     // ---- build: a fresh directory, nothing installed is touched ----
     set(id, { state: 'building' });
@@ -524,7 +547,8 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
       }
       // Anything before `restarting` belonged to a process that is gone. Dispatch already restarted with
       // this daemon; what a stale record would block is every future upgrade, through the conflict check.
-      fail(row.id, 'abandoned', `the daemon restarted while the upgrade was ${row.state}`);
+      const cause = restartCause();
+      fail(row.id, 'abandoned', `the daemon restarted while the upgrade was ${row.state}${cause ? ` (${cause})` : ''}`);
     },
 
     async announce(): Promise<void> {
@@ -551,8 +575,85 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
   return service;
 }
 
-// ---------- the pieces the daemon does itself ----------
+// ---------- VS-407: the daemon-host restart preflight and restart cause ----------
 
+function readConfigPid(configDir: string, name: string): number | null {
+  try { const n = Number.parseInt(readFileSync(join(configDir, name), 'utf8').trim(), 10); return Number.isFinite(n) && n > 0 ? n : null; } catch { return null; }
+}
+
+function markerPid(configDir: string): number | null {
+  try {
+    const m = JSON.parse(readFileSync(join(configDir, 'daemon.json'), 'utf8')) as { pid?: number };
+    return typeof m.pid === 'number' && m.pid > 0 ? m.pid : null;
+  } catch { return null; }
+}
+
+function markerPort(configDir: string): number | null {
+  try {
+    const m = JSON.parse(readFileSync(join(configDir, 'daemon.json'), 'utf8')) as { loopbackUrl?: string; publicUrl?: string };
+    return parseListenPort(m.loopbackUrl) ?? parseListenPort(m.publicUrl);
+  } catch { return null; }
+}
+
+function pidAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+
+function isServerPid(pid: number): boolean {
+  try { return isServerProcessCmdline(readFileSync(`/proc/${pid}/cmdline`, 'utf8')); } catch { return false; }
+}
+
+/**
+ * VS-407: refuse a deferred upgrade when a process outside the installed unit holds the daemon's listen
+ * address, so it fails with the cause instead of the unit crash-looping on `EADDRINUSE`. Refuses only —
+ * the daemon's self-upgrade never signals a process. A host read that fails is a warning, not a block:
+ * the CLI and the restart runner are the primary enforcement points.
+ */
+export function defaultRestartPreflight(configDir: string): { ok: true } | { ok: false; message: string } {
+  try {
+    const unit = process.platform === 'linux' ? resolveInstalledUnit() : null;
+    if (!unit) return { ok: true };
+    const port = markerPort(configDir);
+    if (port === null) return { ok: true };
+    const holder = findPortHolder(port, realRunCommand);
+    if (!holder) return { ok: true };
+    const state = readUnitRuntimeState(unit, realRunCommand);
+    if (state.mainPid !== null && holder.pid === state.mainPid) return { ok: true };
+    const tracked = [readConfigPid(configDir, 'daemon.pid'), markerPid(configDir)]
+      .filter((pid): pid is number => pid !== null && pidAlive(pid) && isServerPid(pid));
+    const kind = tracked.includes(holder.pid) ? 'a detached daemon' : 'an unidentified process';
+    return { ok: false, message: `refusing to upgrade: pid ${holder.pid}${holder.command ? ` (${holder.command})` : ''} is holding the daemon's listen address outside ${unit.name} (${kind}); the service cannot bind until it stops — stop it by hand, then retry` };
+  } catch (e) {
+    log.warn({ err: e }, 'restart preflight could not run; proceeding');
+    return { ok: true };
+  }
+}
+
+/**
+ * VS-407: what actually restarted the daemon, for a pre-`restarting` record reconciled as abandoned.
+ * Names a restart-looping unit (its active state and restart count) or a daemon outside its unit (a
+ * manual start/restart); `null` when the host cannot say.
+ */
+export function defaultRestartCause(configDir: string): string | null {
+  try {
+    const tracked = readConfigPid(configDir, 'daemon.pid');
+    const unit: InstalledUnit | null = process.platform === 'linux' ? resolveInstalledUnit() : null;
+    if (tracked !== null && pidAlive(tracked) && isServerPid(tracked)) {
+      return 'the daemon was running outside its unit (a manual start/restart)';
+    }
+    if (unit) {
+      const st = readUnitRuntimeState(unit, realRunCommand);
+      if ((st.nRestarts ?? 0) > 0 || st.activeState === 'activating' || st.activeState === 'failed') {
+        return `the unit ${unit.name} is restart-looping (ActiveState=${st.activeState ?? '?'}${st.nRestarts !== null ? `, NRestarts=${st.nRestarts}` : ''})`;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------- the pieces the daemon does itself ----------
 /**
  * Copy daemon.sqlite and every registered workspace db into `<config>/backups/<stamp>/`. Same shape as
  * `weave daemon upgrade`'s: sqlite's online backup, safe while the daemon is serving.

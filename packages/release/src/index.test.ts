@@ -4,9 +4,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  LAUNCHD_LABEL, SERVICE_NAME, commitSubjectsInRange, configDir, dataHome, inOwnScope, migrationsIn, planRestart,
-  releaseStamp, releaseVersion, resolveInstalledLaunchdAgent, resolveInstalledUnit, stateHome,
+  LAUNCHD_LABEL, SERVICE_NAME, classifyRestart, commitSubjectsInRange, configDir, dataHome, findPortHolder,
+  inOwnScope, isServerProcessCmdline, migrationsIn, parseListenPort, parseLsofHolder, parsePortHolder,
+  parseUnitRuntimeState, planRestart, readUnitRuntimeState, releaseStamp, releaseVersion,
+  resolveInstalledLaunchdAgent, resolveInstalledUnit, stateHome, type CommandResult, type RunCommand,
 } from './index.js';
+
+/** A RunCommand built from a table of `cmd args → output`, for the seam-only host tests. */
+function fakeRun(table: Array<{ match: string[]; result: Partial<CommandResult> }>): RunCommand {
+  return (cmd, args) => {
+    const joined = [cmd, ...args].join(' ');
+    for (const entry of table) {
+      if (entry.match.every((m) => joined.includes(m))) return { status: 0, signal: null, stdout: '', stderr: '', ...entry.result };
+    }
+    return { status: 1, signal: null, stdout: '', stderr: `not found: ${joined}` };
+  };
+}
 
 const tmps: string[] = [];
 afterEach(() => { while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
@@ -237,5 +250,78 @@ describe('migrationsIn (VS-315)', () => {
     const missing = join(mkdtempSync(join(tmpdir(), 'ac-relmig-none-')), 'nope');
     expect(migrationsIn(missing)).toEqual([]);
     expect(migrationsIn(null)).toEqual([]);
+  });
+});
+
+describe('readUnitRuntimeState (VS-407)', () => {
+  const unit = { name: SERVICE_NAME, path: `/x/${SERVICE_NAME}`, legacy: false };
+
+  it('parses systemctl show Key=Value output', () => {
+    expect(parseUnitRuntimeState('ActiveState=active\nSubState=running\nNRestarts=3\nMainPID=1234\nUnknown=x\n')).toEqual({
+      activeState: 'active', subState: 'running', nRestarts: 3, mainPid: 1234,
+    });
+  });
+
+  it('treats an inactive unit with no main pid as null, not zero', () => {
+    expect(parseUnitRuntimeState('ActiveState=failed\nSubState=failed\nNRestarts=0\nMainPID=0\n')).toEqual({
+      activeState: 'failed', subState: 'failed', nRestarts: 0, mainPid: null,
+    });
+  });
+
+  it('reads through a runner and returns sentinels when the read fails', () => {
+    const ok = readUnitRuntimeState(unit, fakeRun([{ match: ['systemctl', 'show'], result: { stdout: 'ActiveState=active\nMainPID=42\n' } }]));
+    expect(ok).toMatchObject({ activeState: 'active', mainPid: 42 });
+    const bad = readUnitRuntimeState(unit, () => ({ status: 1, signal: null, stdout: '', stderr: 'no systemd' }));
+    expect(bad).toEqual({ activeState: null, subState: null, nRestarts: null, mainPid: null });
+  });
+});
+
+describe('parseListenPort (VS-407)', () => {
+  it('reads an explicit port from an http or https URL', () => {
+    expect(parseListenPort('https://100.64.0.10:7433')).toBe(7433);
+    expect(parseListenPort('http://127.0.0.1:7440')).toBe(7440);
+  });
+
+  it('falls back to the scheme default and is null for a unix socket or garbage', () => {
+    expect(parseListenPort('https://host')).toBe(443);
+    expect(parseListenPort('http://host')).toBe(80);
+    expect(parseListenPort('unix:///run/weave.sock')).toBeNull();
+    expect(parseListenPort('')).toBeNull();
+    expect(parseListenPort(null)).toBeNull();
+  });
+});
+
+describe('port holder lookup (VS-407)', () => {
+  const ssLine = 'LISTEN 0      511          0.0.0.0:7433       0.0.0.0:*    users:(("node",pid=12345,fd=22))\n';
+  const lsofOut = 'COMMAND   PID USER   FD   TYPE DEVICE SIZE/OFF NODE NAME\nnode    12345 user   22u  IPv4  12345      0t0  TCP *:7433 (LISTEN)\n';
+
+  it('parses an ss line and an lsof line', () => {
+    expect(parsePortHolder(ssLine)).toEqual({ pid: 12345, command: 'node' });
+    expect(parseLsofHolder(lsofOut)).toEqual({ pid: 12345, command: 'node' });
+    expect(parsePortHolder('State Recv-Q Send-Q\n')).toBeNull();
+    expect(parseLsofHolder('COMMAND PID USER\n')).toBeNull();
+  });
+
+  it('prefers ss, falls back to lsof, and reports nothing when neither yields a holder', () => {
+    expect(findPortHolder(7433, fakeRun([{ match: ['ss', 'sport = :7433'], result: { stdout: ssLine } }]))).toEqual({ pid: 12345, command: 'node' });
+    expect(findPortHolder(7433, fakeRun([{ match: ['lsof', '-iTCP:7433'], result: { stdout: lsofOut } }]))).toEqual({ pid: 12345, command: 'node' });
+    expect(findPortHolder(7433, () => ({ status: 1, signal: null, stdout: '', stderr: 'absent' }))).toBeNull();
+  });
+});
+
+describe('classifyRestart / isServerProcessCmdline (VS-407)', () => {
+  const unit = { name: SERVICE_NAME, path: `/x/${SERVICE_NAME}`, legacy: false };
+
+  it('recognises this product\'s server command line', () => {
+    expect(isServerProcessCmdline('/home/u/.local/share/weave/releases/1/packages/server/dist/bin.js\0')).toBe(true);
+    expect(isServerProcessCmdline('node\0/app/other.js\0')).toBe(false);
+  });
+
+  it('classifies the holder relative to the unit and the tracked pids', () => {
+    expect(classifyRestart({ unit, holder: { pid: 42, command: 'node' }, unitMainPid: 42, trackedPids: [] }).kind).toBe('unit');
+    expect(classifyRestart({ unit, holder: { pid: 99, command: 'node' }, unitMainPid: 42, trackedPids: [99] }).kind).toBe('detached');
+    expect(classifyRestart({ unit, holder: { pid: 77, command: 'node' }, unitMainPid: 42, trackedPids: [99] }).kind).toBe('other');
+    expect(classifyRestart({ unit, holder: null, unitMainPid: 42, trackedPids: [] }).kind).toBe('none');
+    expect(classifyRestart({ unit: null, holder: { pid: 1, command: 'node' }, unitMainPid: null, trackedPids: [] }).kind).toBe('none');
   });
 });

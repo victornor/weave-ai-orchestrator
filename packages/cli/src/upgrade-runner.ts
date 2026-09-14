@@ -12,11 +12,12 @@ import { join } from 'node:path';
 import { openDb, nowIso, type Db } from '@weave-ai/db';
 import type { Upgrade } from '@weave-ai/shared';
 import {
-  LAUNCHD_LABEL, SERVICE_NAME, planRestart, previousLink, readLink, resolveInstalledLaunchdAgent,
-  resolveInstalledUnit, switchRelease, type InstalledLaunchdAgent, type InstalledUnit,
+  LAUNCHD_LABEL, SERVICE_NAME, findPortHolder, isServerProcessCmdline, parseListenPort, planRestart, previousLink, readLink,
+  readUnitRuntimeState, resolveInstalledLaunchdAgent, resolveInstalledUnit, switchRelease,
+  type InstalledLaunchdAgent, type InstalledUnit,
 } from '@weave-ai/release';
 import { configHome } from './contexts.js';
-import { ensureUnitRestartAlways, realRun, startDaemon, stopDaemon, type CommandResult, type RunCommand } from './daemon.js';
+import { ensureUnitRestartAlways, isRunning, realReadCmdline, realRun, startDaemon, stopDaemon, verifiedTrackedPids, type CommandResult, type ReadCmdline, type RunCommand } from './daemon.js';
 
 /** How long the new daemon has to come back healthy on the target release before it is rolled back. */
 export const HEALTH_DEADLINE_MS = 90_000;
@@ -58,6 +59,12 @@ export interface RunnerIo {
    * the release-and-health match alone is trusted, unchanged from before this existed.
    */
   confirmsReplacement(pid: number): Promise<boolean | null>;
+  /**
+   * VS-407: the installed unit's own runtime state, when there is one. A climbing restart count or a
+   * stuck `activating`/`failed` state means the unit is crash-looping, so the runner fails fast with
+   * that cause instead of waiting out the whole health deadline. Absent on hosts without a unit.
+   */
+  unitState?(): Promise<{ activeState: string | null; nRestarts: number | null } | null>;
 }
 
 export type RunnerVerdict =
@@ -74,7 +81,19 @@ export async function driveRestart(target: { release: string; sha: string | null
   await io.restart();
 
   const deadline = io.now() + HEALTH_DEADLINE_MS;
+  let crashLoop = false;
+  let prevRestarts: number | null = null;
   while (io.now() < deadline) {
+    // VS-407: a crash-looping unit cannot come back on target, so stop waiting and roll back with the
+    // real cause rather than a bare "no healthy daemon".
+    if (io.unitState) {
+      const st = await io.unitState();
+      if (st) {
+        if (st.activeState === 'failed') crashLoop = true;
+        if (st.nRestarts !== null && prevRestarts !== null && st.nRestarts > prevRestarts) crashLoop = true;
+        if (st.nRestarts !== null) prevRestarts = st.nRestarts;
+      }
+    }
     const health = await io.probe();
     if (health?.ok && onTarget(health, target)) {
       // VS-316: a probe on the target release alone is not proof — it might be a stray process running
@@ -87,15 +106,17 @@ export async function driveRestart(target: { release: string; sha: string | null
     // The daemon's own boot-time reconciliation beat this probe to a verdict: trust it over a probe
     // that has not (yet) answered, rather than rolling back a release that is in fact serving.
     if (await io.alreadyCompleted()) return { outcome: 'completed', version: null };
+    if (crashLoop) break;
     await io.sleep(PROBE_INTERVAL_MS);
   }
 
+  const cause = crashLoop ? `service crash-looping on ${target.release}` : `no healthy daemon on ${target.release} within ${HEALTH_DEADLINE_MS / 1000}s`;
   if (!previous) {
-    return { outcome: 'gone', message: `no daemon came back on ${target.release} and there is no previous release to fall back to` };
+    return { outcome: 'gone', message: `${cause} and there is no previous release to fall back to` };
   }
   io.rollbackTo(previous);
   await io.restart();
-  return { outcome: 'rolled_back', to: previous, message: `no healthy daemon on ${target.release} within ${HEALTH_DEADLINE_MS / 1000}s; rolled back to ${previous}` };
+  return { outcome: 'rolled_back', to: previous, message: `${cause}; rolled back to ${previous}` };
 }
 
 /** The daemon that answered is the one the upgrade switched to — by directory, or by the commit it was built from. */
@@ -177,7 +198,7 @@ export type { CommandResult, RunCommand } from './daemon.js';
 /** One `/proc/<pid>/cgroup` read — never a real one in a test. */
 export type ReadCgroup = (pid: number) => string;
 
-export interface HostIo { run: RunCommand; readCgroup: ReadCgroup }
+export interface HostIo { run: RunCommand; readCgroup: ReadCgroup; cmdline?: ReadCmdline; alive?: (pid: number) => boolean }
 
 const realReadCgroup: ReadCgroup = (pid) => readFileSync(`/proc/${pid}/cgroup`, 'utf8');
 export const realHostIo: HostIo = { run: realRun, readCgroup: realReadCgroup };
@@ -478,7 +499,58 @@ export function migrateLaunchdAgent(legacyAgent: InstalledLaunchdAgent, io: Host
   };
 }
 
+function configPid(config: string, name: string): number | null {
+  try { const n = Number.parseInt(readFileSync(join(config, name), 'utf8').trim(), 10); return Number.isFinite(n) && n > 0 ? n : null; } catch { return null; }
+}
+
+function configPort(config: string): number | null {
+  try {
+    const m = JSON.parse(readFileSync(join(config, 'daemon.json'), 'utf8')) as { loopbackUrl?: string; publicUrl?: string };
+    return parseListenPort(m.loopbackUrl) ?? parseListenPort(m.publicUrl);
+  } catch { return null; }
+}
+
+function markerPid(config: string): number | null {
+  try {
+    const m = JSON.parse(readFileSync(join(config, 'daemon.json'), 'utf8')) as { pid?: number };
+    return typeof m.pid === 'number' && m.pid > 0 ? m.pid : null;
+  } catch { return null; }
+}
+
+/**
+ * VS-407: the daemon's own self-upgrade refuses and never signals. Before the runner restarts the
+ * unit, refuse when a process outside the unit holds the listen address, so the upgrade fails with the
+ * cause instead of the unit crash-looping on `EADDRINUSE`. A holder that is the unit's own main pid is
+ * fine; a verified detached daemon is still refused here.
+ */
+function assertNoOutOfService(config: string, io: HostIo): void {
+  const unit = process.platform === 'linux' ? resolveInstalledUnit() : null;
+  if (!unit) return;
+  const port = configPort(config);
+  if (port === null) return;
+  const holder = findPortHolder(port, io.run);
+  if (!holder) return;
+  const state = readUnitRuntimeState(unit, io.run);
+  if (state.mainPid !== null && holder.pid === state.mainPid) return;
+  const tracked = verifiedTrackedPids({
+    pids: [configPid(config, 'daemon.pid'), markerPid(config)],
+    alive: io.alive ?? isRunning,
+    cmdline: io.cmdline ?? realReadCmdline,
+  });
+  const kind = tracked.includes(holder.pid) ? 'a detached daemon' : 'an unidentified process';
+  throw new Error(`refusing to restart: pid ${holder.pid}${holder.command ? ` (${holder.command})` : ''} is holding the daemon's listen address outside ${unit.name} (${kind}); stop it by hand, then retry`);
+}
+
 export function restartCommand(config: string, io: HostIo = realHostIo): RestartOutcome {
+  const outcome = buildRestartCommand(config, io);
+  return {
+    ...outcome,
+    // VS-407: preflight on every restart the runner performs, before it signals the unit at all.
+    run: async () => { assertNoOutOfService(config, io); await outcome.run(); },
+  };
+}
+
+function buildRestartCommand(config: string, io: HostIo = realHostIo): RestartOutcome {
   const unit = resolveInstalledUnit();
   const launchdAgent = resolveInstalledLaunchdAgent();
 
@@ -566,6 +638,15 @@ export async function runUpgradeRunner(upgradeId: string): Promise<RunnerVerdict
         sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
         alreadyCompleted: async () => db.get<{ state: string }>('SELECT state FROM upgrades WHERE id = ?', [upgradeId])?.state === 'completed',
         confirmsReplacement: restart.confirmsReplacement,
+        // VS-407: let driveRestart see a crash-looping unit and fail fast with that cause.
+        unitState: async () => {
+          const unit = process.platform === 'linux' ? resolveInstalledUnit() : null;
+          if (!unit) return null;
+          try {
+            const st = readUnitRuntimeState(unit, realRun);
+            return { activeState: st.activeState, nRestarts: st.nRestarts };
+          } catch { return null; }
+        },
       });
     } catch (e) {
       // VS-316: the restart command itself failed to even request a restart (defect 2 of the incident:

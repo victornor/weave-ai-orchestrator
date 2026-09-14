@@ -10,8 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SHUTDOWN_KILL_GRACE_MS } from '@weave-ai/shared';
 import { SERVICE_NAME, CONDUCTOR_DEPRECATION, cliShimTarget, dataHome, readCliShimTarget, userBinDir } from '@weave-ai/release';
 import {
-  ensureUnitRestartAlways, installService, isRunning, pidFile, renderServiceUnit, startDaemonService, stopDaemon, stopDaemonService,
-  systemdMainPid, withRestartAlways, type CommandResult, type RunCommand,
+  assessListenConflict, ensureUnitRestartAlways, installService, isRunning, localDaemonCheck, onTargetRelease,
+  pidFile, preflightRestart, reconcileDetachedDaemon, renderServiceUnit, restartSafetyChecks, startDaemonService,
+  stopDaemon, stopDaemonService, systemdMainPid, verifyRestart, withRestartAlways, type CommandResult, type RunCommand,
 } from './daemon.js';
 
 // VS-388: record any real `spawnSync` so a test can prove the guard refused before it could run.
@@ -289,5 +290,302 @@ describe('installService writes the CLI shim (VS-377)', () => {
     const content = readFileSync(conductor, 'utf8');
     expect(readCliShimTarget(content)).toBe(cliShimTarget(dataHome()));
     expect(content).toContain(CONDUCTOR_DEPRECATION);
+  });
+});
+
+// ---------- VS-407: detached-daemon handover and restart verification ----------
+
+describe('VS-407 detached-daemon reconciliation and postflight', () => {
+  const unit = { name: SERVICE_NAME, path: `/x/${SERVICE_NAME}`, legacy: false };
+  const tmps: string[] = [];
+  const saved = { XDG_CONFIG_HOME: process.env['XDG_CONFIG_HOME'], XDG_STATE_HOME: process.env['XDG_STATE_HOME'] };
+
+  beforeEach(() => {
+    process.env['XDG_CONFIG_HOME'] = mkdtempSync(join(tmpdir(), 'vs407-config-'));
+    process.env['XDG_STATE_HOME'] = mkdtempSync(join(tmpdir(), 'vs407-state-'));
+    tmps.push(process.env['XDG_CONFIG_HOME']!, process.env['XDG_STATE_HOME']!);
+  });
+  afterEach(() => {
+    while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true });
+    for (const k of ['XDG_CONFIG_HOME', 'XDG_STATE_HOME'] as const) {
+      if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
+  });
+
+  /** A runner whose `ss` answer changes once `holding` flips — the detached process letting go. */
+  function hostRun(state: { holding: boolean; mainPid: number | null }): RunCommand {
+    return (cmd, args) => {
+      if (cmd === 'systemctl') {
+        const valueOnly = args.includes('--value');
+        return { status: 0, signal: null, stdout: valueOnly ? `${state.mainPid ?? 0}\n` : `MainPID=${state.mainPid ?? 0}\n`, stderr: '' };
+      }
+      if (cmd === 'ss') {
+        return { status: 0, signal: null, stdout: state.holding ? `LISTEN 0 1 0.0.0.0:7433 0.0.0.0:* users:(("node",pid=4242,fd=1))\n` : '', stderr: '' };
+      }
+      return { status: 0, signal: null, stdout: '', stderr: '' };
+    };
+  }
+
+  it('SIGTERMs the verified detached daemon, waits for the address to free, and drops the pid file', async () => {
+    const state = { holding: true, mainPid: 999 };
+    const run = hostRun(state);
+    const signals: Array<[number, NodeJS.Signals]> = [];
+    const alive = { v: true };
+    const result = await reconcileDetachedDaemon({
+      run, unit, port: 7433, pid: 4242,
+      cmdline: () => '/x/weave/releases/1/packages/server/dist/bin.js\0',
+      alive: () => alive.v,
+      signal: (pid, sig) => { signals.push([pid, sig]); alive.v = false; state.holding = false; },
+      sleep: async () => undefined,
+      now: (() => { let t = 0; return () => (t += 1000); })(),
+    });
+    expect(result.reconciled).toBe(true);
+    expect(signals).toEqual([[4242, 'SIGTERM']]);
+    expect(existsSync(pidFile())).toBe(false);
+  });
+
+  it('never signals a pid that is not this product, even if a pid file names it', async () => {
+    const signals: number[] = [];
+    const result = await reconcileDetachedDaemon({
+      run: hostRun({ holding: true, mainPid: 999 }), unit, port: 7433, pid: 4242,
+      cmdline: () => 'node\0/app/other.js\0', alive: () => true,
+      signal: (pid) => signals.push(pid), sleep: async () => undefined, now: () => 0,
+    });
+    expect(result.reconciled).toBe(false);
+    expect(result.reason).toMatch(/not this product/);
+    expect(signals).toEqual([]);
+  });
+
+  it('never signals the unit\'s own main pid', async () => {
+    const signals: number[] = [];
+    const result = await reconcileDetachedDaemon({
+      run: hostRun({ holding: true, mainPid: 4242 }), unit, port: 7433, pid: 4242,
+      cmdline: () => '/x/packages/server/dist/bin.js\0', alive: () => true,
+      signal: (pid) => signals.push(pid), sleep: async () => undefined, now: () => 0,
+    });
+    expect(result.reconciled).toBe(false);
+    expect(signals).toEqual([]);
+  });
+
+  it('never signals a tracked pid that no longer holds the listen address', async () => {
+    const signals: number[] = [];
+    const result = await reconcileDetachedDaemon({
+      run: hostRun({ holding: false, mainPid: 999 }), unit, port: 7433, pid: 4242,
+      cmdline: () => '/x/packages/server/dist/bin.js\0', alive: () => true,
+      signal: (pid) => signals.push(pid), sleep: async () => undefined, now: () => 0,
+    });
+    expect(result.reconciled).toBe(false);
+    expect(result.reason).toMatch(/does not hold/);
+    expect(signals).toEqual([]);
+  });
+
+  it('refuses when the unit\'s state cannot be read, and never signals (VS-407)', async () => {
+    const signals: number[] = [];
+    const result = await reconcileDetachedDaemon({
+      run: (cmd) => (cmd === 'ss'
+        ? { status: 0, signal: null, stdout: 'LISTEN 0 1 0.0.0.0:7433 0.0.0.0:* users:(("node",pid=4242,fd=1))\n', stderr: '' }
+        : { status: 0, signal: null, stdout: '', stderr: '' }), // systemctl answers nothing: no ActiveState, no MainPID
+      unit, port: 7433, pid: 4242,
+      cmdline: () => '/x/packages/server/dist/bin.js\0', alive: () => true,
+      signal: (pid) => signals.push(pid), sleep: async () => undefined, now: () => 0,
+    });
+    expect(result.reconciled).toBe(false);
+    expect(result.reason).toMatch(/could not be read/);
+    expect(signals).toEqual([]);
+  });
+
+  it('refuses a pid the unit owns through its cgroup, and never signals (VS-407)', async () => {
+    const signals: number[] = [];
+    const result = await reconcileDetachedDaemon({
+      run: hostRun({ holding: true, mainPid: 999 }), unit, port: 7433, pid: 4242,
+      cmdline: () => '/x/packages/server/dist/bin.js\0', alive: () => true,
+      readCgroup: () => `0::/user.slice/user@1000.service/app.slice/${SERVICE_NAME}\n`,
+      signal: (pid) => signals.push(pid), sleep: async () => undefined, now: () => 0,
+    });
+    expect(result.reconciled).toBe(false);
+    expect(result.reason).toMatch(/belongs to/);
+    expect(signals).toEqual([]);
+  });
+
+  it('refuses when there is no MainPID and the cgroup cannot be read, and never signals (VS-407)', async () => {
+    const signals: number[] = [];
+    const result = await reconcileDetachedDaemon({
+      run: (cmd) => (cmd === 'systemctl'
+        ? { status: 0, signal: null, stdout: 'ActiveState=inactive\nSubState=dead\nNRestarts=0\nMainPID=0\n', stderr: '' }
+        : { status: 0, signal: null, stdout: 'LISTEN 0 1 0.0.0.0:7433 0.0.0.0:* users:(("node",pid=4242,fd=1))\n', stderr: '' }),
+      unit, port: 7433, pid: 4242,
+      cmdline: () => '/x/packages/server/dist/bin.js\0', alive: () => true,
+      readCgroup: () => { throw new Error('no /proc'); },
+      signal: (pid) => signals.push(pid), sleep: async () => undefined, now: () => 0,
+    });
+    expect(result.reconciled).toBe(false);
+    expect(result.reason).toMatch(/cgroup cannot be read/);
+    expect(signals).toEqual([]);
+  });
+
+  /** `MainPID=0` with a readable state is handover's whole reason to exist: run it against both shapes. */
+  async function handoverWithUnitState(stateLine: string): Promise<{ reconciled: boolean; signals: Array<[number, NodeJS.Signals]> }> {
+    const signals: Array<[number, NodeJS.Signals]> = [];
+    const alive = { v: true };
+    const holding = { v: true };
+    const result = await reconcileDetachedDaemon({
+      run: (cmd) => {
+        if (cmd === 'systemctl') return { status: 0, signal: null, stdout: stateLine, stderr: '' };
+        if (cmd === 'ss') return { status: 0, signal: null, stdout: holding.v ? 'LISTEN 0 1 0.0.0.0:7433 0.0.0.0:* users:(("node",pid=4242,fd=1))\n' : '', stderr: '' };
+        return { status: 0, signal: null, stdout: '', stderr: '' };
+      },
+      unit, port: 7433, pid: 4242,
+      cmdline: () => '/x/packages/server/dist/bin.js\0', alive: () => alive.v,
+      readCgroup: () => '0::/user.slice/user-1000.slice/session-1.scope\n', // a user session, not the unit
+      signal: (pid, sig) => { signals.push([pid, sig]); alive.v = false; holding.v = false; },
+      sleep: async () => undefined, now: () => 0,
+    });
+    return { reconciled: result.reconciled, signals };
+  }
+
+  it('hands over during a crash loop (MainPID 0, activating) — the incident shape (VS-407)', async () => {
+    const r = await handoverWithUnitState('ActiveState=activating\nSubState=auto-restart\nNRestarts=600\nMainPID=0\n');
+    expect(r.reconciled).toBe(true);
+    expect(r.signals).toEqual([[4242, 'SIGTERM']]);
+  });
+
+  it('hands over to a stopped unit (MainPID 0, inactive) (VS-407)', async () => {
+    const r = await handoverWithUnitState('ActiveState=inactive\nSubState=dead\nNRestarts=0\nMainPID=0\n');
+    expect(r.reconciled).toBe(true);
+    expect(r.signals).toEqual([[4242, 'SIGTERM']]);
+  });
+
+  it('classifies who holds the address relative to the unit', () => {
+    const run = hostRun({ holding: true, mainPid: 999 });
+    expect(assessListenConflict({ run, unit, port: 7433, unitMainPid: 4242, trackedPids: [4242] }).kind).toBe('unit');
+    expect(assessListenConflict({ run, unit, port: 7433, unitMainPid: 999, trackedPids: [4242] }).kind).toBe('detached');
+    expect(assessListenConflict({ run, unit, port: 7433, unitMainPid: 999, trackedPids: [7] }).kind).toBe('other');
+    expect(assessListenConflict({ run, unit: null, port: 7433, unitMainPid: null, trackedPids: [] }).kind).toBe('none');
+  });
+
+  it('refuses preflight with the holder named, and reports a handover', async () => {
+    const refused = await preflightRestart({
+      reconcile: async () => ({ reconciled: false, pid: null, reason: 'no live detached daemon is recorded' }),
+      assess: () => ({ kind: 'other', pid: 7, command: 'node' }),
+      unit,
+    });
+    expect(refused.ok).toBe(false);
+    expect(refused.ok ? '' : refused.message).toContain('pid 7');
+
+    const handed = await preflightRestart({
+      reconcile: async () => ({ reconciled: true, pid: 4242, reason: 'gracefully stopped the detached daemon pid 4242' }),
+      assess: () => ({ kind: 'none', pid: null, command: null }),
+      unit,
+    });
+    expect(handed).toEqual({ ok: true, handover: { reconciled: true, pid: 4242, reason: 'gracefully stopped the detached daemon pid 4242' } });
+  });
+
+  const clock = () => ({ t: 0, now() { return this.t; }, async sleep(ms: number) { this.t += ms; } });
+
+  it('accepts a restart only when the unit is active and the target release is served', async () => {
+    const v = await verifyRestart({
+      unit, target: { release: '/rel/new', sha: 'a'.repeat(40) }, startedPid: null,
+      readUnitState: () => ({ activeState: 'active', subState: 'running', nRestarts: 0, mainPid: 999 }),
+      probe: async () => ({ ok: true, version: 'v2', releasePath: '/rel/new', releaseSha: 'a'.repeat(40), pid: 999 }),
+      owned: () => true, now: () => 0, sleep: async () => undefined, timeoutMs: 1000,
+    });
+    expect(v).toEqual({ ok: true, version: 'v2' });
+  });
+
+  it('fails on a crash loop', async () => {
+    const c = clock();
+    let n = 0;
+    const v = await verifyRestart({
+      unit, target: { release: '/rel/new', sha: null }, startedPid: null,
+      readUnitState: () => ({ activeState: 'activating', subState: 'auto-restart', nRestarts: (n += 1), mainPid: 999 }),
+      probe: async () => null, owned: () => true, now: c.now.bind(c), sleep: c.sleep.bind(c), timeoutMs: 1500,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.ok ? '' : v.message).toContain('crash-looping');
+  });
+
+  it('fails when a different release answers', async () => {
+    const c = clock();
+    const v = await verifyRestart({
+      unit, target: { release: '/rel/new', sha: 'a'.repeat(40) }, startedPid: null,
+      readUnitState: () => ({ activeState: 'active', subState: 'running', nRestarts: 0, mainPid: 999 }),
+      probe: async () => ({ ok: true, version: 'old', releasePath: '/rel/old', releaseSha: 'b'.repeat(40), pid: 999 }),
+      owned: () => true, now: c.now.bind(c), sleep: c.sleep.bind(c), timeoutMs: 1000,
+    });
+    expect(v.ok).toBe(false);
+    expect(v.ok ? '' : v.message).toContain('not the target release');
+  });
+
+  it('fails when an orphan outside the unit serves the target release (restart/rollback case)', async () => {
+    const c = clock();
+    const v = await verifyRestart({
+      unit, target: { release: '/rel/new', sha: null }, startedPid: null,
+      readUnitState: () => ({ activeState: 'active', subState: 'running', nRestarts: 0, mainPid: 999 }),
+      probe: async () => ({ ok: true, version: 'v2', releasePath: '/rel/new', releaseSha: null, pid: 7 }),
+      owned: () => false, now: c.now.bind(c), sleep: c.sleep.bind(c), timeoutMs: 1000,
+    });
+    expect(v.ok).toBe(false);
+  });
+
+  it('with no unit, accepts only the pid it started', async () => {
+    const c = clock();
+    const base = { unit: null, target: { release: '/rel/new', sha: null }, readUnitState: () => ({ activeState: null, subState: null, nRestarts: null, mainPid: null }) };
+    const wrong = await verifyRestart({ ...base, startedPid: 11, probe: async () => ({ ok: true, version: 'v2', releasePath: '/rel/new', releaseSha: null, pid: 22 }), now: c.now.bind(c), sleep: c.sleep.bind(c), timeoutMs: 1000 });
+    expect(wrong.ok).toBe(false);
+    const right = await verifyRestart({ ...base, startedPid: 11, probe: async () => ({ ok: true, version: 'v2', releasePath: '/rel/new', releaseSha: null, pid: 11 }), now: () => 0, sleep: async () => undefined, timeoutMs: 1000 });
+    expect(right).toEqual({ ok: true, version: 'v2' });
+  });
+
+  it('matches the target by release path or commit', () => {
+    const target = { release: '/rel/new', sha: 'a'.repeat(40) };
+    expect(onTargetRelease({ ok: true, version: null, releasePath: '/rel/new', releaseSha: null, pid: 1 }, target)).toBe(true);
+    expect(onTargetRelease({ ok: true, version: null, releasePath: '/other', releaseSha: 'a'.repeat(40), pid: 1 }, target)).toBe(true);
+    expect(onTargetRelease({ ok: true, version: null, releasePath: '/other', releaseSha: 'b'.repeat(40), pid: 1 }, target)).toBe(false);
+  });
+});
+
+describe('VS-407 doctor host checks', () => {
+  const unit = { name: SERVICE_NAME, path: `/x/${SERVICE_NAME}`, legacy: false };
+  const active = { activeState: 'active', subState: 'running', nRestarts: 0, mainPid: 999 };
+  /** ss reports pid 4242 (a detached daemon); systemd answers the requested unit state. */
+  const run = (mainPid: number | null): RunCommand => (cmd, args) => {
+    if (cmd === 'systemctl') {
+      const valueOnly = args.includes('--value');
+      return { status: 0, signal: null, stdout: valueOnly ? `${mainPid ?? 0}\n` : `MainPID=${mainPid ?? 0}\n`, stderr: '' };
+    }
+    if (cmd === 'ss') return { status: 0, signal: null, stdout: 'LISTEN 0 1 0.0.0.0:7433 0.0.0.0:* users:(("node",pid=4242,fd=1))\n', stderr: '' };
+    return { status: 0, signal: null, stdout: '', stderr: '' };
+  };
+
+  it('reads a unit-managed daemon as healthy, not "not started from this machine"', () => {
+    const check = localDaemonCheck({ unit, pid: null, alive: () => false, unitState: active, run: run(999), port: 7433 });
+    expect(check.ok).toBe(true);
+    expect(check.detail).toContain('unit-managed');
+  });
+
+  it('warns about a detached daemon running alongside the unit', () => {
+    const check = localDaemonCheck({ unit, pid: 4242, alive: () => true, unitState: active, run: run(999), port: 7433 });
+    expect(check.ok).toBe(null);
+    expect(check.detail).toContain('detached daemon pid 4242');
+    expect(check.fix).toContain('weave daemon restart');
+  });
+
+  it('still reports a plain running local daemon when no unit is installed', () => {
+    expect(localDaemonCheck({ unit: null, pid: 4242, alive: () => true }).detail).toContain('running (pid 4242)');
+    expect(localDaemonCheck({ unit: null, pid: null, alive: () => false }).ok).toBe(null);
+  });
+
+  it('flags a restart-looping or failed unit', () => {
+    const failed = restartSafetyChecks({ unit, run: run(999), port: 7433, unitState: { activeState: 'failed', subState: 'failed', nRestarts: 612, mainPid: 999 } });
+    expect(failed.some((c) => c.name === 'systemd unit restart loop' && c.ok === false)).toBe(true);
+    const warning = restartSafetyChecks({ unit, run: run(999), port: 7433, unitState: { ...active, nRestarts: 3 } });
+    expect(warning.some((c) => c.name === 'systemd unit restarts' && c.ok === null)).toBe(true);
+  });
+
+  it('flags an out-of-service process on the listen address and stays quiet on a healthy host', () => {
+    const outOfService = restartSafetyChecks({ unit, run: run(999), port: 7433, unitState: active, unitMainPid: 999, trackedPids: [] });
+    expect(outOfService.some((c) => c.name === 'daemon on the listen address' && c.ok === false)).toBe(true);
+    const healthy = restartSafetyChecks({ unit, run: run(4242), port: 7433, unitState: { ...active, mainPid: 4242 }, unitMainPid: 4242, trackedPids: [] });
+    expect(healthy).toEqual([]);
   });
 });

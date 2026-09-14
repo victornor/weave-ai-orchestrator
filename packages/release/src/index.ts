@@ -20,6 +20,24 @@ import { writeCliShims, type ShimWriteResult } from './shim.js';
 export * from './paths.js';
 export * from './shim.js';
 
+// ---------- the guarded host runner (VS-407) ----------
+
+export interface CommandResult { status: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string; error?: Error }
+/** One command, run and captured — never a real `systemctl`/`launchctl` invocation in a test. */
+export type RunCommand = (cmd: string, args: string[]) => CommandResult;
+
+/**
+ * VS-407: the one guarded runner both the CLI and the daemon use. It refuses before spawning anything
+ * when the VS-388 test guard is set, so a test that reaches a real host-lifecycle command fails loudly
+ * instead of stopping the live daemon. `packages/cli` re-exports this as its `realRun`.
+ */
+export const realRunCommand: RunCommand = (cmd, args) => {
+  assertHostCommandAllowed(cmd);
+  const r = spawnSync(cmd, args, { encoding: 'utf8' });
+  return { status: r.status, signal: r.signal, stdout: r.stdout ?? '', stderr: r.stderr ?? '', error: r.error };
+};
+
+
 /** VS-258: `<base>/agent-conductor` or `<base>/weave`, whichever exists; a fresh host gets the new name. */
 function resolveUserDir(base: string): string {
   const r = resolveInstallPath(join(base, 'agent-conductor'), join(base, 'weave'));
@@ -406,3 +424,143 @@ export function planRestart(env: RestartEnvironment): RestartPlan {
 export function inOwnScope(unit: string, cmd: string, args: string[]): { cmd: string; args: string[] } {
   return { cmd: 'systemd-run', args: ['--user', '--scope', '--collect', `--unit=${unit}`, '--quiet', cmd, ...args] };
 }
+
+// ---------- restart safety: who is serving, and in what state (VS-407) ----------
+
+/** One `systemctl show` read of the fields the preflight/postflight/doctor need. */
+export interface UnitRuntimeState {
+  activeState: string | null;
+  subState: string | null;
+  nRestarts: number | null;
+  mainPid: number | null;
+}
+
+const EMPTY_UNIT_STATE: UnitRuntimeState = { activeState: null, subState: null, nRestarts: null, mainPid: null };
+
+function parseCount(value: string | undefined): number | null {
+  if (value === undefined || value.trim() === '') return null;
+  const n = Number.parseInt(value, 10);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function parsePid(value: string | undefined): number | null {
+  const n = parseCount(value);
+  return n !== null && n > 0 ? n : null;
+}
+
+/** Pure parser for `systemctl show --property=…` `Key=Value` output. Unknown keys are ignored. */
+export function parseUnitRuntimeState(output: string): UnitRuntimeState {
+  const fields = new Map<string, string>();
+  for (const line of output.split('\n')) {
+    const i = line.indexOf('=');
+    if (i > 0) fields.set(line.slice(0, i).trim(), line.slice(i + 1).trim());
+  }
+  return {
+    activeState: fields.get('ActiveState') ?? null,
+    subState: fields.get('SubState') ?? null,
+    nRestarts: parseCount(fields.get('NRestarts')),
+    mainPid: parsePid(fields.get('MainPID')),
+  };
+}
+
+/** The installed unit's own runtime state, or all-null when it cannot be read. */
+export function readUnitRuntimeState(unit: InstalledUnit, run: RunCommand = realRunCommand): UnitRuntimeState {
+  const r = run('systemctl', [
+    '--user', 'show', unit.name,
+    '--property=ActiveState', '--property=SubState', '--property=NRestarts', '--property=MainPID',
+  ]);
+  if (r.error || r.status !== 0) return { ...EMPTY_UNIT_STATE };
+  return parseUnitRuntimeState(r.stdout);
+}
+
+/** The port in a listen URL, or null for a unix socket / unparseable value. */
+export function parseListenPort(url: string | null | undefined): number | null {
+  if (!url) return null;
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return null; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+  if (parsed.port) return Number.parseInt(parsed.port, 10);
+  return parsed.protocol === 'https:' ? 443 : 80;
+}
+
+export interface PortHolder { pid: number; command: string }
+
+/** Parse a holder out of one `ss -ltnp` line: `users:(("node",pid=123,fd=22))`. */
+export function parsePortHolder(ssOutput: string): PortHolder | null {
+  for (const line of ssOutput.split('\n')) {
+    const pid = /\bpid=(\d+)/.exec(line);
+    if (!pid?.[1]) continue;
+    const cmd = /\(\("([^"]+)"/.exec(line)?.[1] ?? '';
+    return { pid: Number.parseInt(pid[1], 10), command: cmd };
+  }
+  return null;
+}
+
+/** Parse a holder out of `lsof -nP -iTCP:<port> -sTCP:LISTEN` output (header skipped). */
+export function parseLsofHolder(lsofOutput: string): PortHolder | null {
+  for (const line of lsofOutput.split('\n').slice(1)) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 2) continue;
+    const pid = Number.parseInt(cols[1]!, 10);
+    if (Number.isFinite(pid) && pid > 0) return { pid, command: cols[0]! };
+  }
+  return null;
+}
+
+/**
+ * Who holds `port`, or null when nothing does. `ss` first (present on most modern Linux hosts), then
+ * `lsof` (the macOS-native one). Both are optional: a host without either simply reports nothing.
+ */
+export function findPortHolder(port: number, run: RunCommand): PortHolder | null {
+  const ss = run('ss', ['-ltnpH', `sport = :${port}`]);
+  if (!ss.error && ss.status === 0) {
+    const holder = parsePortHolder(ss.stdout);
+    if (holder) return holder;
+  }
+  const lsof = run('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN']);
+  if (!lsof.error && lsof.status === 0) {
+    const holder = parseLsofHolder(lsof.stdout);
+    if (holder) return holder;
+  }
+  return null;
+}
+
+/** Does this process command line name this product's server entry point? */
+export function isServerProcessCmdline(cmdline: string): boolean {
+  return cmdline.replace(/\0/g, ' ').includes(join('packages', 'server', 'dist', 'bin.js'));
+}
+
+export type ListenHolderKind = 'none' | 'unit' | 'detached' | 'other';
+
+export interface RestartConflict {
+  kind: ListenHolderKind;
+  /** The pid holding the listen address, when one is known. */
+  pid: number | null;
+  command: string | null;
+}
+
+/**
+ * VS-407: who holds the daemon's listen address, relative to the installed unit. Pure — the caller
+ * supplies the port holder, the unit's main pid, and the pids already verified as this product's own
+ * tracked daemons (from `daemon.pid`/`daemon.json`). `detached` means the local CLI may hand over;
+ * `other` means refuse.
+ */
+export function classifyRestart(input: {
+  unit: InstalledUnit | null;
+  holder: PortHolder | null;
+  unitMainPid: number | null;
+  trackedPids: number[];
+}): RestartConflict {
+  const { unit, holder, unitMainPid, trackedPids } = input;
+  const pid = holder?.pid ?? null;
+  const command = holder?.command ?? null;
+  if (!unit) return { kind: 'none', pid, command };
+  if (!holder) {
+    // Nothing is listening: a unit restart will bind freely, whatever stale records remain.
+    return { kind: 'none', pid: null, command: null };
+  }
+  if (unitMainPid !== null && holder.pid === unitMainPid) return { kind: 'unit', pid, command };
+  if (trackedPids.includes(holder.pid)) return { kind: 'detached', pid, command };
+  return { kind: 'other', pid, command };
+}
+

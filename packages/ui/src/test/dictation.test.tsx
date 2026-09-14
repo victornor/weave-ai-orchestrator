@@ -8,6 +8,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useState, type ReactElement } from 'react';
 import { Composer } from '../components/Composer';
 import { useDictation } from '../lib/dictation';
+import { DICTATION_HOLD_MS } from '../lib/dictationHotkey';
 
 interface ResultLike { isFinal: boolean; length: number; 0: { transcript: string } }
 
@@ -93,6 +94,58 @@ describe('dictation — recognizer unavailable', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/not available in this browser/);
     expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Dictation unavailable')).toBeInTheDocument();
+  });
+});
+
+describe('dictation — the desk shortcut (VS-432)', () => {
+  beforeEach(() => {
+    w.webkitSpeechRecognition = FakeRecognition;
+  });
+
+  it('toggles on a quick press, says to press again, and stops on the next press', () => {
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    expect(screen.getByText('Listening…')).toBeInTheDocument();
+
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+    expect(screen.getByText('Listening…')).toBeInTheDocument();
+    expect(screen.getByText('press Ctrl+Shift+Space again to stop')).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
+  });
+
+  it('says to release during a hold, and stops when the key comes up past the threshold', () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    try {
+      render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+      fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+      expect(screen.getByText('release Ctrl+Shift+Space to stop')).toBeInTheDocument();
+
+      clock.mockReturnValue(DICTATION_HOLD_MS);
+      fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+      expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('ends a hold when a modifier is released before Space', () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    try {
+      render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+      fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+      clock.mockReturnValue(DICTATION_HOLD_MS + 50);
+      fireEvent.keyUp(window, { key: 'Shift' });
+      expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('swallows the chord so a space never reaches the input', () => {
+    render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
+    expect(fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true })).toBe(false);
   });
 });
 

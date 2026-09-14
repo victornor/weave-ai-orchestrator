@@ -11,6 +11,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { dictationHint } from '../lib/dictationHint';
+import { DICTATION_HOLD_MS } from '../lib/dictationHotkey';
 
 const dict = vi.hoisted(() => ({
   onText: null as ((text: string, final: boolean) => void) | null,
@@ -372,23 +373,23 @@ describe('the V2 composer listening state (VS-416)', () => {
   });
 });
 
-describe('the V2 composer dictation hint (VS-416)', () => {
-  it('is Mac-shaped on macOS and Ctrl-shaped elsewhere, and names the hold', () => {
-    expect(dictationHint({ isTouch: false, userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' })).toBe('hold ⌘⇧M to dictate');
-    expect(dictationHint({ isTouch: false, userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })).toBe('hold Ctrl+Shift+M to dictate');
-    expect(dictationHint({ isTouch: false, userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' })).toBe('hold Ctrl+Shift+M to dictate');
+describe('the V2 composer dictation hint (VS-416, VS-432)', () => {
+  it('is Mac-shaped on macOS and Ctrl-shaped elsewhere, and names both modes', () => {
+    expect(dictationHint({ isTouch: false, userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' })).toBe('⌘⇧Space to dictate · hold to talk');
+    expect(dictationHint({ isTouch: false, userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })).toBe('Ctrl+Shift+Space to dictate · hold to talk');
+    expect(dictationHint({ isTouch: false, userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' })).toBe('Ctrl+Shift+Space to dictate · hold to talk');
     expect(dictationHint({ isTouch: true, userAgent: 'Mozilla/5.0 (Macintosh)' })).toBe('tap the mic to dictate');
   });
 
   it('renders the Ctrl hint by default and the Mac hint under a Mac user agent', () => {
     const ua = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
     const { unmount } = render(<Harness onSubmit={vi.fn()} />);
-    expect(screen.getByText('hold Ctrl+Shift+M to dictate')).toBeInTheDocument();
+    expect(screen.getByText('Ctrl+Shift+Space to dictate · hold to talk')).toBeInTheDocument();
     unmount();
 
     ua.mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)');
     render(<Harness onSubmit={vi.fn()} />);
-    expect(screen.getByText('hold ⌘⇧M to dictate')).toBeInTheDocument();
+    expect(screen.getByText('⌘⇧Space to dictate · hold to talk')).toBeInTheDocument();
     ua.mockRestore();
   });
 
@@ -399,20 +400,39 @@ describe('the V2 composer dictation hint (VS-416)', () => {
     media.mockRestore();
   });
 
-  it('starts push-to-talk on meta and on ctrl, and stops on release', () => {
+  it('toggles on a quick press: one starts dictation, the next stops it', () => {
     render(<Harness onSubmit={vi.fn()} />);
-    fireEvent.keyDown(window, { key: 'M', code: 'KeyM', metaKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', metaKey: true, shiftKey: true });
     expect(screen.getByTestId('v2-composer-listening')).toBeInTheDocument();
-    fireEvent.keyUp(window, { key: 'M', code: 'KeyM' });
-    expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
+    // Released at once: a toggle keeps the mic open rather than stopping.
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+    expect(screen.getByTestId('v2-composer-listening')).toBeInTheDocument();
 
-    fireEvent.keyDown(window, { key: 'M', code: 'KeyM', ctrlKey: true, shiftKey: true });
-    expect(screen.getByTestId('v2-composer-listening')).toBeInTheDocument();
-    fireEvent.keyUp(window, { key: 'M', code: 'KeyM' });
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
     expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
   });
 
-  it('does not claim the push-to-talk hotkey when hotkey is false', () => {
+  it('stops on release when the chord is held past the threshold', () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    try {
+      render(<Harness onSubmit={vi.fn()} />);
+      fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+      expect(screen.getByTestId('v2-composer-listening')).toBeInTheDocument();
+      clock.mockReturnValue(DICTATION_HOLD_MS);
+      fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+      expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('swallows the chord so a space never reaches the textarea', () => {
+    render(<Harness onSubmit={vi.fn()} />);
+    // `fireEvent` returns false when the event was defaultPrevented.
+    expect(fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true })).toBe(false);
+  });
+
+  it('does not claim the shortcut when hotkey is false', () => {
     render(
       <ChatComposer
         projects={PROJECTS}
@@ -424,7 +444,7 @@ describe('the V2 composer dictation hint (VS-416)', () => {
         hotkey={false}
       />,
     );
-    fireEvent.keyDown(window, { key: 'M', code: 'KeyM', metaKey: true, shiftKey: true });
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', metaKey: true, shiftKey: true });
     expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
     // The mic button still starts dictation: only the global shortcut is handed off.
     dictate();

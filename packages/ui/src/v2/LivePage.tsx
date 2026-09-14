@@ -5,7 +5,8 @@
  * desktop, with a `−/+` control for one to four per row and a feed height that scales inversely; one
  * column on phone. Scope chips filter for real, and the header's roster/shown figures come from the
  * same worker array the grid renders (HANDOFF §8, §15). Each card's trace is VS-345's shared
- * `WorkerFeed`, so Live opens no private run stream.
+ * `WorkerFeed`, so Live opens no private run stream. VS-372 adds a resize grip: one drag, keyboard
+ * press or double-click reset sets one shared tile height, remembered beside the per-row count.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { agentUiStatus, projectLabel, type Agent, type Ticket } from '@weave-ai/shared';
@@ -23,7 +24,7 @@ import { EmptyState, ErrorState } from '../components/States';
 import { workerModelTagLabel } from '../components/WorkerModelTag';
 import { V2Page } from './V2Page';
 import { WorkerFeed, useWorkerRun } from './WorkerFeed';
-import { LIVE_COLUMNS_DEFAULT, LIVE_COLUMNS_MAX, LIVE_COLUMNS_MIN, readLiveColumns, writeLiveColumns } from './prefs';
+import { LIVE_COLUMNS_DEFAULT, LIVE_COLUMNS_MAX, LIVE_COLUMNS_MIN, LIVE_HEIGHT_MIN, LIVE_HEIGHT_STEP, clampLiveHeight, maxLiveHeight, readLiveColumns, readLiveHeight, writeLiveColumns, writeLiveHeight } from './prefs';
 
 /** The feed height for each cards-per-row choice (HANDOFF §8: the ladder scales inversely). */
 export const LIVE_FEED_HEIGHT: Record<number, number> = { 1: 420, 2: 300, 3: 240, 4: 200 };
@@ -39,6 +40,18 @@ function usePhone(): boolean {
     return () => mq.removeEventListener('change', onChange);
   }, []);
   return phone;
+}
+
+/** The live viewport height, so the tile ceiling is "most of the viewport" rather than a fixed guess. */
+function useViewportHeight(): number {
+  const [height, setHeight] = useState(() => (typeof window === 'undefined' ? 800 : window.innerHeight));
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = (): void => setHeight(window.innerHeight);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return height;
 }
 
 interface ChipProps {
@@ -75,7 +88,7 @@ interface LiveCardProps {
   projectLabel: string | null;
   projectColor: string | null;
   optionName: string | null;
-  bodyHeight: number;
+  bodyHeight?: number;
   focused: boolean;
 }
 
@@ -135,8 +148,39 @@ export function LiveBody(): React.ReactElement {
   const projectsByWs = useWorkspaceProjects(ids);
 
   const phone = usePhone();
+  const viewportHeight = useViewportHeight();
   const [cols, setCols] = useState<number>(() => readLiveColumns());
+  const [customHeight, setCustomHeight] = useState<number | null>(() => readLiveHeight());
+  const [resizing, setResizing] = useState(false);
   const [scope, setScope] = useState<string>('all');
+
+  // A drag is measured in pixels from the pressed height; the chosen value is a device preference,
+  // so it is written once when the pointer is released rather than on every move.
+  const dragStart = useRef<{ y: number; height: number } | null>(null);
+  useEffect(() => {
+    if (!resizing) return;
+    const move = (e: PointerEvent): void => {
+      const start = dragStart.current;
+      if (!start) return;
+      setCustomHeight(clampLiveHeight(start.height + (e.clientY - start.y), window.innerHeight));
+    };
+    const end = (): void => {
+      setResizing(false);
+      dragStart.current = null;
+      setCustomHeight((current) => {
+        writeLiveHeight(current);
+        return current;
+      });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+    };
+  }, [resizing]);
 
   const cells = useMemo<LiveCellInput[]>(() => {
     const out: LiveCellInput[] = [];
@@ -187,7 +231,31 @@ export function LiveBody(): React.ReactElement {
   if (errored) return <ErrorState code="LIVE_QUERY_FAILED" message="Could not load the live floor." onRetry={() => void workersQueries[0]?.refetch()} />;
 
   const effectiveCols = phone ? 1 : cols;
-  const bodyHeight = LIVE_FEED_HEIGHT[effectiveCols] ?? LIVE_FEED_HEIGHT[LIVE_COLUMNS_DEFAULT]!;
+  const ladderHeight = LIVE_FEED_HEIGHT[effectiveCols] ?? LIVE_FEED_HEIGHT[LIVE_COLUMNS_DEFAULT]!;
+  // Phone keeps the natural single-column height; desktop uses the dragged height, else the ladder.
+  const bodyHeight = phone ? undefined : clampLiveHeight(customHeight ?? ladderHeight, viewportHeight);
+  const heightMax = phone ? undefined : maxLiveHeight(viewportHeight);
+
+  const startResize = (e: React.PointerEvent<HTMLDivElement>): void => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    dragStart.current = { y: e.clientY, height: bodyHeight ?? ladderHeight };
+    setResizing(true);
+  };
+
+  const resetHeight = (): void => {
+    setCustomHeight(null);
+    writeLiveHeight(null);
+  };
+
+  const onResizeKey = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    const by = e.key === 'ArrowDown' ? LIVE_HEIGHT_STEP : e.key === 'ArrowUp' ? -LIVE_HEIGHT_STEP : null;
+    if (by === null) return;
+    e.preventDefault();
+    const next = clampLiveHeight((bodyHeight ?? ladderHeight) + by, viewportHeight);
+    setCustomHeight(next);
+    writeLiveHeight(next);
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -211,6 +279,24 @@ export function LiveBody(): React.ReactElement {
           </span>
         ) : null}
       </div>
+      {!phone ? (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize live tiles"
+          aria-valuenow={bodyHeight}
+          aria-valuemin={LIVE_HEIGHT_MIN}
+          aria-valuemax={heightMax}
+          tabIndex={0}
+          title="Drag to resize · double-click to reset"
+          onPointerDown={startResize}
+          onDoubleClick={resetHeight}
+          onKeyDown={onResizeKey}
+          className="group flex h-2 flex-none cursor-ns-resize touch-none items-center justify-center bg-bg-0 outline-none focus-visible:bg-bg-2"
+        >
+          <span aria-hidden className="h-0.5 w-10 rounded-pill bg-line-2 group-hover:bg-accent" />
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {ordered.length === 0 ? (
           <EmptyState title="No workers are running." detail="Workers appear here while they are on a ticket." />

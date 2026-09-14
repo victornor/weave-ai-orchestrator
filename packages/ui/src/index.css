@@ -234,9 +234,14 @@
   }
 }
 
-/* Tailwind v4 mapping. Non-inline on purpose: utilities emit var(--token)
-   so a runtime [data-theme] switch repaints without rebuilding classes. */
-@theme {
+/* Tailwind v4 mapping, `inline` so utilities embed `var(--token)` directly rather than through
+   `--color-bg-1: var(--bg-1)` — a two-level indirection whose own computed value is fixed relative
+   to the element that declares it (`@theme`'s `:root, :host`), not the element that consumes it.
+   Non-inline broke `.v2-root[data-theme='light']`: every Tailwind utility class ignored its scoped
+   token override and kept resolving `<html>`'s value, since `--color-bg-1` never re-declares inside
+   `.v2-root`. `inline` still repaints on a runtime `[data-theme]` switch — it defers to `--bg-1`
+   directly, one level of `var()`, which cascades normally per element (VS-367). */
+@theme inline {
   --color-bg-0: var(--bg-0);
   --color-bg-1: var(--bg-1);
   --color-bg-2: var(--bg-2);

@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "Dictation: a session that ends with five words or fewer inserts nothing and
+  leaves the draft as it was"
+skip_specs: true

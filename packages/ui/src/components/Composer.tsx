@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYPES } from '@weave-ai/shared';
-import { useDictation } from '../lib/dictation';
+import { useDictation, isDictationTooShort } from '../lib/dictation';
 import { useDictationHotkey } from '../lib/dictationHotkey';
 import { useDictationAutoSend } from '../lib/dictationAutoSend';
 import { dictationShortcut } from '../lib/dictationHint';
@@ -131,6 +131,16 @@ export function Composer({
   const [pendingSend, setPendingSend] = useState(false);
   const pendingSendRef = useRef(false);
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
+  /**
+   * VS-439: a session whose transcript is five words or fewer is discarded instead of inserted.
+   * `discarded` is the shared decision (also read by the queued send so a short result never
+   * submits), `sessionTranscript` is the whole transcript the hook last handed over, and
+   * `sessionRan` marks a session in flight so the settle effect only acts on a real attempt.
+   */
+  const discarded = useRef(false);
+  const sessionTranscript = useRef('');
+  const sessionRan = useRef(false);
+  const listeningRef = useRef(false);
 
   const addFiles = useCallback((incoming: File[]): void => {
     const accepted = incoming.filter((f) => (ACCEPTED_ATTACHMENT_TYPES as readonly string[]).includes(f.type));
@@ -147,12 +157,26 @@ export function Composer({
   // the hook hands over the whole transcript so far on every event, so each one replaces the last.
   // Committing interim text into `base` here is what appended the growing phrase to itself (VS-70).
   const dictation = useDictation(
-    (transcript) => {
+    (transcript, final) => {
       const piece = transcript.trim();
+      sessionTranscript.current = transcript;
+      // A short result is never a deliberate message (VS-439). The decision is taken over the whole
+      // session transcript and applied when the session ends, so interim words still show while
+      // talking and a mid-sentence Android restatement (marked final by the recognizer) cannot wipe
+      // the box.
+      discarded.current = piece.length > 0 && isDictationTooShort(transcript);
       if (!piece) return;
+      // The session has already been stopped and this is its outcome: put the draft back as it was
+      // before the mic opened, taking every interim word with it.
+      if (final && !listeningRef.current && discarded.current) {
+        set(base.current);
+        return;
+      }
       set(`${base.current}${base.current && !base.current.endsWith(' ') ? ' ' : ''}${piece}`);
     },
   );
+
+  listeningRef.current = dictation.listening;
 
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches;
   // Opt-in, per browser (VS-435): a session that ends sends the settled draft, through the same
@@ -165,6 +189,11 @@ export function Composer({
       return;
     }
     base.current = text;
+    // Assume too short until the transcript proves otherwise: a session that produces no words at
+    // all is discarded too (VS-439).
+    discarded.current = true;
+    sessionTranscript.current = '';
+    sessionRan.current = true;
     setPendingNotice(null);
     dictation.start();
   }, [dictation, text]);
@@ -270,9 +299,22 @@ export function Composer({
     doSend(t);
   }, [disabled, text, dictation, doSend]);
 
+  // A session's outcome of five words or fewer never lands (VS-439): once the attempt settles, put
+  // the draft back exactly as it was before the mic opened — taking every interim word shown while
+  // talking with it. Declared before the queued send below, so the flag its check reads is set in
+  // the same commit.
+  useEffect(() => {
+    if (!dictation.settled || !sessionRan.current) return;
+    sessionRan.current = false;
+    if (!isDictationTooShort(sessionTranscript.current)) return;
+    set(base.current);
+  }, [dictation.settled, set]);
+
   // A queued non-streaming send submits when the attempt settles. `transcribing` going false is the
   // one signal the attempt is over (VS-195); reading `text` here — not a value captured when the
-  // button was pressed — is what keeps the transcript rather than the pre-press text (VS-282).
+  // button was pressed — is what keeps the transcript rather than the pre-press text (VS-282). A
+  // discarded short result (VS-439) clears the queued/auto-armed state instead of sending the
+  // pre-dictation draft.
   useEffect(() => {
     if (!pendingSend || dictation.transcribing) return;
     pendingSendRef.current = false;
@@ -283,6 +325,10 @@ export function Composer({
     // A failed or empty transcript submits nothing: the hook's own alert says why, and the composer
     // keeps whatever text exists.
     if (dictation.error) return;
+    if (discarded.current) {
+      setPendingNotice('That dictation was too short to insert, so nothing was sent.');
+      return;
+    }
     const t = text.trim();
     if (t) {
       doSend(t);

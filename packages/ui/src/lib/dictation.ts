@@ -55,6 +55,26 @@ export function mergeTranscript(acc: string, next: string): string {
   return `${acc.trimEnd()} ${piece}`;
 }
 
+/**
+ * A dictated result of five words or fewer is discarded rather than inserted (VS-439): a stray
+ * "yes", a cough, or a half-heard aside is far more likely than a deliberate short message, and
+ * clearing the box by hand afterwards is worse than saying the whole thing again. The count is over
+ * the whole session transcript and is applied when the session ends — interim words still appear
+ * while talking.
+ */
+export const DICTATION_MIN_WORDS = 6;
+
+/**
+ * Whether a finished dictation is too short to insert. Words are whitespace-separated tokens that
+ * contain at least one letter or digit; a punctuation-only token ("—", "…", "...") is noise, not a
+ * word, and does not count toward `DICTATION_MIN_WORDS`. Both composers call this so V1 and V2
+ * cannot drift (VS-439).
+ */
+export function isDictationTooShort(text: string): boolean {
+  const count = text.split(/\s+/).filter((token) => /[\p{L}\p{N}]/u.test(token)).length;
+  return count < DICTATION_MIN_WORDS;
+}
+
 export type DictationMode = 'speech' | 'upload' | 'unavailable';
 
 export interface Dictation {

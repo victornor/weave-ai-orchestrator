@@ -60,6 +60,16 @@ describe('the V2 route tree (VS-343, VS-353)', () => {
     );
   });
 
+  it('renders every signed-in V2 destination inside the shell, not beside it', () => {
+    // Only the chromeless sign-in screen and the bare-index redirect may sit beside the shell.
+    // Live was missed when VS-353 re-parented the V2 children and rendered without the rail.
+    const beside = (v2?.children ?? []).filter((r) => {
+      const path = norm(r.path);
+      return r.id !== '/v2/v2-shell' && path !== 'login' && path !== '';
+    });
+    expect(beside.map((r) => norm(r.path))).toEqual([]);
+  });
+
   it('registers every workspace destination', () => {
     const ws = child(shell!, 'w/$ws');
     expect(ws).toBeDefined();

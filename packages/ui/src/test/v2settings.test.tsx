@@ -48,6 +48,8 @@ vi.mock('../api/hooks', () => ({
     { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 0 },
   ] }),
   useWorkers: () => ({ data: [] }),
+  useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
+  useDecisionsMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
   useIncidents: () => ({ data: { items: [] } }),
   useRuntimes: () => ({ data: [{ id: 'claude', displayName: 'Claude Code', detection: { status: 'available' }, capabilities: {} }] }),
   useRuntimeModels: () => ({ data: [] }),

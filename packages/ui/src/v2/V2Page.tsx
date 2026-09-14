@@ -2,9 +2,10 @@
  * The V2 page frame — the 38px header (HANDOFF §3) every destination renders, and the one-source
  * counts behind it. Screen tickets fill the body; this ticket ships the frame with a placeholder.
  */
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { useRouterState } from '@tanstack/react-router';
-import { useIncidents, useWorkers, useWorkspaces } from '../api/hooks';
+import { useDecisionsMany, useIncidents, useWorkersMany, useWorkspaces } from '../api/hooks';
+import { liveWorkingAgents } from '../lib/board';
 import { workspaceFromV2Path, type V2Scope } from './nav';
 
 export function useV2Scope(): V2Scope {
@@ -21,29 +22,49 @@ export function useV2WorkspaceName(scope: V2Scope): string {
 }
 
 export interface V2Counts {
+  /** The current scope's Needs-you figure — what the header's pill shows. */
   needs: number;
+  /** Every workspace's own Needs-you count, keyed by workspace id. */
+  needsByWs: Record<string, number>;
+  /** The daemon-wide Needs-you total. */
+  needsGlobal: number;
+  /** Workers provisioning, active or running across every workspace. */
   live: number;
   incidents: number;
 }
 
-/** Every count a V2 header can show, derived from the same hooks the screens use (HANDOFF §15). */
+/**
+ * Every count a V2 header or rail row can show, derived from the same hooks the screens use
+ * (HANDOFF §15). The shell's rail sits above `V2Workspace`'s `WorkspaceProvider`, so nothing here
+ * may resolve a workspace from that provider: the workspace list is read at the root and each
+ * per-workspace figure fans out explicitly.
+ */
 export function useV2Counts(scope: V2Scope): V2Counts {
   const workspaces = useWorkspaces();
-  const workers = useWorkers({});
+  const listed = workspaces.data ?? [];
+  const ids = useMemo(() => listed.map((w) => w.id), [listed]);
+
+  // Live is the daemon-wide roster — the same predicate the Live screen renders.
+  const workerQueries = useWorkersMany(ids);
+  // Needs you is the open human decisions, the array `V2NeedsScreen` renders. Until a query
+  // answers, the listed `needsYou` (the daemon's own per-workspace count) stands in, so the badge
+  // is present on first paint rather than flashing to zero.
+  const decisionQueries = useDecisionsMany(ids, { status: 'open', owner: 'human' });
   const incidents = useIncidents();
 
-  const needs =
-    scope.kind === 'workspace'
-      ? (workspaces.data?.find((w) => w.id === scope.ws)?.needsYou ?? 0)
-      : (workspaces.data ?? []).reduce((n, w) => n + w.needsYou, 0);
+  const needsByWs: Record<string, number> = {};
+  let needsGlobal = 0;
+  listed.forEach((w, i) => {
+    const needs = decisionQueries[i]?.data?.length ?? w.needsYou;
+    needsByWs[w.id] = needs;
+    needsGlobal += needs;
+  });
 
-  const live = (workers.data ?? []).filter(
-    (w) => w.status === 'provisioning' || w.status === 'active' || w.status === 'running',
-  ).length;
-
+  const needs = scope.kind === 'workspace' ? (needsByWs[scope.ws] ?? 0) : needsGlobal;
+  const live = workerQueries.reduce((n, q) => n + liveWorkingAgents(q.data ?? []).length, 0);
   const openIncidents = (incidents.data?.items ?? []).filter((i) => i.resolvedAt === null).length;
 
-  return { needs, live, incidents: openIncidents };
+  return { needs, needsByWs, needsGlobal, live, incidents: openIncidents };
 }
 
 function Pill({ tone, label }: { tone: 'working' | 'needs-you' | 'blocked'; label: string }): React.ReactElement {

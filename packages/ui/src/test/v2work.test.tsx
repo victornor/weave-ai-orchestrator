@@ -33,6 +33,8 @@ vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: [project({ id: 'p1', slug: 'web', name: 'web' })] }),
   useRoles: () => ({ data: [] }),
   useWorkers: () => ({ data: state.workers }),
+  useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: state.workers })),
+  useDecisionsMany: (ids: readonly string[]) => ids.map(() => ({ data: state.decisions ?? [] })),
   useDecisions: () => ({ data: state.decisions }),
   useWorkspaceSummary: () => ({ data: { config: {} } }),
   useModels: () => ({ data: state.workerOptions === undefined ? undefined : { workerOptions: state.workerOptions } }),

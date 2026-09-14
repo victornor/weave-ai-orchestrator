@@ -201,8 +201,10 @@ const v2WsRouteFor = <K extends keyof V2PageExports>(path: string, page: K) =>
 
 const v2NeedsRoute = v2GlobalRoute('/needs', 'V2NeedsPage');
 // VS-350: Live reads a `worker` search param, so it validates search by passthrough like V1's pages.
+// It is its own `createRoute` (not `v2GlobalRoute`) and so was missed when VS-353 re-parented the
+// V2 children under the shell; it must sit under the shell like every other signed-in destination.
 const v2LiveRoute = createRoute({
-  getParentRoute: () => v2RootRoute,
+  getParentRoute: () => v2ShellRoute,
   path: '/live',
   validateSearch: (s: Record<string, unknown>) => s,
   component: lazyRouteComponent(() => import('./v2/pages'), 'V2LivePage'),

@@ -37,6 +37,7 @@ vi.mock('../api/hooks', () => ({
   }),
   useWorkspaceProjects: () => ({}),
   useWorkers: () => ({ data: [] }),
+  useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
   useIncidents: () => ({ data: { items: [], total: 0 } }),
   useDecisionsMany: (ids: readonly string[]) =>
     ids.map((id) => ({ data: state.decisions.filter((d) => d.workspaceId === id), isError: false, refetch: vi.fn() })),

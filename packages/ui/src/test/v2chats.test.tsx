@@ -28,6 +28,8 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('../api/hooks', () => ({
   useWorkspaces: () => ({ data: workspacesState.list, isError: false, refetch: vi.fn() }),
   useWorkers: () => ({ data: [] }),
+  useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
+  useDecisionsMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
   useIncidents: () => ({ data: { items: [] } }),
 }));
 

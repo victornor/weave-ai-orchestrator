@@ -93,6 +93,18 @@
   --v2-rail-collapsed: 48px;
   --v2-header: 38px;
   --rail-width: var(--v2-rail);
+
+  /* Motion (VS-427): one small scale every V2 animation uses. Durations sit in the 120–250ms band
+     the polish pass asks for — fast for hover, press and menus, base for cards and panes, slow for
+     modals and sheets. The reduced-motion block at the end of this file zeroes them, and
+     `index.css`'s global rule forces animation/transition durations to ~0 as a backstop for
+     anything a component animation forgets. */
+  --v2-dur-fast: 120ms;
+  --v2-dur-base: 180ms;
+  --v2-dur-slow: 240ms;
+  --v2-ease: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --v2-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --v2-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .v2-root[data-theme='light'] {
@@ -221,10 +233,17 @@
   line-height: 1.3;
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color var(--v2-dur-fast) var(--v2-ease),
+    color var(--v2-dur-fast) var(--v2-ease),
+    transform var(--v2-dur-fast) var(--v2-ease);
 }
 .v2-row:hover {
   background: var(--bg-2);
   color: var(--text-1);
+}
+.v2-row:active {
+  transform: scale(0.995);
 }
 .v2-row[aria-current='page'] {
   background: var(--bg-2);
@@ -303,9 +322,17 @@
   font-size: 12px;
   line-height: 1.3;
   cursor: pointer;
+  transition:
+    background-color var(--v2-dur-fast) var(--v2-ease),
+    border-color var(--v2-dur-fast) var(--v2-ease),
+    color var(--v2-dur-fast) var(--v2-ease),
+    transform var(--v2-dur-fast) var(--v2-ease);
 }
 .v2-button:hover {
   background: var(--bg-2);
+}
+.v2-button:active:not(:disabled) {
+  transform: scale(0.98);
 }
 .v2-button:disabled {
   cursor: not-allowed;
@@ -387,6 +414,7 @@
   padding: 10px 14px;
   font-size: 12px;
   color: var(--text-1);
+  transition: background-color var(--v2-dur-fast) var(--v2-ease);
 }
 .v2-table [data-row] + [data-row] {
   border-top: 1px solid var(--line-1);
@@ -406,4 +434,155 @@
   font-family: var(--ff-mono);
   font-size: 11px;
   color: var(--text-3);
+}
+
+/* Hover/press feedback (VS-427): every interactive element in V2 eases its colour on the fast
+   token, so a hover or a press never snaps. Only colour, opacity, filter and (on the two button
+   recipes) transform transition — never width, height or position — so nothing can shift layout
+   or delay a click. Press is a small scale on buttons and rail rows only; a bare link does not
+   scale, and the transform transition is deliberately kept off the generic rule because a centred
+   floating button carries its own `translate` transform a scale would clobber. */
+.v2-root button,
+.v2-root a,
+.v2-root [role='menuitem'] {
+  transition:
+    background-color var(--v2-dur-fast) var(--v2-ease),
+    border-color var(--v2-dur-fast) var(--v2-ease),
+    color var(--v2-dur-fast) var(--v2-ease),
+    opacity var(--v2-dur-fast) var(--v2-ease),
+    filter var(--v2-dur-fast) var(--v2-ease);
+}
+/* A step more specific than `.v2-root button` / `.v2-root a`, so the two button recipes keep their
+   animated press scale rather than having it dropped by the generic rule above. */
+.v2-root .v2-button,
+.v2-root .v2-row {
+  transition:
+    background-color var(--v2-dur-fast) var(--v2-ease),
+    border-color var(--v2-dur-fast) var(--v2-ease),
+    color var(--v2-dur-fast) var(--v2-ease),
+    transform var(--v2-dur-fast) var(--v2-ease);
+}
+
+/* Enter/leave animations. Each consumes the V2 motion tokens, and the reduced-motion block below
+   zeroes the durations; `index.css`'s global rule is the backstop that keeps them instant even
+   where a component forgets. `both` fill leaves the element at the `to` state (visible, settled)
+   once the animation ends. */
+
+/* Modals, popovers and floating panels: fade with a small rise, then settle. */
+.v2-anim-pop {
+  animation: v2-pop-in var(--v2-dur-slow) var(--v2-ease-out) both;
+}
+/* The phone More sheet, sliding up from the bottom edge. */
+.v2-anim-sheet {
+  animation: v2-sheet-in var(--v2-dur-slow) var(--v2-ease-out) both;
+}
+/* The role detail drawer, sliding in from the right. */
+.v2-anim-drawer {
+  animation: v2-drawer-in var(--v2-dur-slow) var(--v2-ease-out) both;
+}
+/* Menus and popovers under a trigger: fade and slide down. */
+.v2-anim-menu {
+  animation: v2-menu-in var(--v2-dur-fast) var(--v2-ease-out) both;
+}
+/* A pane or row disclosed into place: fade and rise a few pixels. */
+.v2-anim-rise {
+  animation: v2-rise-in var(--v2-dur-base) var(--v2-ease-out) both;
+}
+/* Opacity-only, for surfaces swapping in place where a translate would read as a jump. */
+.v2-anim-fade {
+  animation: v2-fade-in var(--v2-dur-base) var(--v2-ease-out) both;
+}
+/* A removed card or row on its way out (the presence hook). */
+.v2-anim-exit {
+  animation: v2-exit var(--v2-dur-base) var(--v2-ease) both;
+}
+/* A route change inside V2: a light cross-fade on the outlet. */
+.v2-anim-route {
+  animation: v2-fade-in var(--v2-dur-base) var(--v2-ease-out) both;
+}
+
+@keyframes v2-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes v2-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes v2-menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes v2-pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes v2-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes v2-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes v2-exit {
+  from {
+    opacity: 1;
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+/* Reduced motion: the durations collapse to nothing, so every `.v2-anim-*` class resolves to an
+   instant step. The global `index.css` rule additionally forces transition/animation durations to
+   ~0 across the whole document, which covers animations that do not read these tokens. */
+@media (prefers-reduced-motion: reduce) {
+  .v2-root {
+    --v2-dur-fast: 0ms;
+    --v2-dur-base: 0ms;
+    --v2-dur-slow: 0ms;
+  }
 }

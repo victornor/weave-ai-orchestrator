@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "V2 motion and polish pass: consistent, subtle animations across the rest
+  of the UI on shared motion tokens, respecting reduced motion"
+skip_specs: true

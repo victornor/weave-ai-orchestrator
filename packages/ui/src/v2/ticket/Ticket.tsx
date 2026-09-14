@@ -264,7 +264,7 @@ function TicketActionsMenu({ ticket, blockers }: { ticket: Ticket; blockers: Tic
         Actions
       </Button>
       {open ? (
-        <div role="menu" aria-label="Ticket actions" className="v2-card absolute right-0 z-30 mt-1 flex w-64 flex-col gap-2 p-3 shadow-float">
+        <div role="menu" aria-label="Ticket actions" className="v2-anim-menu v2-card absolute right-0 z-30 mt-1 flex w-64 flex-col gap-2 p-3 shadow-float">
           <label className="flex items-center justify-between gap-2">
             <span className="text-micro text-text-3">Priority</span>
             <select
@@ -699,7 +699,7 @@ function RunTurn({ run }: { run: Run }): React.ReactElement {
         </div>
         {run.summary ? <p className="mt-0.5 text-meta leading-relaxed text-text-body">{run.summary}</p> : null}
         {open ? (
-          <div className="v2-card mt-2 overflow-hidden">
+          <div className="v2-anim-fade v2-card mt-2 overflow-hidden">
             <RunTranscript events={events} live={live} label={`Transcript of turn ${run.turnEpoch}`} />
           </div>
         ) : null}

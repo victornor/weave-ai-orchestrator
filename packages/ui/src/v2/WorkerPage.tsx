@@ -169,7 +169,7 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
       <Tabs items={TABS} active={tab} onChange={setTab} className="border-b border-line-1 px-3 md:px-4" />
 
       {sessionOpen || held ? (
-        <div className="flex-none border-b border-line-1 bg-bg-0 px-4 py-3 md:px-5">
+        <div className="v2-anim-fade flex-none border-b border-line-1 bg-bg-0 px-4 py-3 md:px-5">
           <div className="mx-auto flex max-w-3xl flex-col gap-2.5">
             {handoverCommand.isLoading ? (
               <SkeletonRows rows={2} />

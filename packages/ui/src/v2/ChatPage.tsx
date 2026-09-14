@@ -47,6 +47,7 @@ import { ChatComposer } from './ChatComposer';
 import { ChatTrace, ChatTurnTrace } from './ChatTrace';
 import { V2DispatchChip, V2WorkerChip } from './ChatChips';
 import { V2DecisionCard, type V2Answer } from './DecisionCard';
+import { useExitPresence } from './motion';
 import { SearchPanel } from './SearchPanel';
 import { PlanModal } from './PlanModal';
 import { DIVIDER_MAX, DIVIDER_MIN, clampDivider, readDivider, shouldSplit, useElementWidth, writeDivider } from './chatSplit';
@@ -129,6 +130,7 @@ function ChatStatusBar({
 function DecisionsPane({
   ws,
   decisions,
+  exitingIds,
   loaded,
   busy,
   onAnswer,
@@ -142,6 +144,8 @@ function DecisionsPane({
 }: {
   ws: string;
   decisions: Decision[];
+  /** Decisions held past their removal for the exit animation (VS-427); the count excludes them. */
+  exitingIds: ReadonlySet<string>;
   loaded: boolean;
   busy: boolean;
   onAnswer: (id: string, a: V2Answer) => void;
@@ -176,7 +180,7 @@ function DecisionsPane({
       />
       <div className="flex h-[38px] flex-none items-center gap-2 border-b border-line-1 px-3">
         <span className="text-meta font-semibold text-text-1">Decisions</span>
-        <span className="ac-mono text-nano text-text-3">{decisions.length} waiting</span>
+        <span className="ac-mono text-nano text-text-3">{decisions.filter((d) => !exitingIds.has(d.id)).length} waiting</span>
         <A to="/v2/needs" className="ml-auto text-micro text-text-3 hover:text-text-1">Needs you</A>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
@@ -200,6 +204,7 @@ function DecisionsPane({
                 ws={ws}
                 narrow
                  busy={busy}
+                 exiting={exitingIds.has(d.id)}
                  askedBy={d.askedByAgentId}
                  askedByName={d.askedByAgentId ? agentNameById.get(d.askedByAgentId) ?? null : null}
                  ticketIdentifier={t?.identifier ?? d.ticketId}
@@ -357,9 +362,15 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
     [messages.data],
   );
   const traces = useRunTraces({ ids: messageRuns, agent: conductorId, since: oldestLoaded });
+  // VS-427: the optimistic removal (VS-369) drops an answered card from the cache at once; hold it
+  // for one animation so it leaves rather than vanishes, in the pane and inline in the conversation.
+  const decisionPresence = useExitPresence(decisions.data ?? [], (d) => d.id);
+  const openDecisions = decisionPresence.map((e) => e.item);
+  const exitingDecisionIds = new Set(decisionPresence.filter((e) => e.exiting).map((e) => e.item.id));
+  const openDecisionCount = decisionPresence.filter((e) => !e.exiting).length;
   const decisionsById = useMemo(
-    () => new Map([...(decisions.data ?? []), ...(answeredDecisions.data ?? []), ...Object.values(justAnswered)].map((d) => [d.id, d] as const)),
-    [decisions.data, answeredDecisions.data, justAnswered],
+    () => new Map([...openDecisions, ...(answeredDecisions.data ?? []), ...Object.values(justAnswered)].map((d) => [d.id, d] as const)),
+    [decisionPresence, answeredDecisions.data, justAnswered],
   );
   const ticketsById = useMemo(() => new Map((tickets.data ?? []).map((t) => [t.id, t] as const)), [tickets.data]);
   const projectsById = useMemo(() => new Map((projects.data ?? []).map((p) => [p.id, p] as const)), [projects.data]);
@@ -385,8 +396,8 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // The shared view model returns both halves the chat shows: each message with the work its turn
   // filed under it, and the live workers no message accounts for (V1's `chatEntries`).
   const { entries, unattributed } = useMemo(
-    () => chatEntries(conversation, tickets.data ?? [], workers.data ?? [], decisions.data ?? []),
-    [conversation, tickets.data, workers.data, decisions.data],
+    () => chatEntries(conversation, tickets.data ?? [], workers.data ?? [], openDecisions),
+    [conversation, tickets.data, workers.data, decisionPresence],
   );
   const rows = useMemo(
     () => chatRows(entries, traces.data ?? [], { showSilent: false }),
@@ -404,7 +415,6 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const compactionAt = (runtimes.data ?? []).find((r) => r.id === conductorRuntime)?.capabilities['contextCompactionAt'] as number | undefined;
 
   const running = (workers.data ?? []).filter((w) => w.status === 'running').length;
-  const openDecisions = decisions.data ?? [];
   const sessionStrip = runtimeLimitStrip(accounts.data, conductorRuntime);
 
   const openTicket = useCallback((identifier: string) => go('/v2/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } }), [go, ws]);
@@ -562,7 +572,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <ChatStatusBar
         running={running}
-        needs={openDecisions.length}
+        needs={openDecisionCount}
         session={sessionStrip?.meter ? { label: sessionStrip.meter.label, percent: sessionStrip.meter.percent, resetsIn: sessionStrip.meter.resetsIn } : null}
       />
 
@@ -616,6 +626,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                                     decision={d}
                                     ws={ws}
                                      busy={answer.isPending}
+                                     exiting={exitingDecisionIds.has(d.id)}
                                      askedBy={d.askedByAgentId}
                                      askedByName={d.askedByAgentId ? agentNameById.get(d.askedByAgentId) ?? null : null}
                                      ticketIdentifier={ticket?.identifier ?? d.ticketId}
@@ -731,6 +742,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
           <DecisionsPane
             ws={ws}
             decisions={openDecisions}
+            exitingIds={exitingDecisionIds}
             loaded={decisions.isSuccess}
             busy={answer.isPending}
             onAnswer={onAnswer}

@@ -825,8 +825,8 @@ function NewTicketDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center p-4" role="dialog" aria-label="New ticket" style={{ background: 'var(--overlay)' }}>
-      <div className="v2-card w-full max-w-md p-4">
+    <div className="v2-anim-fade fixed inset-0 z-40 flex items-center justify-center p-4" role="dialog" aria-label="New ticket" style={{ background: 'var(--overlay)' }}>
+      <div className="v2-anim-pop v2-card w-full max-w-md p-4">
         <h2 className="mb-3 text-ui font-semibold text-text-1">New ticket</h2>
         <label className="mb-2 flex flex-col gap-1">
           <span className="text-micro text-text-3">Project</span>

@@ -39,7 +39,9 @@ describe('the Mono token set', () => {
       .replace(/@keyframes[\s\S]*?}\s*}/g, '')
       .match(/[^{}]+\{/g)
       ?.map((s) => s.slice(0, -1).trim())
-      .filter((s) => s.length > 0 && !s.startsWith('from') && !s.startsWith('to'));
+      // `@media`/`@keyframes` preludes are at-rules, not selectors; the blocks they guard are still
+      // scanned on their own (VS-427 added the reduced-motion `@media`).
+      .filter((s) => s.length > 0 && !s.startsWith('@') && !s.startsWith('from') && !s.startsWith('to'));
     expect(selectors?.length).toBeGreaterThan(0);
     for (const selector of selectors ?? []) {
       for (const part of selector.split(',')) {

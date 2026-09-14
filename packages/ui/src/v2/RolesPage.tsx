@@ -338,7 +338,7 @@ function RoleCard({
             ⋯
           </button>
           {menu ? (
-            <div role="menu" className="absolute right-0 top-6 z-10 flex w-32 flex-col rounded-r4 border border-line-2 bg-bg-1 py-1 shadow-float">
+            <div role="menu" className="v2-anim-menu absolute right-0 top-6 z-10 flex w-32 flex-col rounded-r4 border border-line-2 bg-bg-1 py-1 shadow-float">
               {role.status === 'paused' ? (
                 <button type="button" role="menuitem" className="px-3 py-1.5 text-left text-micro text-text-2 hover:bg-bg-2" onClick={() => { action.mutate({ id: role.id, action: 'resume', reason: 'resumed from the V2 Roles page' }); setMenu(false); }}>
                   Resume
@@ -439,7 +439,7 @@ function WorkerRow({
       </button>
 
       {open ? (
-        <div className="border-t border-line-1">
+        <div className="v2-anim-fade border-t border-line-1">
           <div className="flex items-center gap-2 border-b border-line-1 bg-bg-1 px-2.5 py-1.5">
             <span className="ac-mono flex-none text-nano text-text-2">{run?.model ?? '—'}</span>
             <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{ticketLabel ?? '—'}</span>
@@ -482,7 +482,7 @@ function StartSessionForm({
 
   return (
     <form
-      className="mx-3 mb-3 flex flex-col gap-2 rounded-r4 border border-line-2 bg-bg-2 p-3"
+      className="v2-anim-rise mx-3 mb-3 flex flex-col gap-2 rounded-r4 border border-line-2 bg-bg-2 p-3"
       onSubmit={(e) => {
         e.preventDefault();
         if (!title.trim()) return;
@@ -554,9 +554,9 @@ function RoleDrawer({ roleId, onClose }: { roleId: string; onClose: () => void }
   const error = update.isError ? update.error : putCharter.isError ? putCharter.error : rollback.isError ? rollback.error : null;
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label={detail?.role.name ?? 'Role'}>
+    <div className="v2-anim-fade fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label={detail?.role.name ?? 'Role'}>
       <button type="button" className="absolute inset-0" style={{ background: 'var(--overlay)' }} aria-label="Close" onClick={onClose} />
-      <div className="relative flex h-full w-full max-w-[440px] flex-col border-l border-line-2 bg-bg-1" style={{ boxShadow: 'var(--elev-sheet)' }}>
+      <div className="v2-anim-drawer relative flex h-full w-full max-w-[440px] flex-col border-l border-line-2 bg-bg-1" style={{ boxShadow: 'var(--elev-sheet)' }}>
         <header className="flex h-[38px] flex-none items-center gap-2 border-b border-line-1 px-3">
           <span className="min-w-0 flex-1 truncate text-ui font-medium text-text-1">{detail?.role.name ?? 'Role'}</span>
           {detail ? <span className="v2-tag text-text-3">{roleStateLabel(detail.role.status)}</span> : null}
@@ -693,9 +693,9 @@ function HireModal({ projects, onClose }: { projects: Project[]; onClose: () => 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Hire a role">
+    <div className="v2-anim-fade fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Hire a role">
       <button type="button" className="absolute inset-0" style={{ background: 'var(--overlay)' }} aria-label="Close" onClick={onClose} />
-      <div className="relative flex max-h-full w-full max-w-[520px] flex-col overflow-hidden rounded-r6 border border-line-2 bg-bg-1" style={{ boxShadow: 'var(--elev-sheet)' }}>
+      <div className="v2-anim-pop relative flex max-h-full w-full max-w-[520px] flex-col overflow-hidden rounded-r6 border border-line-2 bg-bg-1" style={{ boxShadow: 'var(--elev-sheet)' }}>
         <header className="flex flex-none items-center gap-2 border-b border-line-1 px-3.5 py-2.5">
           <span className="text-ui font-medium text-text-1">Hire a role</span>
           <span className="ac-mono ml-auto flex-none text-nano text-text-3">sent to the weaver</span>

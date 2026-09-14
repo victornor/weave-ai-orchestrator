@@ -41,6 +41,18 @@ function pluginDest(p: WorkspacePlugin): V2Dest {
   return { key: `plugin:${p.id}`, label: p.name ?? p.id, glyph: 'plugin', scopeKind: 'workspace', path: `/w/$ws/plugins/${p.id}` };
 }
 
+/**
+ * The top-level section of a V2 path (VS-427). The outlet is keyed by this for the route cross-fade:
+ * a change of section replays the fade, while a param change inside one section (another chat thread,
+ * run, ticket or plugin) keeps the outlet mounted so state and scroll are not thrown away.
+ */
+function routeSection(path: string): string {
+  const parts = path.split('/').filter(Boolean);
+  if (parts[0] !== 'v2') return path;
+  if (parts[1] === 'w') return parts[3] ?? 'workspace';
+  return parts[1] ?? 'root';
+}
+
 function countOf(dest: V2Dest, scope: V2Scope, counts: V2Counts): number {
   // An Everywhere row carries the global figure; a workspace row its own workspace's. The row's
   // own `scope` names the workspace for the latter, so the global and workspace Needs rows never
@@ -292,7 +304,7 @@ function WorkspaceGroups({
               {wsNeed > 0 ? <span className="ac-mono flex-none text-nano text-needs-you">{wsNeed}</span> : null}
             </button>
             {!closed ? (
-              <div className="flex flex-col">
+              <div className="v2-anim-fade flex flex-col">
                 {V2_RAIL_WORKSPACE.map((d) => (
                   <RailRow
                     key={d.key}
@@ -471,7 +483,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
           (VS-366, VS-369). `fanIn` also excludes Global Chats, whose panes open one each. */}
       {fanIn ? <FanInStreams ids={ids} /> : null}
       {collapsed ? (
-        <aside className="hidden w-[48px] flex-none flex-col items-center border-r border-line-1 bg-bg-1 py-2 md:flex">
+        <aside className="v2-anim-fade hidden w-[48px] flex-none flex-col items-center border-r border-line-1 bg-bg-1 py-2 md:flex">
           <button
             type="button"
             onClick={toggleCollapse}
@@ -514,7 +526,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
           </div>
         </aside>
       ) : (
-        <aside className="v2-rail-scroll hidden w-[194px] flex-none flex-col border-r border-line-1 bg-bg-1 md:flex">
+        <aside className="v2-anim-fade v2-rail-scroll hidden w-[194px] flex-none flex-col border-r border-line-1 bg-bg-1 md:flex">
           <div className="flex items-center gap-2 px-3 pb-2 pt-3">
             <WeaveMark className="h-[13px] w-[58px]" />
             <span className="text-ui font-semibold tracking-[-0.01em] text-text-strong">WeaveAI</span>
@@ -552,7 +564,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
       )}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex min-h-0 flex-1 flex-col pb-14 md:pb-0">
+        <div key={routeSection(path)} className="v2-anim-route flex min-h-0 flex-1 flex-col pb-14 md:pb-0">
           <Outlet />
         </div>
       </div>
@@ -574,13 +586,13 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
 
       {moreOpen ? (
         <div
-          className="fixed inset-0 z-30 flex flex-col md:items-center md:justify-center md:p-6"
+          className="v2-anim-fade fixed inset-0 z-30 flex flex-col md:items-center md:justify-center md:p-6"
           role="dialog"
           aria-label="More"
           style={{ background: 'var(--overlay)' }}
         >
           <button type="button" className="flex-1 md:hidden" aria-label="Close" onClick={() => setMoreOpen(false)} />
-          <div className="max-h-[75vh] overflow-y-auto rounded-t-r8 border border-line-1 bg-bg-1 p-3 md:max-h-[80vh] md:w-[360px] md:rounded-r8 md:shadow-sheet">
+          <div className="v2-anim-sheet max-h-[75vh] overflow-y-auto rounded-t-r8 border border-line-1 bg-bg-1 p-3 md:max-h-[80vh] md:w-[360px] md:rounded-r8 md:shadow-sheet">
             <MoreList
               scope={scope}
               fallbackWs={fallbackWs}

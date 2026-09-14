@@ -19,6 +19,7 @@ import { SkeletonCards } from '../components/Skeleton';
 import { EmptyState, ErrorState } from '../components/States';
 import { useV2Scope, V2Page } from './V2Page';
 import { V2DecisionCard, type V2Answer } from './DecisionCard';
+import { presentItems, useExitPresence } from './motion';
 import { cx } from '../lib/cx';
 
 interface ChipProps {
@@ -132,6 +133,10 @@ export function V2NeedsScreen(): React.ReactElement {
     for (const q of decisionsQueries) for (const d of q.data ?? []) out.push(d);
     return out;
   }, [decisionsQueries]);
+  // VS-427: an answered card is removed from the cache at once (VS-369); hold it for one animation so
+  // it can animate out. Presence is taken before the filters, so switching a chip never animates a
+  // filter change out — only a decision actually leaving the data does.
+  const presence = useExitPresence(all, (d) => d.id);
 
   const loaded = Boolean(workspaces.data) && decisionsQueries.every((q) => q.data !== undefined || q.isError);
   const errored = decisionsQueries.every((q) => q.isError) && decisionsQueries.length > 0;
@@ -149,13 +154,13 @@ export function V2NeedsScreen(): React.ReactElement {
   }, [listed]);
   const filtered = useMemo(
     () =>
-      all.filter(
-        (d) =>
-          (scopeFilter === 'all' || slugOf(d.workspaceId) === scopeFilter) &&
-          (kindFilter === 'all' || d.kind === kindFilter) &&
-          (!heldOnly || d.weaverReviewStatus === 'concerns'),
+      presence.filter(
+        (e) =>
+          (scopeFilter === 'all' || slugOf(e.item.workspaceId) === scopeFilter) &&
+          (kindFilter === 'all' || e.item.kind === kindFilter) &&
+          (!heldOnly || e.item.weaverReviewStatus === 'concerns'),
       ),
-    [all, scopeFilter, kindFilter, heldOnly, slugOf],
+    [presence, scopeFilter, kindFilter, heldOnly, slugOf],
   );
 
   // Held is mutually exclusive with the kind chips: choosing one clears the other, so the row is a
@@ -214,7 +219,7 @@ export function V2NeedsScreen(): React.ReactElement {
           <Chip key={k} label={KIND_LABEL[k] ?? k} active={kindFilter === k} onClick={() => chooseKind(k)} />
         ))}
         <span className="ml-auto ac-mono text-micro text-text-3" aria-live="polite">
-          {filtered.length} waiting
+          {presentItems(filtered).length} waiting
         </span>
       </div>
       {answerError ? (
@@ -233,7 +238,8 @@ export function V2NeedsScreen(): React.ReactElement {
           )
         ) : (
           <div className="mx-auto flex max-w-2xl flex-col gap-4">
-            {filtered.map((d) => {
+            {filtered.map((e) => {
+              const d = e.item;
               const ticket = d.ticketId ? ticketsById.get(d.ticketId) : undefined;
               const projects = projectsByWs[d.workspaceId]?.projects ?? [];
               const project = projects.find((p) => p.id === (d.projectId ?? undefined));
@@ -241,6 +247,7 @@ export function V2NeedsScreen(): React.ReactElement {
                 <V2DecisionCard
                   key={d.id}
                   decision={d}
+                  exiting={e.exiting}
                   ticketIdentifier={ticket?.identifier ?? d.ticketId}
                   projectLabel={project ? projectLabel(project) : null}
                   projectSlug={project?.slug ?? null}

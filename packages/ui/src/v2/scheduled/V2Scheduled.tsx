@@ -113,7 +113,7 @@ function ScheduledRow({ r, projects, onFocus }: { r: Listed; projects: Array<{ i
         </div>
       </div>
       {open ? (
-        <div className="flex flex-col gap-3 pb-4">
+        <div className="v2-anim-fade flex flex-col gap-3 pb-4">
           <EditForm r={r} />
           <div className="flex items-center gap-2">
             <Button size="sm" disabled={patch.isPending}

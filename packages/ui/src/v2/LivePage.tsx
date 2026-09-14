@@ -122,7 +122,7 @@ function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optio
       data-v2-live-card={cell.id}
       data-v2-live-status={ui}
       data-focused={focused ? 'true' : undefined}
-      className={cx('relative flex flex-col overflow-hidden rounded-r4 border bg-bg-1', focused ? 'border-accent-edge' : 'border-line-1')}
+      className={cx('v2-anim-rise relative flex flex-col overflow-hidden rounded-r4 border bg-bg-1', focused ? 'border-accent-edge' : 'border-line-1')}
     >
       <div className="flex items-center gap-2 border-b border-line-1 px-2.5 py-2">
         <span className="min-w-0 flex-none truncate text-ui font-medium text-text-1">{cell.name}</span>

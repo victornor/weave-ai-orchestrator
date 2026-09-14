@@ -299,7 +299,7 @@ function FileBody({ projectId, number, path, manifest, layout }: { projectId: st
 
   const hunks = data.file.hunks;
   return (
-    <div className="ac-diff-code ac-mono overflow-x-auto border-t border-line-1 text-nano">
+    <div className="v2-anim-fade ac-diff-code ac-mono overflow-x-auto border-t border-line-1 text-nano">
       {hunks.map((hunk, i) => (
         <div key={`${hunk.oldStart}-${hunk.newStart}`}>
           {i > 0 ? <Gap projectId={projectId} number={number} path={path} prev={hunks[i - 1]!} next={hunk} highlight={highlight} /> : null}
@@ -333,7 +333,7 @@ function Gap({ projectId, number, path, prev, next, highlight }: { projectId: st
   if (ctx.isLoading) return <div className="px-2.5 py-1"><SkeletonRows rows={2} /></div>;
   if (!ctx.data || !ctx.data.available) return <p className="px-2.5 py-1 text-text-3">This range is not available.</p>;
   return (
-    <div>
+    <div className="v2-anim-fade">
       {ctx.data.lines.map((text, i) => (
         <div key={i} className="flex whitespace-pre">
           <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{baseStart + i}</span>

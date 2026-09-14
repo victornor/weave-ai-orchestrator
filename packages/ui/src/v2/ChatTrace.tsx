@@ -81,7 +81,7 @@ function ToolRow({ block, marker = '▸' }: { block: ToolBlock; marker?: string 
       {open && block.editPayload ? (
         // The edit/write body comes straight from V1's `EditPayloadBody` (VS-324): the same
         // `diffHunksForEdits` derivation, `DiffHunks` and 40-line window, not a second renderer.
-        <div className="ac-scroll max-h-96 overflow-auto" data-trace-edit>
+        <div className="v2-anim-fade ac-scroll max-h-96 overflow-auto" data-trace-edit>
           <EditPayloadBody id={block.id} path={block.target} payload={block.editPayload} />
         </div>
       ) : open && block.diff ? (
@@ -95,7 +95,7 @@ function ToolRow({ block, marker = '▸' }: { block: ToolBlock; marker?: string 
  *  result scrolls rather than dragging the conversation down with it. */
 function ResultLines({ text }: { text: string }): React.ReactElement {
   return (
-    <div className="ac-scroll flex max-h-40 flex-col overflow-auto" data-trace-result style={{ paddingLeft: '2ch' }}>
+    <div className="v2-anim-fade ac-scroll flex max-h-40 flex-col overflow-auto" data-trace-result style={{ paddingLeft: '2ch' }}>
       {text.split('\n').map((line, i) => (
         <span
           key={i}
@@ -130,7 +130,7 @@ function ToolGroup({ row }: { row: Extract<TranscriptRow, { type: 'tools' }> }):
         <span className="ac-mono text-nano text-text-2">{row.tool} ×{n}</span>
       </button>
       {open ? (
-        <div className="flex flex-col gap-1">
+        <div className="v2-anim-fade flex flex-col gap-1">
           {row.calls.map((c) => (
             <ToolRow key={c.id} block={c} marker="·" />
           ))}
@@ -234,7 +234,7 @@ export function ChatTurnTrace({
         <span className={cx('ac-mono text-nano', failed ? 'text-failed' : 'text-text-4')}>weaver did</span>
         <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-4">{parts.join(' · ')}</span>
       </button>
-      {open ? <ChatTrace events={events.data ?? []} className="mt-1 border-l border-line-1 pl-2.5" /> : null}
+      {open ? <ChatTrace events={events.data ?? []} className="v2-anim-fade mt-1 border-l border-line-1 pl-2.5" /> : null}
     </div>
   );
 }

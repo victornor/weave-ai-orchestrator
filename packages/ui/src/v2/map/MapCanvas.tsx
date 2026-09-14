@@ -32,6 +32,17 @@ function truncate(text: string, n = 22): string {
   return text.length > n ? `${text.slice(0, n - 1)}…` : text;
 }
 
+/**
+ * The shape a node's kind owns (HANDOFF §13): a workspace is a circle, a project a square and a
+ * worker a triangle. The colour is the node's own (a worker by status, a project/workspace by hue),
+ * so the shape says the kind and the fill says the state.
+ */
+function NodeShape({ kind, r, hue }: { kind: MapNode['kind']; r: number; hue: string }): React.ReactElement {
+  if (kind === 'project') return <rect x={-r} y={-r} width={r * 2} height={r * 2} fill={hue} />;
+  if (kind === 'worker') return <polygon points={`0,${-r} ${r},${r} ${-r},${r}`} fill={hue} />;
+  return <circle r={r} fill={hue} />;
+}
+
 export interface MapGraphProps {
   model: MapModel;
   onOpen: (node: MapNode) => void;
@@ -145,7 +156,7 @@ export function MapGraph({ model, onOpen }: MapGraphProps): React.ReactElement {
                   }
                 }}
               >
-                <circle r={r} fill={hue} />
+                <NodeShape kind={n.kind} r={r} hue={hue} />
                 {label ? (
                   <text x={0} y={-r - 5} textAnchor="middle" fontSize={11} fill="var(--text-1)" style={{ pointerEvents: 'none' }}>
                     {truncate(label)}

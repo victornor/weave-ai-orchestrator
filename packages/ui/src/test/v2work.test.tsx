@@ -143,15 +143,58 @@ describe('V2 Work columns', () => {
     expect(within(column('done')).getByText('Landed')).toBeInTheDocument();
   });
 
-  it('renders an empty column narrow and gives it a zero count', () => {
+  it('renders an empty column narrow and a populated one wide', () => {
     render(<V2WorkScreen />);
-    const proposed = column('proposed');
-    expect(within(proposed).getByText('1')).toBeInTheDocument();
-    // Backlog holds one; make it empty by filtering it out is harder — assert the zero count on a
-    // column that has none.
+    // The width is asserted on the rendered element, not only on the empty marker.
     const inReview = column('in_review');
     expect(inReview.getAttribute('data-empty')).toBe('true');
+    expect(inReview.style.flex).toBe('0 0 108px');
+    expect(inReview.style.minWidth).toBe('108px');
     expect(within(inReview).getByText('0')).toBeInTheDocument();
+
+    const proposed = column('proposed');
+    expect(proposed.style.flex).toBe('1 0 236px');
+    expect(proposed.style.minWidth).toBe('236px');
+  });
+
+  it('widens a column when a card arrives and leaves the still-empty ones narrow', () => {
+    const view = render(<V2WorkScreen />);
+    expect(column('in_review').style.flex).toBe('0 0 108px');
+
+    state.active = [...state.active, ticket({ id: 'tk_5', identifier: 'ACME-5', title: 'Reviewing', status: 'in_review' })];
+    view.rerender(<V2WorkScreen />);
+
+    const inReview = column('in_review');
+    expect(inReview.style.flex).toBe('1 0 236px');
+    expect(inReview.style.minWidth).toBe('236px');
+    expect(within(inReview).getByText('Reviewing')).toBeInTheDocument();
+    expect(column('blocked').style.flex).toBe('0 0 108px');
+  });
+
+  it('does not tag a card with the status of the column it sits in', () => {
+    render(<V2WorkScreen />);
+    // A Backlog card must not repeat "Backlog"/"backlog" (the folded-status bug), and an In progress
+    // card must not repeat its column either.
+    const backlogCard = document.querySelector('[data-v2-card="ACME-1"]') as HTMLElement;
+    expect(within(backlogCard).queryByText('Backlog')).toBeNull();
+    expect(within(backlogCard).queryByText('backlog')).toBeNull();
+    const movingCard = document.querySelector('[data-v2-card="ACME-3"]') as HTMLElement;
+    expect(within(movingCard).queryByText(/in progress/i)).toBeNull();
+  });
+
+  it('shows the tier tag only when the catalog holds two or more options', () => {
+    const first = render(<V2WorkScreen />);
+    const card = document.querySelector('[data-v2-card="ACME-1"]') as HTMLElement;
+    expect(within(card).queryByText('default')).toBeNull();
+    first.unmount();
+
+    state.workerOptions = [
+      { id: 'quick', description: 'Fast.', runtime: 'claude', model: null },
+      { id: 'standard', description: 'Default.', runtime: 'claude', model: null },
+    ];
+    render(<V2WorkScreen />);
+    const withCatalog = document.querySelector('[data-v2-card="ACME-1"]') as HTMLElement;
+    expect(within(withCatalog).getByText('default')).toBeInTheDocument();
   });
 
   it('derives the column count from the cards rendered', () => {

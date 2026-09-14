@@ -33,14 +33,13 @@ import { filterTickets, finishedModeFromSearch, mergeStrip, mergeWaitLabel, paus
 import { lastLinesByAgent } from '../../lib/projectOverview';
 import { activityLine, mergeWorkerActivity } from '../../lib/workerActivity';
 import { projectColorVar } from '../../lib/projectColor';
-import { ago, statusText } from '../../lib/format';
+import { ago } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import {
   foldV2Board,
   highlightSegments,
   liveWorkersByTicket,
   needsYouTicketIds,
-  v2ColumnFor,
   v2ColumnStatusOf,
   v2ShownFinished,
   type V2BoardColumn,
@@ -542,7 +541,6 @@ function WorkCard({
 }): React.ReactElement {
   const { ticket } = row;
   const archive = openspecArchive(ticket);
-  const folded = v2ColumnFor(ticket.status, { live: row.live, needsYou: row.needsYou }) !== (ticket.status as string);
   return (
     <button
       type="button"
@@ -571,11 +569,7 @@ function WorkCard({
         <span className="v2-tag text-text-3">{ticket.kind}</span>
         <WorkerModelTag ticket={ticket} options={workerOptions} />
         {row.tests ? <TestTally tests={row.tests} /> : null}
-        {row.needsYou ? (
-          <span className="v2-tag text-needs-you">needs you</span>
-        ) : folded ? (
-          <span className="v2-tag text-text-3">{statusText(ticket.status)}</span>
-        ) : null}
+        {row.needsYou ? <span className="v2-tag text-needs-you">needs you</span> : null}
         {archive?.state === 'pending' ? (
           <span className="v2-tag text-needs-you" data-v2-archive-pending title={archive.pendingPrUrl ?? undefined}>spec archive pending</span>
         ) : null}

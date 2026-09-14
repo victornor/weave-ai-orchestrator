@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Decision, Project, ThreadMessage, Ticket } from '@weave-ai/shared';
 import { isActiveRun, isHumanReplyToolEvent, projectLabel } from '@weave-ai/shared';
-import { resolveModel, runtimeLimitStrip } from '@weave-ai/render';
+import { decisionCardPartsOf, resolveModel, runtimeLimitStrip } from '@weave-ai/render';
 import { A, useGo } from '../app/link';
 import { ScrollToBottomButton } from '../components/ScrollToBottom';
 import { EmptyState } from '../components/States';
@@ -49,6 +49,45 @@ import { DIVIDER_MAX, DIVIDER_MIN, clampDivider, readDivider, shouldSplit, useEl
 
 /** How long a finished turn is held on screen when no row replaces it (V1's SETTLE_MS). */
 const SETTLE_MS = 4000;
+
+/** The answer shown in a note: the chosen option's label, else the first line of the free text. */
+function decisionAnswerLabel(decision: Decision): string {
+  if (decision.answerKey) {
+    return decision.options.find((o) => o.key === decision.answerKey)?.label ?? decision.answerKey;
+  }
+  const first = decision.answerText ?? (decision.answerInputs ? Object.values(decision.answerInputs)[0] : undefined);
+  if (Array.isArray(first)) return first.join(', ');
+  if (typeof first === 'string') return first.split('\n')[0]?.trim() || first;
+  return 'Answered';
+}
+
+/**
+ * One muted line where an answered decision's pushed card sat (captain, 2026-09-14): a plan, merge
+ * or other approval reads "You decided", a question "You answered", and the line links to the
+ * decision's ticket or to Needs you when it has none. An open decision leaves no line at all.
+ */
+function DecisionNote({
+  decision,
+  ws,
+  ticketIdentifier,
+}: {
+  decision: Decision;
+  ws: string;
+  ticketIdentifier: string | null;
+}): React.ReactElement {
+  const decided = decision.kind === 'approval' || decision.kind.endsWith('_approval');
+  const link = ticketIdentifier
+    ? { to: '/v2/w/$ws/tickets/$ticketId', params: { ws, ticketId: ticketIdentifier } }
+    : { to: '/v2/needs' };
+  return (
+    <p data-decision-note className="text-micro leading-relaxed text-text-3">
+      {decided ? 'You decided: ' : 'You answered: '}
+      <A {...link} className="text-text-2 underline-offset-2 hover:text-text-1 hover:underline">
+        {decisionAnswerLabel(decision)} — {decision.title}
+      </A>
+    </p>
+  );
+}
 
 /** The status bar: running workers, waiting decisions, and the weaver session's limit. */
 function ChatStatusBar({
@@ -221,6 +260,10 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const messages = useThreadMessages(fetchId);
   const post = usePostThreadMessage();
   const decisions = useDecisions({ status: 'open', owner: 'human', limit: 200 });
+  // A second, answered-only read on the same route feeds the conversation's notes (captain,
+  // 2026-09-14). Kept separate from the open list so an answered card still leaves the pane
+  // optimistically the moment it is answered, without waiting for the list to refetch (VS-369).
+  const answeredDecisions = useDecisions({ status: 'answered', owner: 'human', limit: 200 });
   const answer = useAnswerDecision();
   const workers = useWorkers({});
   const projects = useProjects();
@@ -238,6 +281,9 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const [searchOpen, setSearchOpen] = useState(false);
   const [anchor, setAnchor] = useState<string | null>(null);
   const [answerError, setAnswerError] = useState<string | null>(null);
+  // A decision answered from this screen's own inline card, so the conversation swaps the card for
+  // its note in place before the answered list refetches (VS-369's live update, in the conversation).
+  const [justAnswered, setJustAnswered] = useState<Record<string, Decision>>({});
   const [divider, setDivider] = useState(readDivider);
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef<{ x: number; width: number } | null>(null);
@@ -291,12 +337,32 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
     [messages.data],
   );
   const traces = useRunTraces({ ids: messageRuns, agent: conductorId, since: oldestLoaded });
+  const decisionsById = useMemo(
+    () => new Map([...(decisions.data ?? []), ...(answeredDecisions.data ?? []), ...Object.values(justAnswered)].map((d) => [d.id, d] as const)),
+    [decisions.data, answeredDecisions.data, justAnswered],
+  );
+  const ticketsById = useMemo(() => new Map((tickets.data ?? []).map((t) => [t.id, t] as const)), [tickets.data]);
+  const projectsById = useMemo(() => new Map((projects.data ?? []).map((p) => [p.id, p] as const)), [projects.data]);
+  // A decision the channel manager pushed to the thread is a message whose card part carries the
+  // decision's prose fallback (title + context). It is kept only while a decision it names is known;
+  // what renders in its place is decided per width below — an inline answerable card on phone where
+  // the pane is absent, nothing on desktop where the pane shows it, and one muted note line once it
+  // is answered, everywhere (captain, 2026-09-14).
+  const conversation = useMemo(
+    () =>
+      (messages.data ?? []).filter((m) => {
+        const cards = decisionCardPartsOf(m.parts);
+        if (cards.length === 0) return true;
+        return cards.some((c) => decisionsById.has(c.ref.id));
+      }),
+    [messages.data, decisionsById],
+  );
   // The conversation rows: each message, its turn's trace attached to the last message that run
   // produced (V1's `chatEntries`/`chatRows` view model). Silent turns are dropped here — Chat shows
   // the turn that produced a message, not a standalone trace row.
   const rows = useMemo(
-    () => chatRows(chatEntries(messages.data ?? [], tickets.data ?? [], workers.data ?? [], decisions.data ?? []).entries, traces.data ?? [], { showSilent: false }),
-    [messages.data, tickets.data, workers.data, decisions.data, traces.data],
+    () => chatRows(chatEntries(conversation, tickets.data ?? [], workers.data ?? [], decisions.data ?? []).entries, traces.data ?? [], { showSilent: false }),
+    [conversation, tickets.data, workers.data, decisions.data, traces.data],
   );
 
   const rowRuns = useMemo(() => new Set((messages.data ?? []).map((m) => m.runId).filter((id): id is string => Boolean(id))), [messages.data]);
@@ -364,6 +430,13 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
         setAnswerError('A card holding a secret cannot be answered offline — reconnect and try again.');
         return;
       }
+      // Swap the inline card for its note in place, as the pane and Needs you drop the card (VS-369).
+      if (d && !offline) {
+        setJustAnswered((prev) => ({
+          ...prev,
+          [id]: { ...d, status: 'answered', answerKey: a.key ?? null, answerText: a.text ?? null, answerInputs: a.inputs ?? null },
+        }));
+      }
       answer.mutate(
         { id, ...a },
         {
@@ -375,6 +448,12 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
             // The decision was already closed elsewhere: the card is gone and any replacement the
             // refetch shows speaks for itself, so this is not an error (VS-369).
             if (isClosedRefusal(e)) return;
+            setJustAnswered((prev) => {
+              if (!(id in prev)) return prev;
+              const next = { ...prev };
+              delete next[id];
+              return next;
+            });
             const stale = staleAnswerCopy(e, d?.ticketId ?? null);
             setAnswerError(stale ? `${stale.title}: ${stale.detail}` : e instanceof Error && e.message ? e.message : 'Could not record that answer.');
           },
@@ -397,6 +476,11 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // Desktop is split by default: the pane stays whether or not anything is waiting, so the layout
   // does not jump when the last card is answered and the empty state has somewhere to live.
   const rail = canSplit;
+  // The inline answerable card renders in exactly the case the pane is absent. It waits for the
+  // region to be measured (`width > 0`): `useElementWidth` reads 0 on the first render, and treating
+  // that as "phone" would flash the card on desktop for a frame before the pane takes over. Waiting
+  // costs a phone one unmeasured frame with no card, and never shows desktop a card it must drop.
+  const showInlineDecisionCard = shellWidth > 0 && !canSplit;
 
   const startDrag = useCallback((e: React.PointerEvent): void => {
     e.preventDefault();
@@ -473,6 +557,40 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                     rows.map((row) => {
                       if (row.kind !== 'message') return null;
                       const m = row.entry.message;
+                      const cards = decisionCardPartsOf(m.parts);
+                      if (cards.length > 0) {
+                        return (
+                          <div key={row.key} className="flex flex-col gap-1.5">
+                            {cards.map((card) => {
+                              const d = decisionsById.get(card.ref.id);
+                              if (!d) return null;
+                              const ticket = d.ticketId ? ticketsById.get(d.ticketId) : undefined;
+                              if (d.status === 'answered') {
+                                // One muted note where the answered card sat, at every width.
+                                return <DecisionNote key={card.ref.id} decision={d} ws={ws} ticketIdentifier={ticket?.identifier ?? null} />;
+                              }
+                              // An open card renders inline only where the decisions pane is absent
+                              // (phone); on desktop the pane beside the conversation carries it.
+                              if (!showInlineDecisionCard) return null;
+                              const projectId = d.projectId ?? ticket?.projectId ?? null;
+                              const project = projectId ? projectsById.get(projectId) : undefined;
+                              return (
+                                <div key={card.ref.id} data-inline-decision-card>
+                                  <V2DecisionCard
+                                    decision={d}
+                                    ws={ws}
+                                    busy={answer.isPending}
+                                    askedBy={d.askedByAgentId}
+                                    ticketIdentifier={ticket?.identifier ?? d.ticketId}
+                                    projectLabel={project ? projectLabel(project) : null}
+                                    onAnswer={(a) => onAnswer(d.id, a)}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      }
                       const trace = row.trace;
                       return (
                         <div key={row.key} className="flex flex-col gap-1.5">

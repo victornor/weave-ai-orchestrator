@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "Fix four V2 departures from the design: empty Work columns, card status
+  tags, Map node shapes, and decisions in the phone Chat conversation."

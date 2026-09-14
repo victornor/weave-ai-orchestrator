@@ -3,31 +3,41 @@ import { decodeTime } from 'ulid';
 import { newId } from './db.js';
 
 const COUNT = 64;
+// Ahead of any real clock: newId is a process-wide monotonic factory that never moves `lastTime` backwards, so a past frozen instant is ignored once any id has already been issued at the real clock.
+const BASE = Date.UTC(2030, 0, 1);
+
+function batch(): string[] {
+  const ids: string[] = [];
+  for (let i = 0; i < COUNT; i++) ids.push(newId());
+  return ids;
+}
 
 describe('newId', () => {
   afterEach(() => vi.useRealTimers());
 
   it('issues strictly increasing ids within a millisecond', () => {
-    // Freeze the clock so the batch is guaranteed to land in one millisecond (VS-392). The
-    // assertion this replaced generated a real-clock batch and retried once if the first and last
-    // ids straddled a tick; on a loaded CI runner both batches could straddle one, so the test
-    // flaked (e.g. `expected 1789358100058 to be 1789358100059`). Freezing the clock tests the
-    // same property — the monotonic factory increments its random part rather than repeating, so
-    // ids in one millisecond are strictly increasing — without depending on how fast the machine
-    // runs 64 calls.
+    // Freeze the clock so the batch cannot span a tick; the test proves monotonicity, not timing.
     vi.useFakeTimers();
-    vi.setSystemTime(1_700_000_000_000);
-    const ids = Array.from({ length: COUNT }, () => newId());
-    const ms = decodeTime(ids[0]!);
-    for (const id of ids) expect(decodeTime(id)).toBe(ms);
+    vi.setSystemTime(BASE);
+    const ids = batch();
+    expect(decodeTime(ids[0]!)).toBe(BASE);
+    expect(decodeTime(ids.at(-1)!)).toBe(BASE);
     for (let i = 1; i < ids.length; i++) {
       expect(ids[i]! > ids[i - 1]!).toBe(true);
     }
+  });
 
-    // Across a millisecond boundary the timestamp advances and ordering still holds.
-    vi.setSystemTime(1_700_000_000_001);
-    const next = newId();
-    expect(decodeTime(next)).toBe(ms + 1);
-    expect(next > ids.at(-1)!).toBe(true);
+  it('issues strictly increasing ids across a millisecond boundary', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(BASE);
+    const before = batch();
+    vi.setSystemTime(BASE + 1);
+    const after = batch();
+    expect(decodeTime(before.at(-1)!)).toBe(BASE);
+    expect(decodeTime(after[0]!)).toBe(BASE + 1);
+    expect(after[0]! > before.at(-1)!).toBe(true);
+    for (let i = 1; i < after.length; i++) {
+      expect(after[i]! > after[i - 1]!).toBe(true);
+    }
   });
 });

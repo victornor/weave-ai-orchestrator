@@ -1,0 +1,8 @@
+# Tasks
+
+- [x] 1. `packages/ui/src/v2/ChatComposer.tsx`: make `onOpenSearch`/`onOpenPlan` optional (their buttons hide when absent) and add `showScope`, `placeholder`, `ariaLabel` and `hotkey` props with the weaver chat's current values as defaults. The global push-to-talk listener is skipped when `hotkey` is false or `disabled` is true.
+- [x] 2. `packages/ui/src/v2/ChatPage.tsx`: pass `hotkey={!planOpen}` to the chat composer so the plan modal owns the hotkey while it is open.
+- [x] 3. `packages/ui/src/v2/PlanModal.tsx`: replace the bare `<textarea>`/`Send` block with `ChatComposer` (`showScope={false}`, `placeholder="Talk through the plan…"`, `ariaLabel="Message the planner"`, `disabled={!plan.data}`); submit via `usePostThreadMessage` with the files and idempotency key, clearing the text only on success; track the planner's runs and pass a queued reason while it is replying.
+- [x] 4. `packages/ui/src/v2/PlanModal.tsx`: render `AttachmentRows` in each conversation bubble so a sent attachment is visible in the plan thread.
+- [x] 5. Tests: extend `packages/ui/src/test/v2planmodal.test.tsx` (shared composer with attach/dictate, no scope/search/plan chrome, attachment carried to the plan thread, text cleared on success) and `packages/ui/src/test/v2chatcomposer.test.tsx` (controls hidden without handlers/scope; hotkey off when `hotkey={false}`).
+- [x] 6. Evidence and checks: screenshots of the weaver chat composer and the Plan modal composer side by side, idle and listening, dark and light, plus the phone Chat tab and one sent attachment visible in the plan conversation; `pnpm lint`, `pnpm typecheck` and both test suites pass.

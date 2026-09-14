@@ -140,6 +140,44 @@ describe('the V2 chat composer', () => {
     expect(onOpenPlan).toHaveBeenCalledTimes(1);
   });
 
+  it('hides the chat-only toolbar when no handlers are given and the scope is off', () => {
+    render(
+      <ChatComposer
+        projects={PROJECTS}
+        projectId={null}
+        onChangeProject={vi.fn()}
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        showScope={false}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Search this conversation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Plan a body of work interactively' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Auto' })).not.toBeInTheDocument();
+    // The three shared controls and the dictation hint stay.
+    expect(screen.getByRole('button', { name: 'Attach a file' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dictate' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
+    expect(screen.getByText(/to dictate/)).toBeInTheDocument();
+  });
+
+  it('uses the supplied placeholder and accessible name', () => {
+    render(
+      <ChatComposer
+        projects={PROJECTS}
+        projectId={null}
+        onChangeProject={vi.fn()}
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        placeholder="Talk through the plan…"
+        ariaLabel="Message the planner"
+      />,
+    );
+    expect(screen.getByLabelText('Message the planner')).toHaveAttribute('placeholder', 'Talk through the plan…');
+  });
+
   it('sends the typed text once, with an idempotency key', () => {
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} />);
@@ -302,6 +340,25 @@ describe('the V2 composer dictation hint (VS-416)', () => {
     expect(screen.getByTestId('v2-composer-listening')).toBeInTheDocument();
     fireEvent.keyUp(window, { key: 'M', code: 'KeyM' });
     expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
+  });
+
+  it('does not claim the push-to-talk hotkey when hotkey is false', () => {
+    render(
+      <ChatComposer
+        projects={PROJECTS}
+        projectId={null}
+        onChangeProject={vi.fn()}
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        hotkey={false}
+      />,
+    );
+    fireEvent.keyDown(window, { key: 'M', code: 'KeyM', metaKey: true, shiftKey: true });
+    expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
+    // The mic button still starts dictation: only the global shortcut is handed off.
+    dictate();
+    expect(screen.getByTestId('v2-composer-listening')).toBeInTheDocument();
   });
 });
 

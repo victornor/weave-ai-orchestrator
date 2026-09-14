@@ -1,0 +1,7 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Replace the per-workspace opencode config symlink to the host user's
+  opencode.json/opencode.jsonc with a generated config carrying only the
+  provider definitions a worker needs, so no worker inherits the owner's MCP
+  servers or plugins.
+skip_specs: true

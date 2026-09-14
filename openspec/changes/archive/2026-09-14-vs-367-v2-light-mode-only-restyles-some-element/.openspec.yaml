@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-13
+goal: V2 light mode repaints every element, not just the ones styled through v2.css's own
+  hand-written rules
+skip_specs: true

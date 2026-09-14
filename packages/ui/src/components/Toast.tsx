@@ -1,8 +1,29 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { UiStatus } from '@weave-ai/shared';
 import { StatusGlyph } from './StatusGlyph';
 import { cx } from '../lib/cx';
+
+/**
+ * `ToastProvider` mounts once at the app root, above the router, so its toast container is a DOM
+ * sibling of `.v2-root` rather than a descendant — V2's tokens and `data-theme` never reach it by
+ * inheritance. Mirroring the active `.v2-root`'s class and theme here is the only fix that does not
+ * require every `useToast()` caller to know which version it is running under (VS-367).
+ *
+ * `self` excludes the container this hook is mirroring onto: once mirrored, it carries `.v2-root`
+ * too, and would otherwise match its own last value forever once the real one unmounts.
+ */
+function useActiveV2Root(self: HTMLElement | null): { theme: string | null } {
+  const find = (): Element | null => [...document.querySelectorAll('.v2-root')].find((el) => el !== self) ?? null;
+  const [theme, setTheme] = useState<string | null>(() => find()?.getAttribute('data-theme') ?? null);
+  useEffect(() => {
+    const read = (): void => setTheme(find()?.getAttribute('data-theme') ?? null);
+    const observer = new MutationObserver(read);
+    observer.observe(document.body, { attributes: true, attributeFilter: ['data-theme'], childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [self]);
+  return { theme };
+}
 
 export interface Toast {
   id: string;
@@ -47,11 +68,24 @@ export function ToastProvider({ children }: { children: ReactNode }): React.Reac
   );
 
   const value = useMemo(() => ({ push, dismiss }), [push, dismiss]);
+  const [self, setSelf] = useState<HTMLElement | null>(null);
+  const v2 = useActiveV2Root(self);
 
   return (
     <Ctx.Provider value={value}>
       {children}
-      <div className="pointer-events-none fixed inset-x-0 top-[calc(var(--ac-app-top)_+_var(--space-5))] z-[60] flex flex-col items-center gap-2 px-3 sm:left-auto sm:right-4 sm:items-end" aria-live="polite">
+      <div
+        ref={setSelf}
+        className={cx(
+          'pointer-events-none fixed inset-x-0 top-[calc(var(--ac-app-top)_+_var(--space-5))] z-[60] flex flex-col items-center gap-2 px-3 sm:left-auto sm:right-4 sm:items-end',
+          v2.theme ? 'v2-root' : undefined,
+        )}
+        // `.v2-root`'s own rule paints a full background — only its token declarations are wanted
+        // here, on a container that must stay invisible around the toast cards themselves.
+        style={v2.theme ? { background: 'transparent' } : undefined}
+        data-theme={v2.theme ?? undefined}
+        aria-live="polite"
+      >
         {items.map((t) => (
           <div
             key={t.id}

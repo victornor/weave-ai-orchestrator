@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Stabilise dictation.test.tsx so its cases stop failing under load and
+  cannot red an approved PR's landing check
+skip_specs: true

@@ -12,6 +12,16 @@ export interface ContextEntry { url: string; token: string; workspace?: string; 
 
 export const DEFAULT_URL = 'http://127.0.0.1:7433';
 
+/** The default daemon port: a loopback login to any other port is a scratch daemon (VS-399). */
+const DEFAULT_PORT = new URL(DEFAULT_URL).port;
+
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+
+/** True for the hosts that name this machine; bracketed IPv6 (`[::1]`) is unwrapped. */
+export function isLoopbackHost(hostname: string): boolean {
+  return LOOPBACK_HOSTS.has(hostname.replace(/^\[|\]$/g, ''));
+}
+
 /** VS-258: collapsed into `@weave-ai/release`, the one place old/new resolution happens. */
 export function configHome(): string {
   return resolveConfigDir();
@@ -23,6 +33,29 @@ export function stateHome(): string {
 
 export function contextsPath(): string {
   return process.env['AC_CONTEXTS_FILE'] ?? join(configHome(), 'contexts.yaml');
+}
+
+/**
+ * VS-399: refuse a `weave login` that would store a scratch-daemon context in the host's shared
+ * contexts file. A loopback URL on a port other than the default is a daemon that will not outlive the
+ * scratch work; writing it to `contextsPath()` replaces `current` and leaves every bare `weave`
+ * command pointed at a dead port. Isolated by `AC_CONTEXTS_FILE`, or deliberately overridden, the
+ * login proceeds.
+ */
+export function assertLoginContextIsolation(url: string, opts: { allowDefaultContexts?: boolean } = {}): void {
+  if (opts.allowDefaultContexts === true) return;
+  if (process.env['AC_CONTEXTS_FILE']) return;
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return; }
+  if (!isLoopbackHost(parsed.hostname)) return;
+  const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+  if (port === DEFAULT_PORT) return;
+  throw new Error(
+    `refusing to write a context for ${url} into the host's ${contextsPath()}: a loopback daemon on a ` +
+    `port other than ${DEFAULT_PORT} is a scratch daemon, and storing it would point every bare ` +
+    '`weave` command at one that stops with your scratch work. Set AC_CONTEXTS_FILE (and ' +
+    'XDG_CONFIG_HOME/XDG_STATE_HOME) to an isolated path, or pass --allow-default-contexts to override.',
+  );
 }
 
 export function loadContexts(): ContextsFile {

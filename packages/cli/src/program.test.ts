@@ -192,6 +192,20 @@ describe('running commands against a stubbed daemon', () => {
     expect(process.exitCode).toBeUndefined();
   });
 
+  // VS-399: the login command itself must consult the guard, not only the exported predicate.
+  it('refuses a scratch loopback login with no isolated contexts file', async () => {
+    const saved = process.env['AC_CONTEXTS_FILE'];
+    delete process.env['AC_CONTEXTS_FILE'];
+    try {
+      await buildProgram().parseAsync(['node', 'conductor', '--json', 'login', 'http://127.0.0.1:8123', '--password', 'x']);
+    } finally {
+      if (saved === undefined) delete process.env['AC_CONTEXTS_FILE'];
+      else process.env['AC_CONTEXTS_FILE'] = saved;
+    }
+    expect(process.exitCode).not.toBe(0);
+    expect(written.join('')).toContain('AC_CONTEXTS_FILE');
+  });
+
   it('prints one project merge queue as json', async () => {
     const seen = stubFetch({
       '/api/w/acme/projects/api/merge-queue': {

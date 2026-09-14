@@ -10,9 +10,18 @@
 #   scripts/scratch-daemon.sh start  [--dir DIR] [--port PORT]
 #   scripts/scratch-daemon.sh stop   [--dir DIR]
 #   scripts/scratch-daemon.sh status [--dir DIR]
+#   scripts/scratch-daemon.sh env    [--dir DIR]
 #
 # DIR defaults to ${AC_SCRATCH_DIR:-${TMPDIR:-/tmp}/weave-scratch-daemon}. PORT defaults to 0, where
 # the daemon picks a free port and writes it into <dir>/config/daemon.json.
+#
+# VS-399: `weave login` writes its contexts to $AC_CONTEXTS_FILE or the host's
+# ~/.config/weave/contexts.yaml. A bare `weave login` at this scratch daemon rewrote the host's file
+# and pointed every `weave` command at a daemon that stops with the scratch dir. `start` prints, and
+# `env` prints, the exports below; use them for every `weave` call against this daemon:
+#
+#   eval "$(scripts/scratch-daemon.sh env)"
+#   weave login http://127.0.0.1:<port>
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,8 +40,19 @@ while [ "$#" -gt 0 ]; do
 done
 
 CONFIG_DIR="$DIR/config"
+CLI_DIR="$DIR/cli"
+CLI_CONFIG_DIR="$DIR/cli-config"
+CLI_STATE_DIR="$DIR/cli-state"
 PID_FILE="$DIR/pid"
 LOG_FILE="$DIR/daemon.log"
+
+# VS-399: every `weave` command against the scratch daemon must read and write its own contexts and
+# config/state, never the host's. `--config-dir` on the daemon does not isolate the CLI.
+cli_env_lines() {
+  printf 'export AC_CONTEXTS_FILE="%s"\n' "$CLI_DIR/contexts.yaml"
+  printf 'export XDG_CONFIG_HOME="%s"\n' "$CLI_CONFIG_DIR"
+  printf 'export XDG_STATE_HOME="%s"\n' "$CLI_STATE_DIR"
+}
 
 pid_running() {
   [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null
@@ -71,6 +91,12 @@ YAML
   pid=$!
   echo "$pid" > "$PID_FILE"
   echo "scratch daemon started (pid $pid, config $CONFIG_DIR, log $LOG_FILE)"
+  echo "use this env for every 'weave' command against it (never the host's contexts):"
+  cli_env_lines
+}
+
+cmd_env() {
+  cli_env_lines
 }
 
 cmd_stop() {
@@ -109,8 +135,9 @@ case "$CMD" in
   start) cmd_start ;;
   stop) cmd_stop ;;
   status) cmd_status ;;
+  env) cmd_env ;;
   *)
-    sed -n '2,16p' "${BASH_SOURCE[0]}" >&2
+    sed -n '2,24p' "${BASH_SOURCE[0]}" >&2
     exit 2
     ;;
 esac

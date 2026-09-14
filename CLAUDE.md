@@ -158,6 +158,14 @@ process spawned by the system it is changing. Rules that keep that sane:
 - **Never touch the live install**: not `~/.config/weave`, not the release dirs, not the
   systemd unit, not the port it listens on. `weave daemon upgrade|rollback|stop|start` are
   human commands; they refuse to run inside a worker.
+- **Never point the host CLI at a scratch daemon.** `--config-dir` isolates the *daemon*, not the
+  CLI: `weave login`/`weave context use` write `$AC_CONTEXTS_FILE`, else
+  `~/.config/weave/contexts.yaml`. A bare `weave login` at a scratch daemon rewrote that shared file
+  and left every bare `weave` command on the host talking to a dead port (VS-399, 2026-09-14). Before
+  any `weave` command against a scratch daemon, use the helper's isolated environment —
+  `eval "$(scripts/scratch-daemon.sh env)"`, or the same exports it prints on `start`. `weave login`
+  refuses a loopback daemon on a non-default port unless `AC_CONTEXTS_FILE` is isolated or
+  `--allow-default-contexts` is passed.
 - **Test against throwaway daemons only**: `--config-dir <tmp> --listen 127.0.0.1:0` (or the
   loopback port of your choice), with `auth.loopbackTrusted: true` in that dir's `daemon.yaml`.
   Since VS-143, any config dir other than the plain default (`~/.config/weave`, or

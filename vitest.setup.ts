@@ -15,4 +15,14 @@ for (const key of Object.keys(process.env)) if (key.startsWith('AC_')) delete pr
 //   - a throwaway `XDG_CONFIG_HOME` means `resolveInstalledUnit()` can never find the host's unit,
 //     even when a test forgets to isolate its own.
 process.env['AC_TEST_GUARD'] = '1';
-process.env['XDG_CONFIG_HOME'] = mkdtempSync(join(tmpdir(), 'ac-test-config-'));
+const scratchConfig = mkdtempSync(join(tmpdir(), 'ac-test-config-'));
+process.env['XDG_CONFIG_HOME'] = scratchConfig;
+
+// VS-399: `weave login`/`weave context use` write `contextsPath()` — `$AC_CONTEXTS_FILE`, else
+// `<XDG_CONFIG_HOME>/weave/contexts.yaml`. A test that reaches them must never rewrite the host's
+// contexts file and repoint every bare `weave` command at a test daemon, which is exactly what
+// VS-378's scratch login did to captain on 2026-09-14. Pinning AC_CONTEXTS_FILE at a throwaway path
+// inside the scratch config dir is the same two-layer guard as the systemd one above: the variable
+// catches a test that calls `putContext` directly, and the throwaway XDG_CONFIG_HOME catches the
+// fallback if a test unsets it.
+process.env['AC_CONTEXTS_FILE'] = join(scratchConfig, 'contexts.yaml');

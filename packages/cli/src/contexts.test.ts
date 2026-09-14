@@ -3,8 +3,9 @@ import { mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync, readFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  contextsPath, currentContext, findWorkspaceFile, loadContexts, putContext, removeContext,
-  resolveWorkspaceId, saveContexts, suggestContextName, useContext, workspaceIdFromFile,
+  assertLoginContextIsolation, contextsPath, currentContext, findWorkspaceFile, loadContexts,
+  putContext, removeContext, resolveWorkspaceId, saveContexts, suggestContextName, useContext,
+  workspaceIdFromFile,
 } from './contexts.js';
 
 let dir: string;
@@ -76,6 +77,36 @@ describe('contexts file', () => {
   it('saves an empty file without inventing a current context', () => {
     saveContexts({ contexts: {} });
     expect(loadContexts().current).toBeUndefined();
+  });
+});
+
+describe('login context guard (VS-399)', () => {
+  it('refuses a scratch loopback login that would write the host contexts file', () => {
+    delete process.env['AC_CONTEXTS_FILE'];
+    expect(() => assertLoginContextIsolation('http://127.0.0.1:8123')).toThrowError(/AC_CONTEXTS_FILE/);
+    expect(() => assertLoginContextIsolation('http://localhost:9999')).toThrowError(/scratch daemon/);
+  });
+
+  it('allows a login when the contexts file is isolated', () => {
+    expect(() => assertLoginContextIsolation('http://127.0.0.1:8123')).not.toThrow();
+  });
+
+  it('allows the default loopback port and remote daemons', () => {
+    delete process.env['AC_CONTEXTS_FILE'];
+    expect(() => assertLoginContextIsolation('http://127.0.0.1:7433')).not.toThrow();
+    expect(() => assertLoginContextIsolation('http://localhost:7433')).not.toThrow();
+    expect(() => assertLoginContextIsolation('https://conductor.example.com')).not.toThrow();
+  });
+
+  it('allows an explicit override', () => {
+    delete process.env['AC_CONTEXTS_FILE'];
+    expect(() => assertLoginContextIsolation('http://127.0.0.1:8123', { allowDefaultContexts: true })).not.toThrow();
+  });
+
+  it('treats a loopback URL with no port as non-default, and ignores an unparseable URL', () => {
+    delete process.env['AC_CONTEXTS_FILE'];
+    expect(() => assertLoginContextIsolation('http://127.0.0.1')).toThrowError(/AC_CONTEXTS_FILE/);
+    expect(() => assertLoginContextIsolation('not a url')).not.toThrow();
   });
 });
 

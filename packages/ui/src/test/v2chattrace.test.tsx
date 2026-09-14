@@ -4,8 +4,8 @@
  * line, output bounded in a scroll container, and the collapsed turn summary that omits a quantity
  * the runtime never reported.
  */
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunEvent, RunTrace } from '@weave-ai/shared';
 
 const state = vi.hoisted(() => ({ events: [] as RunEvent[] }));
@@ -40,6 +40,11 @@ const trace: RunTrace = {
 beforeEach(() => {
   state.events = [];
   sessionStorage.clear();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 describe('the V2 chat trace', () => {
@@ -209,5 +214,85 @@ describe('the V2 collapsed turn summary', () => {
 
     render(<ChatTurnTrace trace={trace} ws="ws1" />);
     expect(screen.getByRole('button', { name: 'What the weaver did' })).toHaveAttribute('aria-expanded', 'true');
+  });
+});
+
+describe('the live trace reveal (VS-433)', () => {
+  const baseline = [
+    event({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Read the first file.' } }),
+    event({ id: 'e2', seq: 2, type: 'tool.call', payload: { name: 'Read', callId: 'c1', target: 'src/a.ts' } }),
+  ];
+  const arrival = event({ id: 'e3', seq: 3, type: 'assistant.text', payload: { text: 'Now the second file.' } });
+  const narrations = (): HTMLElement[] => Array.from(document.querySelectorAll('[data-trace-narration]'));
+
+  it('reveals a line that arrives while watching as a prefix, then the whole text', () => {
+    vi.useFakeTimers();
+    const { rerender } = render(<ChatTrace events={baseline} reveal />);
+    expect(narrations()[0]).toHaveTextContent('Read the first file.');
+
+    rerender(<ChatTrace events={[...baseline, arrival]} reveal />);
+    expect(narrations()).toHaveLength(2);
+    expect(narrations()[1]).toBeTruthy();
+    expect(narrations()[1]!.textContent).toBe('');
+
+    act(() => { vi.advanceTimersByTime(80); });
+    const mid = narrations()[1]!.textContent ?? '';
+    expect(mid.length).toBeGreaterThan(0);
+    expect('Now the second file.'.startsWith(mid)).toBe(true);
+
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(narrations()[1]).toHaveTextContent('Now the second file.');
+  });
+
+  it('extends a growing line without restarting it', () => {
+    vi.useFakeTimers();
+    const base = [event({ id: 't1', seq: 1, type: 'tool.call', payload: { name: 'Read', callId: 'c1', target: 'src/a.ts' } })];
+    const first = event({ id: 't2', seq: 2, type: 'assistant.text', payload: { text: 'Checking' } });
+    const more = event({ id: 't3', seq: 3, type: 'assistant.text', payload: { text: ' the file' } });
+    const { rerender } = render(<ChatTrace events={base} reveal />);
+
+    rerender(<ChatTrace events={[...base, first]} reveal />);
+    act(() => { vi.advanceTimersByTime(64); });
+    const early = narrations()[0]!.textContent ?? '';
+    expect(early.length).toBeGreaterThan(0);
+    expect(early.length).toBeLessThan('Checking'.length);
+
+    rerender(<ChatTrace events={[...base, first, more]} reveal />);
+    const grown = narrations()[0]!.textContent ?? '';
+    expect('Checking the file'.startsWith(grown)).toBe(true);
+    expect(grown.length).toBeGreaterThanOrEqual(early.length);
+
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(narrations()[0]).toHaveTextContent('Checking the file');
+  });
+
+  it('leaves lines present at mount whole', () => {
+    vi.useFakeTimers();
+    render(<ChatTrace events={baseline} reveal />);
+    expect(narrations()[0]).toHaveTextContent('Read the first file.');
+  });
+
+  it('never animates the trace of a past turn', () => {
+    state.events = [narration];
+    render(<ChatTurnTrace trace={trace} ws="ws1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'What the weaver did' }));
+    expect(document.querySelector('[data-trace-narration]')).toHaveTextContent('Reading the file first.');
+  });
+
+  it('renders a newly arrived line whole under reduced motion', () => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query.includes('prefers-reduced-motion'),
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList);
+
+    const { rerender } = render(<ChatTrace events={baseline} reveal />);
+    rerender(<ChatTrace events={[...baseline, arrival]} reveal />);
+    expect(narrations()[1]).toHaveTextContent('Now the second file.');
   });
 });

@@ -692,7 +692,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                           <button type="button" onClick={retryNow} className="text-text-3 underline">Refresh</button>
                         </p>
                       ) : null}
-                      {liveEvents.length ? <ChatTrace events={liveEvents} className="border-l border-line-1 pl-2.5" /> : null}
+                      {liveEvents.length ? <ChatTrace events={liveEvents} className="border-l border-line-1 pl-2.5" reveal /> : null}
                     </section>
                   ) : null}
                   {/* Live work no message in this thread accounts for, exactly where V1 puts it. */}

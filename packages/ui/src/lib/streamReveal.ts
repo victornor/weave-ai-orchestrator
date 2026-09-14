@@ -7,7 +7,7 @@
  * that was already on screen when the view opened — a history read back is not a stream.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ThreadMessage } from '@weave-ai/shared';
+import type { RunEvent, ThreadMessage } from '@weave-ai/shared';
 
 /** A typical reply is well under a second; this is the whole reveal, not a per-character delay. */
 export const REVEAL_MS = 420;
@@ -60,32 +60,80 @@ function prefersReducedMotion(): boolean {
  * text is new, and a later render — an unrelated state change, a refetch that returns the same body
  * — must neither restart the reveal nor cut it short. Reduced motion, and an environment with no
  * timer, return the whole string on the first frame.
+ *
+ * The reveal follows growth (VS-433): a line whose text keeps arriving — a streamed assistant
+ * sentence, a live tool argument — keeps revealing from what is already shown up to the new end.
+ * The visible prefix never restarts and never gets shorter; a fixed body (a reply) behaves as it
+ * always did.
  */
 export function useStreamReveal(full: string, animate: boolean, durationMs = REVEAL_MS): string {
   const reduced = usePrefersReducedMotion();
   const [shouldAnimate] = useState(() => animate && !reduced);
   const [visible, setVisible] = useState(() => (shouldAnimate ? '' : full));
 
+  // Read by the timer, which is not re-created for every render; a state read there would lag.
+  const fullRef = useRef(full);
+  fullRef.current = full;
+  /** The characters settled on so far, so a later growth resumes from here and never goes back. */
+  const shownRef = useRef(shouldAnimate ? 0 : full.length);
+  /** A linear ramp: `from` characters shown at `at`, `to` characters shown at `until`. */
+  const rampRef = useRef({ from: 0, at: 0, to: 0, until: 0 });
+
   useEffect(() => {
     if (!shouldAnimate) {
-      setVisible(full);
+      setVisible(fullRef.current);
       return;
     }
     if (typeof setInterval !== 'function') {
-      setVisible(full);
+      setVisible(fullRef.current);
       return;
     }
-    const total = Math.max(1, Math.ceil(durationMs / REVEAL_STEP_MS));
-    let step = 0;
+    const target = fullRef.current.length;
+    if (shownRef.current < target) {
+      const active = rampRef.current;
+      // A new ramp for the text that is not scheduled yet; the previous one keeps running otherwise.
+      if (active.to < target) {
+        const now = Date.now();
+        const remaining = target - shownRef.current;
+        // Reveal the new characters over the share of the duration their length is worth: a short
+        // line settles quickly, a long one does not crawl, and a growth just extends the ramp.
+        const span = Math.max(REVEAL_STEP_MS, Math.round(durationMs * (remaining / Math.max(target, 1))));
+        rampRef.current = { from: shownRef.current, at: now, to: target, until: now + span };
+      }
+    }
     const timer = setInterval(() => {
-      step += 1;
-      setVisible(full.slice(0, revealedCount(full.length, step * REVEAL_STEP_MS, durationMs)));
-      if (step >= total) clearInterval(timer);
+      const ramp = rampRef.current;
+      const now = Date.now();
+      const p = ramp.until <= ramp.at ? 1 : Math.min(1, Math.max(0, (now - ramp.at) / (ramp.until - ramp.at)));
+      const count = Math.min(ramp.to, Math.max(ramp.from, Math.round(ramp.from + (ramp.to - ramp.from) * p)));
+      if (count > shownRef.current) {
+        shownRef.current = count;
+        setVisible(fullRef.current.slice(0, count));
+      }
+      if (shownRef.current >= ramp.to) clearInterval(timer);
     }, REVEAL_STEP_MS);
     return () => clearInterval(timer);
   }, [shouldAnimate, full, durationMs]);
 
   return shouldAnimate ? visible : full;
+}
+
+/**
+ * The ids of run events that first arrived while this view was open, so only their trace lines
+ * reveal (VS-433). `seq` is per-run and the one field a persisted row and its live frame agree on
+ * (`mergeRunEvents`), so a line stays the same line when the persisted read replaces the live tail.
+ * Everything present when the view mounted — a history read back, a mid-turn join — is the baseline
+ * and never animates.
+ */
+export function useNewLiveIds(events: readonly RunEvent[]): ReadonlySet<string> {
+  const baseline = useRef<number | null>(null);
+  if (baseline.current === null) baseline.current = events.reduce((max, e) => (e.seq > max ? e.seq : max), -1);
+  return useMemo(() => {
+    const ids = new Set<string>();
+    const from = baseline.current ?? -1;
+    for (const e of events) if (e.seq > from) ids.add(e.id);
+    return ids;
+  }, [events]);
 }
 
 /**

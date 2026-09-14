@@ -26,14 +26,47 @@ import { EditPayloadBody } from '../components/Transcript';
 import { useRunEvents } from '../api/hooks';
 import { readExpandedTraces, toggleExpandedTrace } from '../lib/traceExpansion';
 import { duration as fmtDuration, tokens as fmtTokens } from '../lib/format';
+import { useNewLiveIds, useStreamReveal } from '../lib/streamReveal';
 import { cx } from '../lib/cx';
 
-export function ChatTrace({ events, className }: { events: readonly RunEvent[]; className?: string }): React.ReactElement {
+/** Nothing to animate, shared so a history trace never allocates a set it will not read. */
+const NO_REVEAL: ReadonlySet<string> = new Set();
+
+/**
+ * The one piece of variable text a line streams in when it first appears (VS-433): a narration's
+ * body, a tool row's argument, a status line, a command. Used only for the reveal; the rendered
+ * branches read their own fields.
+ */
+function lineText(block: TranscriptBlock): string {
+  switch (block.type) {
+    case 'text': return block.text;
+    case 'tool': return block.target;
+    case 'phase': return block.phase;
+    case 'status': return block.text;
+    case 'report': return block.report.summary;
+    case 'command': return block.command;
+    case 'human': return block.text;
+  }
+}
+
+export function ChatTrace({ events, className, reveal = false }: { events: readonly RunEvent[]; className?: string; reveal?: boolean }): React.ReactElement {
   const rows = useMemo(() => groupConsecutiveTools(runEventsToTranscript(events)), [events]);
+  // Only a line whose event arrived after this trace mounted streams in (VS-433); a history read
+  // back or a join mid-turn is the baseline, and `ChatTurnTrace` never passes `reveal` at all.
+  const newIds = useNewLiveIds(events);
+  const animate = reveal ? newIds : NO_REVEAL;
   if (rows.length === 0) return <p className={cx('text-nano text-text-4', className)}>Nothing on the wire yet.</p>;
   return (
     <div className={cx('flex flex-col gap-1.5', className)} data-v2-trace>
-      {rows.map((row) => (row.type === 'tools' ? <ToolGroup key={row.id} row={row} /> : <TraceLine key={row.block.id} block={row.block} />))}
+      {rows.map((row) =>
+        row.type === 'tools' ? (
+          <ToolGroup key={row.id} row={row} />
+        ) : row.block.type === 'tool' ? (
+          <ToolRow key={row.block.id} block={row.block} reveal={animate.has(row.block.id)} />
+        ) : (
+          <TraceLine key={row.block.id} block={row.block} reveal={animate.has(row.block.id)} />
+        ),
+      )}
     </div>
   );
 }
@@ -41,18 +74,20 @@ export function ChatTrace({ events, className }: { events: readonly RunEvent[]; 
 /** The tool's argument, or the tail of its result body when there is no separate argument. A call
  *  whose result is text, or an edit whose payload carries a diff, keeps that body behind a
  *  disclosure; a call with nothing to show is one line, never a button that opens onto nothing. */
-function ToolRow({ block, marker = '▸' }: { block: ToolBlock; marker?: string }): React.ReactElement {
+function ToolRow({ block, marker = '▸', reveal = false }: { block: ToolBlock; marker?: string; reveal?: boolean }): React.ReactElement {
   // An edit or write starts expanded (VS-413), mirroring V1's `TranscriptLine`: the diff is the
   // content the human asked for, not a second click to reveal it. Every other tool row — reads,
   // searches, shell output — keeps starting collapsed (VS-370).
   const [open, setOpen] = useState(() => Boolean(block.editPayload));
+  // The argument streams in when the row is new (VS-433); the tool name is its fixed label.
+  const target = useStreamReveal(block.target, reveal);
   const expandable = Boolean(block.diff) || Boolean(block.editPayload);
   const tone = block.denied ? 'text-needs-you' : block.error ? 'text-failed' : 'text-text-2';
   const head = (
     <div className="flex items-center gap-2" data-trace-tool>
       <span className="ac-mono flex-none text-nano text-text-4">{expandable ? (open ? '▾' : '▸') : marker}</span>
       <span className={cx('ac-mono flex-none text-nano', tone)}>{block.tool}</span>
-      {block.target ? <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{block.target}</span> : <span className="flex-1" />}
+      {block.target ? <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{target}</span> : <span className="flex-1" />}
       {block.adds != null || block.dels != null ? (
         <span className="ac-mono flex-none text-nano">
           {block.adds != null ? <span className="text-done">+{block.adds}</span> : null}
@@ -140,38 +175,39 @@ function ToolGroup({ row }: { row: Extract<TranscriptRow, { type: 'tools' }> }):
   );
 }
 
-function TraceLine({ block }: { block: TranscriptBlock }): React.ReactElement {
+function TraceLine({ block, reveal }: { block: TranscriptBlock; reveal: boolean }): React.ReactElement {
+  const text = useStreamReveal(lineText(block), reveal);
   // Narration — and a runtime's own thinking — reads as work in progress, not as something addressed
   // to the human: italic, in the dimmest ink (HANDOFF §5).
   if (block.type === 'text') {
     return (
       <div data-trace-narration={block.thinking ? 'thinking' : 'text'} className="text-nano italic leading-relaxed text-text-4">
-        <Markdown source={block.text} className="text-nano italic text-text-4" />
+        <Markdown source={text} className="text-nano italic text-text-4" />
       </div>
     );
   }
-  if (block.type === 'tool') return <ToolRow block={block} />;
+  if (block.type === 'tool') return <ToolRow block={block} reveal={reveal} />;
   if (block.type === 'phase') {
     return (
       <div className="ac-mono text-nano text-text-4" data-trace-phase>
-        phase: {block.phase}
+        phase: {text}
         {block.durationMs != null ? ` · ${fmtDuration(block.durationMs)}` : ''}
         {block.tokens != null ? ` · ${fmtTokens(block.tokens)} tok` : ''}
       </div>
     );
   }
   if (block.type === 'status') {
-    return <div className="ac-mono text-nano text-text-4" data-trace-status>{block.text}</div>;
+    return <div className="ac-mono text-nano text-text-4" data-trace-status>{text}</div>;
   }
   if (block.type === 'report') {
-    return <div className="ac-mono text-nano text-text-3" data-trace-report>{block.report.summary}</div>;
+    return <div className="ac-mono text-nano text-text-3" data-trace-report>{text}</div>;
   }
   if (block.type === 'command') {
     return (
       <div className="flex flex-col gap-0.5">
         <div className="flex items-center gap-2" data-trace-tool>
           <span className="ac-mono flex-none text-nano text-text-4">$</span>
-          <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-2">{block.command}</span>
+          <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-2">{text}</span>
           {block.exitCode != null ? <span className={cx('ac-mono text-nano', block.exitCode === 0 ? 'text-done' : 'text-failed')}>exit {block.exitCode}</span> : null}
         </div>
         {block.output ? <ResultLines text={block.output} /> : null}
@@ -179,7 +215,7 @@ function TraceLine({ block }: { block: TranscriptBlock }): React.ReactElement {
     );
   }
   // human
-  return <div className="ac-mono text-nano text-text-4" data-trace-human>→ you: {block.text}</div>;
+  return <div className="ac-mono text-nano text-text-4" data-trace-human>→ you: {text}</div>;
 }
 
 /** The collapsed summary line's parts, in the order they answer "what did it do?" — a zero or an

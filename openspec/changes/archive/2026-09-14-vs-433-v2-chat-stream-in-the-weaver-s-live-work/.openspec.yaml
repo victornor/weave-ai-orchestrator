@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "Stream the V2 chat live working trace's text in line by line, following
+  growth, instead of each line popping in whole"
+skip_specs: true

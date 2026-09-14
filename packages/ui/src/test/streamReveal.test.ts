@@ -7,7 +7,10 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { revealedCount, useStreamReveal } from '../lib/streamReveal';
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('revealedCount', () => {
   it('is never empty at the first frame, complete at the end, and in between in the middle', () => {
@@ -66,5 +69,26 @@ describe('useStreamReveal', () => {
 
     const { result } = renderHook(() => useStreamReveal('abcdefghij', true));
     expect(result.current).toBe('abcdefghij');
+  });
+
+  it('follows growth: the visible prefix only lengthens, it never restarts', () => {
+    vi.useFakeTimers();
+    const { result, rerender } = renderHook(
+      ({ full }: { full: string }) => useStreamReveal(full, true, 160),
+      { initialProps: { full: 'abcdefghij' } },
+    );
+
+    act(() => { vi.advanceTimersByTime(48); });
+    const early = result.current;
+    expect(early.length).toBeGreaterThan(0);
+    expect(early.length).toBeLessThan(10);
+
+    // The line keeps arriving: the reveal resumes from what is shown, not from the first character.
+    rerender({ full: 'abcdefghijklmnopqrst' });
+    expect('abcdefghijklmnopqrst'.startsWith(result.current)).toBe(true);
+    expect(result.current.length).toBeGreaterThanOrEqual(early.length);
+
+    act(() => { vi.advanceTimersByTime(400); });
+    expect(result.current).toBe('abcdefghijklmnopqrst');
   });
 });

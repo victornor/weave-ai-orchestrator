@@ -77,7 +77,9 @@ describe('archive backfill merge cards (VS-389)', () => {
   async function realSquashMerge(branch: string = BRANCH): Promise<{ mergeCommit: string }> {
     const src = `squash-src-${branch.replace(/[^a-z0-9]+/gi, '-')}`;
     await git(['fetch', origin, `${branch}:${src}`], clone);
+    await git(['fetch', origin, 'main'], clone);
     await git(['checkout', 'main'], clone);
+    await git(['merge', '--ff-only', 'origin/main'], clone);
     await git(['merge', '--squash', src], clone);
     await git(['commit', '-m', `chore(openspec): archive ${CHANGE}`], clone);
     await git(['push', 'origin', 'main'], clone);
@@ -228,5 +230,61 @@ describe('archive backfill merge cards (VS-389)', () => {
     expect(tickets.get(ticketId).delivery?.['openspecArchive']).toMatchObject({
       state: 'pending', pendingPrUrl: 'https://example.com/pr/313', lastFailure: { reason: 'required checks are pending' },
     });
+  });
+
+  /** VS-408: main advances with a `widgets` spec the fake archive branch already added, so the rebase conflicts. */
+  function addConflictingWidgetsSpec(): void {
+    mkdirSync(join(origin, 'openspec', 'specs', 'widgets'), { recursive: true });
+    writeFileSync(join(origin, 'openspec', 'specs', 'widgets', 'spec.md'), '# conflict\n');
+  }
+
+  /** A new-capability change left on main for a rebuild to archive, with or without a usable proposal Why. */
+  function seedGadgetChange(why: string | null): void {
+    const changeDir = join(origin, 'openspec', 'changes', CHANGE);
+    mkdirSync(join(changeDir, 'specs', 'gadgets'), { recursive: true });
+    writeFileSync(join(changeDir, '.openspec.yaml'), 'schema: spec-driven\n');
+    const whySection = why === null ? '' : `## Why\n\n${why}\n\n`;
+    writeFileSync(join(changeDir, 'proposal.md'), `${whySection}## What Changes\n- Add a gadget.\n\n## Capabilities\n\n### New Capabilities\n- \`gadgets\`: adds a gadget\n`);
+    writeFileSync(join(changeDir, 'specs', 'gadgets', 'spec.md'), '## ADDED Requirements\n\n### Requirement: A gadget exists\nThe system SHALL have a gadget.\n\n#### Scenario: One gadget\n- **WHEN** asked\n- **THEN** a gadget is returned\n');
+    writeFileSync(join(changeDir, 'tasks.md'), '## 1. Gadget\n\n- [x] 1.1 Add it\n');
+  }
+
+  it('lands a conflicting archive branch after rebuilding it from the landing tip (VS-408)', async () => {
+    await pushArchiveBranch();
+    addConflictingWidgetsSpec();
+    seedGadgetChange('Gadgets exist so callers can rely on a gadget being present and shaped the way this capability guarantees.');
+    await commit(origin, 'feat: conflicting widgets spec and a left-behind change');
+    const forge = archiveForge();
+    h.ctx.registries.forges.set('github', forge);
+    const ticketId = doneTicket();
+
+    const r = await tickets.landArchiveBackfill(AGENT, { ticketId, changeName: CHANGE, branch: BRANCH, prUrl: 'https://example.com/pr/313' });
+
+    expect(r.landed).toBe(true);
+    expect(forge.mergePr).toHaveBeenCalledTimes(1);
+    // The rebuilt archive added the change's capability, and did not clobber main's own widgets spec.
+    expect((await git(['show', 'main:openspec/specs/gadgets/spec.md'], clone)).stdout).toMatch(/A gadget exists/);
+    expect((await git(['show', 'main:openspec/specs/widgets/spec.md'], clone)).stdout).toContain('# conflict');
+    expect(tickets.get(ticketId).delivery?.['openspecArchive']).toMatchObject({ state: 'landed' });
+  });
+
+  it('records one failure with openspec reason when the rebuild is refused, and does not loop (VS-408)', async () => {
+    await pushArchiveBranch();
+    addConflictingWidgetsSpec();
+    seedGadgetChange(null); // no Why: the archive created by the rebuild keeps the placeholder and is refused
+    await commit(origin, 'feat: conflicting widgets spec and an unarchivable change');
+    const forge = archiveForge({ mergePr: vi.fn(async () => ({})) });
+    h.ctx.registries.forges.set('github', forge);
+    const ticketId = doneTicket();
+    const input = { ticketId, changeName: CHANGE, branch: BRANCH, prUrl: 'https://example.com/pr/313' };
+
+    for (let i = 0; i < 3; i++) expect((await tickets.landArchiveBackfill(AGENT, input)).landed).toBe(false);
+
+    const failures = tickets.comments(ticketId).filter((c) => c.body.includes('not landed yet'));
+    expect(failures).toHaveLength(1);
+    expect(failures[0]!.body).toContain('placeholder'); // openspec's own reason, not a generic one
+    expect(forge.mergePr).not.toHaveBeenCalled();
+    const landingWakes = wake.calls.filter((c) => (c.input as { idempotencyKey?: string }).idempotencyKey === `reconcile-archive-failed:${ticketId}:https://example.com/pr/313`);
+    expect(landingWakes).toHaveLength(1);
   });
 });

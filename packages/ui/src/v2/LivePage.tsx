@@ -130,7 +130,7 @@ function LiveCard({ cell, ticket, projectLabel: project, projectColor, optionNam
 /** The screen as a V2 destination: the standard header over the Live body. */
 export function V2LivePage(): React.ReactElement {
   return (
-    <V2Page title="Live">
+    <V2Page title="Live" scroll={false}>
       <LiveBody />
     </V2Page>
   );
@@ -297,7 +297,7 @@ export function LiveBody(): React.ReactElement {
           <span aria-hidden className="h-0.5 w-10 rounded-pill bg-line-2 group-hover:bg-accent" />
         </div>
       ) : null}
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4" data-v2-live-scroll>
         {ordered.length === 0 ? (
           <EmptyState title="No workers are running." detail="Workers appear here while they are on a ticket." />
         ) : filtered.length === 0 ? (

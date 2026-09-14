@@ -198,6 +198,18 @@ describe('the phone tab bar and More', () => {
     expect(within(dialog).getByText('Usage')).toBeInTheDocument();
     expect(within(dialog).getByText('Open V1')).toBeInTheDocument();
   });
+
+  it('offers the knowledge graph and explorer only as Knowledge tabs, never in More (VS-371)', () => {
+    mountShell();
+    // The desktop rail's More… button opens the same list as the phone tab bar's More.
+    fireEvent.click(within(screen.getByRole('complementary')).getByText('More…'));
+    const dialog = screen.getByRole('dialog', { name: 'More' });
+    expect(within(dialog).queryByText('Knowledge graph')).toBeNull();
+    expect(within(dialog).queryByText('Knowledge explorer')).toBeNull();
+    // The kept screens that have no rail row are still reached here.
+    expect(within(dialog).getByText('Chats')).toBeInTheDocument();
+    expect(within(dialog).getByText('Changelog')).toBeInTheDocument();
+  });
 });
 
 describe('the one-click way back to V1', () => {
@@ -252,5 +264,18 @@ describe('the V2 page header', () => {
   it('renders no controls when a screen supplies no actions', () => {
     render(<V2Page title="Work" />);
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it('scrolls its own body by default, and hands the one scroll region to a fill screen', () => {
+    const { container, rerender } = render(<V2Page title="Work">body</V2Page>);
+    const body = container.querySelector('[data-v2-page-body]') as HTMLElement;
+    expect(body.getAttribute('data-v2-page-body')).toBe('scroll');
+    expect(body.className).toContain('overflow-y-auto');
+
+    rerender(<V2Page title="Work" scroll={false}>body</V2Page>);
+    const fill = container.querySelector('[data-v2-page-body]') as HTMLElement;
+    expect(fill.getAttribute('data-v2-page-body')).toBe('fill');
+    expect(fill.className).not.toContain('overflow-y-auto');
+    expect(fill.className).toContain('overflow-hidden');
   });
 });

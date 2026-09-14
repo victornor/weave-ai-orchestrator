@@ -55,14 +55,14 @@ export const V2_WORKSPACE: V2Dest[] = [
 
 /**
  * The V1 screens captain kept that the design's rail leaves out. They are not rail rows; the More
- * list (desktop and phone) and their owning screens reach them, and each keeps its own route.
+ * list (desktop and phone) and their owning screens reach them, and each keeps its own route. The
+ * knowledge graph and explorer are *not* here: they are reachable only as the Knowledge screen's
+ * Graph and Explorer tabs (VS-371), with the rail's Knowledge row highlighted.
  */
 export const V2_KEPT: V2Dest[] = [
   { key: 'global-chats', label: 'Chats', glyph: 'chats', scopeKind: 'everywhere', path: '/chats' },
   { key: 'ws-usage', label: 'Usage', glyph: 'runs', scopeKind: 'workspace', path: '/w/$ws/usage' },
   { key: 'ws-changelog', label: 'Changelog', glyph: 'scheduled', scopeKind: 'workspace', path: '/w/$ws/changelog' },
-  { key: 'ws-graph', label: 'Knowledge graph', glyph: 'map', scopeKind: 'workspace', path: '/w/$ws/knowledge/graph' },
-  { key: 'ws-explorer', label: 'Knowledge explorer', glyph: 'knowledge', scopeKind: 'workspace', path: '/w/$ws/knowledge/explorer' },
 ];
 
 export type V2Scope = { kind: 'everywhere' } | { kind: 'workspace'; ws: string };
@@ -99,10 +99,6 @@ export function activeNavKey(pathname: string): string | null {
         return 'ws-usage';
       case 'changelog':
         return 'ws-changelog';
-      case 'graph':
-        return 'ws-graph';
-      case 'explorer':
-        return 'ws-explorer';
       case 'p':
         return `project:${second}`;
       default:

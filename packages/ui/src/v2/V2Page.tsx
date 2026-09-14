@@ -83,10 +83,19 @@ export interface V2PageProps {
   /** A screen's own controls for the 38px header (e.g. Usage's window and grain picker). They sit
    *  beside the label and the one-source counts; supplying them does not change either. */
   actions?: ReactNode;
+  /** A fixed sub-navigation row under the header (e.g. Knowledge's tab row). It does not scroll with
+   *  the body, so a tab stays visible however long the body is. */
+  subnav?: ReactNode;
+  /**
+   * Whether this page's body is the single scroll container (default). A screen that fills the
+   * frame and scrolls its own region — chips pinned, list scrolling (HANDOFF §8) — passes `false`,
+   * so the shell bounds the frame and there is exactly one scroll container, never two nested.
+   */
+  scroll?: boolean;
   children?: ReactNode;
 }
 
-export function V2Page({ title, subtitle, actions, children }: V2PageProps): React.ReactElement {
+export function V2Page({ title, subtitle, actions, subnav, scroll = true, children }: V2PageProps): React.ReactElement {
   const scope = useV2Scope();
   const root = useV2WorkspaceName(scope);
   const counts = useV2Counts(scope);
@@ -106,7 +115,11 @@ export function V2Page({ title, subtitle, actions, children }: V2PageProps): Rea
           {counts.needs > 0 ? <Pill tone="needs-you" label={`${counts.needs} need you`} /> : null}
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {subnav ? <div className="flex-none border-b border-line-1 bg-bg-0">{subnav}</div> : null}
+      <div
+        data-v2-page-body={scroll ? 'scroll' : 'fill'}
+        className={scroll ? 'min-h-0 flex-1 overflow-y-auto' : 'flex min-h-0 flex-1 flex-col overflow-hidden'}
+      >
         {children ?? <V2Placeholder title={title} />}
       </div>
     </div>

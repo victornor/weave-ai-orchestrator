@@ -3,8 +3,10 @@
  * address and the header ship here so navigation and highlighting are complete (proposal: "a route
  * and a header for every V2 destination").
  */
-import { V2Page } from './V2Page';
+import { KnowledgeScreen } from './knowledge/KnowledgeFrame';
 import { KnowledgeHome } from './knowledge/KnowledgeHome';
+import { KnowledgeChangelogPage } from './knowledge/KnowledgeChangelogPage';
+import { KnowledgeSpecsPage } from './knowledge/KnowledgeSpecs';
 import { KnowledgeGraphPage } from './knowledge/KnowledgeGraphPage';
 import { KnowledgeExplorerPage } from './knowledge/KnowledgeExplorerPage';
 import { V2WorkScreen } from './work/Work';
@@ -45,23 +47,37 @@ export function V2WorkPage(): React.ReactElement {
 }
 export function V2KnowledgePage(): React.ReactElement {
   return (
-    <V2Page title="Knowledge">
+    <KnowledgeScreen tab="knowledge">
       <KnowledgeHome />
-    </V2Page>
+    </KnowledgeScreen>
   );
 }
 export function V2GraphPage(): React.ReactElement {
   return (
-    <V2Page title="Knowledge graph">
+    <KnowledgeScreen tab="graph">
       <KnowledgeGraphPage />
-    </V2Page>
+    </KnowledgeScreen>
   );
 }
 export function V2ExplorerPage(): React.ReactElement {
   return (
-    <V2Page title="Knowledge explorer">
+    <KnowledgeScreen tab="explorer">
       <KnowledgeExplorerPage />
-    </V2Page>
+    </KnowledgeScreen>
+  );
+}
+export function V2KnowledgeChangelogPage(): React.ReactElement {
+  return (
+    <KnowledgeScreen tab="changelog">
+      <KnowledgeChangelogPage />
+    </KnowledgeScreen>
+  );
+}
+export function V2KnowledgeSpecsPage(): React.ReactElement {
+  return (
+    <KnowledgeScreen tab="specs">
+      <KnowledgeSpecsPage />
+    </KnowledgeScreen>
   );
 }
 export function V2TicketPage(): React.ReactElement {

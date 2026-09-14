@@ -416,6 +416,7 @@ function VoxtypeHarness(props: { backend?: 'chrome' | 'voxtype'; serverConfigure
       </button>
       <span data-testid="mode">{d.mode}</span>
       <span data-testid="transcribing">{String(d.transcribing)}</span>
+      <span data-testid="settled">{String(d.settled)}</span>
       {d.error ? <span role="alert">{d.error}</span> : null}
       <textarea aria-label="out" value={text} readOnly />
     </div>
@@ -530,6 +531,39 @@ describe('dictation — voxtype upload', () => {
     act(() => rec.onresult!(said(['one', true])));
     fireEvent.click(screen.getByText('Stop dictation'));
     expect(screen.getByTestId('transcribing')).toHaveTextContent('false');
+  });
+
+  it('settles only after the recognizer ends on the speech path (VS-416)', () => {
+    w.webkitSpeechRecognition = FakeRecognition;
+    render(<VoxtypeHarness serverConfigured />);
+    expect(screen.getByTestId('settled')).toHaveTextContent('true'); // nothing started yet
+    fireEvent.click(screen.getByText('Dictate'));
+    expect(screen.getByTestId('settled')).toHaveTextContent('false');
+    const rec = FakeRecognition.last!;
+    act(() => rec.onresult!(said(['one', true])));
+    // A stop nulls `rec.current` before the recognizer ends; the final result still has to arrive.
+    fireEvent.click(screen.getByText('Stop dictation'));
+    expect(screen.getByTestId('settled')).toHaveTextContent('false');
+    act(() => rec.onend!());
+    expect(screen.getByTestId('settled')).toHaveTextContent('true');
+  });
+
+  it('settles only after the upload response lands (VS-416)', async () => {
+    let settle: ((v: { ok: boolean; status: number; json: () => Promise<unknown> }) => void) | null = null;
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Promise((resolve) => { settle = resolve; });
+      return Promise.resolve({ ok: false, status: 404, json: async () => ({}) });
+    }));
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+    render(<VoxtypeHarness backend="voxtype" serverConfigured />);
+    fireEvent.click(screen.getByText('Dictate'));
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalled());
+    expect(screen.getByTestId('settled')).toHaveTextContent('false');
+    fireEvent.click(screen.getByText('Stop dictation'));
+    expect(screen.getByTestId('settled')).toHaveTextContent('false');
+    settle!({ ok: true, status: 200, json: async () => ({ text: 'hi' }) });
+    await waitFor(() => expect(screen.getByTestId('settled')).toHaveTextContent('true'));
+    expect(screen.getByLabelText('out')).toHaveValue('hi');
   });
 
   it('start() is a no-op while transcribing is in flight', async () => {

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: V2 composer dictation shows the listening animation inside the message box, scrolls to the newest dictated text, and shows a platform-correct shortcut hint
+skip_specs: true

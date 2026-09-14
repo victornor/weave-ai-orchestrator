@@ -1,34 +1,58 @@
 /**
  * VS-349: the V2 chat composer — the three identical controls, the project scope selector, dictation
  * appended to the existing text, and attachments staged through the picker.
+ *
+ * VS-416: dictation takes over the input box itself (listening state where the textarea was, no
+ * second row), a dictated insert scrolls the textarea to its end and moves the caret after it, the
+ * hint is platform/input-aware, and a send while dictating waits for an upload-mode transcript so
+ * the last words are not lost.
  */
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
+import { dictationHint } from '../lib/dictationHint';
 
 const dict = vi.hoisted(() => ({
   onText: null as ((text: string, final: boolean) => void) | null,
-  listening: false,
+  mode: 'speech' as 'speech' | 'upload' | 'unavailable',
+  elapsed: 0,
+  metered: false,
+  error: null as string | null,
+  setListening: null as ((v: boolean) => void) | null,
+  setTranscribing: null as ((v: boolean) => void) | null,
+  setSettled: null as ((v: boolean) => void) | null,
 }));
 
-vi.mock('../lib/dictation', () => ({
-  useDictation: (onText: (text: string, final: boolean) => void) => {
-    dict.onText = onText;
-    return {
-      mode: 'speech',
-      listening: dict.listening,
-      transcribing: false,
-      elapsed: 0,
-      analyser: { current: null },
-      metered: false,
-      error: null,
-      start: () => { dict.listening = true; },
-      stop: () => { dict.listening = false; },
-      toggle: () => undefined,
-      diagnostics: { enabled: false, count: 0, copy: () => undefined },
-    };
-  },
-}));
+vi.mock('../lib/dictation', async () => {
+  const { useState } = await import('react');
+  return {
+    useDictation: (onText: (text: string, final: boolean) => void) => {
+      dict.onText = onText;
+      const [listening, setListening] = useState(false);
+      const [transcribing, setTranscribing] = useState(false);
+      const [settled, setSettled] = useState(true);
+      dict.setListening = setListening;
+      dict.setTranscribing = setTranscribing;
+      dict.setSettled = setSettled;
+      return {
+        mode: dict.mode,
+        listening,
+        transcribing,
+        settled,
+        elapsed: dict.elapsed,
+        analyser: { current: null },
+        metered: dict.metered,
+        error: dict.error,
+        // The hook clears `settled` on start and only restores it when the attempt ends — the final
+        // recognizer result on the speech path, the transcription response on the daemon path.
+        start: () => { setListening(true); setSettled(false); },
+        stop: () => { setListening(false); if (dict.mode === 'upload') setTranscribing(true); },
+        toggle: () => undefined,
+        diagnostics: { enabled: false, count: 0, copy: () => undefined },
+      };
+    },
+  };
+});
 
 const { ChatComposer } = await import('../v2/ChatComposer');
 
@@ -55,8 +79,35 @@ function Harness({ onSubmit }: { onSubmit: (text: string, files: File[], opts: {
 
 beforeEach(() => {
   dict.onText = null;
-  dict.listening = false;
+  dict.mode = 'speech';
+  dict.elapsed = 0;
+  dict.metered = false;
+  dict.error = null;
+  dict.setListening = null;
+  dict.setTranscribing = null;
+  dict.setSettled = null;
 });
+
+function dictate(): void {
+  fireEvent.click(screen.getByRole('button', { name: 'Dictate' }));
+}
+
+/** The recognizer's final result on the speech path: the text lands, and only then the attempt settles. */
+function finishSpeech(text: string): void {
+  act(() => {
+    dict.onText?.(text, true);
+    dict.setSettled?.(true);
+  });
+}
+
+/** The daemon's transcription response on the upload path. */
+function finishTranscribe(text: string): void {
+  act(() => {
+    dict.onText?.(text, true);
+    dict.setTranscribing?.(false);
+    dict.setSettled?.(true);
+  });
+}
 
 describe('the V2 chat composer', () => {
   it('renders three identical attach, dictate and send controls', () => {
@@ -87,8 +138,9 @@ describe('the V2 chat composer', () => {
   it('appends the recognized transcript after the existing text', () => {
     render(<Harness onSubmit={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'Hi' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Dictate' }));
+    dictate();
     act(() => dict.onText?.('there', true));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
     expect(screen.getByLabelText('Message the weaver')).toHaveValue('Hi there');
   });
 
@@ -134,5 +186,145 @@ describe('the V2 chat composer', () => {
     for (const name of ['Attach a file', 'Dictate', 'Send']) {
       expect(screen.getByRole('button', { name }).className).not.toMatch(/box-shadow:none/);
     }
+  });
+});
+
+describe('the V2 composer listening state (VS-416)', () => {
+  it('replaces the textarea inside the composer box, with the elapsed time, and adds no second box', () => {
+    dict.elapsed = 3;
+    render(<Harness onSubmit={vi.fn()} />);
+    dictate();
+
+    const box = screen.getByTestId('v2-composer');
+    const listening = screen.getByTestId('v2-composer-listening');
+    expect(box).toContainElement(listening);
+    expect(listening).toHaveTextContent('Listening…');
+    expect(listening).toHaveTextContent('0:03');
+    // The textarea is gone, and the only stop affordance is the mic turned square inside the box.
+    expect(screen.queryByLabelText('Message the weaver')).not.toBeInTheDocument();
+    const stop = screen.getByRole('button', { name: 'Stop dictation' });
+    expect(box).toContainElement(stop);
+    // Nothing was grown below the box: the listening node sits in the box's own textarea slot.
+    expect(listening.parentElement).toBe(box);
+    expect(screen.getAllByText('Listening…')).toHaveLength(1);
+  });
+
+  it('returns the textarea with the dictated text when dictation stops', () => {
+    render(<Harness onSubmit={vi.fn()} />);
+    dictate();
+    act(() => dict.onText?.('a dictated sentence', true));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    expect(screen.getByLabelText('Message the weaver')).toHaveValue('a dictated sentence');
+    expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
+  });
+
+  it('scrolls to the end and puts the caret after a dictated insert that overflows the box', () => {
+    // Upload mode has no live transcript: stop first, then the transcript lands (the moment the
+    // scroll has to happen). jsdom has no layout, so the box's scroll metrics are faked.
+    dict.mode = 'upload';
+    render(<Harness onSubmit={vi.fn()} />);
+    dictate();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+
+    const box = screen.getByLabelText('Message the weaver') as HTMLTextAreaElement;
+    let scrollTop = 0;
+    Object.defineProperty(box, 'scrollTop', { configurable: true, get: () => scrollTop, set: (v: number) => { scrollTop = v; } });
+    Object.defineProperty(box, 'scrollHeight', { configurable: true, get: () => 640 });
+
+    const long = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen';
+    act(() => dict.onText?.(long, true));
+
+    expect(box).toHaveValue(long);
+    expect(box.selectionStart).toBe(long.length);
+    expect(box.selectionEnd).toBe(long.length);
+    expect(scrollTop).toBe(640);
+  });
+});
+
+describe('the V2 composer dictation hint (VS-416)', () => {
+  it('is Mac-shaped on macOS and Ctrl-shaped elsewhere, and names the hold', () => {
+    expect(dictationHint({ isTouch: false, userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)' })).toBe('hold ⌘⇧M to dictate');
+    expect(dictationHint({ isTouch: false, userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' })).toBe('hold Ctrl+Shift+M to dictate');
+    expect(dictationHint({ isTouch: false, userAgent: 'Mozilla/5.0 (X11; Linux x86_64)' })).toBe('hold Ctrl+Shift+M to dictate');
+    expect(dictationHint({ isTouch: true, userAgent: 'Mozilla/5.0 (Macintosh)' })).toBe('tap the mic to dictate');
+  });
+
+  it('renders the Ctrl hint by default and the Mac hint under a Mac user agent', () => {
+    const ua = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Windows NT 10.0; Win64; x64)');
+    const { unmount } = render(<Harness onSubmit={vi.fn()} />);
+    expect(screen.getByText('hold Ctrl+Shift+M to dictate')).toBeInTheDocument();
+    unmount();
+
+    ua.mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)');
+    render(<Harness onSubmit={vi.fn()} />);
+    expect(screen.getByText('hold ⌘⇧M to dictate')).toBeInTheDocument();
+    ua.mockRestore();
+  });
+
+  it('keeps the touch hint when there is no keyboard', () => {
+    const media = vi.spyOn(window, 'matchMedia').mockReturnValue({ matches: true, media: '(hover: none)' } as MediaQueryList);
+    render(<Harness onSubmit={vi.fn()} />);
+    expect(screen.getByText('tap the mic to dictate')).toBeInTheDocument();
+    media.mockRestore();
+  });
+
+  it('starts push-to-talk on meta and on ctrl, and stops on release', () => {
+    render(<Harness onSubmit={vi.fn()} />);
+    fireEvent.keyDown(window, { key: 'M', code: 'KeyM', metaKey: true, shiftKey: true });
+    expect(screen.getByTestId('v2-composer-listening')).toBeInTheDocument();
+    fireEvent.keyUp(window, { key: 'M', code: 'KeyM' });
+    expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: 'M', code: 'KeyM', ctrlKey: true, shiftKey: true });
+    expect(screen.getByTestId('v2-composer-listening')).toBeInTheDocument();
+    fireEvent.keyUp(window, { key: 'M', code: 'KeyM' });
+    expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
+  });
+});
+
+describe('the V2 composer send while dictating (VS-416)', () => {
+  it('queues a speech-mode send and submits the final transcript that arrives after stop', () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+    dictate();
+    // Empty box while dictating: send is available because it is what finishes the dictation.
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    // Stop happened, but the recognizer's final result has not landed: nothing may be submitted yet.
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
+
+    finishSpeech('the full sentence that was dictated');
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith('the full sentence that was dictated', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
+  });
+
+  it('queues an upload-mode send and submits the transcript that lands, not the empty value', () => {
+    dict.mode = 'upload';
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+    dictate();
+    // Empty value, but dictation is running, so send is available and stops the mic.
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
+
+    finishTranscribe('the last words');
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith('the last words', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
+  });
+
+  it('submits nothing when the transcript comes back empty, and never an empty body', () => {
+    dict.mode = 'upload';
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+    dictate();
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    finishTranscribe('');
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('Nothing was recognized, so nothing was sent.');
   });
 });

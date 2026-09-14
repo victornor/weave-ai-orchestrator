@@ -2,12 +2,13 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Decision, Run, Ticket, WorkerActivitySummary, WorkerModelOption } from '@weave-ai/shared';
+import type { Agent, Decision, Project, Run, Ticket, WorkerActivitySummary, WorkerModelOption } from '@weave-ai/shared';
 import { agent, decision, project, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
   active: [] as Ticket[],
   finished: [] as Ticket[],
+  projects: [] as Project[],
   workers: [] as Agent[],
   runs: [] as Run[],
   decisions: [] as Decision[],
@@ -86,7 +87,7 @@ vi.mock('../api/hooks', () => ({
     }
     return { data: terminal ? (enabled ? state.finished : undefined) : state.active, isLoading: false, isError: false, refetch: vi.fn() };
   },
-  useProjects: () => ({ data: [project({ id: 'p1', slug: 'web', name: 'web' })] }),
+  useProjects: () => ({ data: state.projects }),
   useRoles: () => ({ data: [] }),
   useWorkers: () => ({ data: state.workers }),
   useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: state.workers })),
@@ -116,6 +117,7 @@ const liveWorker = (over: Partial<WorkerActivitySummary> & Partial<Agent> = {}):
 beforeEach(() => {
   state.go = vi.fn();
   state.createTicket = vi.fn();
+  state.projects = [project({ id: 'p1', slug: 'web', name: 'web' })];
   state.workers = [];
   state.runs = [];
   state.decisions = [];
@@ -282,6 +284,69 @@ describe('V2 Work views', () => {
     const row = phone.querySelector('[data-v2-phone-row="ACME-3"]') as HTMLElement;
     expect(row).toBeTruthy();
     expect(row.querySelector('svg[role="img"]')).toBeTruthy();
+  });
+});
+
+describe('V2 Work phone scope (VS-404)', () => {
+  const scopeRow = (): HTMLElement => {
+    const el = document.querySelector('[data-v2-work-scope]');
+    if (!el) throw new Error('no phone scope row');
+    return el as HTMLElement;
+  };
+
+  it('gates the desktop toolbar below md and shows the scope row on phone', () => {
+    render(<V2WorkScreen />);
+    // The two desktop toolbar rows are hidden by default and only become flex at md and up, the
+    // same breakpoint the phone list uses (`md:hidden`). The controls live inside those rows, so
+    // hidden rows hide them; the scope row is the mirror image (`md:hidden`).
+    const toolbar = document.querySelector('[data-v2-work-toolbar]') as HTMLElement;
+    const filters = document.querySelector('[data-v2-work-filters]') as HTMLElement;
+    expect(toolbar.className).toContain('hidden');
+    expect(toolbar.className).toContain('md:flex');
+    expect(filters.className).toContain('hidden');
+    expect(filters.className).toContain('md:flex');
+    expect(within(toolbar).getByRole('radio', { name: 'Kanban' })).toBeInTheDocument();
+    expect(filters.querySelector('[data-v2-work-search]')).toBeTruthy();
+    // The phone scope row is visible only below md; the merge strip stays on both.
+    expect(scopeRow().className).toContain('md:hidden');
+    expect(scopeRow().className).not.toContain('hidden md:flex');
+    const strip = document.querySelector('[data-v2-merge-strip]') as HTMLElement;
+    expect(strip.className).not.toContain('md:flex');
+  });
+
+  it('narrows the phone list to needs-you tickets and restores it with All work', () => {
+    render(<V2WorkScreen />);
+    expect(document.querySelector('[data-v2-phone-row="ACME-1"]')).toBeTruthy();
+    expect(document.querySelector('[data-v2-phone-row="ACME-2"]')).toBeTruthy();
+
+    fireEvent.click(within(scopeRow()).getByRole('button', { name: 'Needs you' }));
+    // ACME-2 is the one with an open human decision; the other two drop out of the phone list.
+    expect(document.querySelector('[data-v2-phone-row="ACME-2"]')).toBeTruthy();
+    expect(document.querySelector('[data-v2-phone-row="ACME-1"]')).toBeNull();
+    expect(document.querySelector('[data-v2-phone-row="ACME-3"]')).toBeNull();
+
+    fireEvent.click(within(scopeRow()).getByRole('button', { name: 'All work' }));
+    expect(document.querySelector('[data-v2-phone-row="ACME-1"]')).toBeTruthy();
+    expect(document.querySelector('[data-v2-phone-row="ACME-3"]')).toBeTruthy();
+  });
+
+  it('narrows the phone list by project chip and clears Needs you', () => {
+    state.projects = [project({ id: 'p1', slug: 'web', name: 'web' }), project({ id: 'p2', slug: 'api', name: 'api' })];
+    state.active = [
+      ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Web work', status: 'todo', projectId: 'p1' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-2', title: 'Api work', status: 'todo', projectId: 'p2' }),
+    ];
+    render(<V2WorkScreen />);
+    expect(document.querySelector('[data-v2-phone-row="ACME-1"]')).toBeTruthy();
+    expect(document.querySelector('[data-v2-phone-row="ACME-2"]')).toBeTruthy();
+
+    fireEvent.click(within(scopeRow()).getByRole('button', { name: 'api' }));
+    expect(document.querySelector('[data-v2-phone-row="ACME-1"]')).toBeNull();
+    expect(document.querySelector('[data-v2-phone-row="ACME-2"]')).toBeTruthy();
+
+    fireEvent.click(within(scopeRow()).getByRole('button', { name: 'All work' }));
+    expect(document.querySelector('[data-v2-phone-row="ACME-1"]')).toBeTruthy();
+    expect(document.querySelector('[data-v2-phone-row="ACME-2"]')).toBeTruthy();
   });
 });
 

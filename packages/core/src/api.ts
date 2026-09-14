@@ -138,7 +138,7 @@ export interface WeaverArtifactsService {
 
 // ---------- merge queue ----------
 /** One ticket's place in a project's merge queue. `position` is null for a ticket already merging. */
-export interface MergeQueueEntry { ticketId: string; identifier: string; title: string; projectId: string | null; position: number | null; queuedAt: string | null; startedAt: string | null; workerId: string | null }
+export interface MergeQueueEntry { ticketId: string; identifier: string; title: string; projectId: string | null; position: number | null; queuedAt: string | null; startedAt: string | null; workerId: string | null; /** VS-391: the active merge's pull-request check state, or null when not yet observed. */ ciState: 'pending' | 'success' | 'failure' | 'none' | null; /** VS-391: when `ciState` was first observed, so the wait's duration is known. */ ciStateAt: string | null }
 /** A ticket that recently left a project's queue: `landed` merged, `failed` could not, `withdrawn` left without either. */
 export interface MergeQueueOutcome { ticketId: string; identifier: string; title: string; outcome: 'landed' | 'failed' | 'withdrawn'; at: string; mergeCommit: string | null }
 export interface MergeQueueView { projectId: string; concurrency: number; active: MergeQueueEntry[]; waiting: MergeQueueEntry[]; recent: MergeQueueOutcome[] }

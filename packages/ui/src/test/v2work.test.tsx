@@ -232,13 +232,13 @@ describe('V2 Work merge strip', () => {
     expect(screen.getByText('nothing landing')).toBeInTheDocument();
   });
 
-  it('counts landing and waiting from the loaded tickets', () => {
+  it('counts landing and waiting from the loaded tickets, and names the wait (VS-391)', () => {
     state.active = [
-      ticket({ id: 'tk_1', identifier: 'ACME-1', status: 'merging', mergeStartedAt: '2026-09-10T00:00:00.000Z' }),
+      ticket({ id: 'tk_1', identifier: 'ACME-1', status: 'merging', mergeStartedAt: '2026-09-10T00:00:00.000Z', delivery: { ciState: 'pending', ciStateAt: '2026-09-10T00:00:00.000Z' } }),
       ticket({ id: 'tk_2', identifier: 'ACME-2', status: 'merging', mergeStartedAt: null }),
     ];
     render(<V2WorkScreen />);
-    expect(screen.getByText('1 landing · 1 waiting')).toBeInTheDocument();
+    expect(screen.getByText(/1 landing · 1 waiting · on CI/)).toBeInTheDocument();
   });
 });
 

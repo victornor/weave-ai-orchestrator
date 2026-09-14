@@ -154,8 +154,8 @@ describe('project pull requests', () => {
       workProduct(waiting.id, 'https://github.com/acme/api/pull/2');
       queue = {
         projectId: h.projectId, concurrency: 1,
-        active: [{ ticketId: landing.id, identifier: landing.identifier, title: '', projectId: h.projectId, position: null, queuedAt: null, startedAt: null, workerId: null }],
-        waiting: [{ ticketId: waiting.id, identifier: waiting.identifier, title: '', projectId: h.projectId, position: 2, queuedAt: null, startedAt: null, workerId: null }],
+        active: [{ ticketId: landing.id, identifier: landing.identifier, title: '', projectId: h.projectId, position: null, queuedAt: null, startedAt: null, workerId: null, ciState: null, ciStateAt: null }],
+        waiting: [{ ticketId: waiting.id, identifier: waiting.identifier, title: '', projectId: h.projectId, position: 2, queuedAt: null, startedAt: null, workerId: null, ciState: null, ciStateAt: null }],
         recent: [],
       };
       forge.list = [pr({ number: 1 }), pr({ number: 2 })];

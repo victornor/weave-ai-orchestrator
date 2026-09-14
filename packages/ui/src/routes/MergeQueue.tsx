@@ -10,6 +10,7 @@ import { useWs } from '../api/context';
 import { useGo, useSearchParams } from '../app/link';
 import type { MergeQueueEntry, MergeQueueOutcome } from '../api/types';
 import { ago, duration } from '../lib/format';
+import { mergeWaitLabel, mergeWaitPhase } from '../lib/board';
 
 /** How a ticket left the queue, as a glyph and a word (PLAN §11.4). */
 const OUTCOME: Record<MergeQueueOutcome['outcome'], { status: UiStatus; label: string }> = {
@@ -117,37 +118,46 @@ export function MergeQueueRoute(): React.ReactElement {
                     <p className="text-micro text-text-3">Nothing is merging; the queue admits the next ticket in a moment.</p>
                   ) : (
                     <ul className="space-y-2">
-                      {active.map((e) => (
-                        <li key={e.ticketId} className="ac-card p-3.5">
-                          <button
-                            type="button"
-                            onClick={() => openTicket(e.identifier)}
-                            className="flex w-full items-center gap-2.5 text-left"
-                          >
-                            <StatusGlyph status="merging" size="sm" pulse />
-                            <span className="ac-mono shrink-0 text-micro text-text-3">{e.identifier}</span>
-                            <span className="min-w-0 flex-1 truncate text-ui text-text-1">{e.title}</span>
-                            <span className="ac-mono shrink-0 text-nano text-text-4">
-                              {duration(e.startedAt ? now - new Date(e.startedAt).getTime() : null)}
-                            </span>
-                          </button>
-                          <div className="mt-2 flex flex-wrap items-center gap-2 text-micro text-text-3">
-                            <span>{workerName(e.workerId) ?? 'no worker yet'}</span>
-                            {e.workerId ? (
-                              <>
-                                <span className="text-text-4">·</span>
-                                <button
-                                  type="button"
-                                  onClick={() => openWorker(e.workerId as string)}
-                                  className="text-accent-link transition-colors duration-(--dur-fast) ease-ac hover:text-accent-hover"
-                                >
-                                  Open the landing log →
-                                </button>
-                              </>
-                            ) : null}
-                          </div>
-                        </li>
-                      ))}
+                      {active.map((e) => {
+                        const wait = mergeWaitLabel({ identifier: e.identifier, phase: mergeWaitPhase(e.ciState), since: e.ciStateAt }, now);
+                        return (
+                          <li key={e.ticketId} className="ac-card p-3.5">
+                            <button
+                              type="button"
+                              onClick={() => openTicket(e.identifier)}
+                              className="flex w-full items-center gap-2.5 text-left"
+                            >
+                              <StatusGlyph status="merging" size="sm" pulse />
+                              <span className="ac-mono shrink-0 text-micro text-text-3">{e.identifier}</span>
+                              <span className="min-w-0 flex-1 truncate text-ui text-text-1">{e.title}</span>
+                              <span className="ac-mono shrink-0 text-nano text-text-4">
+                                {duration(e.startedAt ? now - new Date(e.startedAt).getTime() : null)}
+                              </span>
+                            </button>
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-micro text-text-3">
+                              <span>{workerName(e.workerId) ?? 'no worker yet'}</span>
+                              {wait ? (
+                                <>
+                                  <span className="text-text-4">·</span>
+                                  <span className="ac-mono text-text-3">waiting {wait}</span>
+                                </>
+                              ) : null}
+                              {e.workerId ? (
+                                <>
+                                  <span className="text-text-4">·</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => openWorker(e.workerId as string)}
+                                    className="text-accent-link transition-colors duration-(--dur-fast) ease-ac hover:text-accent-hover"
+                                  >
+                                    Open the landing log →
+                                  </button>
+                                </>
+                              ) : null}
+                            </div>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                 </section>

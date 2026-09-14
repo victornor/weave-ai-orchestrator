@@ -119,12 +119,19 @@ export function createWakeService(ctx: WorkspaceContext, _deps: () => CoreServic
       const now = nowIso();
       const notBefore = new Date(Date.now() + input.delayMs).toISOString();
       const requestedBy = input.requestedBy ?? { kind: 'agent', id: agentId };
-      // One pending self-wake per worker (VS-317): cancel the outstanding one first, clearing its
-      // idempotency key so the stable key below can be reused on the replacement row.
+      // One pending self-wake per worker (VS-317): cancel the outstanding one first, then release the
+      // stable key from every self-wake row still holding it before reusing it on the replacement
+      // (VS-391). The row that started the current turn is `claimed` until this turn finalizes and
+      // `completed` after, and either way it keeps its idempotency key, so cancelling only `queued`
+      // rows left that key on the table and the insert below collided with `wakeups_idem`.
       const replaced = ctx.db.run(
         "UPDATE wakeups SET status = 'cancelled', idempotency_key = NULL, skip_reason = 'replaced by a newer self-wake', finished_at = ? WHERE agent_id = ? AND source = 'self_scheduled' AND status = 'queued'",
         [now, agentId],
       ).changes;
+      ctx.db.run(
+        "UPDATE wakeups SET idempotency_key = NULL WHERE agent_id = ? AND source = 'self_scheduled' AND idempotency_key IS NOT NULL",
+        [agentId],
+      );
       const w = insert(agentId, { source: 'self_scheduled', reason: input.reason, payload: { delayMs: input.delayMs, scheduledAt: now }, idempotencyKey: `self-wake:${agentId}`, notBefore, requestedBy }, 'queued');
       recordActivity(ctx.db, ctx.workspaceId, requestedBy, 'wake.enqueue', 'wakeup', w.id, { agentId, source: 'self_scheduled', reason: input.reason, delayMs: input.delayMs });
       ctx.events.emit('wake.queued', 'wakeup', w.id, { agentId, source: 'self_scheduled', reason: input.reason });

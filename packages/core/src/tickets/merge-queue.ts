@@ -35,6 +35,9 @@ export function createMergeQueue(ctx: WorkspaceContext, deps: () => CoreServices
   const entry = (t: Ticket, position: number | null): MergeQueueEntry => ({
     ticketId: t.id, identifier: t.identifier, title: t.title, projectId: t.projectId,
     position, queuedAt: t.mergeQueuedAt, startedAt: t.mergeStartedAt, workerId: t.workerId,
+    // VS-391: the supervisor records these on the delivery for a ticket in the active merge step.
+    ciState: (t.delivery?.['ciState'] as MergeQueueEntry['ciState']) ?? null,
+    ciStateAt: (t.delivery?.['ciStateAt'] as string | undefined) ?? null,
   });
 
   function limitFor(projectId: string | null): number {

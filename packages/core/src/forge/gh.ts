@@ -1,5 +1,5 @@
 import type {
-  ForgeAdapter, ForgeCheck, ForgeCheckState, ForgeChangedFile, ForgePullRequest, ForgePullRequestDetail,
+  ForgeAdapter, ForgeCheck, ForgeCheckState, ForgeChangedFile, ForgeMergeState, ForgePullRequest, ForgePullRequestDetail,
 } from '@weave-ai/plugin-sdk';
 import { OcError } from '@weave-ai/shared';
 import { sh } from '../util/exec.js';
@@ -11,6 +11,8 @@ interface GhPrView {
   mergeCommit?: { oid?: string } | null;
   statusCheckRollup?: GhCheck[] | null;
   headRefOid?: string;
+  mergeStateStatus?: string;
+  isDraft?: boolean;
 }
 
 /** One pull request exactly as `gh pr list --json` / `gh pr view --json` spells it. */
@@ -69,6 +71,11 @@ function toFile(f: { path?: string; additions?: number; deletions?: number }): F
 function prStateOf(raw: string | undefined): 'open' | 'merged' | 'closed' {
   const s = (raw ?? 'OPEN').toUpperCase();
   return s === 'MERGED' ? 'merged' : s === 'CLOSED' ? 'closed' : 'open';
+}
+
+/** `mergeStateStatus` is an upper-case enum; the daemon reads it lowercased, and `undefined` when `gh` omits it. */
+function mergeStateOf(raw: string | undefined): ForgeMergeState | undefined {
+  return raw ? (raw.toLowerCase() as ForgeMergeState) : undefined;
 }
 
 function toPullRequest(doc: GhPr): ForgePullRequest {
@@ -154,14 +161,14 @@ export class GhForge implements ForgeAdapter {
     return r.ok;
   }
 
-  async prState(cwd: string, url: string): Promise<{ state: 'open' | 'merged' | 'closed'; mergeCommit?: string; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number }; headSha?: string }> {
-    const r = await sh('gh', ['pr', 'view', url, '--json', 'state,mergeCommit,statusCheckRollup,headRefOid'], { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
+  async prState(cwd: string, url: string): Promise<{ state: 'open' | 'merged' | 'closed'; mergeCommit?: string; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number }; headSha?: string; mergeState?: ForgeMergeState; isDraft?: boolean }> {
+    const r = await sh('gh', ['pr', 'view', url, '--json', 'state,mergeCommit,statusCheckRollup,headRefOid,mergeStateStatus,isDraft'], { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
     if (!r.ok) throw new OcError('internal', `gh pr view failed: ${r.stderr.trim().slice(0, 300)}`, { url });
     let doc: GhPrView;
     try { doc = JSON.parse(r.stdout) as GhPrView; } catch { throw new OcError('internal', 'gh pr view returned invalid JSON', { url }); }
     const raw = (doc.state ?? 'OPEN').toUpperCase();
     const state = raw === 'MERGED' ? 'merged' : raw === 'CLOSED' ? 'closed' : 'open';
-    return { state, mergeCommit: doc.mergeCommit?.oid, ciState: rollupState(doc.statusCheckRollup), checks: checkTally(doc.statusCheckRollup), headSha: doc.headRefOid };
+    return { state, mergeCommit: doc.mergeCommit?.oid, ciState: rollupState(doc.statusCheckRollup), checks: checkTally(doc.statusCheckRollup), headSha: doc.headRefOid, mergeState: mergeStateOf(doc.mergeStateStatus), isDraft: doc.isDraft === true };
   }
 
   async mergePr(cwd: string, url: string, method: string): Promise<{ mergeCommit?: string }> {

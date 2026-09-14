@@ -97,6 +97,21 @@ describe('merge queue', () => {
     });
   });
 
+  describe('reported CI wait (VS-391)', () => {
+    it('carries the active merge\'s observed check state and when it was seen', async () => {
+      const a = approved('First');
+      await approve(a);
+      h.db.update('tickets', a.id, { deliveryJson: { ciState: 'pending', ciStateAt: '2026-09-14T10:00:00.000Z' } });
+      expect(tickets.mergeQueue.forProject(h.projectId).active[0]).toMatchObject({ ciState: 'pending', ciStateAt: '2026-09-14T10:00:00.000Z' });
+    });
+
+    it('reports a null state for an active merge nothing has observed yet', async () => {
+      const a = approved('First');
+      await approve(a);
+      expect(tickets.mergeQueue.forProject(h.projectId).active[0]).toMatchObject({ ciState: null, ciStateAt: null });
+    });
+  });
+
   describe('ordering', () => {
     it('admits in join order, breaking ties on the ticket number', async () => {
       const a = approved('First');

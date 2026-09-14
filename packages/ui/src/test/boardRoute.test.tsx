@@ -174,7 +174,7 @@ describe('BoardRoute merge queue', () => {
     ];
     render(<BoardRoute />);
 
-    expect(screen.getByText('1 landing \u00b7 1 waiting')).toBeTruthy();
+    expect(screen.getByText(/1 landing · 1 waiting · on the worker/)).toBeTruthy();
     // The line belongs to the filter bar, not to the scrolling body the columns live in.
     expect(screen.getByText('Merge queue').closest('section')).toBeNull();
   });

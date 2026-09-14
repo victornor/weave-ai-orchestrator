@@ -161,6 +161,30 @@ describe('wake queue', () => {
     expect(wake.pendingSelfWake(workerId)?.id).toBe(second.id);
   });
 
+  it('replaces a self-wake already claimed for the current turn (VS-391)', () => {
+    const workerId = h.addWorker(null);
+    const first = wake.scheduleSelfWake(workerId, { reason: 'first', delayMs: 20 * 60_000 });
+    h.db.update('wakeups', first.id, { status: 'claimed', claimedAt: nowIso() });
+    const second = wake.scheduleSelfWake(workerId, { reason: 'second', delayMs: 30 * 60_000 });
+    expect(second.id).not.toBe(first.id);
+    const queued = wake.listForAgent(workerId, ['queued']).filter((w) => w.source === 'self_scheduled');
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.id).toBe(second.id);
+    expect(wake.pendingSelfWake(workerId)?.id).toBe(second.id);
+  });
+
+  it('replaces a self-wake already finished, releasing its key (VS-391)', () => {
+    const workerId = h.addWorker(null);
+    const first = wake.scheduleSelfWake(workerId, { reason: 'first', delayMs: 20 * 60_000 });
+    h.db.update('wakeups', first.id, { status: 'completed', finishedAt: nowIso() });
+    const second = wake.scheduleSelfWake(workerId, { reason: 'second', delayMs: 30 * 60_000 });
+    expect(second.id).not.toBe(first.id);
+    expect(wake.pendingSelfWake(workerId)?.id).toBe(second.id);
+    const firstRow = h.db.get<{ idempotencyKey: string | null; status: string }>('SELECT idempotency_key, status FROM wakeups WHERE id = ?', [first.id]);
+    expect(firstRow!.idempotencyKey).toBeNull();
+    expect(firstRow!.status).toBe('completed');
+  });
+
   it('rejects a self-wake shorter than the minimum or longer than the maximum', () => {
     const workerId = h.addWorker(null);
     expect(() => wake.scheduleSelfWake(workerId, { reason: 'too soon', delayMs: 1_000 })).toThrow(/at least/);

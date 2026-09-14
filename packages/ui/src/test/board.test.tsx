@@ -15,6 +15,7 @@ import {
   liveWorkersByTicket,
   liveWorkingAgents,
   mergeStrip,
+  mergeWaitLabel,
   pausedWorkersByTicket,
   recentlyFinished,
   ticketBoardStatus,
@@ -237,11 +238,26 @@ describe('mergeStrip', () => {
       ticket({ id: 'c', status: 'merging', mergeQueuedAt: '2026-09-01T10:06:00.000Z' }),
       ticket({ id: 'd', status: 'in_review' }),
     ]);
-    expect(counts).toEqual({ landing: 1, waiting: 2 });
+    expect(counts).toMatchObject({ landing: 1, waiting: 2 });
+    expect(counts.active).toEqual({ identifier: 'ACME-42', phase: 'worker', since: null });
   });
 
   it('counts nothing when nothing is merging', () => {
-    expect(mergeStrip([ticket({ status: 'in_progress' })])).toEqual({ landing: 0, waiting: 0 });
-    expect(mergeStrip([])).toEqual({ landing: 0, waiting: 0 });
+    expect(mergeStrip([ticket({ status: 'in_progress' })])).toMatchObject({ landing: 0, waiting: 0, active: null });
+    expect(mergeStrip([])).toMatchObject({ landing: 0, waiting: 0, active: null });
+  });
+
+  it('names what the longest-active merge is waiting on (VS-391)', () => {
+    const counts = mergeStrip([
+      ticket({ id: 'a', status: 'merging', mergeStartedAt: '2026-09-01T10:00:05.000Z', delivery: { ciState: 'success', ciStateAt: '2026-09-01T10:01:00.000Z' } }),
+      ticket({ id: 'b', status: 'merging', mergeStartedAt: '2026-09-01T10:00:01.000Z', delivery: { ciState: 'pending', ciStateAt: '2026-09-01T10:02:00.000Z' } }),
+    ]);
+    expect(counts.active).toEqual({ identifier: 'ACME-42', phase: 'ci', since: '2026-09-01T10:02:00.000Z' });
+  });
+
+  it('labels the wait phase, with how long when its start is known (VS-391)', () => {
+    expect(mergeWaitLabel(null)).toBeNull();
+    expect(mergeWaitLabel({ identifier: 'x', phase: 'ci', since: null })).toBe('on CI');
+    expect(mergeWaitLabel({ identifier: 'x', phase: 'worker', since: '2026-09-01T10:00:00.000Z' }, Date.parse('2026-09-01T10:05:00.000Z'))).toContain('on the worker');
   });
 });

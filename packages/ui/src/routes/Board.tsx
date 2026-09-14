@@ -214,6 +214,7 @@ export function BoardRoute(): React.ReactElement {
           className="mt-2 border-t border-line-1 pt-2"
           landing={strip.landing}
           waiting={strip.waiting}
+          active={strip.active}
           onOpen={() => go('/w/$ws/merge-queue', { params: { ws }, search: project ? { project } : {} })}
         />
       </div>

@@ -1,5 +1,6 @@
 import type { Agent, AgentStatus, Ticket, TicketStatus, UiStatus } from '@weave-ai/shared';
 import { TICKET_STATUSES, ticketUiStatus } from '@weave-ai/shared';
+import { duration } from './format';
 
 /**
  * Six owner-naming columns for eleven statuses (DESIGN-CONTRACT §5, designer's
@@ -234,14 +235,43 @@ export function filterTickets<T extends Pick<Ticket, 'status' | 'kind' | 'priori
  * What the board's merge-queue line says (PLAN §11.4). Counted over every ticket the board loaded,
  * not over the filtered view: the line is about the workspace's landing, and a number that changed
  * with the project filter would be the old panel's problem in another shape.
+ *
+ * VS-391: the longest-active merge also carries what it is waiting on, so a stalled slot reads as
+ * "on CI" or "on the worker" rather than an unexplained duration.
  */
-export function mergeStrip(tickets: readonly Pick<Ticket, 'status' | 'mergeStartedAt'>[]): { landing: number; waiting: number } {
+export interface MergeWait { identifier: string; phase: 'ci' | 'worker'; since: string | null }
+
+/** Waiting on CI while its checks are pending, otherwise on the worker. */
+export function mergeWaitPhase(ciState: 'pending' | 'success' | 'failure' | 'none' | null | undefined): 'ci' | 'worker' {
+  return ciState === 'pending' ? 'ci' : 'worker';
+}
+
+/** A short label for what an active merge is waiting on, with how long when the phase start is known. */
+export function mergeWaitLabel(wait: MergeWait | null, now: number = Date.now()): string | null {
+  if (!wait) return null;
+  const phase = wait.phase === 'ci' ? 'on CI' : 'on the worker';
+  const span = wait.since ? duration(now - Date.parse(wait.since)) : null;
+  return span ? `${phase} ${span}` : phase;
+}
+
+export function mergeStrip(tickets: readonly Pick<Ticket, 'status' | 'mergeStartedAt' | 'identifier' | 'delivery'>[]): { landing: number; waiting: number; active: MergeWait | null } {
   let landing = 0;
   let waiting = 0;
+  let active: MergeWait | null = null;
+  let activeSince: string | null = null;
   for (const t of tickets) {
     if (t.status !== 'merging') continue;
-    if (t.mergeStartedAt) landing++;
-    else waiting++;
+    if (!t.mergeStartedAt) { waiting++; continue; }
+    landing++;
+    if (activeSince === null || t.mergeStartedAt < activeSince) {
+      activeSince = t.mergeStartedAt;
+      const d = (t.delivery ?? {}) as Record<string, unknown>;
+      active = {
+        identifier: t.identifier,
+        phase: mergeWaitPhase(d['ciState'] as 'pending' | 'success' | 'failure' | 'none' | null | undefined),
+        since: (d['ciStateAt'] as string | undefined) ?? null,
+      };
+    }
   }
-  return { landing, waiting };
+  return { landing, waiting, active };
 }

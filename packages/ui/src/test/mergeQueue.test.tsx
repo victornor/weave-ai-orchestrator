@@ -31,6 +31,7 @@ const minutesAgo = (n: number): string => new Date(NOW.getTime() - n * 60_000).t
 const entry = (over: Partial<MergeQueueEntry> = {}): MergeQueueEntry => ({
   ticketId: 'tk_1', identifier: 'VS-53', title: 'Full test suite exits cleanly', projectId: 'p1',
   position: null, queuedAt: minutesAgo(9), startedAt: minutesAgo(4), workerId: 'ag_1', ...over,
+  ciState: over.ciState ?? null, ciStateAt: over.ciStateAt ?? null,
 });
 
 const outcome = (over: Partial<MergeQueueOutcome> = {}): MergeQueueOutcome => ({
@@ -84,6 +85,18 @@ describe('MergeQueueRoute', () => {
     render(<MergeQueueRoute />);
     act(() => { vi.advanceTimersByTime(2000); });
     expect(within(section('Landing now')).getByText('4m02s')).toBeInTheDocument();
+  });
+
+  it('says the active merge is waiting on CI while its checks are pending (VS-391)', () => {
+    state.queue = queue({ active: [entry({ ciState: 'pending', ciStateAt: minutesAgo(2) })] });
+    render(<MergeQueueRoute />);
+    expect(within(section('Landing now')).getByText('waiting on CI 2m00s')).toBeInTheDocument();
+  });
+
+  it('says the active merge is waiting on its worker once the checks resolve (VS-391)', () => {
+    state.queue = queue({ active: [entry({ ciState: 'success', ciStateAt: minutesAgo(1) })] });
+    render(<MergeQueueRoute />);
+    expect(within(section('Landing now')).getByText('waiting on the worker 1m00s')).toBeInTheDocument();
   });
 
   it('opens the transcript of the worker doing the merge', () => {

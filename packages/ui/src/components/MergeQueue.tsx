@@ -1,5 +1,6 @@
 import { Badge, StatusGlyph } from './StatusGlyph';
 import { cx } from '../lib/cx';
+import { mergeWaitLabel, type MergeWait } from '../lib/board';
 
 /**
  * The board's one line about landing (PLAN §11.4). It says how much is in flight and opens the merge
@@ -9,15 +10,19 @@ import { cx } from '../lib/cx';
 export function MergeQueueStrip({
   landing,
   waiting,
+  active,
   onOpen,
   className,
 }: {
   landing: number;
   waiting: number;
+  /** VS-391: what the longest-active merge is waiting on, for a stall that is visible on the board. */
+  active?: MergeWait | null;
   onOpen: () => void;
   className?: string;
 }): React.ReactElement {
   const busy = landing > 0 || waiting > 0;
+  const wait = landing > 0 ? mergeWaitLabel(active ?? null) : null;
   return (
     <button
       type="button"
@@ -31,7 +36,7 @@ export function MergeQueueStrip({
       <StatusGlyph status={busy ? 'merging' : 'idle'} size="xs" />
       <span className="text-micro font-medium">Merge queue</span>
       <span className="ac-mono text-nano">
-        {busy ? `${landing} landing · ${waiting} waiting` : 'nothing landing'}
+        {busy ? `${landing} landing · ${waiting} waiting${wait ? ` · ${wait}` : ''}` : 'nothing landing'}
       </span>
       <span className="flex-1" />
       <span aria-hidden="true" className="text-nano">

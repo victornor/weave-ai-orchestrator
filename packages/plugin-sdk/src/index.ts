@@ -15,6 +15,12 @@ export interface WorktreeProvider {
 export interface AgentToolDefinition { name: string; description: string; inputSchema: Record<string, unknown>; scope: 'weaver' | 'worker' | 'all'; handler(input: Record<string, unknown>, ctx: { workspaceId: string; agentId: string; agentKind: 'weaver' | 'worker'; projectId: string | null; ticketId: string | null; runId: string }): Promise<unknown> }
 /** How a pull request's checks stand, rolled up. `none` is "the forge reported no check", not "no answer". */
 export type ForgeCheckState = 'pending' | 'success' | 'failure' | 'none';
+/**
+ * GitHub's `mergeStateStatus`, lowercased (VS-391): whether the pull request can merge as it stands.
+ * `clean` is mergeable; `blocked` also covers required checks still running, so it is not on its own
+ * a "checks are done" signal. A forge that reports none omits the field.
+ */
+export type ForgeMergeState = 'behind' | 'blocked' | 'clean' | 'dirty' | 'draft' | 'has_hooks' | 'unknown' | 'unstable';
 /** One changed file with the lines it adds and removes. */
 export interface ForgeChangedFile { path: string; additions: number; deletions: number }
 /** One check, named, for a pull request's detail. The rolled-up `ForgeCheckState` is what a list shows. */
@@ -36,7 +42,7 @@ export interface ForgePullRequestDetail extends ForgePullRequest { body: string;
 export interface ForgeAdapter {
   readonly id: string;
   detect(cwd: string): Promise<boolean>;
-  prState(cwd: string, url: string): Promise<{ state: 'open' | 'merged' | 'closed'; mergeCommit?: string; ciState?: ForgeCheckState; /** VS-328: the checks that passed out of those reported, when the forge reports any. */ checks?: { passed: number; total: number }; /** VS-365: the pull request's current head commit, when the forge reports one. */ headSha?: string }>;
+  prState(cwd: string, url: string): Promise<{ state: 'open' | 'merged' | 'closed'; mergeCommit?: string; ciState?: ForgeCheckState; /** VS-328: the checks that passed out of those reported, when the forge reports any. */ checks?: { passed: number; total: number }; /** VS-365: the pull request's current head commit, when the forge reports one. */ headSha?: string; /** VS-391: whether the pull request can merge as it stands, when the forge reports it. */ mergeState?: ForgeMergeState; /** VS-391: whether the pull request is a draft, when the forge reports it. A draft's absent checks are not "resolved". */ isDraft?: boolean }>;
   mergePr(cwd: string, url: string, method: string): Promise<{ mergeCommit?: string }>;
   /**
    * Optional (VS-97): the repository's pull requests, most recently updated first, open and closed

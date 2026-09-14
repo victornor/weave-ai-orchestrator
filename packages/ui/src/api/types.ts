@@ -229,6 +229,9 @@ export interface MergeQueueEntry {
   queuedAt: string | null;
   startedAt: string | null;
   workerId: string | null;
+  /** VS-391: the active merge's pull-request check state and when it was first observed. */
+  ciState: 'pending' | 'success' | 'failure' | 'none' | null;
+  ciStateAt: string | null;
 }
 
 /** A ticket that recently left a project's queue: `landed` merged, `failed` could not, `withdrawn` left without either. */

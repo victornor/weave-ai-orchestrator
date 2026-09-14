@@ -270,6 +270,21 @@ describe('prState', () => {
     const state = await new GhForge().prState(home, 'https://github.com/acme/api/pull/77');
     expect(state.headSha).toBeUndefined();
   });
+
+  it('maps mergeStateStatus and isDraft, and asks gh for them (VS-391)', async () => {
+    fakeGh(JSON.stringify({ state: 'OPEN', mergeStateStatus: 'BLOCKED', isDraft: true }));
+    const state = await new GhForge().prState(home, 'https://github.com/acme/api/pull/77');
+    expect(state).toMatchObject({ mergeState: 'blocked', isDraft: true });
+    expect(args()).toContain('mergeStateStatus');
+    expect(args()).toContain('isDraft');
+  });
+
+  it('omits mergeState when gh reports none (VS-391)', async () => {
+    fakeGh(JSON.stringify({ state: 'OPEN' }));
+    const state = await new GhForge().prState(home, 'https://github.com/acme/api/pull/77');
+    expect(state.mergeState).toBeUndefined();
+    expect(state.isDraft).toBe(false);
+  });
 });
 
 describe('repoInfo (VS-359)', () => {

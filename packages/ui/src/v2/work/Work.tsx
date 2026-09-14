@@ -29,7 +29,7 @@ import {
   type WorkerListItem,
 } from '../../api/hooks';
 import { useWorkerActivity } from '../../api/workerActivity';
-import { filterTickets, finishedModeFromSearch, mergeStrip, pausedWorkersByTicket, type FinishedMode } from '../../lib/board';
+import { filterTickets, finishedModeFromSearch, mergeStrip, mergeWaitLabel, pausedWorkersByTicket, type FinishedMode } from '../../lib/board';
 import { lastLinesByAgent } from '../../lib/projectOverview';
 import { activityLine, mergeWorkerActivity } from '../../lib/workerActivity';
 import { projectColorVar } from '../../lib/projectColor';
@@ -273,7 +273,9 @@ export function V2WorkScreen(): React.ReactElement {
             Merge queue
           </span>
           <span className="ac-mono text-nano text-text-3">
-            {strip.landing + strip.waiting > 0 ? `${strip.landing} landing · ${strip.waiting} waiting` : 'nothing landing'}
+            {strip.landing + strip.waiting > 0
+              ? `${strip.landing} landing · ${strip.waiting} waiting${strip.landing > 0 ? ` · ${mergeWaitLabel(strip.active)}` : ''}`
+              : 'nothing landing'}
           </span>
         </div>
 

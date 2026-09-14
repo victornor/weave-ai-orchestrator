@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "The merge queue stalls on green CI: a merging worker's self-wake fails
+  with a UNIQUE constraint, and nothing wakes it when its PR's checks finish"

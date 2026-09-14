@@ -37,16 +37,32 @@ NOT be available to the weaver, whose scheduling is the routines service.
 The system SHALL reject a schedule whose effective delay is shorter than a fixed minimum or longer
 than a fixed maximum, and SHALL reject a request that gives neither a delay nor an instant, or both,
 or an instant already in the past. A worker SHALL have at most one pending self-wake: a new schedule
-SHALL cancel the worker's outstanding queued self-wake before enqueuing its own, so exactly one
-queued self-wake for that worker remains, at the newest requested time and reason. The schedule SHALL
-carry a stable idempotency key derived from the worker, so a duplicate call in the same turn cannot
-stack a second wake.
+SHALL supersede the worker's previous self-wake before enqueuing its own, so exactly one queued
+self-wake for that worker remains, at the newest requested time and reason. A superseded self-wake
+that is still pending SHALL be cancelled. The schedule SHALL carry a stable idempotency key derived
+from the worker, so a duplicate call in the same turn cannot stack a second wake, and the replacement
+SHALL succeed whatever status the worker's previous self-wake is in — pending, claimed, completed or
+failed — with the previous row no longer holding that key, so the new schedule is never refused
+because an earlier wake of the worker's own finished.
 
 #### Scenario: A second schedule replaces the pending self-wake
 
 - **WHEN** a worker schedules a wake twenty minutes out, then schedules another thirty minutes out
 - **THEN** the worker has exactly one queued self-wake and its `notBefore` and reason are the second
   call's
+
+#### Scenario: A second schedule supersedes one already claimed for the current turn
+
+- **WHEN** a worker whose current turn was started from its own scheduled wake schedules another wake
+  before that turn ends
+- **THEN** the new self-wake is queued with the new time and reason, exactly one queued self-wake
+  remains for the worker, and no error is raised
+
+#### Scenario: A second schedule supersedes one already finished
+
+- **WHEN** a worker whose previous self-wake has been completed or failed schedules another wake
+- **THEN** the new self-wake is queued with the new time and reason, exactly one queued self-wake
+  remains for the worker, and no error is raised
 
 #### Scenario: A delay below the minimum is rejected
 

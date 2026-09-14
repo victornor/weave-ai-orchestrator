@@ -465,6 +465,130 @@ describe('supervisor scheduled passes', () => {
       expect(h.events.filter((e) => e.type === 'ticket.updated').length).toBeGreaterThan(before);
     });
 
+    describe('merge-slot progress (VS-391)', () => {
+      type MergePrState = { state: 'open' | 'merged' | 'closed'; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number }; headSha?: string; mergeState?: 'clean' | 'blocked' | 'behind' | 'dirty'; isDraft?: boolean };
+      const resetMergePoll = (): void => { h.db.run("UPDATE meta SET value = '0' WHERE key = 'supervisor:merge_ci_at'"); };
+      const wakesFor = (ticketId: string): Array<{ input: Record<string, unknown> }> =>
+        wake.calls.filter((c) => {
+          const input = c.input as { source?: string; payload?: { ticketId?: string } };
+          return input.source === 'merge_approved' && input.payload?.ticketId === ticketId;
+        });
+      const wakeReason = (ticketId: string): string => String((wakesFor(ticketId)[0]!.input as { reason?: string }).reason ?? '');
+
+      function seedMergingPr(over: Record<string, unknown> = {}): string {
+        const ticketId = seedTicket(h, { status: 'merging', kind: 'change', mergeStartedAt: nowIso(), ...over });
+        h.db.insert('ticket_work_products', {
+          id: newId(), ticketId, type: 'pull_request', provider: 'github', url: 'https://github.com/acme/api/pull/7',
+          title: 'PR 7', state: 'open', isPrimary: 1, metadataJson: {}, createdAt: nowIso(), updatedAt: nowIso(),
+        });
+        mkdirSync(join(h.ctx.paths.projects, h.projectSlug), { recursive: true });
+        h.db.update('projects', h.projectId, { status: 'ready' });
+        h.addWorker(ticketId);
+        return ticketId;
+      }
+
+      function setForge(prState: ReturnType<typeof vi.fn>): void {
+        h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState, mergePr: async () => ({}) } as never);
+      }
+
+      it('wakes the worker once when the checks go pending → success', async () => {
+        let ciState: 'pending' | 'success' = 'pending';
+        const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState, headSha: 'sha-1', checks: { passed: 1, total: 2 } }));
+        setForge(prState);
+        const ticketId = seedMergingPr();
+
+        await supervisor.tick();
+        expect(wakesFor(ticketId)).toHaveLength(0);
+
+        resetMergePoll();
+        ciState = 'success';
+        await supervisor.tick();
+        expect(wakesFor(ticketId)).toHaveLength(1);
+        expect(wakeReason(ticketId)).toContain('passed');
+
+        resetMergePoll();
+        await supervisor.tick();
+        expect(wakesFor(ticketId)).toHaveLength(1);
+      });
+
+      it('wakes the worker with the failure when the checks fail', async () => {
+        let ciState: 'pending' | 'failure' = 'pending';
+        const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState }));
+        setForge(prState);
+        const ticketId = seedMergingPr();
+
+        await supervisor.tick();
+        resetMergePoll();
+        ciState = 'failure';
+        await supervisor.tick();
+
+        expect(wakesFor(ticketId)).toHaveLength(1);
+        expect(wakeReason(ticketId)).toContain('failed');
+      });
+
+      it('does not poll a merging ticket still waiting in the queue', async () => {
+        const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState: 'success' }));
+        setForge(prState);
+        const ticketId = seedMergingPr({ mergeStartedAt: null, mergeQueuedAt: nowIso() });
+
+        await supervisor.tick();
+
+        expect(prState).not.toHaveBeenCalled();
+        expect(wakesFor(ticketId)).toHaveLength(0);
+      });
+
+      it('does not wake on blocked while the checks are still pending', async () => {
+        const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState: 'pending', mergeState: 'blocked' }));
+        setForge(prState);
+        const ticketId = seedMergingPr();
+
+        await supervisor.tick();
+
+        expect(wakesFor(ticketId)).toHaveLength(0);
+      });
+
+      it('wakes on a clean merge state', async () => {
+        const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState: 'success', headSha: 'sha-1', mergeState: 'clean' }));
+        setForge(prState);
+        const ticketId = seedMergingPr({ deliveryJson: { ciState: 'success', ciHead: 'sha-1', prState: 'open', mergeState: 'blocked', mergeStateHead: 'sha-1' } });
+
+        await supervisor.tick();
+
+        expect(wakesFor(ticketId)).toHaveLength(1);
+        expect(wakeReason(ticketId)).toContain('merge state is clean');
+      });
+
+      it('never wakes for a draft pull request', async () => {
+        const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState: 'success', headSha: 'sha-1', mergeState: 'clean', isDraft: true }));
+        setForge(prState);
+        const ticketId = seedMergingPr();
+
+        await supervisor.tick();
+
+        expect(wakesFor(ticketId)).toHaveLength(0);
+      });
+
+      it('throttles the forge poll so a second immediate tick does not call it again', async () => {
+        const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState: 'pending' }));
+        setForge(prState);
+        seedMergingPr();
+
+        await supervisor.tick();
+        await supervisor.tick();
+
+        expect(prState).toHaveBeenCalledTimes(1);
+      });
+
+      it('leaves the delivery unchanged when the forge throws', async () => {
+        const prState = vi.fn(async () => { throw new Error('gh down'); });
+        setForge(prState);
+        const ticketId = seedMergingPr();
+
+        await expect(supervisor.tick()).resolves.toBeUndefined();
+        expect(h.db.get<{ delivery: unknown }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId])?.delivery).toBeNull();
+      });
+    });
+
     it('moves a merged PR to merging and wakes the live worker to report only', async () => {
       h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
       const transition = vi.fn(async () => ({}));

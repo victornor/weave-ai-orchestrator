@@ -52,6 +52,13 @@ const RETENTION_EVERY_MS = DAY_MS;
  * so a tree still in flight (the in-process set also protects it) is never swept.
  */
 const SCRATCH_SWEEP_EVERY_MS = 15 * 60_000;
+/**
+ * VS-391: how often the active merge's pull request is polled for a check/merge-state transition.
+ * Faster than the hourly reconciliation (so a merge turn starts within a supervisor pass of CI
+ * finishing) but well short of every 15 s tick, so a deep queue cannot multiply forge calls against
+ * GitHub's authenticated rate limit.
+ */
+const MERGE_POLL_EVERY_MS = 30_000;
 
 const SYSTEM: Actor = { kind: 'system', id: null };
 
@@ -801,6 +808,104 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     }
   }
 
+  interface MergingPrRow { id: string; identifier: string; projectId: string; url: string; clonePath: string; delivery: Record<string, unknown> | null }
+
+  /**
+   * VS-391: wake the worker holding a project's merge slot when its pull request's checks resolve (or
+   * its merge state becomes clean). Runs on the supervisor tick, throttled to `MERGE_POLL_EVERY_MS`,
+   * and polls only tickets admitted to the active merge step — a merging ticket still waiting in the
+   * queue has no merge turn to wake. Only the forge's pull-request state is read; unlike
+   * `reconcilePass` this never fetches the projects.
+   */
+  async function wakeMergingOnProgress(): Promise<void> {
+    const forge = ctx.registries.forges.get('github');
+    if (!forge) return;
+    const rows = ctx.db.all<MergingPrRow>(
+      `SELECT t.id AS id, t.identifier AS identifier, t.project_id AS project_id, wp.url AS url,
+              p.clone_path AS clone_path, t.delivery_json AS delivery_json
+         FROM tickets t
+         JOIN ticket_work_products wp ON wp.ticket_id = t.id AND wp.type = 'pull_request' AND wp.url IS NOT NULL
+         JOIN projects p ON p.id = t.project_id AND p.status = 'ready'
+        WHERE t.workspace_id = ? AND t.status = 'merging' AND t.merge_started_at IS NOT NULL
+        ORDER BY wp.created_at DESC`,
+      [ctx.workspaceId],
+    );
+    const seen = new Set<string>();
+    for (const row of rows) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      if (!existsSync(row.clonePath)) continue;
+      const pr = await forge.prState(row.clonePath, row.url).catch((e: unknown) => {
+        log.warn({ ticket: row.identifier, url: row.url, err: String(e) }, 'merge-slot pull request poll failed');
+        return null;
+      });
+      if (!pr) continue;
+
+      const stored = row.delivery ?? {};
+      const ciState = pr.ciState ?? null;
+      const checks = pr.checks ?? null;
+      const head = pr.headSha ?? (typeof stored['ciHead'] === 'string' ? stored['ciHead'] : null);
+      const mergeState = pr.mergeState ?? null;
+      const draft = pr.isDraft === true;
+      const ciChanged = JSON.stringify(stored['ciState'] ?? null) !== JSON.stringify(ciState)
+        || JSON.stringify(stored['prChecks'] ?? null) !== JSON.stringify(checks)
+        || JSON.stringify(stored['ciHead'] ?? null) !== JSON.stringify(head);
+      const mergeStateChanged = (stored['mergeState'] ?? null) !== mergeState;
+      const stateChanged = (stored['prState'] ?? null) !== pr.state;
+      const draftChanged = (stored['isDraft'] === true) !== draft;
+      const now = nowIso();
+      const ciStateAt = ciState !== (stored['ciState'] ?? null) ? now : (stored['ciStateAt'] as string | undefined) ?? now;
+      if (ciChanged || mergeStateChanged || stateChanged || draftChanged) {
+        ctx.db.update('tickets', row.id, {
+          deliveryJson: {
+            ...stored, prUrl: row.url, prState: pr.state, ciState, ciStateAt, ciHead: head, prChecks: checks,
+            mergeState, mergeStateHead: mergeState ? head : null, isDraft: draft,
+          },
+          updatedAt: now,
+        });
+        if (ciChanged) ctx.events.emit('ticket.updated', 'ticket', row.id, { ticketId: row.id });
+      }
+
+      // A draft's absent checks are not "resolved" (VS-393 makes ticket PRs drafts until the merge
+      // step marks them ready), so a draft never wakes the worker.
+      if (draft) continue;
+      const worker = liveWorkerFor(row.id);
+      if (!worker) {
+        log.warn({ ticket: row.identifier }, 'merge-slot pull request moved but the ticket has no live worker');
+        continue;
+      }
+      const ciResolved = ciState === 'success' || ciState === 'failure';
+      const ciTransition = ciResolved && ((stored['ciState'] ?? null) !== ciState || (stored['ciHead'] ?? null) !== head);
+      // `blocked` while checks are still pending is GitHub's normal running state, not news; it is a
+      // trigger only once the rollup has resolved. `clean` always is.
+      const mergeTransition = mergeStateChanged && (mergeState === 'clean' || (ciResolved && mergeState === 'blocked'));
+      if (ciTransition) {
+        const passed = ciState === 'success';
+        try {
+          deps().wake.enqueue(worker.id, {
+            source: 'merge_approved',
+            reason: passed
+              ? `${row.identifier}: required checks passed on ${row.url}; re-sync and request landing with weave_ticket_merge_done`
+              : `${row.identifier}: required checks failed on ${row.url}; fix the failure and request landing again`,
+            payload: { ticketId: row.id, ciState, prChecks: checks, mergeState, prUrl: row.url, headSha: head },
+            idempotencyKey: `merge-ci:${row.id}:${head ?? 'unknown'}:${ciState}`,
+            requestedBy: SYSTEM,
+          });
+        } catch (e) { log.warn({ ticket: row.identifier, err: String(e) }, 'merge-slot wake failed'); }
+      } else if (mergeTransition) {
+        try {
+          deps().wake.enqueue(worker.id, {
+            source: 'merge_approved',
+            reason: `${row.identifier}: pull request merge state is ${mergeState} on ${row.url}; re-sync and request landing with weave_ticket_merge_done`,
+            payload: { ticketId: row.id, ciState, prChecks: checks, mergeState, prUrl: row.url, headSha: head },
+            idempotencyKey: `merge-state:${row.id}:${head ?? 'unknown'}:${mergeState}`,
+            requestedBy: SYSTEM,
+          });
+        } catch (e) { log.warn({ ticket: row.identifier, err: String(e) }, 'merge-state wake failed'); }
+      }
+    }
+  }
+
   /** A `change` ticket can be `done` while its OpenSpec change directory is still un-archived on disk (§12.4 drift). */
   /**
    * `openspec_change_name IS NOT NULL` is already the full membership test — a `scout`/`question`
@@ -988,6 +1093,9 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         await spawnPending().catch((e) => log.error({ err: String(e) }, 'spawn pass failed'));
         { const sweep = deps().tickets.autoMergeSweep; if (typeof sweep === 'function') await sweep.call(deps().tickets).catch((e: unknown) => log.error({ err: String(e) }, 'auto-merge sweep failed')); }
         await pumpMergeQueues().catch((e) => log.error({ err: String(e) }, 'merge queue pump failed'));
+        if (due('supervisor:merge_ci_at', MERGE_POLL_EVERY_MS)) {
+          await wakeMergingOnProgress().catch((e) => log.error({ err: String(e) }, 'merge-slot progress wake failed'));
+        }
         await retireFinished().catch((e) => log.error({ err: String(e) }, 'retire pass failed'));
         await retireIdleSessions().catch((e) => log.error({ err: String(e) }, 'idle session retire pass failed'));
         await reconcileAbandonedHandovers().catch((e) => log.error({ err: String(e) }, 'abandoned handover sweep failed'));

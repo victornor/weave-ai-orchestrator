@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: V2 Live opens one live stream per tile and exhausts the browser's
+  per-origin connection limit, so no other tab can load while Live is open
+skip_specs: true

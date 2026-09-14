@@ -99,7 +99,7 @@ function runEvent(over: Partial<RunEvent> & Pick<RunEvent, 'id' | 'seq'>): RunEv
 
 const emitRunEvent = (event: RunEvent): void => {
   act(() => {
-    for (const h of bus.handlers) h({ type: 'run.event', seq: 1, workspaceId: 'ws1', entityType: 'run', entityId: event.runId, payload: { runId: event.runId, event }, createdAt: '' } as WorkspaceEvent);
+    for (const h of bus.handlers) h({ type: 'run.event', seq: 1, workspaceId: 'ws1', entityType: 'run', entityId: event.runId, payload: { runId: event.runId, event }, createdAt: '' } as unknown as WorkspaceEvent);
   });
 };
 

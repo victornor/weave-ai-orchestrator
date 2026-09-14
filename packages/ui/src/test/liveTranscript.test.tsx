@@ -8,6 +8,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Run, RunEvent } from '@weave-ai/shared';
 import { agent, run as makeRun, ticket } from './factories';
+import { resetWorkspaceStreams } from '../api/streams';
 
 const state = vi.hoisted(() => ({
   params: {} as Record<string, string>,
@@ -60,6 +61,13 @@ class FakeEventSource {
       for (const fn of this.listeners.get(event.type) ?? []) fn({ data: JSON.stringify(event) } as MessageEvent<string>);
     });
   }
+  /** A `run.event` workspace frame, as the daemon broadcasts it on the shared stream (VS-417). */
+  emitRun(event: RunEvent): void {
+    act(() => {
+      const frame = { seq: 0, workspaceId: 'ws1', type: 'run.event', entityType: 'run', entityId: event.runId, payload: { runId: event.runId, event }, createdAt: '' };
+      for (const fn of this.listeners.get('run.event') ?? []) fn({ data: JSON.stringify(frame) } as MessageEvent<string>);
+    });
+  }
 }
 
 function ev(over: Partial<RunEvent> & Pick<RunEvent, 'id' | 'seq' | 'type'>): RunEvent {
@@ -78,7 +86,7 @@ beforeEach(() => {
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
 });
-afterEach(() => vi.clearAllMocks());
+afterEach(() => { resetWorkspaceStreams(); vi.clearAllMocks(); });
 
 // VS-357: the activity feed is on the ticket page's default Overview tab, so the ticket tests
 // below render it directly rather than clicking a now-removed Activity tab.
@@ -89,17 +97,17 @@ describe('ticket Activity section', () => {
     render(<TicketRoute />);
 
     expect(screen.getByText('turn 2')).toBeInTheDocument();
-    expect(stream().url).toBe('/api/w/ws1/runs/run_1/events/stream');
+    expect(stream().url).toBe('/api/w/ws1/events');
     expect(screen.getByRole('button', { name: 'hide transcript' })).toBeInTheDocument();
 
-    stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the failing test.' } }));
+    stream().emitRun(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the failing test.' } }));
     expect(screen.getByText('Reading the failing test.')).toBeInTheDocument();
 
-    stream().emit(ev({ id: 'e2', seq: 2, type: 'tool.call', payload: { id: 't1', name: 'Bash', input: { command: 'pnpm test' } } }));
+    stream().emitRun(ev({ id: 'e2', seq: 2, type: 'tool.call', payload: { id: 't1', name: 'Bash', input: { command: 'pnpm test' } } }));
     expect(screen.getByText('Bash')).toBeInTheDocument();
     expect(screen.getByText('pnpm test')).toBeInTheDocument();
 
-    stream().emit(ev({ id: 'e3', seq: 3, type: 'run.phase.timing', payload: { phase: 'deliver', durationMs: 1200 } }));
+    stream().emitRun(ev({ id: 'e3', seq: 3, type: 'run.phase.timing', payload: { phase: 'deliver', durationMs: 1200 } }));
     expect(screen.getByText(/phase: deliver/)).toBeInTheDocument();
 
     // The box follows its own bottom and nothing else: `scrollIntoView` walks every scrollable
@@ -110,7 +118,7 @@ describe('ticket Activity section', () => {
   it('collapses the turn to its summary row when the run finishes, and closes the stream', () => {
     state.runs = [makeRun({ status: 'running', turnEpoch: 2 })];
     const { rerender } = render(<TicketRoute />);
-    stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the failing test.' } }));
+    stream().emitRun(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the failing test.' } }));
     expect(live()).toHaveLength(1);
 
     // What the daemon's `run.finished` event does to this page: the ticket's runs refetch.
@@ -151,10 +159,10 @@ describe('RunRoute', () => {
     state.runDetail = detail({ status: 'running' });
     const { rerender } = render(<RunRoute />);
 
-    expect(stream().url).toBe('/api/w/ws1/runs/run_1/events/stream');
+    expect(stream().url).toBe('/api/w/ws1/events');
     expect(screen.getByText('· following')).toBeInTheDocument();
 
-    stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Half way through.' } }));
+    stream().emitRun(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Half way through.' } }));
     expect(screen.getByText('Half way through.')).toBeInTheDocument();
 
     state.runDetail = detail({ status: 'succeeded', finishedAt: '2026-09-01T09:04:00.000Z' });

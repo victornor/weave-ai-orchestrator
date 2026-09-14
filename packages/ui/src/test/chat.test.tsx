@@ -8,6 +8,7 @@ import { clearChatScroll, readChatScroll, writeChatScroll } from '../lib/chatScr
 import { clearHiddenCache } from '../lib/hiddenDecisions';
 import { writeShowSilentTurns } from '../lib/chatPrefs';
 import { writeDecisionHeight } from '../lib/decisionHeight';
+import { resetWorkspaceStreams } from '../api/streams';
 import { resizeObserved } from './resizeObserver';
 import { installVisualViewport, removeVisualViewport } from './visualViewport';
 import { ApiError } from '../api/client';
@@ -150,6 +151,11 @@ class FakeEventSource {
   emit(event: RunEvent): void {
     for (const fn of this.listeners.get(event.type) ?? []) fn({ data: JSON.stringify(event) } as MessageEvent<string>);
   }
+  /** A `run.event` workspace frame, as the daemon broadcasts it on the shared stream (VS-417). */
+  emitRun(event: RunEvent): void {
+    const frame = { seq: 0, workspaceId: 'ws1', type: 'run.event', entityType: 'run', entityId: event.runId, payload: { runId: event.runId, event }, createdAt: '' };
+    for (const fn of this.listeners.get('run.event') ?? []) fn({ data: JSON.stringify(frame) } as MessageEvent<string>);
+  }
   connect(): void { this.onopen?.(); }
   fail(): void { this.onerror?.(); }
 }
@@ -246,7 +252,7 @@ beforeEach(() => {
     list.scrollTop = list.scrollHeight - list.clientHeight;
   });
 });
-afterEach(() => vi.clearAllMocks());
+afterEach(() => { resetWorkspaceStreams(); vi.clearAllMocks(); });
 
 describe('ChatRoute live turn', () => {
   it('shows nothing live while the conductor is idle', () => {
@@ -261,9 +267,9 @@ describe('ChatRoute live turn', () => {
     emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
 
     expect(screen.getByLabelText('Weaver is working')).toBeInTheDocument();
-    expect(stream().url).toBe('/api/w/ws1/runs/run_1/events/stream');
+    expect(stream().url).toBe('/api/w/ws1/events');
 
-    act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
+    act(() => { stream().emitRun(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
     expect(screen.getByText('Reading the briefing.')).toBeInTheDocument();
 
     // The stream is closed as soon as the turn ends; what it produced is held until the row that
@@ -287,9 +293,9 @@ describe('ChatRoute live turn', () => {
     render(<ChatRoute />);
     expect(screen.getByLabelText('Weaver is working')).toBeInTheDocument();
     expect(screen.getByText('Already working on it.')).toBeInTheDocument();
-    expect(stream().url).toBe('/api/w/ws1/runs/run_live/events/stream');
+    expect(stream().url).toBe('/api/w/ws1/events');
 
-    act(() => { stream().emit(ev({ id: 'e2', seq: 2, type: 'assistant.text', payload: { text: ' Nearly done.' } })); });
+    act(() => { stream().emitRun(ev({ id: 'e2', seq: 2, runId: 'run_live', type: 'assistant.text', payload: { text: ' Nearly done.' } })); });
     expect(screen.getByText('Already working on it. Nearly done.')).toBeInTheDocument();
   });
 
@@ -304,11 +310,11 @@ describe('ChatRoute live turn', () => {
     render(<ChatRoute />);
     emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
 
-    act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'tool.call', payload: { id: 'tu_1', name: 'weave_briefing', input: { query: 'what is everyone doing' } } })); });
+    act(() => { stream().emitRun(ev({ id: 'e1', seq: 1, type: 'tool.call', payload: { id: 'tu_1', name: 'weave_briefing', input: { query: 'what is everyone doing' } } })); });
     expect(screen.getByText('weave_briefing')).toBeInTheDocument();
     expect(screen.getByText('what is everyone doing')).toBeInTheDocument();
 
-    act(() => { stream().emit(ev({ id: 'e2', seq: 2, type: 'tool.result', payload: { id: 'tu_1', name: 'weave_briefing', content: '3 workers running' } })); });
+    act(() => { stream().emitRun(ev({ id: 'e2', seq: 2, type: 'tool.result', payload: { id: 'tu_1', name: 'weave_briefing', content: '3 workers running' } })); });
     // The result is collapsed behind the call it belongs to, not a second block.
     const toggle = screen.getByRole('button', { expanded: false });
     act(() => { toggle.click(); });
@@ -322,8 +328,8 @@ describe('ChatRoute live turn', () => {
     emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
 
     act(() => {
-      stream().emit(ev({ id: 'e1', seq: 1, type: 'tool.call', payload: { id: 'tu_1', name: 'weave_human_send', input: { body: reply } } }));
-      stream().emit(ev({ id: 'e2', seq: 2, type: 'tool.result', payload: { id: 'tu_1', name: 'weave_human_send', content: 'delivered' } }));
+      stream().emitRun(ev({ id: 'e1', seq: 1, type: 'tool.call', payload: { id: 'tu_1', name: 'weave_human_send', input: { body: reply } } }));
+      stream().emitRun(ev({ id: 'e2', seq: 2, type: 'tool.result', payload: { id: 'tu_1', name: 'weave_human_send', content: 'delivered' } }));
     });
 
     expect(screen.queryByText('weave_human_send')).not.toBeInTheDocument();
@@ -336,7 +342,7 @@ describe('ChatRoute live turn', () => {
       render(<ChatRoute />);
       emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
       act(() => { stream().connect(); });
-      act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
+      act(() => { stream().emitRun(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
       expect(screen.queryByText('Reconnecting…')).not.toBeInTheDocument();
 
       const dropped = stream();
@@ -348,8 +354,9 @@ describe('ChatRoute live turn', () => {
       act(() => { stream().connect(); });
       expect(screen.queryByText('Reconnecting…')).not.toBeInTheDocument();
 
-      act(() => { stream().emit(ev({ id: 'e2', seq: 2, type: 'assistant.text', payload: { text: ' Nearly done.' } })); });
+      act(() => { stream().emitRun(ev({ id: 'e2', seq: 2, type: 'assistant.text', payload: { text: ' Nearly done.' } })); });
       expect(screen.getAllByText(/Reading the briefing\./)).toHaveLength(1);
+
       expect(screen.getByText('Reading the briefing. Nearly done.')).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -411,7 +418,7 @@ describe('ChatPage focused prop (VS-199)', () => {
     emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
 
     expect(screen.getByLabelText('Weaver is working')).toBeInTheDocument();
-    expect(stream().url).toBe('/api/w/ws1/runs/run_1/events/stream');
+    expect(stream().url).toBe('/api/w/ws1/events');
   });
 });
 
@@ -1716,7 +1723,7 @@ describe('ChatRoute follow the bottom', () => {
     to(40);
 
     const before = scrolls();
-    act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
+    act(() => { stream().emitRun(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
 
     expect(screen.getByText('Reading the briefing.')).toBeInTheDocument();
     expect(scrolls()).toBe(before);
@@ -1876,7 +1883,7 @@ describe('ChatRoute on a phone with the keyboard open', () => {
     emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
 
     const before = scrolls();
-    act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
+    act(() => { stream().emitRun(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
 
     expect(screen.getByText('Reading the briefing.')).toBeInTheDocument();
     expect(scrolls()).toBeGreaterThan(before);
@@ -2469,7 +2476,7 @@ describe('ChatRoute live turn folding into its trace', () => {
   it('holds the finished turn on screen until the reply that replaces it arrives', () => {
     const { rerender } = render(<ChatRoute />);
     emit({ type: 'run.started', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
-    act(() => { stream().emit(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
+    act(() => { stream().emitRun(ev({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Reading the briefing.' } })); });
 
     emit({ type: 'run.finished', entityId: 'run_1', payload: { agentId: 'ag_conductor' } });
     expect(screen.getByLabelText('Weaver is working')).toBeInTheDocument();
@@ -3224,7 +3231,7 @@ describe('ChatRoute selection stability (VS-321)', () => {
 
     emit({ type: 'run.started', entityId: 'run_2', payload: { agentId: 'ag_conductor' } });
     act(() => { stream().connect(); });
-    act(() => { stream().emit(ev({ id: 'e1', seq: 1, runId: 'run_2', type: 'assistant.text', payload: { text: 'Working…' } })); });
+    act(() => { stream().emitRun(ev({ id: 'e1', seq: 1, runId: 'run_2', type: 'assistant.text', payload: { text: 'Working…' } })); });
 
     expect(screen.getByText('Older message worth copying.')).toBe(node);
     expect(window.getSelection()?.toString()).toBe('Older message worth copying.');

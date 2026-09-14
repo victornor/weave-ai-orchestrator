@@ -60,7 +60,7 @@ export function WorkerRoute(): React.ReactElement {
   useWorkspaceEvents(
     useCallback(
       (e) => {
-        if (e.type !== 'run.event') return;
+        if (String(e.type) !== 'run.event') return;
         const p = e.payload as { runId?: string; event?: RunEvent } | null;
         if (!p?.event || (p.runId && runId && p.runId !== runId)) return;
         setLive((xs) => (xs.some((x) => x.id === p.event!.id) ? xs : [...xs, p.event!]));

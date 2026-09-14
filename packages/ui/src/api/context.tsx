@@ -2,8 +2,9 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import type { ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { WorkspaceEvent } from '@weave-ai/shared';
-import { EventStream } from './events';
+import type { EventStream } from './events';
 import type { ConnectionStatus } from './events';
+import { acquireWorkspaceStream, releaseWorkspaceStream } from './streams';
 import { setWorkspaceId } from './client';
 
 interface Ctx {
@@ -39,14 +40,15 @@ export function WorkspaceProvider({
       setStream(null);
       return;
     }
-    const s = new EventStream(ws, qc);
+    // The shared stream (VS-417): the provider, the global fan-in and every run subscription in
+    // this workspace attach to one `EventStream`, never one each.
+    const s = acquireWorkspaceStream(ws, qc);
     const off = s.subscribe(setConnection);
-    s.start();
     setStream(s);
     return () => {
       off();
-      s.stop();
       setStream(null);
+      releaseWorkspaceStream(ws);
     };
   }, [ws, qc, remember, live]);
 
@@ -89,19 +91,16 @@ export function useWorkspaceEvents(fn: (e: WorkspaceEvent) => void): void {
   }, [stream]);
 }
 
-/** Opens one EventStream per listed workspace while a global page is mounted (VS-168). */
+/** Opens one EventStream per listed workspace while a global page is mounted (VS-168). Every mount
+ *  shares the one stream per workspace with the workspace page's provider (VS-417). */
 export function FanInStreams({ ids }: { ids: readonly string[] }): null {
   const qc = useQueryClient();
   const key = ids.join('\0');
   useEffect(() => {
     if (!ids.length) return;
-    const streams = ids.map((id) => {
-      const s = new EventStream(id, qc);
-      s.start();
-      return s;
-    });
+    for (const id of ids) acquireWorkspaceStream(id, qc);
     return () => {
-      for (const s of streams) s.stop();
+      for (const id of ids) releaseWorkspaceStream(id);
     };
   }, [qc, key]);
   return null;

@@ -5,7 +5,7 @@ export const EVENT_TYPES = [
   'worker.spawned', 'worker.status', 'worker.retired', 'worker.stalled', 'worker.relaunched',
   'ticket.created', 'ticket.updated', 'ticket.assigned', 'ticket.status', 'ticket.comment', 'ticket.document', 'ticket.work_product', 'ticket.merged',
   'decision.created', 'decision.answered', 'decision.expired', 'decision.superseded', 'decision.updated',
-  'wake.queued', 'wake.skipped', 'run.started', 'run.event', 'run.finished',
+  'wake.queued', 'wake.skipped', 'run.started', 'run.finished',
   'job.started', 'job.finished',
   'routine.created', 'routine.updated', 'routine.removed', 'routine.fired',
   'roadmap.created', 'roadmap.updated', 'roadmap.removed',
@@ -19,7 +19,11 @@ export type EventType = (typeof EVENT_TYPES)[number];
  * Frames the workspace stream forwards to connected clients without writing an outbox row (VS-328).
  * They are live-only: a client that misses one converges from the read behind it. Kept out of
  * `EVENT_TYPES` so nothing treats them as a durable domain event.
+ *
+ * `run.event` (VS-417) carries one `RunEvent` and lets every live run on a page share the one
+ * workspace stream instead of opening a per-run `EventSource`. `worker.activity` (VS-328) is the
+ * per-worker activity summary.
  */
-export const EPHEMERAL_EVENT_TYPES = ['worker.activity'] as const;
+export const EPHEMERAL_EVENT_TYPES = ['worker.activity', 'run.event'] as const;
 export type EphemeralEventType = (typeof EPHEMERAL_EVENT_TYPES)[number];
 export interface WorkspaceEvent<T = unknown> { seq: number; workspaceId: string; type: EventType; entityType: string; entityId: string; payload: T; createdAt: string }

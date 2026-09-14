@@ -4,7 +4,7 @@ import type { RunEvent } from '@weave-ai/shared';
 import { groupConsecutiveTools, reportUiStatus, runEventsToTranscript } from '../lib/transcript';
 import type { TranscriptBlock } from '../lib/transcript';
 import { Transcript } from '../components/Transcript';
-import { UnifiedHunk } from '../components/DiffHunks';
+import { SplitHunk, UnifiedHunk } from '../components/DiffHunks';
 import { Markdown } from '../components/Markdown';
 import { markdownToHtml } from '../lib/markdown';
 import { qrMatrix } from '../lib/qr';
@@ -768,6 +768,47 @@ describe('Transcript', () => {
       expect(scrollingRow.className).toContain('whitespace-pre');
       expect(scrollingRow.className).not.toContain('whitespace-pre-wrap');
       expect(scrollingRow.querySelector('span:last-child')!.className).not.toContain('flex-1');
+    });
+
+    // VS-419: a diff line's tint is the diff's own green/red, never the status palette — Mono makes
+    // `--status-done` grey, so `bg-done` would render an addition as context.
+    it('tints added and removed lines with the diff tokens, not the status tokens', () => {
+      const h = {
+        oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, header: '@@ -1 +1 @@',
+        lines: [
+          { kind: 'remove' as const, oldLine: 1, newLine: null, text: 'old' },
+          { kind: 'add' as const, oldLine: null, newLine: 1, text: 'new' },
+          { kind: 'context' as const, oldLine: 2, newLine: 2, text: 'keep' },
+        ],
+      };
+      const hl = (text: string): string => text;
+      const { container } = render(<UnifiedHunk hunk={h} highlight={hl} />);
+      const rows = Array.from(container.querySelectorAll('div.flex')) as HTMLElement[];
+      expect(rows).toHaveLength(3);
+      expect(rows[0]!.className).toContain('bg-diff-remove-bg');
+      expect(rows[0]!.className).not.toContain('bg-failed');
+      expect(rows[1]!.className).toContain('bg-diff-add-bg');
+      expect(rows[1]!.className).not.toContain('bg-done');
+      expect(rows[2]!.className).not.toContain('bg-diff-add-bg');
+      expect(rows[2]!.className).not.toContain('bg-diff-remove-bg');
+    });
+
+    it('tints the side-by-side columns with the diff tokens too', () => {
+      const h = {
+        oldStart: 1, oldLines: 1, newStart: 1, newLines: 1, header: '@@ -1 +1 @@',
+        lines: [
+          { kind: 'remove' as const, oldLine: 1, newLine: null, text: 'old' },
+          { kind: 'add' as const, oldLine: null, newLine: 1, text: 'new' },
+        ],
+      };
+      const hl = (text: string): string => text;
+      const { container } = render(<SplitHunk hunk={h} highlight={hl} />);
+      const rowClass = (text: string): string =>
+        (Array.from(container.querySelectorAll('div.flex')) as HTMLElement[]).find((r) => r.textContent?.includes(text))!.className;
+      expect(rowClass('old')).toContain('bg-diff-remove-bg');
+      expect(rowClass('old')).not.toContain('bg-failed');
+      expect(rowClass('new')).toContain('bg-diff-add-bg');
+      expect(rowClass('new')).not.toContain('bg-done');
     });
   });
 });

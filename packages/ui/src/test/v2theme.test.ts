@@ -90,6 +90,20 @@ describe('the Mono palette', () => {
     expect(token(light, '--status-merging')).toBe('#4e535b');
   });
 
+  it('gives diffs their own green/red tints, not the greyscale done (VS-419)', () => {
+    for (const selector of [dark, light]) {
+      const add = token(selector, '--diff-add-bg');
+      const remove = token(selector, '--diff-remove-bg');
+      expect(add).toBeDefined();
+      expect(remove).toBeDefined();
+      expect(add).not.toContain('--status');
+      expect(remove).not.toContain('--status');
+      expect(add).not.toBe(remove);
+    }
+    expect(token(dark, '--diff-add-bg')).not.toBe(token(dark, '--status-done'));
+    expect(token(light, '--diff-remove-bg')).not.toBe(token(light, '--status-done'));
+  });
+
   it('keeps hue only on working, needs-you and blocked', () => {
     expect(token(dark, '--status-working')).toBe('#e9a23b');
     expect(token(dark, '--status-needs-you')).toBe('#7c87f0');

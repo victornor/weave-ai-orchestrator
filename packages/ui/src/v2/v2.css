@@ -57,6 +57,13 @@
   --status-failed: #e5484d;
   --status-paused: #8a8f98;
 
+  /* Diffs keep a green/red read even though Mono greys out done (VS-419). These deliberately do
+     not reference --status-*: they are their own signal, and the status palette stays greyscale. */
+  --diff-add-bg: rgb(63 185 80 / 0.16);
+  --diff-remove-bg: rgb(229 72 77 / 0.15);
+  --diff-add-fg: #3fb950;
+  --diff-remove-fg: #e5484d;
+
   /* Project identity is not a state; these are the same hand-picked hues V1 assigns. */
   --project-1: #2dd4bf;
   --project-2: #38bdf8;
@@ -114,6 +121,11 @@
   --status-done: #565a61;
   --status-failed: #c22b31;
   --status-paused: #6b7078;
+
+  --diff-add-bg: rgb(31 138 52 / 0.13);
+  --diff-remove-bg: rgb(194 43 49 / 0.12);
+  --diff-add-fg: #1f8a34;
+  --diff-remove-fg: #c22b31;
 
   --project-1: #0f766e;
   --project-2: #0369a1;

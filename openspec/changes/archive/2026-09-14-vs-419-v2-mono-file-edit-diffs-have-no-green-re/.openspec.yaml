@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Give V2 (Mono) file-edit diffs their own green/red add/remove tint tokens,
+  separate from the greyscale status colours
+skip_specs: true

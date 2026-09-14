@@ -11,7 +11,9 @@ import { cx } from '../lib/cx';
 /** One line's text, turned into a highlighted-or-plain HTML string (VS-107 / ADR 0013). */
 export type Highlighter = (text: string) => string;
 
-const LINE_BG: Record<DiffLine['kind'], string> = { add: 'bg-done/10', remove: 'bg-failed/10', context: '' };
+/** Diff lines use the diff tokens (VS-419), never the status ones: Mono greys out `--status-done`,
+ *  so `bg-done` made added lines read as context. */
+const LINE_BG: Record<DiffLine['kind'], string> = { add: 'bg-diff-add-bg', remove: 'bg-diff-remove-bg', context: '' };
 
 /**
  * Highlighted markup is trusted here: `highlightLine` escapes the source text itself

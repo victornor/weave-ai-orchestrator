@@ -52,6 +52,14 @@
   --status-failed: #e5484d;
   --status-paused: #6b7078;
 
+  /* file-edit diff tints (VS-419) — deliberately not the status tokens: Mono greys out done, so a
+     diff line that borrowed it lost its green. V1 keeps its existing green/red, at its existing
+     strength, so nothing about a V1 diff changes. */
+  --diff-add-bg: rgb(63 185 80 / 0.10);
+  --diff-remove-bg: rgb(229 72 77 / 0.10);
+  --diff-add-fg: #3fb950;
+  --diff-remove-fg: #e5484d;
+
   /* project identity (VS-149) — kept clear of the nine status hues and --accent */
   --project-1: #2dd4bf;
   --project-2: #38bdf8;
@@ -103,6 +111,11 @@
   --status-done: #1f8a34;
   --status-failed: #c22b31;
   --status-paused: #8a8f98;
+
+  --diff-add-bg: rgb(31 138 52 / 0.10);
+  --diff-remove-bg: rgb(194 43 49 / 0.10);
+  --diff-add-fg: #1f8a34;
+  --diff-remove-fg: #c22b31;
 
   --project-1: #0f766e;
   --project-2: #0369a1;
@@ -276,6 +289,11 @@
   --color-done: var(--status-done);
   --color-failed: var(--status-failed);
   --color-paused: var(--status-paused);
+
+  --color-diff-add-bg: var(--diff-add-bg);
+  --color-diff-remove-bg: var(--diff-remove-bg);
+  --color-diff-add-fg: var(--diff-add-fg);
+  --color-diff-remove-fg: var(--diff-remove-fg);
 
   --radius-r4: var(--r4);
   --radius-r6: var(--r6);
@@ -653,11 +671,13 @@
 .ac-diff-code .hljs-attribute { color: var(--accent); }
 .ac-diff-code .hljs-string,
 .ac-diff-code .hljs-symbol,
-.ac-diff-code .hljs-regexp,
-.ac-diff-code .hljs-addition { color: var(--status-done); }
+.ac-diff-code .hljs-regexp { color: var(--status-done); }
+/* The added/removed whole-line classes are a diff's own signal, not syntax: they use the diff
+   tokens so V2 keeps a green/red read even though Mono greys out the done status. */
+.ac-diff-code .hljs-addition { color: var(--diff-add-fg); }
 .ac-diff-code .hljs-comment,
-.ac-diff-code .hljs-quote,
-.ac-diff-code .hljs-deletion { color: var(--text-4); font-style: italic; }
+.ac-diff-code .hljs-quote { color: var(--text-4); font-style: italic; }
+.ac-diff-code .hljs-deletion { color: var(--diff-remove-fg); font-style: italic; }
 .ac-diff-code .hljs-number,
 .ac-diff-code .hljs-type,
 .ac-diff-code .hljs-variable,

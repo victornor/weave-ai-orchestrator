@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "V2 chat shows edit/write diffs open by default, the way V1 does, instead of behind
+  a collapsed tool row and a collapsed tool group"
+skip_specs: true

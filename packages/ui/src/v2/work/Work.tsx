@@ -72,6 +72,9 @@ export function V2WorkScreen(): React.ReactElement {
   const [view, setView] = useState<WorkView>('kanban');
   const [finished, setFinished] = useState<FinishedMode>(finishedModeFromSearch(search['done']));
   const [project, setProject] = useState<string | undefined>(search['project']);
+  // The phone scope row's `Needs you` tab (VS-404). Phone-only: the desktop filter row has no such
+  // control, and it is cleared by `All work`.
+  const [needsYouOnly, setNeedsYouOnly] = useState(false);
   const [role, setRole] = useState<string | undefined>(undefined);
   const [kind, setKind] = useState<string | undefined>(undefined);
   const [priority, setPriority] = useState<string | undefined>(undefined);
@@ -134,10 +137,10 @@ export function V2WorkScreen(): React.ReactElement {
     return m;
   }, [workers.data]);
 
-  const filtered = useMemo(
-    () => filterTickets(sourceTickets, { project, role, kind, priority }),
-    [sourceTickets, project, role, kind, priority],
-  );
+  const filtered = useMemo(() => {
+    const base = filterTickets(sourceTickets, { project, role, kind, priority });
+    return needsYouOnly ? base.filter((t) => needsYou.has(t.id)) : base;
+  }, [sourceTickets, project, role, kind, priority, needsYouOnly, needsYou]);
 
   const rows = useMemo<WorkRow[]>(
     () =>
@@ -178,6 +181,21 @@ export function V2WorkScreen(): React.ReactElement {
 
   const chooseFinished = (mode: FinishedMode): void => setFinished(mode);
 
+  // The phone scope tabs are mutually exclusive (the reference's `boardFilters`). `All work` clears
+  // both; a project and `Needs you` each clear the other so exactly one chip reads active.
+  const chooseScopeAll = (): void => {
+    setNeedsYouOnly(false);
+    setProject(undefined);
+  };
+  const chooseScopeNeedsYou = (): void => {
+    setNeedsYouOnly(true);
+    setProject(undefined);
+  };
+  const chooseScopeProject = (id: string): void => {
+    setNeedsYouOnly(false);
+    setProject(id);
+  };
+
   /** Keep `?q=` current without stacking history, so the query survives reload and back/forward. */
   const commitQuery = (value: string): void => {
     setQ(value);
@@ -202,7 +220,7 @@ export function V2WorkScreen(): React.ReactElement {
   return (
     <V2Page title="Work">
       <div className="flex h-full min-h-0 flex-col">
-        <div className="flex flex-none flex-wrap items-center gap-2 border-b border-line-1 px-4 py-2">
+        <div className="hidden flex-none flex-wrap items-center gap-2 border-b border-line-1 px-4 py-2 md:flex" data-v2-work-toolbar>
           <span className="text-micro text-text-3">Finished</span>
           <Segmented
             ariaLabel="Finished tickets"
@@ -229,7 +247,7 @@ export function V2WorkScreen(): React.ReactElement {
           </Button>
         </div>
 
-        <div className="flex flex-none flex-wrap items-center gap-1.5 border-b border-line-1 px-4 py-2">
+        <div className="hidden flex-none flex-wrap items-center gap-1.5 border-b border-line-1 px-4 py-2 md:flex" data-v2-work-filters>
           <SearchField
             inputRef={searchInput}
             value={q}
@@ -265,6 +283,19 @@ export function V2WorkScreen(): React.ReactElement {
               {filtered.length === 1 ? '1 ticket matches' : `${filtered.length} tickets match`}
             </span>
           ) : null}
+        </div>
+
+        {/* Phone: the reference's compact scope-tab row, over the merge strip and the list (VS-404).
+            The desktop toolbar above is gated `md:flex`, so on phone this row is the only filter. */}
+        <div
+          className="flex flex-none items-center gap-1.5 overflow-x-auto border-b border-line-1 px-4 py-2 md:hidden"
+          data-v2-work-scope
+        >
+          <ScopeChip label="All work" active={!project && !needsYouOnly} onClick={chooseScopeAll} />
+          <ScopeChip label="Needs you" active={needsYouOnly} onClick={chooseScopeNeedsYou} />
+          {projectList.map((p) => (
+            <ScopeChip key={p.id} label={projectLabel(p)} active={project === p.id} onClick={() => chooseScopeProject(p.id)} />
+          ))}
         </div>
 
         <div className="flex flex-none items-center gap-2 border-b border-line-1 px-4 py-2" data-v2-merge-strip>
@@ -352,6 +383,23 @@ export function V2WorkScreen(): React.ReactElement {
 function rowsByTicket(rows: readonly WorkRow[], column: V2BoardColumn<Ticket>): WorkRow[] {
   const ids = new Set(column.items.map((t) => t.id));
   return rows.filter((r) => ids.has(r.ticket.id));
+}
+
+/** The phone Work scope tab (the reference's `boardFilters`): a flat chip row, exactly one active. */
+function ScopeChip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }): React.ReactElement {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cx(
+        'flex-none rounded-r4 px-2.5 py-1 text-micro transition-colors duration-(--dur-fast) ease-ac',
+        active ? 'bg-bg-3 font-medium text-text-1' : 'text-text-3 hover:text-text-1',
+      )}
+    >
+      {label}
+    </button>
+  );
 }
 
 function Segmented<T extends string>({

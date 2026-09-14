@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: Phone Work shows the reference's compact scope row over a simple list,
+  with the desktop toolbar hidden
+skip_specs: true

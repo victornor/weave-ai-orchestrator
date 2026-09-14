@@ -306,8 +306,8 @@ function WorkspaceGroups({
                 ))}
                 <div className="my-1 h-px bg-line-1" />
                 {projects.map((p) => {
-                  const key = projectRowKey(p.name);
-                  const href = `/v2/w/${encodeURIComponent(w.id)}/p/${encodeURIComponent(p.name)}`;
+                  const key = projectRowKey(p.slug);
+                  const href = `/v2/w/${encodeURIComponent(w.id)}/p/${encodeURIComponent(p.slug)}`;
                   return (
                     <A
                       key={p.id}

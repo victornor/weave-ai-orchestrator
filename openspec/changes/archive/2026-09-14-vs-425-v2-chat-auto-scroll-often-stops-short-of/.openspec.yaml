@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-14
+goal: V2 chat reaches its true bottom reliably and smoothly on send, on a reply
+  and while a turn streams, and reveals new replies and dictated text with a
+  fast streaming animation
+skip_specs: true

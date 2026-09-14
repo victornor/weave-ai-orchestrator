@@ -7,7 +7,7 @@
  * hint is platform/input-aware, and a send while dictating waits for an upload-mode transcript so
  * the last words are not lost.
  */
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { dictationHint } from '../lib/dictationHint';
@@ -61,7 +61,7 @@ const PROJECTS = [
   { id: 'p2', workspaceId: 'ws1', slug: 'api', name: 'api' },
 ] as never[];
 
-function Harness({ onSubmit }: { onSubmit: (text: string, files: File[], opts: { projectId: string | null; replyToMessageId: string | null; idempotencyKey: string }) => void }): React.ReactElement {
+function Harness({ onSubmit, clearOnSubmit = false }: { onSubmit: (text: string, files: File[], opts: { projectId: string | null; replyToMessageId: string | null; idempotencyKey: string }) => void | Promise<void>; clearOnSubmit?: boolean }): React.ReactElement {
   const [text, setText] = useState('');
   const [projectId, setProjectId] = useState<string | null>(null);
   return (
@@ -71,7 +71,7 @@ function Harness({ onSubmit }: { onSubmit: (text: string, files: File[], opts: {
       onChangeProject={setProjectId}
       value={text}
       onChange={setText}
-      onSubmit={onSubmit}
+      onSubmit={(t, f, o) => { const r = onSubmit(t, f, o); if (clearOnSubmit) setText(''); return r; }}
       onOpenSearch={vi.fn()}
       onOpenPlan={vi.fn()}
     />
@@ -196,13 +196,14 @@ describe('the V2 chat composer', () => {
     expect(onSubmit).toHaveBeenLastCalledWith('x', [], expect.objectContaining({ projectId: 'p1' }));
   });
 
-  it('appends the recognized transcript after the existing text', () => {
+  it('appends the recognized transcript after the existing text', async () => {
     render(<Harness onSubmit={vi.fn()} />);
     fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'Hi' } });
     dictate();
     act(() => dict.onText?.('there', true));
     fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    expect(screen.getByLabelText('Message the weaver')).toHaveValue('Hi there');
+    // VS-425 streams the insert in; the committed draft is whole at once, the textarea catches up.
+    await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue('Hi there'));
   });
 
   it('stages a file through the picker and sends it with the message', () => {
@@ -270,16 +271,84 @@ describe('the V2 composer listening state (VS-416)', () => {
     expect(screen.getAllByText('Listening…')).toHaveLength(1);
   });
 
-  it('returns the textarea with the dictated text when dictation stops', () => {
+  it('returns the textarea with the dictated text when dictation stops', async () => {
     render(<Harness onSubmit={vi.fn()} />);
     dictate();
     act(() => dict.onText?.('a dictated sentence', true));
     fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    expect(screen.getByLabelText('Message the weaver')).toHaveValue('a dictated sentence');
+    await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue('a dictated sentence'));
     expect(screen.queryByTestId('v2-composer-listening')).not.toBeInTheDocument();
   });
 
-  it('scrolls to the end and puts the caret after a dictated insert that overflows the box', () => {
+  it('reveals the dictated insert instead of dropping it in whole (VS-425)', () => {
+    vi.useFakeTimers();
+    try {
+      render(<Harness onSubmit={vi.fn()} />);
+      dictate();
+      act(() => dict.onText?.('stream this sentence in', true));
+      fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+
+      const box = screen.getByLabelText('Message the weaver') as HTMLTextAreaElement;
+      act(() => { vi.advanceTimersByTime(80); });
+      // Partway through: a prefix, not the whole transcript. That is the reveal.
+      expect(box.value.length).toBeGreaterThan(0);
+      expect(box.value.length).toBeLessThan('stream this sentence in'.length);
+
+      act(() => { vi.advanceTimersByTime(600); });
+      expect(box).toHaveValue('stream this sentence in');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops a dictated insert in whole under reduced motion (VS-425)', () => {
+    const media = vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+      matches: query.includes('prefers-reduced-motion'),
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    }) as unknown as MediaQueryList);
+    render(<Harness onSubmit={vi.fn()} />);
+    dictate();
+    act(() => dict.onText?.('no animation please', true));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    expect(screen.getByLabelText('Message the weaver')).toHaveValue('no animation please');
+    media.mockRestore();
+  });
+
+  it('empties the textarea after a dictated insert is sent (VS-425)', async () => {
+    const onSubmit = vi.fn();
+    // The screen clears its draft after a successful send; the composer must follow it, not stay
+    // pinned to the text the reveal had been streaming in.
+    render(<Harness onSubmit={onSubmit} clearOnSubmit />);
+    dictate();
+    act(() => dict.onText?.('send this by voice', true));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    // Sent while the reveal is still streaming: the draft clears, and the textarea must too.
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith('send this by voice', [], expect.objectContaining({ idempotencyKey: expect.any(String) })));
+    await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue(''));
+  });
+
+  it('does not write the dictated text back when typing after a completed reveal (VS-425)', async () => {
+    render(<Harness onSubmit={vi.fn()} />);
+    dictate();
+    act(() => dict.onText?.('the old dictated text', true));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+
+    const box = screen.getByLabelText('Message the weaver') as HTMLTextAreaElement;
+    await waitFor(() => expect(box).toHaveValue('the old dictated text'));
+
+    fireEvent.change(box, { target: { value: 'typed instead' } });
+    expect(box).toHaveValue('typed instead');
+  });
+
+  it('scrolls to the end and puts the caret after a dictated insert that overflows the box', async () => {
     // Upload mode has no live transcript: stop first, then the transcript lands (the moment the
     // scroll has to happen). jsdom has no layout, so the box's scroll metrics are faked.
     dict.mode = 'upload';
@@ -295,7 +364,8 @@ describe('the V2 composer listening state (VS-416)', () => {
     const long = 'one two three four five six seven eight nine ten eleven twelve thirteen fourteen';
     act(() => dict.onText?.(long, true));
 
-    expect(box).toHaveValue(long);
+    // The reveal streams the text in; the box follows it to the end the whole way (VS-425).
+    await waitFor(() => expect(box).toHaveValue(long));
     expect(box.selectionStart).toBe(long.length);
     expect(box.selectionEnd).toBe(long.length);
     expect(scrollTop).toBe(640);

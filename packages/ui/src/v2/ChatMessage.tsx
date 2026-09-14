@@ -10,6 +10,7 @@ import { attachmentPartsOf, attachmentToView } from '@weave-ai/render';
 import { Markdown } from '../components/Markdown';
 import { clock, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
+import { useStreamReveal } from '../lib/streamReveal';
 
 const IDENTIFIER = /\b([A-Z][A-Z0-9]+-\d+)\b/g;
 
@@ -95,10 +96,13 @@ export interface ChatMessageProps {
   onTicket: (identifier: string) => void;
   /** Present on a weaver message: set the reply target for the next message. */
   onReply?: () => void;
+  /** Reveal the body with a fast streaming animation (VS-425). Only for a genuinely new reply. */
+  reveal?: boolean;
 }
 
-export function ChatMessage({ message, ws, spent, projectName, onTicket, onReply }: ChatMessageProps): React.ReactElement {
+export function ChatMessage({ message, ws, spent, projectName, onTicket, onReply, reveal = false }: ChatMessageProps): React.ReactElement {
   const mine = message.direction === 'inbound';
+  const body = useStreamReveal(message.body, reveal);
   return (
     <div className={cx('flex flex-col gap-1', mine && 'items-end')} data-chat-message={message.direction}>
       {message.replyToExcerpt ? (
@@ -114,7 +118,7 @@ export function ChatMessage({ message, ws, spent, projectName, onTicket, onReply
             : 'w-full rounded-r4 border border-line-1 bg-bg-1 px-3.5 py-3',
         )}
       >
-        <MessageBody body={message.body} onTicket={onTicket} />
+        <MessageBody body={body} onTicket={onTicket} />
         <AttachmentRows ws={ws} threadId={message.threadId} parts={message.parts} />
       </div>
       <span className={cx('flex items-center gap-2 px-0.5', mine && 'justify-end')}>

@@ -14,6 +14,7 @@ import { projectLabel } from '@weave-ai/shared';
 import { useDictation } from '../lib/dictation';
 import { dictationHint } from '../lib/dictationHint';
 import { projectColorVar } from '../lib/projectColor';
+import { REVEAL_MS, REVEAL_STEP_MS, revealedCount, usePrefersReducedMotion } from '../lib/streamReveal';
 import { VoiceMeter } from '../components/VoiceMeter';
 import { cx } from '../lib/cx';
 
@@ -122,14 +123,64 @@ export function ChatComposer({
   const base = useRef('');
   /** Set by the dictation callback; consumed by the layout effect so an insert scrolls to its end. */
   const dictated = useRef(false);
+  const reducedMotion = usePrefersReducedMotion();
+  /**
+   * A dictated insert reveals over a few frames (VS-425): the draft is committed in full at once, so
+   * a queued send still gets the last words, while the textarea shows a growing prefix of it. `null`
+   * when nothing is revealing.
+   */
+  const [reveal, setReveal] = useState<{ prefix: string; piece: string; shown: number } | null>(null);
+  const revealTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopReveal = useCallback((): void => {
+    if (revealTimer.current !== null) clearInterval(revealTimer.current);
+    revealTimer.current = null;
+    setReveal(null);
+  }, []);
+  useEffect(() => stopReveal, [stopReveal]);
+
+  /** What the textarea shows: the committed draft, or a growing prefix of a revealing dictated insert. */
+  const displayed = reveal ? `${reveal.prefix}${reveal.piece.slice(0, reveal.shown)}` : value;
+
+  // A send (which clears the draft) or any other change to the committed draft ends the reveal: the
+  // textarea must never stay pinned to the text that was streaming in once the draft it belonged to
+  // has moved on, or typing would write that stale text back (VS-425).
+  useEffect(() => {
+    if (reveal && value !== `${reveal.prefix}${reveal.piece}`) stopReveal();
+  }, [value, reveal, stopReveal]);
 
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches;
 
-  const dictation = useDictation((transcript) => {
+  const dictation = useDictation((transcript, final) => {
     const piece = transcript.trim();
     if (!piece) return;
+    const joiner = base.current && !base.current.endsWith(' ') ? ' ' : '';
+    const full = `${base.current}${joiner}${piece}`;
+    // Commit the whole draft immediately: the reveal is display only, so a send queued while
+    // dictating submits every last word (VS-416), not the prefix on screen mid-animation.
+    onChange(full);
+    if (!final || reducedMotion || typeof setInterval !== 'function') {
+      stopReveal();
+      return;
+    }
+    stopReveal();
+    const prefix = `${base.current}${joiner}`;
+    let step = 0;
+    const total = Math.max(1, Math.ceil(REVEAL_MS / REVEAL_STEP_MS));
     dictated.current = true;
-    onChange(`${base.current}${base.current && !base.current.endsWith(' ') ? ' ' : ''}${piece}`);
+    setReveal({ prefix, piece, shown: 0 });
+    revealTimer.current = setInterval(() => {
+      step += 1;
+      dictated.current = true;
+      if (step >= total) {
+        // The reveal is over: drop it, so `displayed` follows the committed draft from here on.
+        if (revealTimer.current !== null) clearInterval(revealTimer.current);
+        revealTimer.current = null;
+        setReveal(null);
+      } else {
+        setReveal({ prefix, piece, shown: revealedCount(piece.length, step * REVEAL_STEP_MS, REVEAL_MS) });
+      }
+    }, REVEAL_STEP_MS);
   });
 
   const startMic = useCallback(() => {
@@ -163,6 +214,8 @@ export function ChatComposer({
   // there, otherwise where the browser left it. A dictated insert also moves the caret to the end,
   // which is what "the newest text is visible" means for a long transcript (VS-416). While
   // listening there is no textarea — the flag survives until it returns, so the remount scrolls.
+  // The reveal shifts the textarea's value a frame at a time, so this runs on the displayed text,
+  // not the committed draft, and follows the animation to its end.
   useLayoutEffect(() => {
     const el = ta.current;
     if (!el) return;
@@ -174,7 +227,7 @@ export function ChatComposer({
     el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_PX)}px`;
     if (fromDictation) el.setSelectionRange(el.value.length, el.value.length);
     el.scrollTop = atEnd ? el.scrollHeight : prev;
-  }, [value, dictation.listening, dictation.transcribing]);
+  }, [displayed, dictation.listening, dictation.transcribing]);
 
   const addFiles = useCallback((incoming: File[]): void => {
     const accepted = incoming.filter((f) => ACCEPTED.includes(f.type));
@@ -347,11 +400,11 @@ export function ChatComposer({
           <textarea
             ref={ta}
             rows={1}
-            value={value}
+            value={displayed}
             disabled={disabled || submitting}
             placeholder={placeholder}
             aria-label={ariaLabel}
-            onChange={(e) => onChange(e.target.value)}
+            onChange={(e) => { stopReveal(); onChange(e.target.value); }}
             onPaste={onPaste}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isTouch) { e.preventDefault(); send(); } }}
             className="max-h-[12rem] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-body text-text-1 outline-none placeholder:text-text-4 focus-visible:[box-shadow:none]"

@@ -1,13 +1,14 @@
 /** `weave doctor [--install]` — the checklist that tells a human exactly what is missing (PLAN §20). */
 import type { Command } from 'commander';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { accessSync, constants } from 'node:fs';
-import { hostname } from 'node:os';
+import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
+import { homedir, hostname } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { ApiError } from '../api.js';
 import { emit, style, write } from '../output.js';
 import { contextsPath, currentContext } from '../contexts.js';
 import { ensureUnitRestartAlways, isRunning, readPid } from '../daemon.js';
+import { cliShimTarget, dataHome, readCliShimTarget, userBinDir } from '../release.js';
 import { promptConfirm } from '../prompt.js';
 import { isInstallable, planInstalls, type InstallStep, type InstallableId } from '../install.js';
 import { items, run, session } from './util.js';
@@ -45,6 +46,47 @@ const LOCAL_TOOLS: Array<{ id: InstallableId; binary: string; args: string[]; fi
   { id: 'wt', binary: 'wt', args: ['--version'], fix: 'install worktrunk (cargo install worktrunk / brew install worktrunk / pacman -S worktrunk) — until then the plain git worktree fallback is used' },
 ];
 
+/**
+ * VS-377: `weave` on PATH is a shim this product installs at `<home>/.local/bin/weave`, pointing at the
+ * running release's CLI. A host that only has the original `conductor` shim — or a `weave` left over
+ * from a release that is no longer `current` — is exactly what this reports, with the command that
+ * rewrites it.
+ */
+function shimCheck(): Check {
+  const shimPath = join(userBinDir(homedir()), 'weave');
+  let expected: string;
+  try {
+    expected = cliShimTarget(dataHome());
+  } catch (error) {
+    return {
+      name: 'weave CLI shim',
+      ok: false,
+      detail: `cannot resolve the data home: ${(error as Error).message}`,
+      fix: 'resolve the duplicate install directory (both `weave` and `agent-conductor` exist under the data home)',
+    };
+  }
+  if (!existsSync(expected)) {
+    // No release on this machine (a source checkout): there is no `current` for a shim to name, so a
+    // missing shim is the expected state, not a failure.
+    return { name: 'weave CLI shim', ok: null, detail: 'no current release on this machine; `weave` is not installed from a release' };
+  }
+  let content: string | null = null;
+  try { content = readFileSync(shimPath, 'utf8'); } catch { /* absent */ }
+  if (content === null) {
+    return { name: 'weave CLI shim', ok: false, detail: `missing at ${shimPath}`, fix: 'run `weave daemon install-service` (or `weave daemon upgrade`) to write it' };
+  }
+  const target = readCliShimTarget(content);
+  if (target !== expected) {
+    return {
+      name: 'weave CLI shim',
+      ok: false,
+      detail: target ? `points at ${target}, not the current release` : `${shimPath} is not a Weave shim`,
+      fix: 'run `weave daemon upgrade` to rewrite it against the current release',
+    };
+  }
+  return { name: 'weave CLI shim', ok: true, detail: `${shimPath} -> ${expected}` };
+}
+
 export function register(program: Command): void {
   program
     .command('doctor')
@@ -72,6 +114,7 @@ export function register(program: Command): void {
         const r = localTool(tool.binary, tool.args);
         checks.push({ name: tool.id === 'wt' ? 'worktrunk (wt)' : tool.id, ok: r.ok ? true : null, detail: r.detail, fix: tool.fix, install: r.ok ? undefined : tool.id });
       }
+      checks.push(shimCheck());
 
       let daemonIsThisHost: boolean | null = null;
       let remoteHost: string | null = null;

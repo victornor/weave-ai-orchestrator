@@ -56,8 +56,10 @@ pnpm build                   # tsc -b across every package
 pnpm --filter @weave-ai/ui build    # the web app -> packages/ui/dist
 ```
 
-Put `weave` on your PATH, either by linking the package or with a two-line wrapper (the wrapper is
-what survives a `mise` node upgrade and works from systemd):
+Once the daemon runs from a release, `weave daemon install-service` (and every `weave daemon upgrade`)
+writes `~/.local/bin/weave` for you, pointing at the current release. Before that first install — a
+source checkout — put `weave` on your PATH either by linking the package or with a two-line wrapper
+(the wrapper is what survives a `mise` node upgrade and works from systemd):
 
 ```bash
 cd packages/cli && pnpm link --global          # option 1
@@ -68,6 +70,10 @@ exec "$(mise which node)" "$PWD/packages/cli/dist/bin.js" "\$@"
 EOF
 chmod +x ~/.local/bin/weave
 ```
+
+The pre-rename `conductor` command still works as a deprecated alias — an existing
+`~/.local/bin/conductor` shim is rewritten to run `weave` and prints a one-line notice; it will be
+removed later.
 
 Then let the doctor tell you what else this machine needs:
 

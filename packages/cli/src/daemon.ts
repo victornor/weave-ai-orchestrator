@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { SHUTDOWN_KILL_GRACE_MS } from '@weave-ai/shared';
 import { stateHome, configHome } from './contexts.js';
-import { LAUNCHD_LABEL, SERVICE_NAME, currentLink, resolveInstalledUnit, type InstalledUnit } from './release.js';
+import { LAUNCHD_LABEL, SERVICE_NAME, currentLink, resolveInstalledUnit, writeUserShims, type InstalledUnit, type ShimWriteResult } from './release.js';
 
 export function pidFile(): string { return join(stateHome(), 'daemon.pid'); }
 export function logFile(): string { return join(stateHome(), 'daemon.log'); }
@@ -217,17 +217,20 @@ export function renderLaunchdPlist(bin: string): string {
  * Write `~/Library/LaunchAgents/com.weave-ai.daemon.plist`. On anything but macOS the plist is
  * only rendered (`written: false`) so it can be copied to a Mac by hand.
  */
-export function installLaunchdAgent(): { path: string; plist: string; commands: string[]; written: boolean } {
+export function installLaunchdAgent(): { path: string; plist: string; commands: string[]; written: boolean; shim: ShimWriteResult | null } {
   const bin = resolveServerBin();
   const path = launchdPlistPath();
   const plist = renderLaunchdPlist(bin);
   const written = process.platform === 'darwin';
+  let shim: ShimWriteResult | null = null;
   if (written) {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, plist);
+    // VS-377: installing the service is the install moment — put `weave` on PATH too.
+    shim = writeUserShims();
   }
   return {
-    path, plist, written,
+    path, plist, written, shim,
     commands: [
       `launchctl bootstrap gui/$(id -u) ${path}`,
       `launchctl kickstart -k gui/$(id -u)/${LAUNCHD_LABEL}`,
@@ -237,15 +240,18 @@ export function installLaunchdAgent(): { path: string; plist: string; commands: 
   };
 }
 
-export function installService(): { path: string; unit: string; commands: string[] } {
+export function installService(): { path: string; unit: string; commands: string[]; shim: ShimWriteResult } {
   const bin = resolveServerBin();
   const path = serviceUnitPath();
   const unit = renderServiceUnit(bin);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, unit);
+  // VS-377: installing the service is the install moment — put `weave` on PATH too.
+  const shim = writeUserShims();
   return {
     path,
     unit,
+    shim,
     commands: [
       'systemctl --user daemon-reload',
       `systemctl --user enable --now ${SERVICE_NAME}`,

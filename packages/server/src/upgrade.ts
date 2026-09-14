@@ -23,7 +23,7 @@ import { getLogger, recordActivity } from '@weave-ai/core';
 import {
   buildRelease, cliBinIn, commitSubjectsInRange, currentLink, inOwnScope, migrationsIn, planRestart,
   pruneReleases, readLink, releaseSha, resolveInstalledLaunchdAgent, resolveInstalledUnit,
-  resolveWorkspaceStateDir, switchRelease,
+  resolveWorkspaceStateDir, switchRelease, writeUserShims,
 } from '@weave-ai/release';
 import type { WorkspaceRuntime } from './types.js';
 import type { UpdateChecker } from './release-info.js';
@@ -83,6 +83,8 @@ export interface UpgradeDeps {
   backup?: () => string[];
   switchTo?: (path: string) => { previous: string | null };
   prune?: (keep: number) => string[];
+  /** VS-377: refresh the user's `weave` CLI shim after the switch. Defaults to the real writer. */
+  writeShims?: () => void;
   spawnRunner?: (o: { upgradeId: string; release: string }) => void;
   now?: () => number;
   /**
@@ -102,6 +104,7 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
   const backup = deps.backup ?? (() => backupDatabases(deps.configDir));
   const switchTo = deps.switchTo ?? ((path: string) => switchRelease(path));
   const prune = deps.prune ?? ((keep: number) => pruneReleases(keep));
+  const writeShims = deps.writeShims ?? (() => { writeUserShims(); });
   const spawnRunner = deps.spawnRunner ?? ((o) => launchRunner(o.release, o.upgradeId, deps.configDir));
   const armRestartWatchdog = deps.armRestartWatchdog ?? ((o) => { const t = setTimeout(o.check, RESTART_VERIFY_MS); t.unref?.(); });
 
@@ -276,6 +279,9 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
       resumeDispatch();
       return;
     }
+    // VS-377: the release moved, so the user's `weave` shim must follow it (and appear on a host that
+    // predates it). Best-effort: a shim that cannot be written must not fail an upgrade that switched.
+    try { writeShims(); } catch (e) { log.warn({ err: e, upgradeId: id }, 'could not write the CLI shim'); }
 
     // ---- restart: not ours to do ----
     set(id, { state: 'restarting', toRelease: built.path, toSha: releaseSha(built.path) ?? built.sha });

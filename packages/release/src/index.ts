@@ -15,8 +15,10 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, readlinkSync, renameSync
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { resolveInstallPath } from './paths.js';
+import { writeCliShims, type ShimWriteResult } from './shim.js';
 
 export * from './paths.js';
+export * from './shim.js';
 
 /** VS-258: `<base>/agent-conductor` or `<base>/weave`, whichever exists; a fresh host gets the new name. */
 function resolveUserDir(base: string): string {
@@ -44,6 +46,15 @@ export function configDir(): string {
 export function stateHome(): string {
   const xdg = process.env['XDG_STATE_HOME'];
   return resolveUserDir(xdg && xdg.trim() !== '' ? xdg : join(homedir(), '.local', 'state'));
+}
+
+/**
+ * VS-377: write this machine's user CLI shims from the environment's own home and data home, with the
+ * node that is running this process. The one call the CLI's install/upgrade and the daemon's deferred
+ * upgrade make; the directory-taking `writeCliShims` is what a test calls.
+ */
+export function writeUserShims(): ShimWriteResult {
+  return writeCliShims({ home: homedir(), dataHomeDir: dataHome(), node: process.execPath });
 }
 
 export function readLink(path: string): string | null {

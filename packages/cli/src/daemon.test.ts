@@ -8,9 +8,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SHUTDOWN_KILL_GRACE_MS } from '@weave-ai/shared';
-import { SERVICE_NAME } from '@weave-ai/release';
+import { SERVICE_NAME, CONDUCTOR_DEPRECATION, cliShimTarget, dataHome, readCliShimTarget, userBinDir } from '@weave-ai/release';
 import {
-  ensureUnitRestartAlways, isRunning, pidFile, renderServiceUnit, startDaemonService, stopDaemon, stopDaemonService,
+  ensureUnitRestartAlways, installService, isRunning, pidFile, renderServiceUnit, startDaemonService, stopDaemon, stopDaemonService,
   systemdMainPid, withRestartAlways, type CommandResult, type RunCommand,
 } from './daemon.js';
 
@@ -209,5 +209,60 @@ describe('unit restart policy and systemd lifecycle (VS-376)', () => {
     const ok: RunCommand = (_cmd, args) => noop({ stdout: args.includes('show') ? '4242\n' : '' });
     expect(systemdMainPid(unit, ok)).toBe(4242);
     expect(systemdMainPid(unit, () => noop({ status: 1 }))).toBeNull();
+  });
+});
+
+/**
+ * VS-377: `weave daemon install-service` is the install moment, so it puts `weave` on PATH — pointing
+ * at the current release's CLI — and rewrites an existing deprecated `conductor` shim. Everything runs
+ * in a temp HOME / XDG pair; the real `~/.local/bin`, release dirs and unit are never touched.
+ */
+describe('installService writes the CLI shim (VS-377)', () => {
+  const saved = { HOME: process.env['HOME'], XDG_CONFIG_HOME: process.env['XDG_CONFIG_HOME'], XDG_DATA_HOME: process.env['XDG_DATA_HOME'] };
+  let home: string;
+  let configHomeDir: string;
+  let dataHomeDir: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'vs377-home-'));
+    configHomeDir = mkdtempSync(join(tmpdir(), 'vs377-config-'));
+    dataHomeDir = mkdtempSync(join(tmpdir(), 'vs377-data-'));
+    process.env['HOME'] = home;
+    process.env['XDG_CONFIG_HOME'] = configHomeDir;
+    process.env['XDG_DATA_HOME'] = dataHomeDir;
+    // A release install: `weave/current` with both bins, so resolveServerBin and the shim target resolve.
+    for (const pkg of ['server', 'cli']) {
+      const bin = join(dataHomeDir, 'weave', 'current', 'packages', pkg, 'dist', 'bin.js');
+      mkdirSync(dirname(bin), { recursive: true });
+      writeFileSync(bin, '// bin\n');
+    }
+  });
+
+  afterEach(() => {
+    for (const k of ['HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME'] as const) {
+      if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+    }
+    for (const dir of [home, configHomeDir, dataHomeDir]) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('writes an executable weave shim at the current release, and no conductor on a fresh install', () => {
+    const result = installService();
+    const weave = join(userBinDir(home), 'weave');
+    expect(result.shim).toMatchObject({ path: weave, present: true, changed: true, alias: null, reason: null });
+    expect(readCliShimTarget(readFileSync(weave, 'utf8'))).toBe(cliShimTarget(dataHome()));
+    expect(readFileSync(weave, 'utf8')).toContain('Weave AI CLI');
+    expect(existsSync(join(userBinDir(home), 'conductor'))).toBe(false);
+  });
+
+  it('rewrites an existing conductor shim with the deprecation notice', () => {
+    const conductor = join(userBinDir(home), 'conductor');
+    mkdirSync(userBinDir(home), { recursive: true });
+    writeFileSync(conductor, `#!/bin/sh\nexec "/usr/bin/node" "${cliShimTarget(dataHome())}" "$@"\n`);
+
+    const result = installService();
+    expect(result.shim?.alias).toBe(conductor);
+    const content = readFileSync(conductor, 'utf8');
+    expect(readCliShimTarget(content)).toBe(cliShimTarget(dataHome()));
+    expect(content).toContain(CONDUCTOR_DEPRECATION);
   });
 });

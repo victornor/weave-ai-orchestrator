@@ -90,6 +90,8 @@ function fixture(): Fixture {
     backup: () => ['/tmp/config/backups/x/daemon.sqlite'],
     switchTo: () => ({ previous: FROM_RELEASE }),
     prune: () => [],
+    // VS-377: the real default writes into the user's `~/.local/bin`; these tests name their own seam.
+    writeShims: () => undefined,
     spawnRunner: () => undefined,
     ...over,
   });

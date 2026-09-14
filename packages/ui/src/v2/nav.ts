@@ -31,6 +31,8 @@ export interface V2Dest {
   path: string;
   /** Which one-source count the row carries, if any. */
   count?: 'needs' | 'live' | 'incidents';
+  /** A kept-V1 screen the desktop rail also carries; the rest stay in More only (VS-384). */
+  rail?: boolean;
 }
 
 /** Everywhere: the daemon-wide destinations, above the workspace groups (HANDOFF §4). */
@@ -54,15 +56,32 @@ export const V2_WORKSPACE: V2Dest[] = [
 ];
 
 /**
- * The V1 screens captain kept that the design's rail leaves out. They are not rail rows; the More
- * list (desktop and phone) and their owning screens reach them, and each keeps its own route. The
- * knowledge graph and explorer are *not* here: they are reachable only as the Knowledge screen's
- * Graph and Explorer tabs (VS-371), with the rail's Knowledge row highlighted.
+ * The V1 screens captain kept that the design's rail leaves out. They are not rail rows by default;
+ * the More list (desktop and phone) and their owning screens reach them, and each keeps its own
+ * route. The knowledge graph and explorer are *not* here: they are reachable only as the Knowledge
+ * screen's Graph and Explorer tabs (VS-371), with the rail's Knowledge row highlighted. The ones
+ * marked `rail` are carried by the desktop rail too (VS-384).
  */
 export const V2_KEPT: V2Dest[] = [
-  { key: 'global-chats', label: 'Chats', glyph: 'chats', scopeKind: 'everywhere', path: '/chats' },
-  { key: 'ws-usage', label: 'Usage', glyph: 'runs', scopeKind: 'workspace', path: '/w/$ws/usage' },
-  { key: 'ws-changelog', label: 'Changelog', glyph: 'scheduled', scopeKind: 'workspace', path: '/w/$ws/changelog' },
+  { key: 'global-chats', label: 'Chats', glyph: 'chats', scopeKind: 'everywhere', path: '/chats', rail: true },
+  { key: 'ws-usage', label: 'Usage', glyph: 'runs', scopeKind: 'workspace', path: '/w/$ws/usage', rail: true },
+  { key: 'ws-changelog', label: 'Changelog', glyph: 'scheduled', scopeKind: 'workspace', path: '/w/$ws/changelog', rail: true },
+];
+
+/**
+ * The desktop rail's Everywhere group: the design's global rows plus the kept Chats entry, placed
+ * after Live as in V1 (VS-384). The phone tab bar and More list read `V2_EVERYWHERE`/`V2_KEPT`.
+ */
+export const V2_RAIL_EVERYWHERE: V2Dest[] = [
+  ...V2_EVERYWHERE.slice(0, 2),
+  ...V2_KEPT.filter((d) => d.rail && d.scopeKind === 'everywhere'),
+  ...V2_EVERYWHERE.slice(2),
+];
+
+/** A workspace group in the desktop rail: its own sections plus the kept Usage and Changelog. */
+export const V2_RAIL_WORKSPACE: V2Dest[] = [
+  ...V2_WORKSPACE,
+  ...V2_KEPT.filter((d) => d.rail && d.scopeKind === 'workspace'),
 ];
 
 export type V2Scope = { kind: 'everywhere' } | { kind: 'workspace'; ws: string };

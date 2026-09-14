@@ -159,6 +159,60 @@ describe('the rail counts', () => {
   });
 });
 
+describe('the rail carries the kept V1 screens', () => {
+  it('shows Chats in Everywhere and Usage and Changelog under the workspace', () => {
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).getByRole('link', { name: 'Chats' })).toHaveAttribute('href', '/v2/chats');
+    expect(within(rail).getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/v2/w/acme/usage');
+    expect(within(rail).getByRole('link', { name: 'Changelog' })).toHaveAttribute('href', '/v2/w/acme/changelog');
+  });
+
+  it('shows Usage and Changelog under every workspace group, each scoped to its own workspace', () => {
+    state.workspaces = [
+      { id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 },
+      { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 0 },
+    ];
+    state.projectsByWs = { acme: [], beta: [] };
+    state.decisionsByWs = { acme: [], beta: [] };
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).getAllByRole('link', { name: 'Usage' }).map((a) => a.getAttribute('href'))).toEqual([
+      '/v2/w/acme/usage',
+      '/v2/w/beta/usage',
+    ]);
+    expect(within(rail).getAllByRole('link', { name: 'Changelog' }).map((a) => a.getAttribute('href'))).toEqual([
+      '/v2/w/acme/changelog',
+      '/v2/w/beta/changelog',
+    ]);
+  });
+
+  it('highlights exactly the kept row on each kept route', () => {
+    for (const [path, href] of [
+      ['/v2/chats', '/v2/chats'],
+      ['/v2/w/acme/usage', '/v2/w/acme/usage'],
+      ['/v2/w/acme/changelog', '/v2/w/acme/changelog'],
+    ] as const) {
+      state.path = path;
+      cleanup();
+      mountShell();
+      const rail = screen.getByRole('complementary');
+      const current = within(rail).getAllByRole('link').filter((a) => a.getAttribute('aria-current') === 'page');
+      expect(current).toHaveLength(1);
+      expect(current[0]).toHaveAttribute('href', href);
+    }
+  });
+
+  it('keeps them as marks in the collapsed rail', () => {
+    localStorage.setItem('weave.v2.rail', 'collapsed');
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).getByRole('link', { name: 'Chats' })).toHaveAttribute('href', '/v2/chats');
+    expect(within(rail).getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/v2/w/acme/usage');
+    expect(within(rail).getByRole('link', { name: 'Changelog' })).toHaveAttribute('href', '/v2/w/acme/changelog');
+  });
+});
+
 describe('the collapsed rail is remembered', () => {
   it('collapses, writes the choice, and restores it on the next mount', () => {
     const { unmount } = mountShell();

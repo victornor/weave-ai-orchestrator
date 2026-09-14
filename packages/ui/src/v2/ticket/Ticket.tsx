@@ -44,7 +44,13 @@ import {
   useTicketWorkProducts,
   useWorker,
   useWorkerMessage,
+  useWorkers,
 } from '../../api/hooks';
+import { useWorkerActivity } from '../../api/workerActivity';
+import { LiveActivityLine, type LiveActivityLineModel } from '../../components/LiveActivityLine';
+import { liveWorkersByTicket, ticketBoardStatus } from '../../lib/board';
+import { lastLinesByAgent } from '../../lib/projectOverview';
+import { activityLine, mergeWorkerActivity } from '../../lib/workerActivity';
 import { projectColorVar } from '../../lib/projectColor';
 import { ago, cents, duration, statusText, tokens } from '../../lib/format';
 import { cx } from '../../lib/cx';
@@ -69,8 +75,25 @@ export function V2TicketScreen(): React.ReactElement {
   const { ticketId } = useParams({ strict: false }) as { ticketId: string };
   const detail = useTicket(ticketId);
   const products = useTicketWorkProducts(detail.data?.ticket.id ?? '');
+  // The ticket's own worker and what it is doing now (VS-368): the same workers read, runs and stream
+  // the V2 Work screen uses, so the two surfaces cannot disagree about a live ticket.
+  const workers = useWorkers({});
+  const activity = useWorkerActivity();
+  const runs = useTicketRuns(detail.data?.ticket.id ?? '');
   const hasArtifacts = (products.data ?? []).some((p) => p.type === 'artifact');
   const visibleTabs = useMemo(() => TABS.filter((t) => t.key !== 'artifacts' || hasArtifacts), [hasArtifacts]);
+
+  const ticketRow = detail.data?.ticket;
+  const liveWorker = useMemo(
+    () => (ticketRow ? liveWorkersByTicket(workers.data ?? []).get(ticketRow.id) : undefined),
+    [workers.data, ticketRow],
+  );
+  const liveLine = useMemo(() => {
+    if (!liveWorker) return null;
+    const summary = mergeWorkerActivity(liveWorker, activity);
+    const runLine = lastLinesByAgent(runs.data ?? []).get(liveWorker.id) ?? null;
+    return activityLine(summary, runLine) ?? { label: 'Working', since: null };
+  }, [liveWorker, activity, runs.data]);
 
   const [tab, setTab] = useState<string>(() => resolveTab(search['tab']));
   useEffect(() => {
@@ -112,7 +135,7 @@ export function V2TicketScreen(): React.ReactElement {
   }
 
   const { ticket, project, worker } = detail.data;
-  const ui = ticketUiStatus(ticket.status);
+  const ui = ticketBoardStatus(ticket.status, { live: Boolean(liveWorker) });
   const pauseDetail = worker ? workerPauseDetail(worker) : null;
   const pausedFor = pauseDetail?.summary ?? null;
   const usage = detail.data.usage;
@@ -121,7 +144,7 @@ export function V2TicketScreen(): React.ReactElement {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <TicketHeader ws={ws} detail={detail.data} ui={ui} pausedFor={pausedFor} usageLine={usageLine} />
+      <TicketHeader ws={ws} detail={detail.data} ui={ui} pausedFor={pausedFor} usageLine={usageLine} liveLine={liveLine} />
       <Tabs items={visibleTabs} active={active} onChange={chooseTab} />
       <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-5">
         {active === 'artifacts' ? (
@@ -142,12 +165,14 @@ function TicketHeader({
   ui,
   pausedFor,
   usageLine,
+  liveLine,
 }: {
   ws: string;
   detail: NonNullable<ReturnType<typeof useTicket>['data']>;
   ui: ReturnType<typeof ticketUiStatus>;
   pausedFor: string | null;
   usageLine: string;
+  liveLine: LiveActivityLineModel | null;
 }): React.ReactElement {
   const { ticket, project, worker } = detail;
   return (
@@ -178,6 +203,9 @@ function TicketHeader({
         <A to="/v2/w/$ws/work" params={{ ws }} className="v2-link ml-auto">
           Work
         </A>
+      </div>
+      <div className="mt-2">
+        <LiveActivityLine line={liveLine} />
       </div>
     </header>
   );

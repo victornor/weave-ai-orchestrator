@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "V2 Work and the ticket page show no live status: a ticket being worked on
+  doesn't show what its worker is doing (the running command or test), as V1
+  does"

@@ -849,7 +849,7 @@ export function ChatPage({
                         or “what is everyone working on?”
                         <br />
                         <span className="text-micro text-text-4">
-                          The mic is push-to-talk on ⌘⇧M at a desk and tap-to-toggle on a phone.
+                          The mic is ⌘/Ctrl+Shift+Space at a desk — a quick press toggles, a held press is push-to-talk — and tap-to-toggle on a phone.
                         </span>
                       </>
                     }

@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: "Dictation shortcut moves to Ctrl+Shift+Space: a quick press toggles, a
+  hold is push-to-talk, on V1 and V2 alike"
+skip_specs: true

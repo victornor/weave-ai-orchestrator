@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYPES } from '@weave-ai/shared';
 import { useDictation } from '../lib/dictation';
+import { useDictationHotkey } from '../lib/dictationHotkey';
+import { dictationShortcut } from '../lib/dictationHint';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
 import { VoiceMeter } from './VoiceMeter';
@@ -79,8 +81,8 @@ function SendIcon(): React.ReactElement {
 
 /**
  * The one composer: chat, ticket comments, decision notes, revise-plan notes.
- * Mic is tap-to-toggle on touch and push-to-talk on ⌘⇧M at a desk — "a desk
- * user never leaves a hot mic open".
+ * Mic is tap-to-toggle on touch and Ctrl/⌘+Shift+Space at a desk — a quick press toggles the mic,
+ * a held press is push-to-talk ("a desk user never leaves a hot mic open") (VS-432).
  */
 export function Composer({
   placeholder = 'Tell the weaver what you need…',
@@ -106,7 +108,6 @@ export function Composer({
   const ta = useRef<HTMLTextAreaElement>(null);
   const base = useRef('');
   const [explain, setExplain] = useState(false);
-  const startedByKey = useRef(false);
 
   const [internalFiles, setInternalFiles] = useState<File[]>([]);
   const files = attachments ?? internalFiles;
@@ -164,28 +165,14 @@ export function Composer({
     dictation.start();
   }, [dictation, text]);
 
-  // Push-to-talk on ⌘⇧M / Ctrl⇧M at a desk; tap-to-toggle on touch.
-  useEffect(() => {
-    if (isTouch) return;
-    const down = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyM' && !dictation.listening) {
-        e.preventDefault();
-        startedByKey.current = true;
-        startMic();
-      }
-    };
-    // Releasing the chord ends push-to-talk; a mic started by click is only stopped by click.
-    const up = (e: KeyboardEvent) => {
-      if (!startedByKey.current || !dictation.listening) return;
-      if (e.code === 'KeyM' || e.key === 'Meta' || e.key === 'Control' || e.key === 'Shift') { startedByKey.current = false; dictation.stop(); }
-    };
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-    return () => {
-      window.removeEventListener('keydown', down);
-      window.removeEventListener('keyup', up);
-    };
-  }, [isTouch, dictation, startMic]);
+  // The shared dictation chord at a desk: a quick press toggles, a hold is push-to-talk (VS-432);
+  // tap-to-toggle on touch. The hook reports which mode is live so the row below can say how to stop.
+  const hotkeyMode = useDictationHotkey({
+    enabled: !isTouch,
+    listening: dictation.listening,
+    start: startMic,
+    stop: dictation.stop,
+  });
 
   useEffect(() => {
     if (autoFocus) ta.current?.focus();
@@ -253,7 +240,6 @@ export function Composer({
       pendingSendRef.current = true;
       setPendingSend(true);
       if (dictation.listening) {
-        startedByKey.current = false;
         dictation.stop();
       }
       return;
@@ -263,7 +249,6 @@ export function Composer({
     // Sending ends the utterance. A mic left open would keep appending to an input the human has
     // already sent, so it closes here — button and ⏎ alike — before the input is cleared.
     if (dictation.listening) {
-      startedByKey.current = false;
       dictation.stop();
     }
     doSend(t);
@@ -470,7 +455,7 @@ export function Composer({
             // to stop, and starting a second recording before this one's transcript lands is not a
             // state the hook holds concurrently (VS-195).
             disabled={transcribing}
-            onClick={() => { startedByKey.current = false; dictating ? dictation.stop() : startMic(); }}
+            onClick={() => { dictating ? dictation.stop() : startMic(); }}
             className={cx(
               'inline-flex size-8 flex-none items-center justify-center rounded-r6 border transition-colors duration-(--dur-fast) ease-ac',
               dictating
@@ -521,7 +506,15 @@ export function Composer({
             <span className="ac-mono text-micro tabular-nums text-text-3">
               {Math.floor(dictation.elapsed / 60)}:{String(dictation.elapsed % 60).padStart(2, '0')}
             </span>
-            <span className="hidden text-micro text-text-4 sm:inline">{isTouch ? 'tap the mic to stop' : startedByKey.current ? 'release ⌘⇧M to stop' : 'click the mic to stop'}</span>
+            <span className="hidden text-micro text-text-4 sm:inline">
+              {isTouch
+                ? 'tap the mic to stop'
+                : hotkeyMode === 'hold'
+                  ? `release ${dictationShortcut()} to stop`
+                  : hotkeyMode === 'toggle'
+                    ? `press ${dictationShortcut()} again to stop`
+                    : 'click the mic to stop'}
+            </span>
           </div>
         ) : transcribing ? (
           // Distinct from the listening row above: the mic is closed, nothing is being captured

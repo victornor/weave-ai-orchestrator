@@ -12,6 +12,7 @@ import type { Project } from '@weave-ai/shared';
 import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYPES } from '@weave-ai/shared';
 import { projectLabel } from '@weave-ai/shared';
 import { useDictation } from '../lib/dictation';
+import { useDictationHotkey } from '../lib/dictationHotkey';
 import { dictationHint } from '../lib/dictationHint';
 import { projectColorVar } from '../lib/projectColor';
 import { REVEAL_MS, REVEAL_STEP_MS, revealedCount, usePrefersReducedMotion } from '../lib/streamReveal';
@@ -188,26 +189,15 @@ export function ChatComposer({
     dictation.start();
   }, [dictation, value]);
 
-  // Push-to-talk at a desk; tap-to-toggle on touch (V1's model). A disabled composer, or one that
-  // has handed the hotkey to a modal (VS-428), does not claim it.
-  useEffect(() => {
-    if (isTouch || !hotkey || disabled) return;
-    const down = (e: KeyboardEvent): void => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyM' && !dictation.listening) {
-        e.preventDefault();
-        startMic();
-      }
-    };
-    const up = (e: KeyboardEvent): void => {
-      if (dictation.listening && (e.code === 'KeyM' || e.key === 'Meta' || e.key === 'Control' || e.key === 'Shift')) dictation.stop();
-    };
-    window.addEventListener('keydown', down);
-    window.addEventListener('keyup', up);
-    return () => {
-      window.removeEventListener('keydown', down);
-      window.removeEventListener('keyup', up);
-    };
-  }, [isTouch, disabled, hotkey, dictation, startMic]);
+  // The shared dictation chord: a quick press toggles, a hold is push-to-talk (VS-432). A touch
+  // device, a disabled composer, or one that has handed the hotkey to a modal (VS-428) does not
+  // claim it.
+  useDictationHotkey({
+    enabled: !isTouch && hotkey && !disabled,
+    listening: dictation.listening,
+    start: startMic,
+    stop: dictation.stop,
+  });
 
   // Grow to fit, then scroll inside. Measuring collapses the box and throws the scroll position
   // away, so it is put back: at the end when the insert came from dictation or the caret is already

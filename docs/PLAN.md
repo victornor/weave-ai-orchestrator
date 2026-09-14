@@ -261,6 +261,10 @@ A workspace is a directory. `weave init <dir> --prefix ACME` scaffolds it.
                                #   project's own repo instead of the daemon's. Not the same directory as the
                                #   workspace's own .weave/ above — one is the daemon's runtime state on the
                                #   host, this one lives inside a project's repo and is versioned with its code.
+    .weave/artifacts/<TICKET-IDENTIFIER>/<key>.html + <key>.meta.json  # VS-360, same opt-in flag: a
+                               #   worker's weave_ticket_artifact_put mirrors here, namespaced by its own
+                               #   ticket so no two tickets ever share a file. A workspace-scoped
+                               #   (weave_artifact_put) artifact never reaches any repo.
   archive/workers/<workerId>/ # retired workers' brief, notes, final report (logs stay under .weave/runs)
   tickets/                    # optional rendered markdown mirror of tickets (generated, read-only)
 ```

@@ -16,14 +16,32 @@ import { createMergeQueue } from './merge-queue.js';
 import { landLock } from '../util/land-lock.js';
 import { git } from '../util/git.js';
 import { reconcileProjectKnowledgeFromRepo } from '../knowledge/repoSync.js';
+import { reconcileProjectArtifactsFromRepo } from './artifactRepoSync.js';
+import { SECRET_SHAPED_RE } from '../knowledge/files.js';
 import { effectiveModels } from '../models/resolve.js';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { flattenWakes } from '../prompts/index.js';
 import type { Wakeup } from '@weave-ai/shared';
 
 function ticketBranchFor(t: { identifier: string; title: string }): string {
   const slug = t.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
   return `ac/${t.identifier.toLowerCase()}-${slug}`;
+}
+
+/**
+ * VS-360: the single enforcement point for the artifact repo-write boundary. Maps a ticket's own
+ * identifier and an artifact key to its path under `.weave/artifacts/` in that ticket's worktree —
+ * both values are already known to `putDocument` from the ticket and key it is writing, never
+ * supplied by a caller as a path, so there is no way to reach this with a different ticket's
+ * identifier. `key`'s shape is already enforced by `weave_ticket_artifact_put`'s Zod schema; the
+ * re-check here is defense in depth against internal misuse, not a real caller today.
+ */
+function repoArtifactPath(identifier: string, key: string): string {
+  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(key)) {
+    throw new OcError('internal', `artifact key ${key} is not the shape weave_ticket_artifact_put already validated; refusing to write it into a repo`, { key });
+  }
+  return `${identifier}/${key}`;
 }
 
 /** Two SHAs name the same object when one is a prefix of the other (workers often pass 7–12 chars). */
@@ -521,15 +539,32 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
    * external entry point (the agent tool, the HTTP route) rejects both before reaching here, so this
    * is not an authorization check on `actor`; `actorFor()` never produces a `system` actor for a real
    * request in the first place.
+   *
+   * `opts.mirror` (VS-360) is set only by `weave_ticket_artifact_put`'s handler, and only when the
+   * publishing worker has a worktree and the ticket's project has opted in to `knowledgeRepo`. It is
+   * used only for the `artifact:`-prefixed path — never for `plan` — and only ever names the path
+   * `repoArtifactPath` computes from this ticket's own identifier and the key being written.
    */
-  function putDocument(actor: Actor, id: string, key: string, body: string, opts?: { system?: boolean }): { documentId: string; revision: number } {
+  function putDocument(actor: Actor, id: string, key: string, body: string, opts?: { system?: boolean; mirror?: { worktreePath: string; title?: string; kind?: string } }): { documentId: string; revision: number } {
     if (key === 'plan' && !opts?.system) {
       throw new OcError('forbidden', "the `plan` document key is reserved for the daemon-generated plan digest; use `report` (or another key) for your own notes", { key });
     }
     if (key.startsWith('artifact:') && !opts?.system) {
       throw new OcError('forbidden', 'the `artifact:` key prefix is reserved for published artifacts; use `weave_ticket_artifact_put` instead of writing this key directly', { key });
     }
+    // VS-360: refuse before anything is recorded — matching `putDoc`'s existing secret refusal —
+    // only on the path that would otherwise commit this HTML into a repo. An opted-out project's
+    // publish (no `mirror`) is unaffected: an artifact is already sandboxed, reviewed content on
+    // every project, opted in or not, unlike a knowledge note.
+    if (key.startsWith('artifact:') && opts?.mirror && SECRET_SHAPED_RE.test(body)) {
+      throw new OcError('validation', 'artifact body looks like it contains a secret; refusing to publish it', { key });
+    }
     const t = get(id);
+    // Computed — and, on a boundary violation, thrown — before the transaction opens: a caller
+    // reaching this with a key `weave_ticket_artifact_put`'s own Zod schema could never have let
+    // through refuses the whole write, the same as the secret check above, rather than being folded
+    // into the "log and continue" treatment a genuine filesystem failure gets below.
+    const mirrorRel = key.startsWith('artifact:') && opts?.mirror ? repoArtifactPath(t.identifier, key.slice('artifact:'.length)) : null;
     const written = tx(db, () => {
       let doc = db.get<{ id: string; currentRevision: number }>('SELECT id, current_revision FROM ticket_documents WHERE ticket_id = ? AND key = ?', [t.id, key]);
       if (!doc) {
@@ -542,6 +577,25 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         id: newId(), documentId: doc.id, revision, body, authorKind: actor.kind, authorId: actor.id, runId: actor.runId ?? null, createdAt: nowIso(),
       });
       db.run('UPDATE ticket_documents SET current_revision = ? WHERE id = ?', [revision, doc.id]);
+      if (mirrorRel !== null && opts?.mirror) {
+        const mirror = opts.mirror;
+        try {
+          const dir = join(mirror.worktreePath, '.weave', 'artifacts', dirname(mirrorRel));
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(join(mirror.worktreePath, '.weave', 'artifacts', `${mirrorRel}.html`), body, 'utf8');
+          writeFileSync(
+            join(mirror.worktreePath, '.weave', 'artifacts', `${mirrorRel}.meta.json`),
+            `${JSON.stringify({ title: mirror.title ?? null, kind: mirror.kind ?? null }, null, 2)}\n`,
+            'utf8',
+          );
+        } catch (e) {
+          // The DB write above already succeeded and is the tool's documented contract; a mirror
+          // I/O failure (disk full, permission) is surfaced to the worker as an unexpected `git
+          // status` before it delivers, not as a failed publish (VS-358 design.md accepts the same
+          // trade-off for knowledge). A boundary violation is not caught here — see `mirrorRel` above.
+          log.warn({ err: String(e), ticketId: t.id, key }, 'artifact mirror write failed');
+        }
+      }
       recordActivity(db, ws, actor, 'ticket.document', 'ticket_document', doc.id, { key, revision, tokens: estimateTokens(body) }, t.id);
       ctx.events.emit('ticket.document', 'ticket', t.id, { ticketId: t.id, documentId: doc.id, key, revision });
       // A newer plan revision supersedes a pending plan approval (PLAN §12.2).
@@ -1353,7 +1407,12 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
             if (p.knowledgeRepoEnabled && beforeSha) {
               try {
                 const afterSha = (await git(['rev-parse', 'HEAD'], p.clonePath, 15_000)).stdout.trim();
-                if (afterSha && afterSha !== beforeSha) await reconcileProjectKnowledgeFromRepo(ctx, deps, p, beforeSha, afterSha, t.id);
+                if (afterSha && afterSha !== beforeSha) {
+                  await reconcileProjectKnowledgeFromRepo(ctx, deps, p, beforeSha, afterSha, t.id);
+                  // VS-360: same before/after pair, same per-project critical section — kept next to
+                  // the knowledge reconcile call above rather than a second lookup or a separate hook.
+                  await reconcileProjectArtifactsFromRepo(ctx, deps, p, beforeSha, afterSha);
+                }
               } catch (e) {
                 // A reconciliation failure never blocks the landing that already succeeded — the
                 // workspace copy simply stays as it was until the next opportunity to reconcile it.

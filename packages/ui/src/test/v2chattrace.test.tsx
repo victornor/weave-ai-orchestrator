@@ -286,6 +286,48 @@ describe('the live trace reveal (VS-433)', () => {
     expect(narrations()[0]).toHaveTextContent('Read the first file.');
   });
 
+  it('streams a turn’s first line when the trace mounted with nothing on the wire (VS-440)', () => {
+    vi.useFakeTimers();
+    const first = event({ id: 'e1', runId: 'r1', seq: 1, type: 'assistant.text', payload: { text: 'Starting the first line.' } });
+    const { rerender } = render(<ChatTrace events={[]} reveal runId="r1" />);
+    // Mounted early and empty: no history placeholder, because the run is being watched.
+    expect(document.querySelector('[data-v2-trace]')).not.toBeNull();
+    expect(screen.queryByText('Nothing on the wire yet.')).toBeNull();
+
+    rerender(<ChatTrace events={[first]} reveal runId="r1" />);
+    expect(narrations()).toHaveLength(1);
+    expect(narrations()[0]!.textContent).toBe('');
+
+    act(() => { vi.advanceTimersByTime(80); });
+    const mid = narrations()[0]!.textContent ?? '';
+    expect(mid.length).toBeGreaterThan(0);
+    expect('Starting the first line.'.startsWith(mid)).toBe(true);
+
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(narrations()[0]).toHaveTextContent('Starting the first line.');
+  });
+
+  it('renders a run joined mid-turn whole, keyed by its run id (VS-440)', () => {
+    vi.useFakeTimers();
+    render(<ChatTrace events={baseline} reveal runId="r1" />);
+    expect(narrations()[0]).toHaveTextContent('Read the first file.');
+  });
+
+  it('streams a second run without an unmount, though its seq restarts (VS-440)', () => {
+    vi.useFakeTimers();
+    const firstRun = [event({ id: 'a1', runId: 'r1', seq: 1, type: 'assistant.text', payload: { text: 'The first turn.' } })];
+    const secondRun = [event({ id: 'b1', runId: 'r2', seq: 1, type: 'assistant.text', payload: { text: 'The second turn.' } })];
+    const { rerender } = render(<ChatTrace events={firstRun} reveal runId="r1" />);
+    expect(narrations()[0]).toHaveTextContent('The first turn.');
+
+    rerender(<ChatTrace events={secondRun} reveal runId="r2" />);
+    expect(narrations()).toHaveLength(1);
+    expect(narrations()[0]!.textContent).toBe('');
+
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(narrations()[0]).toHaveTextContent('The second turn.');
+  });
+
   it('never animates the trace of a past turn', () => {
     state.events = [narration];
     render(<ChatTurnTrace trace={trace} ws="ws1" />);

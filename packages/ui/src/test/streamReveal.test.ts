@@ -5,7 +5,8 @@
  */
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { revealedCount, useStreamReveal } from '../lib/streamReveal';
+import type { RunEvent } from '@weave-ai/shared';
+import { revealedCount, useNewLiveIds, useStreamReveal } from '../lib/streamReveal';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -90,5 +91,50 @@ describe('useStreamReveal', () => {
 
     act(() => { vi.advanceTimersByTime(400); });
     expect(result.current).toBe('abcdefghijklmnopqrst');
+  });
+});
+
+/**
+ * VS-440: the live-trace baseline is scoped to the run. A run watched from its start has no
+ * baseline, a run joined mid-turn keeps its present events whole, and a run change resets it so a
+ * back-to-back turn streams even though `seq` restarts from zero.
+ */
+describe('useNewLiveIds', () => {
+  const ev = (id: string, runId: string, seq: number): RunEvent => ({
+    id, runId, seq, ts: '2026-09-14T09:00:00.000Z', stream: 'stdout', level: 'info',
+    type: 'assistant.text', payload: { text: id },
+  });
+
+  it('has no baseline for a run it watched start, so the first line is new', () => {
+    const { result, rerender } = renderHook(
+      ({ events, runId }: { events: RunEvent[]; runId: string }) => useNewLiveIds(events, runId),
+      { initialProps: { events: [] as RunEvent[], runId: 'r1' } },
+    );
+    expect([...result.current]).toEqual([]);
+
+    rerender({ events: [ev('e1', 'r1', 0)], runId: 'r1' });
+    expect([...result.current]).toEqual(['e1']);
+  });
+
+  it('treats the events a run already has at mount as the baseline, joined mid-turn', () => {
+    const { result } = renderHook(() => useNewLiveIds([ev('e1', 'r1', 1), ev('e2', 'r1', 2)], 'r1'));
+    expect([...result.current]).toEqual([]);
+  });
+
+  it('resets the baseline when the run changes, so a back-to-back turn streams', () => {
+    const { result, rerender } = renderHook(
+      ({ events, runId }: { events: RunEvent[]; runId: string }) => useNewLiveIds(events, runId),
+      { initialProps: { events: [ev('a1', 'r1', 5)], runId: 'r1' } },
+    );
+    expect([...result.current]).toEqual([]);
+
+    // The new run's seq restarts at 1, below the old baseline of 5; it is still new.
+    rerender({ events: [ev('b1', 'r2', 1)], runId: 'r2' });
+    expect([...result.current]).toEqual(['b1']);
+  });
+
+  it('ignores another run’s stale frame rather than reading it as new', () => {
+    const { result } = renderHook(() => useNewLiveIds([ev('a1', 'r1', 9)], 'r2'));
+    expect([...result.current]).toEqual([]);
   });
 });

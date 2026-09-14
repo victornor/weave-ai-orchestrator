@@ -301,7 +301,10 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const queuedCount = useQueueCount('thread');
 
   const [sending, setSending] = useState(false);
-  const [live, setLive] = useState<{ id: string; running: boolean } | null>(null);
+  // `fromStart` is true only for a run this screen saw begin (`run.started`), not one resumed from
+  // `weaver.lastRun`; the live trace mounts on it before the run's first event so that line streams
+  // (VS-440), while a resumed run still waits for its events so the ones already there stay whole.
+  const [live, setLive] = useState<{ id: string; running: boolean; fromStart: boolean } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const [anchor, setAnchor] = useState<string | null>(null);
@@ -326,7 +329,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // Resume a turn in flight, and follow the weaver's own runs (V1's live-turn stream).
   useEffect(() => {
     const last = weaver.data?.lastRun;
-    if (last && isActiveRun(last.status)) setLive((cur) => cur ?? { id: last.id, running: true });
+    if (last && isActiveRun(last.status)) setLive((cur) => cur ?? { id: last.id, running: true, fromStart: false });
   }, [weaver.data?.lastRun]);
 
   useWorkspaceEvents(
@@ -335,9 +338,9 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
         if (e.type !== 'run.started' && e.type !== 'run.finished') return;
         const p = e.payload as { agentId?: string } | null;
         if (!conductorId || p?.agentId !== conductorId) return;
-        if (e.type === 'run.started') setLive({ id: e.entityId, running: true });
+        if (e.type === 'run.started') setLive({ id: e.entityId, running: true, fromStart: true });
         else {
-          setLive((cur) => (cur && cur.id === e.entityId ? { id: cur.id, running: false } : cur));
+          setLive((cur) => (cur && cur.id === e.entityId ? { ...cur, running: false } : cur));
           setSending(false);
         }
       },
@@ -692,7 +695,9 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                           <button type="button" onClick={retryNow} className="text-text-3 underline">Refresh</button>
                         </p>
                       ) : null}
-                      {liveEvents.length ? <ChatTrace events={liveEvents} className="border-l border-line-1 pl-2.5" reveal /> : null}
+                      {liveEvents.length || live?.fromStart ? (
+                        <ChatTrace events={liveEvents} runId={live?.id ?? null} className="border-l border-line-1 pl-2.5" reveal />
+                      ) : null}
                     </section>
                   ) : null}
                   {/* Live work no message in this thread accounts for, exactly where V1 puts it. */}

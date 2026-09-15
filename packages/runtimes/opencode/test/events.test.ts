@@ -23,6 +23,8 @@ describe('opencode run --format json parser', () => {
     expect(state.sessionId).toBe('ses_f9649ed9bffeRTKyRYoqBVKK1G');
     expect(state.finalText).toBe('pong');
     expect(state.usage).toEqual({ inputTokens: 10018, outputTokens: 14, cachedInputTokens: 1792 });
+    // VS-462: the first (only) request reads 10018 fresh (input 10018 + cache.write 0) and 1792 cached.
+    expect(state.firstRequest).toEqual({ freshTokens: 10018, cachedTokens: 1792 });
     // One request: input 10018 + cache.write 0 + cache.read 1792.
     expect(state.contextTokens).toBe(11_810);
     expect(state.costUsd).toBe(0);
@@ -40,6 +42,8 @@ describe('opencode run --format json parser', () => {
     expect(cmd.payload['tests']).toBeUndefined();
     // usage is summed across both steps
     expect(state.usage).toEqual({ inputTokens: 4551, outputTokens: 61, cachedInputTokens: 18944 });
+    // VS-462: only the first step's request — 4294 fresh, 7424 read from cache — not the sum.
+    expect(state.firstRequest).toEqual({ freshTokens: 4294, cachedTokens: 7424 });
     expect(state.finalText).toBe('```json\n{"state":"done","summary":"said pong"}\n```');
   });
 
@@ -60,6 +64,7 @@ describe('opencode run --format json parser', () => {
     expect(state.errorMessage).toContain('Unexpected server error');
     expect(state.contextTokens).toBeNull();
     expect(state.usage).toBeNull();
+    expect(state.firstRequest).toBeNull();
   });
 
   it('reports session.resumed when resuming', () => {

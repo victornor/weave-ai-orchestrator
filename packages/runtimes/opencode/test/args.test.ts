@@ -57,6 +57,22 @@ describe('opencode buildArgs', () => {
     expect(buildArgs(input()).files).toHaveLength(0);
   });
 
+  it('disables opencode native tools on an interactive opening turn (VS-462)', () => {
+    const b = buildArgs(input({
+      permission: { mode: 'auto', firstTurn: true },
+      mcpServers: { 'weave-ai': { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1' } },
+    }));
+    const cfg = JSON.parse(b.files.find((x) => x.path === '/home/agent/.opencode/opencode.json')!.content);
+    // Every tool that could read or touch the repo is off; the MCP control plane is untouched.
+    for (const name of ['bash', 'edit', 'read', 'grep', 'glob', 'skill', 'webfetch']) expect(cfg.tools[name]).toBe(false);
+    expect(cfg.mcp['weave-ai']).toBeDefined();
+  });
+
+  it('leaves the tools switch unset on an ordinary turn', () => {
+    const b = buildArgs(input({ mcpServers: { 'weave-ai': { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1' } } }));
+    expect(JSON.parse(b.files[0]!.content).tools).toBeUndefined();
+  });
+
   it('isolates every XDG root and HOME to the runtime home (VS-161, VS-436)', () => {
     const home = '/ws/.agent-conductor/runtimes/opencode';
     expect(buildArgs(input({ configHome: home })).env).toEqual({

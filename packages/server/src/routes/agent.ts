@@ -24,13 +24,13 @@ export function agentRoutes(deps: AppDeps): Hono<AppEnv> {
 
   app.get('/tools', (c) => {
     const ctx = toolCtx(c as never);
-    return c.json(toolListFor(ctx.claims.agentKind, ctx.ws));
+    return c.json(toolListFor(ctx.claims.agentKind, ctx.ws, ctx.claims.firstTurn));
   });
 
   app.post('/tools/:tool', async (c) => {
     const ctx = toolCtx(c as never);
     const name = c.req.param('tool');
-    if (!toolNamesFor(ctx.claims.agentKind, ctx.ws).includes(name)) throw new OcError('forbidden', `tool ${name} is not available to a ${ctx.claims.agentKind}`);
+    if (!toolNamesFor(ctx.claims.agentKind, ctx.ws, ctx.claims.firstTurn).includes(name)) throw new OcError('forbidden', `tool ${name} is not available to a ${ctx.claims.agentKind}`);
     const { input } = await body(c, z.object({ input: z.unknown().default({}) }));
     return c.json(await runTool(name, ctx, input));
   });

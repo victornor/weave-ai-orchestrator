@@ -11,6 +11,12 @@ export interface ClaudeParseState {
   structured: unknown;
   usage: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } | null;
   /**
+   * VS-462: the first API request of the turn, split into fresh (input + cache creation) and cached
+   * (cache read) tokens. Captured from the first non-subagent `assistant` message's usage block,
+   * before the `result` line's turn total supersedes it. Null when the stream carried no usage.
+   */
+  firstRequest: { freshTokens: number; cachedTokens: number } | null;
+  /**
    * The size of the last API request this turn made, from the last `assistant` message that carried
    * a usage block: what it sent, what it wrote to cache and what it read back. That is the context
    * window's fill. The `result` message's usage is the same fields summed over every request the
@@ -41,7 +47,7 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 export function createClaudeParser(opts: { resumed: boolean } = { resumed: false }) {
   const state: ClaudeParseState = {
     sessionId: null, model: null, finalText: null, assistantText: '', structured: undefined,
-    usage: null, contextTokens: null, costUsd: null, isError: false, errorMessage: null, numTurns: null,
+    usage: null, firstRequest: null, contextTokens: null, costUsd: null, isError: false, errorMessage: null, numTurns: null,
     resultSeen: false,
   };
   /** tool_use id -> tool name, so tool_result lines can be classified. */
@@ -118,6 +124,13 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
     if (msg['parent_tool_use_id'] == null) {
       const u = obj(m['usage']);
       if (u) {
+        // VS-462: the first request's own split, before later requests overwrite `contextTokens`.
+        if (state.firstRequest == null) {
+          state.firstRequest = {
+            freshTokens: (num(u['input_tokens']) ?? 0) + (num(u['cache_creation_input_tokens']) ?? 0),
+            cachedTokens: num(u['cache_read_input_tokens']) ?? 0,
+          };
+        }
         state.contextTokens =
           (num(u['input_tokens']) ?? 0) + (num(u['cache_creation_input_tokens']) ?? 0) + (num(u['cache_read_input_tokens']) ?? 0);
       }

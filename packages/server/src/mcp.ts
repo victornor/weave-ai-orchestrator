@@ -40,7 +40,7 @@ export function capListResult(result: ToolResult<unknown>, cap: number): ToolRes
 
 /** Build the MCP server exposing exactly the tools this run's agent may call — core tools plus this workspace's own plugin tools (VS-334). */
 export function createMcpServer(ctx: ToolCtx, version: string): Server {
-  const defs = toolListFor(ctx.claims.agentKind, ctx.ws);
+  const defs = toolListFor(ctx.claims.agentKind, ctx.ws, ctx.claims.firstTurn);
   const server = new Server({ name: MCP_SERVER_NAME, version }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: defs.map((d) => ({ name: d.name, description: d.description, inputSchema: d.inputSchema })),

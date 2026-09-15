@@ -31,7 +31,13 @@ export interface TurnInput {
   systemPrompt: { text: string; mode: 'inject' | 'skip' };
   prompt: string; outputSchema?: JsonSchema; mcpServers: Record<string, McpServerConfig>; env: Record<string, string>;
   options: Record<string, unknown>; limits: { timeoutMs: number; maxBudgetUsd?: number; maxTurns?: number };
-  permission: { mode: PermissionMode; allowedTools?: string[]; deniedTools?: string[] };
+  /**
+   * VS-462: `firstTurn` marks an interactive session's opening turn. Its `allowedTools` list is
+   * exhaustive — the runtime adapters hand it to the CLI where one exists (Claude's `--allowedTools`)
+   * and, where a runtime exposes its own tool switch (opencode's `tools` config), disable everything
+   * outside it. The MCP server enforces the same list off the run token, so it holds on any runtime.
+   */
+  permission: { mode: PermissionMode; allowedTools?: string[]; deniedTools?: string[]; firstTurn?: boolean };
   model?: string | null; effort?: string | null; configHome?: string;
 }
 export interface RuntimeEvent { seq?: number; ts: string; type: RunEventType; payload: Record<string, unknown> }
@@ -47,7 +53,16 @@ export interface TurnResult {
    * multiplied by the request count and are not a context measurement. Omitted by an adapter whose
    * CLI reports no per-request figure — better unreported than a total read as a size.
    */
-  usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number; contextTokens?: number; basis: 'per_turn' | 'session_cumulative' };
+  usage?: {
+    inputTokens: number; outputTokens: number; cachedInputTokens?: number; contextTokens?: number; basis: 'per_turn' | 'session_cumulative';
+    /**
+     * VS-462: the turn's **first** API request, split into what the provider had to read fresh and
+     * what it read from its prompt cache. A turn's first request should hit the cache of the
+     * previous turn's context; when it does not, the whole conversation is re-sent uncached and the
+     * miss dominates the run's cost. Omitted by an adapter whose CLI reports no per-request figure.
+     */
+    firstRequest?: { freshTokens: number; cachedTokens: number };
+  };
   cost?: { usd: number; status: 'reported' | 'estimated' }; model?: string; provider?: string;
   error?: { code: string; family: RunErrorFamily; message: string; retryAfterMs?: number };
 }

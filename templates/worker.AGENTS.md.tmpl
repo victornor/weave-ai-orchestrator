@@ -66,6 +66,10 @@ Do not add or keep a `mise.toml` (or equivalent) Node pin that makes host CLIs s
 
 `state` is one of `working | needs_decision | blocked | paused | done | failed | idle`. `knowledge` is required — `{recorded:true, where}` or `{recorded:false, reason}` — and a report that omits it, or gives an incomplete shape, is treated as no report at all, the same as one missing `state`. Set `uncommittedWork: true` if you are ending a turn with changes you have not committed.
 
+## Token care
+
+- **Batch independent reads into one step.** Several files, several greps, several globs: ask for them together in one call, never one per call. Every extra step re-sends the whole conversation, so reading one file per step costs far more than reading them all at once.
+
 ## Git
 
 - Commit early, with clear messages. Never end a turn holding work you would mind losing — your worktree survives, but your session may not.

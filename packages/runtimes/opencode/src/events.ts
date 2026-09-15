@@ -7,6 +7,12 @@ export interface OpenCodeParseState {
   finalText: string | null;
   usage: { inputTokens: number; outputTokens: number; cachedInputTokens: number } | null;
   /**
+   * VS-462: the first `step_finish`'s request split into fresh (input + cache.write) and cached
+   * (cache.read) tokens. A turn that re-sends its whole conversation uncached shows up here. Null
+   * when the stream reported no `tokens` object.
+   */
+  firstRequest: { freshTokens: number; cachedTokens: number } | null;
+  /**
    * Size of the last `step_finish` request: input + cache.write + cache.read. The `usage`
    * totals above sum every step and are not a context size. Null when the stream reported
    * no `tokens` object.
@@ -40,7 +46,7 @@ const EDIT_TOOLS = new Set(['edit', 'write', 'patch', 'multiedit']);
  * `runtime.raw`, which is the honest record that something arrived we do not model.
  */
 export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: false }) {
-  const state: OpenCodeParseState = { sessionId: null, finalText: null, usage: null, contextTokens: null, costUsd: null, isError: false, errorMessage: null };
+  const state: OpenCodeParseState = { sessionId: null, finalText: null, usage: null, firstRequest: null, contextTokens: null, costUsd: null, isError: false, errorMessage: null };
   const textByMessage = new Map<string, string[]>();
   let lastMessageId: string | null = null;
   let announced = false;
@@ -87,11 +93,13 @@ export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: fal
       case 'step_finish': {
         const t = obj(part?.['tokens']);
         if (t) {
-          sawTokens = true;
           const cache = obj(t['cache']);
           const input = num(t['input']) ?? 0;
           const write = num(cache?.['write']) ?? 0;
           const read = num(cache?.['read']) ?? 0;
+          // VS-462: remember only the first step's request, before the running total folds it in.
+          if (state.firstRequest == null) state.firstRequest = { freshTokens: input + write, cachedTokens: read };
+          sawTokens = true;
           tokens = {
             inputTokens: tokens.inputTokens + input,
             outputTokens: tokens.outputTokens + (num(t['output']) ?? 0),

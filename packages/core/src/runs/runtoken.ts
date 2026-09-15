@@ -18,6 +18,12 @@ export interface RunTokenClaims {
   /** VS-398: the plan a `planner`-kind agent's tool calls are scoped to; null for every other kind. */
   planId: string | null;
   roleId: string | null;
+  /**
+   * VS-462: true on an interactive session's opening turn. The MCP server then serves and runs only
+   * `FIRST_TURN_TOOLS` for this run — the hold is a fact of the token, not of the runtime honouring
+   * an allowlist, so it survives a runtime that ignores one.
+   */
+  firstTurn?: boolean;
 }
 
 export const RUN_TOKEN_PREFIX = 'rt_';
@@ -36,7 +42,7 @@ export function runTokenSecret(db: Db): Uint8Array {
 export async function signRunToken(secret: Uint8Array, claims: RunTokenClaims, ttlSeconds = RUN_TOKEN_TTL_SECONDS): Promise<string> {
   const jwt = await new SignJWT({
     wid: claims.workspaceId, rid: claims.runId, aid: claims.agentId, kind: claims.agentKind,
-    pid: claims.projectId, tid: claims.ticketId, plid: claims.planId, rlid: claims.roleId,
+    pid: claims.projectId, tid: claims.ticketId, plid: claims.planId, rlid: claims.roleId, ft: claims.firstTurn,
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(claims.agentId)
@@ -66,6 +72,7 @@ export async function verifyRunToken(secret: Uint8Array, token: string): Promise
     return {
       workspaceId: payload.wid, runId: payload.rid, agentId: payload.aid, agentKind: kind,
       projectId: str(payload.pid), ticketId: str(payload.tid), planId: str(payload.plid), roleId: str(payload.rlid),
+      firstTurn: payload.ft === true,
     };
   } catch (e) {
     if (e instanceof OcError) throw e;

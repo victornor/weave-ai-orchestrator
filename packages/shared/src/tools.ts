@@ -39,7 +39,17 @@ export const PLANNER_TOOLS = [
   /** The planner's own reply tool — `weave_human_send` is weaver-only and `weave_ticket_comment` needs a ticket the planner never has. */
   'weave_plan_reply',
 ] as const;
-export type ToolName = (typeof COMMON_TOOLS)[number] | (typeof WEAVER_TOOLS)[number] | (typeof PLANNER_TOOLS)[number];
+/**
+ * VS-101, narrowed by VS-462: the tools an interactive session's agent may call on its very first
+ * turn — read its ticket and its documents, and post one comment, nothing else. Deliberately no
+ * `weave_worktree_status`, no `weave_ticket_transition`, no work product: the opening turn says what
+ * it understands and stops. Enforced at the MCP boundary by the run token's `firstTurn` claim, so a
+ * runtime that ignores its own tool allowlist still cannot reach past this list.
+ */
+export const FIRST_TURN_TOOLS = [
+  'weave_inbox', 'weave_ticket_get', 'weave_ticket_comments', 'weave_ticket_comment', 'weave_ticket_document_get',
+] as const;
+export type ToolName = (typeof COMMON_TOOLS)[number] | (typeof WEAVER_TOOLS)[number] | (typeof PLANNER_TOOLS)[number] | (typeof FIRST_TURN_TOOLS)[number];
 
 /** The weaver's tool whose words reach the human; its body is the reply itself. Kept as the single name for backward compatibility — `HUMAN_REPLY_TOOLS` is the full set `isHumanReplyToolEvent` checks against. */
 export const HUMAN_REPLY_TOOL = 'weave_human_send' satisfies ToolName;

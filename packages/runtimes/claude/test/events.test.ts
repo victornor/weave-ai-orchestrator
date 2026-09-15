@@ -39,6 +39,8 @@ describe('claude stream-json parser', () => {
     expect(state.model).toBe('claude-haiku-4-5-20251001');
     expect(state.finalText).toBe('pong');
     expect(state.usage).toEqual({ inputTokens: 12333, outputTokens: 43, cachedInputTokens: 13615 });
+    // VS-462: the first request reads 12333 fresh (input 10 + cache creation 12323) and 13615 cached.
+    expect(state.firstRequest).toEqual({ freshTokens: 12333, cachedTokens: 13615 });
     // One request, so its size and the turn's totals happen to agree: 10 + 12323 + 13615.
     expect(state.contextTokens).toBe(25_948);
     expect(state.costUsd).toBeCloseTo(0.0262325, 6);
@@ -65,6 +67,8 @@ describe('claude stream-json parser', () => {
     expect(state.structured).toEqual({ state: 'done', summary: 'said pong' });
     expect(state.finalText).toBe('{"state":"done","summary":"said pong"}');
     expect(state.usage).toEqual({ inputTokens: 17962, outputTokens: 257, cachedInputTokens: 17739 });
+    // VS-462: the first request of the two-request turn, before `result`'s turn total supersedes it.
+    expect(state.firstRequest).toEqual({ freshTokens: 17749, cachedTokens: 0 });
   });
 
   it('measures the context from the last request, while usage stays the turn\u2019s total', () => {
@@ -87,9 +91,12 @@ describe('claude stream-json parser', () => {
     });
     p.handle(msg(null, 80_000));
     expect(p.state.contextTokens).toBe(80_005);
+    // VS-462: the first request of this conversation, kept even as later requests overwrite it.
+    expect(p.state.firstRequest).toEqual({ freshTokens: 5, cachedTokens: 80_000 });
     // A Task tool's own turn: far smaller, and not this session's context.
     p.handle(msg('toolu_sub', 900));
     expect(p.state.contextTokens).toBe(80_005);
+    expect(p.state.firstRequest).toEqual({ freshTokens: 5, cachedTokens: 80_000 });
   });
 
   it('reports session.resumed when the turn resumed a session', () => {

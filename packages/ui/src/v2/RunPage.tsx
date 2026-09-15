@@ -7,7 +7,7 @@
  */
 import { useParams } from '@tanstack/react-router';
 import { isActiveRun } from '@weave-ai/shared';
-import { contextStrip, resolveModel } from '@weave-ai/render';
+import { contextStrip, firstRequest, resolveModel } from '@weave-ai/render';
 import { useRunGlobal, useRuntimeModels, useWeaverMany, useWorkersMany } from '../api/hooks';
 import { useRunEventStream } from '../api/runStream';
 import { useGo } from '../app/link';
@@ -73,6 +73,8 @@ export function RunBody({ runId }: { runId: string }): React.ReactElement {
   const inOut = `${tokens(run.usage?.inputTokens ?? 0)} in · ${tokens(run.usage?.outputTokens ?? 0)} out`;
   const tokenValue = ctx ? `${inOut} · ${ctx.tokensLabel}/${ctx.windowLabel} ctx` : inOut;
   const wall = run.startedAt && run.finishedAt ? duration(new Date(run.finishedAt).getTime() - new Date(run.startedAt).getTime()) : '—';
+  // VS-462: the turn's first request, split fresh/cached — a miss re-sends the whole conversation.
+  const firstReq = firstRequest(run.usage);
 
   const meta: Array<[string, string]> = [
     ['agent', agentName],
@@ -80,6 +82,7 @@ export function RunBody({ runId }: { runId: string }): React.ReactElement {
     ['started', run.startedAt ? new Date(run.startedAt).toLocaleString() : '—'],
     ['duration', wall],
     ['tokens', tokenValue],
+    ...(firstReq ? [['first req', firstReq.label] as [string, string]] : []),
     ['cost', cents(run.costCents)],
     ['trigger', runTrigger(run)],
   ];
@@ -105,6 +108,15 @@ export function RunBody({ runId }: { runId: string }): React.ReactElement {
           </div>
         ))}
       </div>
+
+      {firstReq?.missed ? (
+        <div className="v2-card flex items-center gap-3 px-3.5 py-2" data-v2-run-cache-miss>
+          <span className="ac-label flex-none text-needs-you">cache miss</span>
+          <span className="ac-mono min-w-0 flex-1 truncate text-micro text-text-1">
+            {firstReq.label} on the first request
+          </span>
+        </div>
+      ) : null}
 
       <section className="flex flex-col gap-2">
         <div className="ac-label">What it did</div>

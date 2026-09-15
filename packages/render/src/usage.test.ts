@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RuntimeAccount } from '@weave-ai/shared';
-import { accountLimits, budgetMeter, contextStrip, contextTokens, costStatusFor, MIXED_BILLING_NOTE, mixedBillingNote, resolveModel, runtimeLimitStrip, showCost, usageRows, usageTotals } from './usage.js';
+import { accountLimits, budgetMeter, contextStrip, contextTokens, costStatusFor, FIRST_REQUEST_MISS_THRESHOLD, firstRequest, MIXED_BILLING_NOTE, mixedBillingNote, resolveModel, runtimeLimitStrip, showCost, usageRows, usageTotals } from './usage.js';
 
 const series = {
   range: { start: 's', end: 'e', window: '24h', grain: 'hour', prevStart: 'ps', prevEnd: 'pe' },
@@ -349,5 +349,29 @@ describe('contextStrip', () => {
       { inputTokens: 320_119, cachedInputTokens: 667_671, outputTokens: 1_022 };
     expect(contextStrip({ usage: cumulativeOnly, contextWindowTokens: 200_000, compactionAt: 0.92, hasRun: true }))
       .toMatchObject({ tokens: 0, meter: null, reason: 'Context size unreported' });
+  });
+});
+
+describe('firstRequest (VS-462)', () => {
+  it('says nothing when the runtime reported no first request', () => {
+    expect(firstRequest(null)).toBeNull();
+    expect(firstRequest(undefined)).toBeNull();
+    expect(firstRequest({})).toBeNull();
+  });
+
+  it('splits the first request into fresh and cached, and labels it', () => {
+    expect(firstRequest({ firstRequest: { freshTokens: 1_664, cachedTokens: 110_080 } })).toEqual({
+      freshTokens: 1_664,
+      cachedTokens: 110_080,
+      label: '1.7k fresh · 110k cached',
+      missed: false,
+    });
+  });
+
+  it('flags a first request that re-sent more than the threshold uncached', () => {
+    expect(firstRequest({ firstRequest: { freshTokens: 74_076, cachedTokens: 1_664 } })?.missed).toBe(true);
+    // The threshold itself counts as a miss; one below it does not.
+    expect(firstRequest({ firstRequest: { freshTokens: FIRST_REQUEST_MISS_THRESHOLD, cachedTokens: 0 } })?.missed).toBe(true);
+    expect(firstRequest({ firstRequest: { freshTokens: FIRST_REQUEST_MISS_THRESHOLD - 1, cachedTokens: 0 } })?.missed).toBe(false);
   });
 });

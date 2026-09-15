@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { z, type ZodTypeAny } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
-  COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, PLANNER_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
+  COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, PLANNER_TOOLS, FIRST_TURN_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   SELF_WAKE_MAX_DELAY_MS, SELF_WAKE_MIN_DELAY_MS,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES, ROADMAP_STATUSES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
@@ -1167,14 +1167,17 @@ const BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
  * A plugin tool registered while loading a *different* workspace is never in this list: it lives in
  * that workspace's own `ctx.plugins.tools`, not here.
  */
-export function toolNamesFor(kind: AgentKind, ws?: WorkspaceRuntime): string[] {
+export function toolNamesFor(kind: AgentKind, ws?: WorkspaceRuntime, firstTurn = false): string[] {
+  // VS-462: an interactive session's opening turn is scoped to reading its ticket and posting one
+  // comment, ahead of and instead of its kind's ordinary surface — a narrowing, never a widening.
+  if (firstTurn) return [...FIRST_TURN_TOOLS];
   const core = kind === 'weaver' ? [...COMMON_TOOLS, ...WEAVER_TOOLS] : kind === 'planner' ? [...PLANNER_TOOLS] : [...COMMON_TOOLS, ...WORKER_ONLY_TOOLS];
   if (!ws) return core;
   const pluginNames = ws.ctx.plugins.tools.filter((t) => t.scope === 'all' || t.scope === kind).map((t) => t.name);
   return [...core, ...pluginNames];
 }
-export function toolsFor(kind: AgentKind): ToolDef[] {
-  const allowed = new Set(toolNamesFor(kind));
+export function toolsFor(kind: AgentKind, firstTurn = false): ToolDef[] {
+  const allowed = new Set(toolNamesFor(kind, undefined, firstTurn));
   return TOOLS.filter((t) => allowed.has(t.name));
 }
 export function jsonSchemaFor(def: ToolDef): Record<string, unknown> {
@@ -1182,8 +1185,10 @@ export function jsonSchemaFor(def: ToolDef): Record<string, unknown> {
 }
 export interface ToolListEntry { name: string; description: string; inputSchema: Record<string, unknown> }
 /** The full tool list an MCP `tools/list` (or the CLI's `GET /tools`) should show: core tools plus this workspace's own plugin tools, scope-filtered (VS-334). */
-export function toolListFor(kind: AgentKind, ws: WorkspaceRuntime): ToolListEntry[] {
-  const core = toolsFor(kind).map((d) => ({ name: d.name, description: d.description, inputSchema: jsonSchemaFor(d) }));
+export function toolListFor(kind: AgentKind, ws: WorkspaceRuntime, firstTurn = false): ToolListEntry[] {
+  const core = toolsFor(kind, firstTurn).map((d) => ({ name: d.name, description: d.description, inputSchema: jsonSchemaFor(d) }));
+  // VS-462: a first-turn run never sees a workspace plugin tool — its surface is the fixed list.
+  if (firstTurn) return core;
   const plugin = ws.ctx.plugins.tools
     .filter((t) => t.scope === 'all' || t.scope === kind)
     .map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema }));
@@ -1195,12 +1200,18 @@ export async function runTool(name: string, ctx: ToolCtx, rawInput: unknown): Pr
   try {
     const def = BY_NAME.get(name);
     if (def) {
-      if (!toolNamesFor(ctx.claims.agentKind).includes(name)) throw new OcError('forbidden', `tool ${name} is not available to a ${ctx.claims.agentKind}`);
+      if (!toolNamesFor(ctx.claims.agentKind, undefined, ctx.claims.firstTurn).includes(name)) {
+        throw new OcError('forbidden', ctx.claims.firstTurn
+          ? `tool ${name} is not available on an interactive session's first turn`
+          : `tool ${name} is not available to a ${ctx.claims.agentKind}`);
+      }
       const parsed = def.input.safeParse(rawInput ?? {});
       if (!parsed.success) throw toOcError(parsed.error);
       const result = await def.handler(ctx, parsed.data);
       return isWithMcpContent(result) ? ok(result.data, mcpContentOf(result)) : ok(result);
     }
+    // VS-462: a first-turn run has no plugin tools either — its whole surface is `FIRST_TURN_TOOLS`.
+    if (ctx.claims.firstTurn) throw new OcError('forbidden', `tool ${name} is not available on an interactive session's first turn`);
     // VS-334: a core-tool miss falls through to this workspace's own plugin tools — never another
     // workspace's, since each keeps its own `ctx.plugins.tools`.
     const pluginTool = ctx.ws.ctx.plugins.tools.find((t) => t.name === name);

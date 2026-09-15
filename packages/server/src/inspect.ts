@@ -7,7 +7,7 @@
  * and `weave attach` do, so an inspected transcript cannot disagree with the one a human sees.
  */
 import { RECORDED_RUN_PHASES, OcError, type Agent, type Run, type RunEvent, type RunPhase, type Ticket } from '@weave-ai/shared';
-import { formatDuration, runEventsToTranscript, transcriptToLines, type InspectionLine } from '@weave-ai/render';
+import { firstRequest, formatDuration, runEventsToTranscript, transcriptToLines, type InspectionLine } from '@weave-ai/render';
 import type { CoreServices } from '@weave-ai/core';
 
 /** Transcript events read per call. The tool caps the caller's request at `MAX_EVENTS`. */
@@ -262,6 +262,10 @@ export function runView(run: Run, now = Date.now()): Record<string, unknown> {
     errorFamily: run.errorFamily,
     retryOfRunId: run.retryOfRunId,
     summary: run.summary,
+    usage: run.usage,
+    // VS-462: the turn's first request, split fresh/cached, with `missed` past 50k fresh — the one
+    // place an inspector can see that a turn re-sent its whole context uncached.
+    firstRequest: firstRequest(run.usage),
   };
 }
 

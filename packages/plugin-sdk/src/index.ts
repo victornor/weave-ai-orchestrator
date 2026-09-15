@@ -171,7 +171,9 @@ export function definePlugin(p: WeaveAIPlugin): WeaveAIPlugin { return p; }
  * `section`/`badge` are the app's own real classes (`.v2-card`/`.v2-tag`); the other five are shared
  * classes added to `packages/ui/src/v2/v2.css` alongside real screens that use them. `link` is the
  * anchor role (VS-458): the generated stylesheet also styles a bare `<a>` in a plugin page, so a
- * plugin that writes a plain link is styled too.
+ * plugin that writes a plain link is styled too. `rowPanel` (VS-468) is the class for a panel that
+ * expands under a `.v2-table` row: place it as a direct child of the table, after the row, and lay
+ * out its fields with `.v2-form-row` (the `formRow` role).
  */
 export const WEAVE_PLUGIN_CLASS = {
   section: 'v2-card',
@@ -181,14 +183,17 @@ export const WEAVE_PLUGIN_CLASS = {
   input: 'v2-input',
   formRow: 'v2-form-row',
   link: 'v2-link',
+  rowPanel: 'v2-table-panel',
 } as const;
 
 /**
- * The `.v2-table` recipe's cell roles (VS-385/VS-458) — the values a row cell's `data-cell`
+ * The `.v2-table` recipe's cell roles (VS-385/VS-458/VS-468) — the values a row cell's `data-cell`
  * attribute takes. Separate from `WEAVE_PLUGIN_CLASS` because these are attribute values, not class
  * names, and both constants share the same rule: names only, never a colour, spacing or font value.
  * `actions` is a cell holding a row's own inline controls, laid out for `.v2-button`s — use the
- * compact `data-size="small"` variant so a row's buttons do not set the row's height (VS-458).
+ * compact `data-size="small"` variant so a row's buttons do not set the row's height (VS-458). The
+ * `secondary` cell may shrink and truncate with an ellipsis after `primary` keeps a minimum (VS-468),
+ * so a long muted detail no longer pushes the actions cell off a narrow row.
  */
 export const WEAVE_PLUGIN_TABLE_CELL = {
   primary: 'primary',

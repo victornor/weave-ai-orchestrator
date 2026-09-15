@@ -50,7 +50,7 @@ export const V2_STATUS_TONE_NAMES: readonly string[] = V2_THEME_TOKEN_NAMES
   .map((n) => n.slice('--status-'.length));
 
 /** Every component class the generated stylesheet must define at least one rule for — the completeness set. */
-const COMPONENT_CLASS_PREFIXES = ['.v2-card', '.v2-tag', '.v2-button', '.v2-input', '.v2-form-row', '.v2-table'] as const;
+const COMPONENT_CLASS_PREFIXES = ['.v2-card', '.v2-tag', '.v2-button', '.v2-input', '.v2-form-row', '.v2-table', '.v2-table-panel'] as const;
 
 function stripComments(css: string): string {
   return css.replace(/\/\*[\s\S]*?\*\//g, ' ');

@@ -139,6 +139,49 @@ describe('generateV2PluginCss — VS-465 (plugin pages: section spacing and [hid
   });
 });
 
+describe('generateV2PluginCss — VS-468 (a shrinking metadata cell, a row panel, grouped actions)', () => {
+  const generated = generateV2PluginCss(V2_CSS, INDEX_CSS);
+
+  /** The declaration block of the rule whose selector text is `selector`, or a thrown error. */
+  function ruleBody(selector: string): string {
+    const found = new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(generated);
+    if (!found) throw new Error(`no rule for ${selector}`);
+    return found[1]!;
+  }
+
+  it('lets the metadata cell shrink and truncate after primary keeps a minimum', () => {
+    const secondary = ruleBody(".v2-table [data-cell='secondary']");
+    expect(secondary).toMatch(/flex:\s*0 1 auto/);
+    expect(secondary).toMatch(/min-width:\s*0\b/);
+    expect(secondary).toMatch(/overflow:\s*hidden/);
+    expect(secondary).toMatch(/text-overflow:\s*ellipsis/);
+    expect(secondary).toMatch(/white-space:\s*nowrap/);
+    // Its muted mono look is unchanged.
+    expect(secondary).toMatch(/font-family:\s*var\(--ff-mono\)/);
+    expect(secondary).toMatch(/color:\s*var\(--text-3\)/);
+
+    const primary = ruleBody(".v2-table [data-cell='primary']");
+    expect(primary).toMatch(/min-width:\s*var\(--space-9\)/);
+  });
+
+  it('emits the row-panel rule (VS-468)', () => {
+    const panel = ruleBody('.v2-table-panel');
+    expect(panel).toMatch(/border-top:\s*1px solid var\(--line-1\)/);
+  });
+
+  it('divides any table child from its predecessor, so a row after a panel is not left flush', () => {
+    expect(generated).toMatch(/\.v2-table > \* \+ \* \{[^}]*border-top:\s*1px solid var\(--line-1\)/);
+  });
+
+  it('hardens the actions cell into a non-wrapping, non-shrinking right-aligned group', () => {
+    const actions = ruleBody(".v2-table [data-cell='actions']");
+    expect(actions).toMatch(/flex-wrap:\s*nowrap/);
+    expect(actions).toMatch(/gap:\s*var\(--space-3\)/);
+    expect(actions).toMatch(/margin-left:\s*auto/);
+    expect(ruleBody(".v2-table [data-cell='actions'] .v2-button")).toMatch(/flex:\s*0 0 auto/);
+  });
+});
+
 it('generateV2PluginCss output has no <script> tag and no non-data: external reference', () => {
   const generated = generateV2PluginCss(V2_CSS, INDEX_CSS);
   expect(generated).not.toMatch(/<script/i);

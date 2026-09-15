@@ -28,6 +28,10 @@ const newNoteId = () => `${Date.now().toString(36)}${Math.random().toString(36).
  * stylesheet's own page stack, so they are spaced without any wrapper; and the second add-card row
  * is toggled through the standard `hidden` attribute, which the generated `[hidden]` rule makes win
  * over `.v2-form-row`'s own `display: flex`.
+ *
+ * VS-468: the static table above the notes list exercises the table's three new/changed roles — a
+ * long `secondary` metadata value that truncates, an open `rowPanel` holding `.v2-form-row` fields,
+ * and a row whose `actions` cell carries a two-button group.
  */
 function pageHtml(host) {
   return `<!doctype html>
@@ -64,6 +68,41 @@ function pageHtml(host) {
       <a class="${WEAVE_PLUGIN_CLASS.link}" href="#">a classed link</a> and
       <a href="#">a plain one</a>.
     </p>
+  </div>
+</div>
+<div class="${WEAVE_PLUGIN_CLASS.table}">
+  <div data-row>
+    <span data-cell="${WEAVE_PLUGIN_TABLE_CELL.primary}">nightly-backup</span>
+    <span data-cell="${WEAVE_PLUGIN_TABLE_CELL.secondary}">9/15/2026, 4:14:29 AM · v0.1.0 · f35dbdf · initial bring-up · by human</span>
+    <span data-cell="${WEAVE_PLUGIN_TABLE_CELL.actions}">
+      <button class="${WEAVE_PLUGIN_CLASS.button}" data-size="small" type="button">Edit</button>
+    </span>
+  </div>
+  <div class="${WEAVE_PLUGIN_CLASS.rowPanel}">
+    <label class="${WEAVE_PLUGIN_CLASS.formRow}">
+      <span>Schedule</span>
+      <input class="${WEAVE_PLUGIN_CLASS.input}" type="text" value="0 3 * * *" />
+    </label>
+    <div class="${WEAVE_PLUGIN_CLASS.formRow}">
+      <span>Actions</span>
+      <button class="${WEAVE_PLUGIN_CLASS.button}" data-variant="primary" type="button">Save</button>
+    </div>
+  </div>
+  <div data-row>
+    <span data-cell="${WEAVE_PLUGIN_TABLE_CELL.primary}">weekly-report</span>
+    <span data-cell="${WEAVE_PLUGIN_TABLE_CELL.secondary}">2m ago</span>
+    <span data-cell="${WEAVE_PLUGIN_TABLE_CELL.actions}">
+      <button class="${WEAVE_PLUGIN_CLASS.button}" data-size="small" type="button">Edit</button>
+      <button class="${WEAVE_PLUGIN_CLASS.button}" data-size="small" data-variant="primary" type="button">Run</button>
+    </span>
+  </div>
+  <div data-row>
+    <span data-cell="${WEAVE_PLUGIN_TABLE_CELL.primary}">monthly-archive</span>
+    <span data-cell="${WEAVE_PLUGIN_TABLE_CELL.secondary}">1h ago</span>
+    <span data-cell="${WEAVE_PLUGIN_TABLE_CELL.actions}">
+      <button class="${WEAVE_PLUGIN_CLASS.button}" data-size="small" type="button">Edit</button>
+      <button class="${WEAVE_PLUGIN_CLASS.button}" data-size="small" data-variant="primary" type="button">Run</button>
+    </span>
   </div>
 </div>
 <div id="notes" class="${WEAVE_PLUGIN_CLASS.table}"></div>

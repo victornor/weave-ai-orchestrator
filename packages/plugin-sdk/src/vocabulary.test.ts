@@ -34,6 +34,10 @@ describe('the vocabulary carries no visual values (VS-385)', () => {
     expect(WEAVE_PLUGIN_CLASS.link).toBe('v2-link');
   });
 
+  it('WEAVE_PLUGIN_CLASS exports the row-panel role (VS-468)', () => {
+    expect(WEAVE_PLUGIN_CLASS.rowPanel).toBe('v2-table-panel');
+  });
+
   it('WEAVE_PLUGIN_TABLE_CELL names the table cell roles only, including actions (VS-458)', () => {
     const serialized = JSON.stringify(WEAVE_PLUGIN_TABLE_CELL);
     for (const { name, pattern } of VISUAL_VALUE_PATTERNS) {

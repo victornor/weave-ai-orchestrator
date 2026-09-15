@@ -281,11 +281,11 @@ handler)` posts `{ type: 'subscribe', kind }` once and calls `handler(payload)` 
 anything calls it.
 
 **Styling — the vocabulary.** `WEAVE_PLUGIN_CLASS`, exported from `@weave-ai/plugin-sdk`, is the
-one styling contract a plugin writes to: `{ section, table, badge, button, input, formRow, link }`,
-plus the `data-theme` (set automatically) and `data-tone` (`idle`/`working`/`stalled`/`blocked`/
-`needs-you`/`merging`/`done`/`failed`/`paused`, for a status-coloured `badge`) attributes. It is
-*names only* — no colour, spacing or font value lives in this package, and a plugin should never
-write its own CSS for these roles. Changing this object is the only thing that changes
+one styling contract a plugin writes to: `{ section, table, badge, button, input, formRow, link,
+rowPanel }`, plus the `data-theme` (set automatically) and `data-tone` (`idle`/`working`/`stalled`/
+`blocked`/`needs-you`/`merging`/`done`/`failed`/`paused`, for a status-coloured `badge`) attributes.
+It is *names only* — no colour, spacing or font value lives in this package, and a plugin should
+never write its own CSS for these roles. Changing this object is the only thing that changes
 `@weave-ai/plugin-sdk`'s own version with respect to styling.
 
 A few roles take an attribute or two:
@@ -294,24 +294,44 @@ A few roles take an attribute or two:
   so a plugin that writes a plain link needs no class at all; `link` is the explicit, documented
   form.
 - **The table's cell roles** are the values of a row cell's `data-cell` attribute, exported as
-  `WEAVE_PLUGIN_TABLE_CELL` = `{ primary, secondary, actions }`: `primary` is the row's main text,
-  `secondary` a right-aligned muted detail, and `actions` a trailing cell holding the row's own
-  inline controls. Put `.v2-button`s in an `actions` cell and give them `data-size="small"` — the
-  compact button variant — so a row's buttons do not set the row's height.
+  `WEAVE_PLUGIN_TABLE_CELL` = `{ primary, secondary, actions }`: `primary` is the row's main text
+  (it keeps a minimum width and truncates with an ellipsis), `secondary` a right-aligned muted
+  detail that **shrinks and truncates** before `primary` gives ground, and `actions` a trailing
+  cell holding the row's own inline controls. A long `secondary` value (a deployment line, say)
+  therefore truncates instead of pushing `primary` and `actions` off a narrow row — short values do
+  not wrap. Put `.v2-button`s in an `actions` cell and give them `data-size="small"` — the compact
+  button variant — so a row's buttons do not set the row's height. Two or more buttons in `actions`
+  render as one right-aligned group with a consistent gap; they never wrap or shrink.
+- **A row panel** is `WEAVE_PLUGIN_CLASS.rowPanel` (class `v2-table-panel`): a full-width region a
+  plugin places as a direct child of a `.v2-table`, immediately after the row it expands, to open an
+  edit form under that row. It is divided from the row exactly as rows are divided from one another,
+  and it carries no padding of its own — lay out its fields with `formRow` (`.v2-form-row`), which
+  already supplies the same 14px horizontal inset as a row and the host's settings-form label and
+  field layout. Do not nest a `.v2-card` inside the table for this: the panel is the table-native
+  surface.
 - **Buttons** take `data-variant="primary"` for the accent-filled shape and `data-size="small"` for
   the compact one.
 
-A row with actions looks like:
+A row with actions, and an open row panel under it, looks like:
 
 ```html
 <div class="v2-table">
   <div data-row>
     <span data-cell="primary">nightly-backup</span>
-    <span data-cell="secondary">2m ago</span>
+    <span data-cell="secondary">9/15/2026, 4:14:29 AM · v0.1.0 · f35dbdf · by human</span>
     <span data-cell="actions">
       <button class="v2-button" data-size="small">Edit</button>
       <button class="v2-button" data-size="small" data-variant="primary">Run</button>
     </span>
+  </div>
+  <div class="v2-table-panel">
+    <label class="v2-form-row">
+      <span>Schedule</span>
+      <input class="v2-input" type="text" value="0 3 * * *" />
+    </label>
+    <div class="v2-form-row">
+      <button class="v2-button" data-variant="primary">Save</button>
+    </div>
   </div>
 </div>
 ```

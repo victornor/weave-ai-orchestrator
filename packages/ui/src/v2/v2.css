@@ -449,33 +449,60 @@
   color: var(--text-1);
   transition: background-color var(--v2-dur-fast) var(--v2-ease);
 }
-.v2-table [data-row] + [data-row] {
+/* Every child of the list divides from its predecessor (VS-468): rows as before, and a row panel
+   (`.v2-table-panel`) from the row it expands and the next row from the panel. Previously this was
+   `[data-row] + [data-row]`, which left a row following a panel undivided. */
+.v2-table > * + * {
   border-top: 1px solid var(--line-1);
 }
 .v2-table [data-row]:hover {
   background: var(--bg-2);
 }
+/* The main text keeps a minimum (VS-468) so an overflowing row can never squeeze it away; the
+   metadata cell (below) gives up its width first and truncates. `--space-9` (3rem) is the
+   generated stylesheet's own token, so this stays a design value, not a literal. */
 .v2-table [data-cell='primary'] {
-  min-width: 0;
+  min-width: var(--space-9);
   flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The metadata cell may shrink after `primary` keeps a minimum (VS-468): `flex: 0 1 auto` plus
+   `min-width: 0` lets a long value (a deployment line) truncate with an ellipsis instead of taking
+   the row's width and pushing `actions` off-screen. Its muted mono look is unchanged. */
 .v2-table [data-cell='secondary'] {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--ff-mono);
   font-size: 11px;
   color: var(--text-3);
 }
 /* A row's own inline controls (VS-458): a trailing group sized for the compact button variant, so
-   a table row can carry per-row actions instead of the page moving editing into a separate form. */
+   a table row can carry per-row actions instead of the page moving editing into a separate form.
+   VS-468: two or more buttons read as one right-aligned group with a consistent gap; `nowrap` and
+   the non-shrinking buttons below keep the whole group on screen at a phone width. */
 .v2-table [data-cell='actions'] {
   display: flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: nowrap;
+  gap: var(--space-3);
   flex: 0 0 auto;
   margin-left: auto;
+}
+.v2-table [data-cell='actions'] .v2-button {
+  flex: 0 0 auto;
+}
+/* A panel that expands under a row (VS-468): a full-width region a plugin places after the row,
+   divided from it by the same `* + *` rule above. It carries no padding of its own — its
+   `.v2-form-row` children already have the same 14px horizontal inset as a row and the host's
+   settings-form label/field layout — so a panel's fields align with the table with no doubled
+   inset and no second card. */
+.v2-table-panel {
+  border-top: 1px solid var(--line-1);
 }
 
 /* Hover/press feedback (VS-427): every interactive element in V2 eases its colour on the fast

@@ -502,7 +502,7 @@ function run(over: Partial<Run> = {}): Run {
     runtimeId: 'claude-code', model: null, status: 'succeeded', turnEpoch: 1, cwd: '/w', startedAt: '2026-09-13T10:00:00.000Z',
     finishedAt: '2026-09-13T10:05:00.000Z', exitCode: 0, signal: null, pid: null, pgid: null, errorCode: null,
     errorFamily: null, retryOfRunId: null, usage: null, costCents: null, result: null, liveness: null, logPath: null,
-    summary: null, createdAt: '2026-09-13T10:00:00.000Z', ...over,
+    summary: null, lastEventAt: null, lastProgressAt: null, lastError: null, createdAt: '2026-09-13T10:00:00.000Z', ...over,
   };
 }
 

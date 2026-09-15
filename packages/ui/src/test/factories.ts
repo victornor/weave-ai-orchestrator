@@ -206,6 +206,9 @@ export function run(over: Partial<Run> = {}): Run {
     liveness: null,
     logPath: null,
     summary: null,
+    lastEventAt: null,
+    lastProgressAt: null,
+    lastError: null,
     createdAt: '2026-09-01T09:00:00.000Z',
     ...over,
   };

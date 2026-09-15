@@ -1529,3 +1529,82 @@ describe('stale terminal-decision sweep (VS-306)', () => {
     expect(rows.find((r) => r.title === 'live')!.status).toBe('open');
   });
 });
+
+/**
+ * VS-461: the silence window measures *progress*, not any event, and a second consecutive no-progress
+ * cut parks the worker instead of auto-resuming it again. Modelled on the 2026-09-14 DeepSeek outage,
+ * where a retry loop re-emitted session/step-boundary events and a run's provider error lived only in
+ * the runtime's own log.
+ */
+describe('supervisor silence watchdog (VS-461)', () => {
+  let h: TestHarness;
+  let supervisor: Supervisor;
+  let wake: ReturnType<typeof fakeWake>;
+
+  beforeEach(() => {
+    h = makeHarness();
+    wake = fakeWake();
+    h.services.wake = wake as never;
+    h.services.workers = { spawnForTicket: vi.fn(async () => ({ id: 'w1' })), retireIfLanded: vi.fn(async () => ({ retired: true })), conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.tickets = { livenessViolations: () => [] } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
+    h.ctx.config.defaults.silenceTimeoutSec = 60;
+    supervisor = createSupervisor(h.ctx, h.deps);
+  });
+  afterEach(() => { supervisor.stop(); h.cleanup(); });
+
+  const secondsAgo = (s: number): string => new Date(Date.now() - s * 1000).toISOString();
+
+  /** A `running` run registered in the in-memory state, so `bootRecovery` leaves it alone. */
+  function seedRunning(workerId: string, over: Record<string, unknown> = {}): string {
+    const runId = newId();
+    h.db.insert('runs', {
+      id: runId, workspaceId: h.workspaceId, agentId: workerId, wakeupIdsJson: [], runtimeId: 'opencode',
+      status: 'running', turnEpoch: 1, cwd: '/w', startedAt: secondsAgo(120), lastProgressAt: secondsAgo(120),
+      lastEventAt: secondsAgo(1), createdAt: secondsAgo(120), ...over,
+    });
+    runState(h.ctx).active.set(runId, { runId, agentId: workerId, startedAt: Date.now(), pid: null, cancel: async () => { /* stubbed */ } });
+    return runId;
+  }
+
+  const actionEvents = (runId: string): Array<{ action: string; lastError?: string }> =>
+    h.db.all<{ payload: { action: string; lastError?: string } }>('SELECT payload_json FROM run_events WHERE run_id = ?', [runId]).map((r) => r.payload);
+
+  it('interrupts a run whose only fresh events are non-progress, naming its last upstream error', async () => {
+    const workerId = h.addWorker(seedTicket(h));
+    const runId = seedRunning(workerId, { lastError: 'provider deepseek: unable to start processing your request within the 900-second timeout limit' });
+    await supervisor.tick();
+    const actions = actionEvents(runId).filter((p) => p.action === 'silence_interrupt');
+    expect(actions).toHaveLength(1);
+    expect(actions[0]!.lastError).toContain('900-second timeout');
+  });
+
+  it('does not interrupt a run that recorded a progress event inside the window', async () => {
+    const workerId = h.addWorker(seedTicket(h));
+    const runId = seedRunning(workerId, { lastProgressAt: secondsAgo(5), lastEventAt: secondsAgo(5) });
+    await supervisor.tick();
+    expect(actionEvents(runId).some((p) => p.action === 'silence_interrupt')).toBe(false);
+  });
+
+  it('parks the worker after a second consecutive no-progress silence cut instead of retrying again', async () => {
+    const workerId = h.addWorker(seedTicket(h));
+    const priorId = newId();
+    h.db.insert('runs', {
+      id: priorId, workspaceId: h.workspaceId, agentId: workerId, wakeupIdsJson: [], runtimeId: 'opencode',
+      status: 'interrupted', turnEpoch: 1, cwd: '/w', startedAt: secondsAgo(600), lastProgressAt: secondsAgo(600),
+      finishedAt: secondsAgo(500), createdAt: secondsAgo(600),
+    });
+    h.db.run(
+      "INSERT INTO run_events (run_id, seq, ts, type, stream, level, payload_json) VALUES (?, 1, ?, 'supervisor.action', 'system', 'warn', ?)",
+      [priorId, secondsAgo(500), JSON.stringify({ action: 'silence_interrupt', silentMs: 600_000 })],
+    );
+    const runId = seedRunning(workerId, { lastError: 'provider deepseek: timed out' });
+    await supervisor.tick();
+    expect(actionEvents(runId).some((p) => p.action === 'park_after_repeated_silence')).toBe(true);
+    const agent = h.db.get<{ status: string; pauseReason: string | null }>('SELECT status, pause_reason FROM agents WHERE id = ?', [workerId])!;
+    expect(agent.status).toBe('paused');
+    expect(agent.pauseReason).toContain('repeated_provider_no_progress');
+  });
+});

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
-import { createOpenCodeParser } from '../src/events.js';
+import { createOpenCodeParser, parseOpenCodeProviderErrors } from '../src/events.js';
 import { parseModels } from '../src/adapter.js';
 
 // All three fixtures were recorded live from opencode 1.18.27 on 2026-09-03 against a free
@@ -108,5 +108,39 @@ describe('opencode compaction (VS-454)', () => {
     expect(types).not.toContain('session.compaction.started');
     expect(types).not.toContain('session.compaction.completed');
     expect(types).toContain('runtime.raw');
+  });
+});
+
+// VS-461: the line below is copied verbatim from the live opencode log during the 2026-09-14
+// DeepSeek outage (`<configHome>/opencode/log/opencode.log`); the run's own stream had no error.
+describe('opencode provider errors (VS-461)', () => {
+  const SESSION = 'ses_f5edbbd24ffeQj03OjwcFApn8m';
+  const ERROR_LINE = 'timestamp=2026-09-14T18:46:51.593Z level=ERROR run=27fd2273 message="stream error" '
+    + 'providerID=deepseek modelID=deepseek-flash session.id=' + SESSION + ' small=false agent=build mode=primary '
+    + 'error.error.message="We were unable to start processing your request within the 900-second timeout limit. Please try again later."';
+
+  it('extracts the provider, model and message for the turn\'s session', () => {
+    expect(parseOpenCodeProviderErrors(ERROR_LINE, SESSION)).toEqual({
+      sessionId: SESSION,
+      provider: 'deepseek',
+      model: 'deepseek-flash',
+      message: 'We were unable to start processing your request within the 900-second timeout limit. Please try again later.',
+    });
+  });
+
+  it('ignores another session (concurrent turns share one log) and non-ERROR lines', () => {
+    const other = ERROR_LINE.replace(SESSION, 'ses_someone_else');
+    const info = ERROR_LINE.replace('level=ERROR', 'level=INFO');
+    expect(parseOpenCodeProviderErrors(`${other}\n${info}`, SESSION)).toBeNull();
+  });
+
+  it('returns null rather than guessing when the turn never reported a session', () => {
+    expect(parseOpenCodeProviderErrors(ERROR_LINE, null)).toBeNull();
+  });
+
+  it('keeps the last error when a session retried and failed again', () => {
+    const later = ERROR_LINE.replace('18:46:51.593', '19:01:20.545')
+      .replace('error.error.message="We were unable to start processing your request within the 900-second timeout limit. Please try again later."', 'error.error.message="429 rate limited"');
+    expect(parseOpenCodeProviderErrors(`${ERROR_LINE}\n${later}`, SESSION)?.message).toBe('429 rate limited');
   });
 });

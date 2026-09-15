@@ -246,6 +246,23 @@ describe('weave_run_inspect — the worker and the transcript', () => {
     expect(runView['firstRequest']).toEqual({ freshTokens: 74_076, cachedTokens: 1_664, label: '74.1k fresh · 1.7k cached', missed: true });
     expect((runView['usage'] as Record<string, unknown>)['firstRequest']).toEqual({ freshTokens: 74_076, cachedTokens: 1_664 });
   });
+
+  // VS-461: the provider error the runtime recorded must reach the conductor, both on the run view
+  // and — kept in full, per the run-inspection spec — in the transcript, not only as `interrupted`.
+  it('names the runtime\'s own last error and shows it in the transcript', async () => {
+    harness = makeHarness();
+    seq = 0;
+    const message = 'provider deepseek: unable to start processing your request within the 900-second timeout limit';
+    seed(harness, [
+      ev('turn.started', { pid: 41 }),
+      ev('error', { name: 'ProviderError', provider: 'deepseek', model: 'deepseek-flash', message }),
+    ], run({ lastError: message }));
+
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'run_1' })).data as Record<string, never>;
+    expect(d['run']).toMatchObject({ lastError: message });
+    const lines = d['transcript'] as Array<{ kind: string; text: string }>;
+    expect(lines.some((l) => l.kind === 'error' && l.text.includes('unable to start processing'))).toBe(true);
+  });
 });
 
 describe('weave_run_inspect — the cursor', () => {

@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Surface a runtime's upstream provider error on the run, make the silence
+  watchdog count only progress, and stop auto-resuming a turn that keeps hitting
+  the same upstream error with no progress
+skip_specs: true

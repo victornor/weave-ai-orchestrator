@@ -260,6 +260,9 @@ export function runView(run: Run, now = Date.now()): Record<string, unknown> {
     liveness: run.liveness,
     errorCode: run.errorCode,
     errorFamily: run.errorFamily,
+    // VS-461: the runtime's own last error message, so the inspection names "provider deepseek: …"
+    // rather than only the family and code.
+    lastError: run.lastError,
     retryOfRunId: run.retryOfRunId,
     summary: run.summary,
     usage: run.usage,

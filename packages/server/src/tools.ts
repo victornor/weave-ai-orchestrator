@@ -882,10 +882,12 @@ export const TOOLS: ToolDef[] = [
     }),
     description: 'Mark that you have reviewed a plan, merge or action approval. Both marks need a note shown on the card: concerns = what you object to; looked = the one or two sentences you would otherwise write in chat about why the work is clean. A concerns mark holds approval until a new plan revision (for a plan) or a new commit (for a merge) lands, so use it only when the work must change before approval — notes to apply while building go in a looked note. Do not mark at turn start or in a batch. A clean mark says the review found nothing to object to — it is not an endorsement and never your approval. Never use this to answer those decisions. On a merge approval the head you are reviewing is recorded, so a later push to the same card wakes you.',
     handler: async (ctx, i) => {
-      // VS-365: record the delivery head this review is made against, so a commit pushed afterwards can
-      // wake the weaver without a comment. Only a merge approval has a delivery head worth recording.
+      // VS-365: record the head this review is made against, so a commit pushed afterwards can
+      // wake the weaver without a comment. VS-474: for a merge card that is the head the card will
+      // actually land — the archive pull request for an archive-backfill card, otherwise the ticket's
+      // own pull request — so the daemon's grant can require it was reviewed.
       const d = svc(ctx).decisions.get(i.decisionId);
-      const reviewedHead = d.kind === 'merge_approval' && d.ticketId ? await svc(ctx).tickets.deliveryHead(d.ticketId) : null;
+      const reviewedHead = d.kind === 'merge_approval' && d.ticketId ? await svc(ctx).tickets.approvalDeliveryHead(d) : null;
       return svc(ctx).decisions.review(ctx.actor, i.decisionId, { status: i.status, note: i.note, reviewedHead });
     },
   },

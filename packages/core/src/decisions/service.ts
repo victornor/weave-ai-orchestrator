@@ -11,6 +11,14 @@ const asDecision = (r: Record<string, unknown>): Decision => decisionRow(r) as u
 /** A secret input's `secretName` becomes an environment variable name, so it has to be able to be one. */
 const SECRET_NAME = /^[A-Z][A-Z0-9_]{0,63}$/;
 
+/** Two SHAs name the same object when one is a prefix of the other (mirrors the tickets-service helper of the same name). */
+function sameGitSha(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (x.length < 7 || y.length < 7) return x === y;
+  return x === y || x.startsWith(y) || y.startsWith(x);
+}
+
 export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreServices): DecisionsService {
   const db: Db = ctx.db;
   const log = ctx.log('decision');
@@ -537,25 +545,36 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     // VS-310: enforced here, not only in the tool's `scope: 'weaver'`, so no future caller can
     // fabricate a relay. Validated before any write and before the side effects below.
     const relayFrom = ans.relayFromMessageId ? validateRelayMessage(actor, d, ans.relayFromMessageId) : null;
-    // VS-266 / VS-281: an approving answer on a still-open review-carrying decision is held in two
-    // cases. The weaver marked `concerns` (VS-266 — every actor, including the system actor, so an
-    // unattended merge cannot silently override a stated objection). Or the weaver has not reviewed
-    // it yet (VS-281 — every actor except the daemon's own `system` grant: a YOLO plan approval is
-    // always `unseen` at the instant it is answered, so holding the system actor would break YOLO
-    // entirely). Every other answer — revise, reject, the non-approving merge option, any answer on
-    // a decision that is not held — is untouched by this check.
+    // VS-266 / VS-281 / VS-474: an approving answer on a still-open review-carrying decision is held
+    // in three cases. The weaver marked `concerns` (VS-266 — every actor, including the system actor,
+    // so an unattended merge cannot silently override a stated objection). Or the weaver has not
+    // reviewed it yet (VS-281 — every actor: since VS-474 the daemon's own `system` grant is held too,
+    // so YOLO can never skip the review). Or (VS-474) the daemon is granting a `merge_approval` whose
+    // reviewed head no longer matches the head about to be landed — a push after the mark would
+    // otherwise land a head nobody reviewed. The head guard is scoped to the system actor and to
+    // `looked` cards, so every human answer keeps the behavior it has always had. Every other answer —
+    // revise, reject, the non-approving merge option, any answer on a decision that is not held — is
+    // untouched by this check.
     const approving = ans.key != null && ans.key === approvingKeyOf(d.kind);
     const reviewStatus = d.weaverReviewStatus ?? 'unseen';
     const hasConcerns = reviewStatus === 'concerns';
     const unreviewed = reviewStatus === 'unseen';
-    const held = approving && (hasConcerns || (unreviewed && actor.kind !== 'system'));
+    let headMismatch = false;
+    if (approving && reviewStatus === 'looked' && actor.kind === 'system' && d.kind === 'merge_approval') {
+      const current = await deps().tickets.approvalDeliveryHead(d);
+      headMismatch = !(d.weaverReviewedHeadSha && current && sameGitSha(d.weaverReviewedHeadSha, current));
+    }
+    const held = approving && (hasConcerns || unreviewed || headMismatch);
     const overrideReason = (ans.overrideReason ?? '').trim();
     const overridden = held && ans.overrideHold === true && overrideReason !== '';
     if (held && !overridden) {
-      throw new OcError('revision_pending', hasConcerns
-        ? `decision ${id} is held: the weaver has concerns and no revision has landed`
-        : `decision ${id} is held: the weaver has not reviewed it yet`, {
+      throw new OcError('revision_pending', headMismatch
+        ? `decision ${id} is held: the weaver has not reviewed the current head yet`
+        : hasConcerns
+          ? `decision ${id} is held: the weaver has concerns and no revision has landed`
+          : `decision ${id} is held: the weaver has not reviewed it yet`, {
         weaverReviewStatus: reviewStatus,
+        ...(headMismatch ? { weaverReviewHeadMismatch: true, weaverReviewedHeadSha: d.weaverReviewedHeadSha } : {}),
         ...(hasConcerns ? { weaverReviewNote: d.weaverReviewNote, weaverReviewedAt: d.weaverReviewedAt } : {}),
       });
     }
@@ -636,8 +655,13 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
   /**
    * Asserted conductor review (VS-223). The mark is a dedicated write, never inferred from a digest
    * or a turn. `answer()` does not read these columns.
+   *
+   * VS-474: after a `looked` mark, the tickets service is asked to grant the card when its project
+   * runs under YOLO — this is the single place the daemon's own grant is released, so every
+   * auto-approve caller (the plan raise/repair/republish, the merge sweep, the archive raise) is
+   * covered without its own review logic. A grant failure never fails the review write.
    */
-  function review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null }): Decision {
+  async function review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null }): Promise<Decision> {
     const d = get(id);
     const cid = conductorId();
     if (actor.kind !== 'agent' || !actor.id || actor.id !== cid) {
@@ -665,7 +689,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       throw new OcError('validation', `review note is at most ${WEAVER_REVIEW_NOTE_MAX} characters`);
     }
     const note = trimmed;
-    return tx(db, () => {
+    const marked = tx(db, () => {
       db.update('decisions', d.id, {
         weaverReviewStatus: input.status,
         weaverReviewedAt: nowIso(),
@@ -680,6 +704,14 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       ctx.events.emit('decision.updated', 'decision', d.id, next);
       return next;
     });
+    if (marked.status === 'open' && marked.weaverReviewStatus === 'looked') {
+      try {
+        await deps().tickets.onReviewLooked(marked.id);
+      } catch (e) {
+        log.warn({ err: e, decisionId: marked.id }, 'granting a reviewed YOLO approval failed');
+      }
+    }
+    return marked;
   }
 
   // ---------- service ----------

@@ -280,8 +280,11 @@ describe('prompt rendering', () => {
     it('tells a worker its approvals are granted for it when the mode is on', () => {
       setYolo(true);
       expect(brief()).toContain('YOLO mode is on for this project');
+      // VS-474: the grant is stated as following the weaver's review, not as immediate.
+      expect(brief()).toContain('after the weaver has reviewed the card');
       shipped();
       expect(brief()).toContain('YOLO mode is on for this project');
+      expect(brief()).toContain('after the weaver has reviewed the card');
       expect(brief()).not.toMatch(/\{\{|\}\}/);
     });
 
@@ -308,11 +311,14 @@ describe('prompt rendering', () => {
       const on = renderConductorInstructions(h.ctx, h.deps);
       expect(on).toContain('YOLO mode is on for');
       expect(on).toContain('api');
+      // VS-474: the weaver is told its review releases the grant.
+      expect(on).toContain('after you have reviewed the card');
       expect(on).not.toMatch(/\{\{|\}\}/);
 
       shipped();
       const shippedOn = renderConductorInstructions(h.ctx, h.deps);
       expect(shippedOn).toContain('YOLO mode is on for');
+      expect(shippedOn).toContain('after you have reviewed the card');
       expect(shippedOn).not.toMatch(/\{\{|\}\}/);
     });
   });

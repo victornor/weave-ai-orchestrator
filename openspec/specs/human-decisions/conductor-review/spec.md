@@ -104,8 +104,10 @@ The conductor SHALL NOT be able to set the state back to **not looked at yet** o
 
 A human SHALL be able to answer a `plan_approval`, `merge_approval`, or `action_approval` at any moment regardless of its conductor review state, with two exceptions, each scoped to a decision that is still `open`: an approving answer is refused unless answered with a deliberate override (see "A human can override a held approval").
 
-1. An **approving** answer (the option that would move the ticket forward — `approve` on `plan_approval` and `action_approval`, `approve` on `merge_approval`) on a decision whose review state is currently **not looked at yet** SHALL be refused, unless answered with the deliberate override. This exception applies to every actor **except** the `system` actor: the daemon's own YOLO auto-approval is not a human being asked to approve an unreviewed card, and holding it would make YOLO unable to grant the approvals it exists to grant.
+1. An **approving** answer (the option that would move the ticket forward — `approve` on `plan_approval` and `action_approval`, `approve` on `merge_approval`) on a decision whose review state is currently **not looked at yet** SHALL be refused, unless answered with the deliberate override. This exception applies to every actor that can answer a decision, **including the `system` actor**: the daemon's own YOLO auto-approval is refused until the weaver has marked the card looked at, so YOLO waits on the review rather than bypassing it.
 2. An **approving** answer on a decision whose review state is currently **looked at, with concerns** SHALL be refused, unless answered with the deliberate override. This exception applies to every actor that can answer a decision, including the `system` actor (unchanged from the concern-hold this change extends).
+
+For the `system` actor's grant of a `merge_approval`, the first exception SHALL additionally cover a card marked **looked at** whose recorded review head does not match the head about to be landed: that card is treated as unreviewed (see `human-decisions/auto-approval`). A human's approving answer SHALL NOT be subject to that head comparison.
 
 Outside those two cases, the answer path SHALL NOT wait for a review, SHALL NOT refuse an answer because the state is **looked at**, SHALL NOT queue the answer on a review, and SHALL NOT add latency that is a function of the review state. A non-approving answer (`revise`, `reject` on `plan_approval`/`action_approval`; the non-approving option on `merge_approval`) SHALL NEVER be refused on account of the review state, regardless of what that state is.
 
@@ -157,8 +159,13 @@ While a conductor review is in progress — the conductor has been woken about t
 
 #### Scenario: YOLO does not wait on a review
 
-- **WHEN** a project is in YOLO mode and a `plan_approval` is created
-- **THEN** the daemon answers it as the system actor without a review mark, exactly as before, because the **not looked at yet** hold does not apply to the system actor — YOLO's own grant is not a human being asked to approve an unreviewed card
+- **WHEN** a project is in YOLO mode, a `plan_approval` or `merge_approval` has already been marked **looked at**, and its readiness condition is met
+- **THEN** the daemon answers it as the system actor without waiting on the human — the review has landed, and nothing about the review state delays it further
+
+#### Scenario: YOLO waits on an unreviewed card
+
+- **WHEN** a project is in YOLO mode and a `plan_approval` or `merge_approval` is created
+- **THEN** the daemon's own grant is refused while the card is **not looked at yet**, exactly as a human's would be, and the daemon grants it only once the weaver marks it looked at
 
 #### Scenario: An unattended merge held by a concern is not silently approved
 
@@ -443,13 +450,13 @@ The wake SHALL be a notification only. It SHALL NOT set, clear or otherwise chan
 
 ### Requirement: A held merge approval whose head moves wakes the weaver
 
-When the weaver marks an open `merge_approval` **looked at, with concerns**, the daemon SHALL record on that decision the delivery head the review was made against. The delivery head SHALL be resolved generally: the pull request's head when the ticket has a pull request and its forge reports one, otherwise the ticket branch's head from its worker worktree, otherwise the project clone's branch ref. A mark SHALL still succeed when no head can be resolved; the decision then simply carries no recorded head.
+When the weaver marks an open `merge_approval` **looked at, with concerns**, the daemon SHALL record on that decision the head the review was made against. It SHALL record the same on a **looked at** mark, because a YOLO grant of that card is held until the head it lands equals the head reviewed. The head SHALL be resolved generally: the pull request's head when the ticket has a pull request and its forge reports one, otherwise the ticket branch's head from its worker worktree, otherwise the project clone's branch ref; for an archive-backfill card it SHALL be the archive pull request's head. A mark SHALL still succeed when no head can be resolved; the decision then simply carries no recorded head.
 
-While that decision stays `open` and marked **looked at, with concerns**, the daemon SHALL compare the ticket's current delivery head against the recorded head both at the end of a worker's turn and on its periodic pull-request reconcile. When the current head differs from the recorded head, it SHALL enqueue exactly one wake for the workspace's weaver, naming the ticket and the new commit, and carrying the decision's id and the new head in its payload.
+While that decision stays `open` and marked **looked at** or **looked at, with concerns**, the daemon SHALL compare the head the card will land against the recorded head both at the end of a worker's turn and on its periodic pull-request reconcile. When the current head differs from the recorded head, it SHALL enqueue exactly one wake for the workspace's weaver, naming the ticket, the pull request, and the recorded and the new head, and carrying the decision's id and both heads in its payload. A **concerns** wake states the review moved since the concerns; a **looked at** wake asks the weaver to re-review, so a YOLO card whose grant is held on a moved head is never left to stall silently.
 
 The wake SHALL be idempotent per (decision, head): the same new head observed again SHALL NOT enqueue a second wake, whether from the turn-end check or the reconcile, and a further new head SHALL enqueue one more. The wake is a notification only: it SHALL NOT set, clear, or otherwise change any review state, and it SHALL NOT itself lift the hold.
 
-A decision marked **looked at**, a decision not yet reviewed, or a decision that is no longer `open` (answered, superseded, withdrawn, expired) SHALL NOT produce this wake. A `plan_approval` or `action_approval` SHALL NOT produce it however it is marked or however its ticket moves.
+A decision that is **not looked at yet**, or that is no longer `open` (answered, superseded, withdrawn, expired), SHALL NOT produce this wake. A **looked at** card that recorded no head SHALL NOT be baselined — recording the current head as reviewed would authorise a head the weaver never read, so it is left as it is. A `plan_approval` or `action_approval` SHALL NOT produce it however it is marked or however its ticket moves.
 
 #### Scenario: A pushed fix wakes the weaver once
 
@@ -468,8 +475,13 @@ A decision marked **looked at**, a decision not yet reviewed, or a decision that
 
 #### Scenario: A looked mark produces no wake
 
-- **WHEN** an open `merge_approval` is marked **looked at** and its delivery head later moves
+- **WHEN** an open `merge_approval` is marked **looked at** and the head the card will land has not moved since
 - **THEN** no wake is enqueued for the weaver
+
+#### Scenario: A looked mark's moved head wakes the weaver to re-review
+
+- **WHEN** an open `merge_approval` is marked **looked at** at `sha1` and the head the card will land later moves to `sha2`
+- **THEN** exactly one wake is enqueued for the weaver, naming the pull request and the recorded head `sha1` and the new head `sha2` for re-review, and the decision remains `open` and marked **looked at**
 
 #### Scenario: An unreviewed merge approval produces no wake
 
@@ -490,6 +502,11 @@ A decision marked **looked at**, a decision not yet reviewed, or a decision that
 
 - **WHEN** a merge approval is marked **looked at, with concerns** while no delivery head can be resolved
 - **THEN** the mark succeeds, and the first head observed afterwards is recorded as the baseline without waking the weaver
+
+#### Scenario: A looked mark with no resolvable head is not baselined
+
+- **WHEN** a merge approval is marked **looked at** while no head can be resolved, and a head is observed afterwards
+- **THEN** the mark succeeds, the recorded head stays absent, and no wake is enqueued
 
 #### Scenario: A local-branch delivery wakes on the branch head
 

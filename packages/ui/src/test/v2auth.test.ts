@@ -1,5 +1,5 @@
 /**
- * V2 sign-in helpers (VS-353): the return target is version-scoped, and "signed out" means the
+ * Sign-in helpers (VS-353, VS-456): the return target is a root path, and "signed out" means the
  * daemon refused the request — a 200 with a null session (trusted loopback) is signed in.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,25 +10,27 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-describe('the V2 return target', () => {
-  it('accepts a /v2 path from ?next', () => {
-    window.history.replaceState({}, '', '/v2/login?next=' + encodeURIComponent('/v2/w/acme/work'));
-    expect(v2NextTarget()).toBe('/v2/w/acme/work');
+describe('the return target', () => {
+  it('accepts a root path from ?next', () => {
+    window.history.replaceState({}, '', '/login?next=' + encodeURIComponent('/w/acme/work'));
+    expect(v2NextTarget()).toBe('/w/acme/work');
   });
 
-  it('ignores a next that is not a /v2 path', () => {
-    window.history.replaceState({}, '', '/v2/login?next=' + encodeURIComponent('/w/acme/work'));
+  it('ignores a next that is not a root path', () => {
+    window.history.replaceState({}, '', '/login?next=' + encodeURIComponent('w/acme/work'));
+    expect(v2NextTarget()).toBeNull();
+    window.history.replaceState({}, '', '/login?next=' + encodeURIComponent('//evil.example/w/acme'));
     expect(v2NextTarget()).toBeNull();
   });
 
   it('does not return to the sign-in itself', () => {
-    window.history.replaceState({}, '', '/v2/login?next=' + encodeURIComponent('/v2/login'));
+    window.history.replaceState({}, '', '/login?next=' + encodeURIComponent('/login'));
     expect(v2NextTarget()).toBeNull();
   });
 
   it('accepts an absolute same-origin link and keeps the path', () => {
-    window.history.replaceState({}, '', '/v2/login?next=' + encodeURIComponent('http://localhost/v2/w/acme/work?x=1'));
-    expect(v2NextTarget()).toBe('/v2/w/acme/work?x=1');
+    window.history.replaceState({}, '', '/login?next=' + encodeURIComponent('http://localhost/w/acme/work?x=1'));
+    expect(v2NextTarget()).toBe('/w/acme/work?x=1');
   });
 });
 
@@ -83,7 +85,7 @@ describe('whether the daemon refuses the browser', () => {
   });
 });
 
-describe('the 401 redirect is V2-aware', () => {
+describe('the 401 redirect', () => {
   const original = window.location;
 
   beforeEach(() => {
@@ -94,21 +96,12 @@ describe('the 401 redirect is V2-aware', () => {
     vi.restoreAllMocks();
   });
 
-  it('sends a /v2 request to /v2/login and remembers where', async () => {
+  it('sends a 401 to /login and remembers where', async () => {
     const assign = vi.fn();
-    Object.defineProperty(window, 'location', { configurable: true, value: { pathname: '/v2/w/acme/work', search: '?x=1', host: 'localhost', assign } });
+    Object.defineProperty(window, 'location', { configurable: true, value: { pathname: '/w/acme/work', search: '?x=1', host: 'localhost', assign } });
     const { api } = await import('../api/client');
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ error: { code: 'unauthorized', message: 'no' } }, 401));
     await api.root('/x').catch(() => undefined);
-    expect(assign).toHaveBeenCalledWith('/v2/login?next=' + encodeURIComponent('/v2/w/acme/work?x=1'));
-  });
-
-  it('leaves a V1 request on /login', async () => {
-    const assign = vi.fn();
-    Object.defineProperty(window, 'location', { configurable: true, value: { pathname: '/w/acme/work', search: '', host: 'localhost', assign } });
-    const { api } = await import('../api/client');
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ error: { code: 'unauthorized', message: 'no' } }, 401));
-    await api.root('/x').catch(() => undefined);
-    expect(assign).toHaveBeenCalledWith('/login?next=' + encodeURIComponent('/w/acme/work'));
+    expect(assign).toHaveBeenCalledWith('/login?next=' + encodeURIComponent('/w/acme/work?x=1'));
   });
 });

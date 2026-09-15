@@ -103,7 +103,7 @@ export function ArtifactInline({
               <span className="ac-mono text-nano text-text-2">published {ago(selected.updatedAt)} · sandboxed</span>
             </span>
             <A
-              to="/v2/w/$ws/tickets/$ticketId/artifacts/$key"
+              to="/w/$ws/tickets/$ticketId/artifacts/$key"
               params={{ ws, ticketId, key: selected.externalId ?? '' }}
               className="v2-tag text-text-2 hover:text-text-1"
             >
@@ -143,7 +143,7 @@ export function ArtifactInline({
   );
 }
 
-/** The full-screen reader for a ticket artifact: `/v2/w/$ws/tickets/$ticketId/artifacts/$key`. */
+/** The full-screen reader for a ticket artifact: `/w/$ws/tickets/$ticketId/artifacts/$key`. */
 export function V2TicketArtifactReader(): React.ReactElement {
   const { ws, ticketId, key } = useParams({ strict: false }) as { ws: string; ticketId: string; key: string };
   const detail = useTicket(ticketId);
@@ -169,7 +169,7 @@ export function V2TicketArtifactReader(): React.ReactElement {
             </span>
           ) : null}
         </span>
-        <A to="/v2/w/$ws/tickets/$ticketId" params={{ ws, ticketId }} className="v2-tag text-text-2 hover:text-text-1">
+        <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId }} className="v2-tag text-text-2 hover:text-text-1">
           Ticket
         </A>
       </header>
@@ -196,7 +196,7 @@ export function V2TicketArtifactReader(): React.ReactElement {
   );
 }
 
-/** The workspace-scoped reader: `/v2/w/$ws/artifacts/$key` (Knowledge links in here). */
+/** The workspace-scoped reader: `/w/$ws/artifacts/$key` (Knowledge links in here). */
 export function V2WorkspaceArtifactReader(): React.ReactElement {
   const { ws, key } = useParams({ strict: false }) as { ws: string; key: string };
   const artifacts = useWorkspaceArtifacts();

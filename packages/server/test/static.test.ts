@@ -26,6 +26,8 @@ afterEach(() => { while (tmps.length) rmSync(tmps.pop()!, { recursive: true, for
 function app(root: string): Hono<AppEnv> {
   const a = new Hono<AppEnv>();
   a.onError(onError);
+  // The same order `app.ts` uses: the API surface's own 404 is registered before the SPA fallback.
+  a.all('/api/*', (c) => c.json({ error: { code: 'not_found', message: `no route for ${c.req.path}` } }, 404));
   a.route('/', staticRoutes(root));
   return a;
 }
@@ -56,5 +58,26 @@ describe('an ordinary app route', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toMatch(/text\/html/);
     expect(await res.text()).toContain('shell');
+  });
+
+  // VS-456: the app is served at `/`, and every retired address must reach the shell so the client
+  // redirect layer can run — a typed address or a hard reload included.
+  it.each(['/', '/w/acme/work', '/runs', '/w/acme/board', '/w/acme/merge-queue', '/w/acme/settings', '/v2/w/acme/work'])(
+    'serves the shell for %s',
+    async (path) => {
+      const res = await app(uiDir()).request(path);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toMatch(/text\/html/);
+      expect(await res.text()).toContain('shell');
+    },
+  );
+});
+
+describe('the API surface', () => {
+  it('answers its own 404, never the SPA shell', async () => {
+    const res = await app(uiDir()).request('/api/nope');
+    expect(res.status).toBe(404);
+    expect(res.headers.get('content-type')).toMatch(/application\/json/);
+    expect((await res.json()).error.code).toBe('not_found');
   });
 });

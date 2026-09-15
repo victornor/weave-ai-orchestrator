@@ -2,7 +2,7 @@
  * V2 sign-in (VS-353, mockup 17-login). Chromeless — it renders inside the V2 token root but not the
  * shell — and reuses V1's authentication: first-run set-password, password, the TOTP second step,
  * the remembered device, and the daemon's error and lockout states. The only V2 decisions are the
- * Mono presentation and returning to the `/v2` address the visitor came from.
+ * Mono presentation and returning to the `/ address the visitor came from.
  */
 import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -115,7 +115,7 @@ export function V2Login(): React.ReactElement {
     const ws = h?.workspaces?.[0]?.id ?? null;
     if (ws) setWorkspaceId(ws);
     // Forget the guard's cached refusal before navigating, or the landing hits the same guard and
-    // bounces straight back to `/v2/login` (a remembered device or a quick TOTP finishes well inside
+    // bounces straight back to `/login` (a remembered device or a quick TOTP finishes well inside
     // the probe's cache window).
     resetV2RefusedCache();
     go(v2Landing(ws), { replace: true });

@@ -6,7 +6,7 @@ import type { Incident } from '@weave-ai/shared';
 const state = vi.hoisted(() => ({ items: [] as Incident[] }));
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/v2/incidents' } }) : '/v2/incidents'),
+  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/incidents' } }) : '/incidents'),
   useParams: () => ({}),
 }));
 vi.mock('../app/link', () => ({ useSearchParams: () => ({}), useGo: () => vi.fn() }));

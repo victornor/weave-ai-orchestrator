@@ -176,11 +176,6 @@ export function MoreSheet({
           </button>
         </section>
 
-        {/* VS-343: the phone's way into the V2 preview. Outside `MORE_ITEMS` and the pinned navs,
-            so V1's More list keeps its shape. */}
-        <A to="/v2" onClick={onClose} className="flex h-10 items-center gap-2.5 rounded-r6 px-2.5 text-meta text-accent-link hover:bg-bg-2">
-          <span>Open V2 preview</span>
-        </A>
       </div>
     </Sheet>
   );

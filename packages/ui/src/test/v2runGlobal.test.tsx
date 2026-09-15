@@ -1,5 +1,5 @@
 /**
- * VS-386: the global `/v2/runs/$runId` route has no `WorkspaceProvider`. Before the fix `RunBody`
+ * VS-386: the global `/runs/$runId` route has no `WorkspaceProvider`. Before the fix `RunBody`
  * called `useRun`, whose `useWs()` threw `useWorkspace outside WorkspaceProvider`, and the screen
  * showed only an error boundary. This mounts the real `RunBody` with the real hooks and the real
  * workspace context (there is none), mocking only the HTTP client — so a hook that still reaches
@@ -24,7 +24,7 @@ const state = vi.hoisted(() => ({
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ runId: 'run_1' }),
   useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) =>
-    o?.select ? o.select({ location: { pathname: '/v2/runs/run_1' } }) : '/v2/runs/run_1',
+    o?.select ? o.select({ location: { pathname: '/runs/run_1' } }) : '/runs/run_1',
 }));
 vi.mock('../app/link', () => ({
   useGo: () => vi.fn(),

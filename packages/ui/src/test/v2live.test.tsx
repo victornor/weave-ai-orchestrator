@@ -19,7 +19,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/v2/live' } }) : '/v2/live'),
+  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/live' } }) : '/live'),
   useParams: () => ({}),
 }));
 vi.mock('../app/link', () => ({ useSearchParams: () => state.search, useGo: () => state.go }));
@@ -165,9 +165,9 @@ describe('V2 Live', () => {
   it('writes a chosen scope back to the URL, and drops it for Everywhere (VS-455)', () => {
     render(<LiveBody />);
     fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
-    expect(state.go).toHaveBeenLastCalledWith('/v2/live', { search: { ws: 'ws1' }, replace: true });
+    expect(state.go).toHaveBeenLastCalledWith('/live', { search: { ws: 'ws1' }, replace: true });
     fireEvent.click(screen.getByRole('button', { name: 'Everywhere' }));
-    expect(state.go).toHaveBeenLastCalledWith('/v2/live', { search: { ws: undefined }, replace: true });
+    expect(state.go).toHaveBeenLastCalledWith('/live', { search: { ws: undefined }, replace: true });
   });
 
   it('reads a ws that names no workspace as Everywhere, so the floor is never empty (VS-455)', () => {

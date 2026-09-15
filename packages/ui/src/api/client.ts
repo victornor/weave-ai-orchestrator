@@ -178,19 +178,17 @@ export async function request<T>(path: string, init: RequestInitLike = {}): Prom
 /**
  * A 401 outside the auth routes means the session is gone (expired, revoked, or a cookie the
  * daemon no longer recognises): forget the token and go to the login page once, remembering
- * where we were so sign-in can return there. A request made from `/v2` goes to V2's own sign-in
- * instead of V1's, and `/v2/login` is terminal so the redirect cannot loop (VS-353).
+ * where we were so sign-in can return there. `/login` is terminal so the redirect cannot loop
+ * (VS-353, VS-456).
  */
 let redirecting = false;
 function onUnauthorized(): void {
   const path = window.location.pathname;
-  const onV2 = path.startsWith('/v2');
-  const login = onV2 ? '/v2/login' : '/login';
-  if (redirecting || path === login) return;
+  if (redirecting || path === '/login') return;
   redirecting = true;
   setToken(null, true);
   const next = path + window.location.search;
-  window.location.assign(`${login}?next=${encodeURIComponent(next)}`);
+  window.location.assign(`/login?next=${encodeURIComponent(next)}`);
 }
 
 /**

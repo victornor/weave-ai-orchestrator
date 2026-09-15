@@ -107,7 +107,7 @@ export function V2TicketScreen(): React.ReactElement {
 
   const chooseTab = (key: string): void => {
     setTab(key);
-    go('/v2/w/$ws/tickets/$ticketId', { params: { ws, ticketId }, search: { ...search, tab: key }, replace: true });
+    go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId }, search: { ...search, tab: key }, replace: true });
   };
 
   if (detail.isLoading) {
@@ -125,7 +125,7 @@ export function V2TicketScreen(): React.ReactElement {
           code="TICKET_NOT_FOUND"
           message={`No ticket ${ticketId} in this workspace.`}
           actions={
-            <Button variant="link" onClick={() => go('/v2/w/$ws/work', { params: { ws } })}>
+            <Button variant="link" onClick={() => go('/w/$ws/work', { params: { ws } })}>
               Back to Work
             </Button>
           }
@@ -200,7 +200,7 @@ function TicketHeader({
         {worker ? <span>{worker.name}</span> : null}
         {usageLine ? <span className="ac-mono">{usageLine}</span> : null}
         {pausedFor ? <span className="ac-mono">paused · {pausedFor}</span> : null}
-        <A to="/v2/w/$ws/work" params={{ ws }} className="v2-link ml-auto">
+        <A to="/w/$ws/work" params={{ ws }} className="v2-link ml-auto">
           Work
         </A>
       </div>

@@ -7,7 +7,7 @@ import { run as makeRun } from './factories';
 const state = vi.hoisted(() => ({ run: null as Run | null, summary: null as string | null }));
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/v2/runs/run_1' } }) : '/v2/runs/run_1'),
+  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/runs/run_1' } }) : '/runs/run_1'),
   useParams: () => ({ runId: 'run_1' }),
 }));
 vi.mock('../app/link', () => ({ useSearchParams: () => ({}), useGo: () => vi.fn() }));

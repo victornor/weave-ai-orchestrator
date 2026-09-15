@@ -1,5 +1,5 @@
 /**
- * VS-352: the V2 Global Chats screen (`/v2/chats`) — one pane per workspace, each the V2 Chat screen,
+ * VS-352: the V2 Global Chats screen (`/chats`) — one pane per workspace, each the V2 Chat screen,
  * with V1's resize / collapse / reorder behaviour and a layout remembered under V2's own key.
  *
  * The per-pane run-stream gate is unit-tested in `v2chat.test.tsx` (a `focused={false}` ChatPage does
@@ -21,7 +21,7 @@ const workspacesState = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: () => '/v2/chats',
+  useRouterState: () => '/chats',
   useParams: () => ({}),
 }));
 

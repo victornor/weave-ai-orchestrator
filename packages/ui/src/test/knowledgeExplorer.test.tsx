@@ -377,44 +377,44 @@ function renderHosted(host: 'v1' | 'v2'): ReturnType<typeof render> {
 }
 
 describe('KnowledgeExplorer writes to the host route (VS-434)', () => {
-  it('keeps a document selection under /v2, with replace, when hosted in V2', () => {
+  it('keeps a document selection on the app route, with replace, when hosted in the app', () => {
     state.hubFiles = [PROJECT_HUB];
     state.docs = [DOC_FLAT];
     renderHosted('v2');
 
     fireEvent.click(screen.getByText('The run engine'));
     const call = linkState.go.mock.calls.at(-1);
-    expect(call?.[0]).toBe('/v2/w/$ws/knowledge/explorer');
+    expect(call?.[0]).toBe('/w/$ws/knowledge/explorer');
     expect(call?.[1]).toMatchObject({ params: { ws: 'ws1' }, replace: true, search: { project: 'p1', doc: 'project:run-engine' } });
   });
 
-  it('keeps a hub and an archive selection under /v2 when hosted in V2', () => {
+  it('keeps a hub and an archive selection on the app route when hosted in the app', () => {
     state.hubFiles = [PROJECT_HUB];
     state.archive = [{ path: 'projects/api/docs/archive/2026-09-11.md', date: '2026-09-11' }];
     renderHosted('v2');
 
     fireEvent.click(screen.getByText('PROJECT.md').closest('button')!);
-    expect(linkState.go.mock.calls.at(-1)?.[0]).toBe('/v2/w/$ws/knowledge/explorer');
+    expect(linkState.go.mock.calls.at(-1)?.[0]).toBe('/w/$ws/knowledge/explorer');
     expect(linkState.go.mock.calls.at(-1)?.[1]).toMatchObject({ replace: true });
 
     fireEvent.click(screen.getByText('archive'));
     fireEvent.click(screen.getByText('2026-09-11'));
-    expect(linkState.go.mock.calls.at(-1)?.[0]).toBe('/v2/w/$ws/knowledge/explorer');
+    expect(linkState.go.mock.calls.at(-1)?.[0]).toBe('/w/$ws/knowledge/explorer');
     expect(linkState.go.mock.calls.at(-1)?.[1]).toMatchObject({ replace: true });
   });
 
-  it('opens a weaver artifact and a ticket artifact under /v2 when hosted in V2', () => {
+  it('opens a weaver artifact and a ticket artifact on the app route when hosted in the app', () => {
     state.hubFiles = [PROJECT_HUB];
     state.artifacts = [ARTIFACT];
     state.weaverArtifacts = [HOST_WEAVER];
     renderHosted('v2');
 
     fireEvent.click(screen.getByText('Overview').closest('button')!);
-    expect(linkState.go.mock.calls.at(-1)?.[0]).toBe('/v2/w/$ws/knowledge/explorer');
+    expect(linkState.go.mock.calls.at(-1)?.[0]).toBe('/w/$ws/knowledge/explorer');
     expect(linkState.go.mock.calls.at(-1)?.[1]).toMatchObject({ replace: true });
 
     fireEvent.click(screen.getByText('Architecture').closest('button')!);
-    expect(linkState.go).toHaveBeenLastCalledWith('/v2/w/$ws/artifacts/$key', { params: { ws: 'ws1', key: 'architecture' } });
+    expect(linkState.go).toHaveBeenLastCalledWith('/w/$ws/artifacts/$key', { params: { ws: 'ws1', key: 'architecture' } });
   });
 
   it('leaves the V1 paths unchanged when hosted in V1', () => {
@@ -433,7 +433,7 @@ describe('KnowledgeExplorer writes to the host route (VS-434)', () => {
 });
 
 describe('KnowledgeDocPanel revision ticket link host (VS-434)', () => {
-  it('points the revision ticket link under /v2 in V2 and /w in V1', () => {
+  it('points the revision ticket link at the ticket route', () => {
     state.revisions = [{ revision: 2, reason: 'a worker wrote it', ticketIdentifier: 'ACME-42', createdAt: '2026-09-12T00:00:00Z' }];
 
     const { unmount } = render(
@@ -441,7 +441,7 @@ describe('KnowledgeDocPanel revision ticket link host (VS-434)', () => {
         <KnowledgeDocPanel scope="project" project="p1" />
       </HostRoutesProvider>,
     );
-    expect(screen.getByRole('link', { name: 'ACME-42' })).toHaveAttribute('href', '/v2/w/ws1/tickets/ACME-42');
+    expect(screen.getByRole('link', { name: 'ACME-42' })).toHaveAttribute('href', '/w/ws1/tickets/ACME-42');
     unmount();
 
     render(<KnowledgeDocPanel scope="project" project="p1" />);

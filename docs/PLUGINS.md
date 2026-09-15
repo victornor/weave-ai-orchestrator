@@ -202,7 +202,7 @@ the first place.
 
 A plugin's page is nothing more than one more route — by convention `GET /page` — that returns
 self-contained HTML, using only the vocabulary's classes for its markup. The web app renders it at
-`/v2/w/:ws/plugins/:pluginId` (or `/w/:ws/plugins/:pluginId` in V1) inside an iframe sandboxed
+`/w/:ws/plugins/:pluginId` inside an iframe sandboxed
 **without `allow-same-origin`**: the page's origin is opaque, so it can never read the viewer's
 session cookie, and its content-security-policy keeps `connect-src 'none'` — the page cannot make a
 network call of its own, by construction, not by convention.

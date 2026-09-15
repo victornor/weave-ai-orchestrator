@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@tanstack/react-router', () => ({
   useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) =>
-    (o?.select ? o.select({ location: { pathname: '/v2/w/ws1/plugins/notes' } }) : '/v2/w/ws1/plugins/notes'),
+    (o?.select ? o.select({ location: { pathname: '/w/ws1/plugins/notes' } }) : '/w/ws1/plugins/notes'),
 }));
 vi.mock('../api/hooks', () => ({
   useWorkspaces: () => ({ data: [{ id: 'ws1', name: 'Acme' }] }),

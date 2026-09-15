@@ -170,14 +170,14 @@ function SelectedBranch({ branch: r, ws, onClear }: { branch: T.ProjectRef | und
     <div className="v2-card flex items-center gap-2 p-2.5 text-meta">
       <span className="ac-mono text-text-2">{r.name}</span>
       {r.ticketIdentifier ? (
-        <A to="/v2/w/$ws/tickets/$ticketId" params={{ ws, ticketId: r.ticketIdentifier }} className="text-accent-link">
+        <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: r.ticketIdentifier }} className="text-accent-link">
           {r.ticketIdentifier}
         </A>
       ) : (
         <span className="text-text-3">belongs to no ticket</span>
       )}
       {r.agentId && r.agentName ? (
-        <A to="/v2/w/$ws/workers/$workerId" params={{ ws, workerId: r.agentId }} className="text-accent-link">
+        <A to="/w/$ws/workers/$workerId" params={{ ws, workerId: r.agentId }} className="text-accent-link">
           {r.agentName}
         </A>
       ) : null}

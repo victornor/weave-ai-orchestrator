@@ -78,8 +78,8 @@ function DecisionNote({
 }): React.ReactElement {
   const decided = decision.kind === 'approval' || decision.kind.endsWith('_approval');
   const link = ticketIdentifier
-    ? { to: '/v2/w/$ws/tickets/$ticketId', params: { ws, ticketId: ticketIdentifier } }
-    : { to: '/v2/needs' };
+    ? { to: '/w/$ws/tickets/$ticketId', params: { ws, ticketId: ticketIdentifier } }
+    : { to: '/needs' };
   return (
     <p data-decision-note className="text-micro leading-relaxed text-text-3">
       {decided ? 'You decided: ' : 'You answered: '}
@@ -116,7 +116,7 @@ function ChatStatusBar({
             {session.resetsIn ? <span className="ac-mono whitespace-nowrap text-nano text-text-3">{session.resetsIn}</span> : null}
           </span>
         ) : null}
-        <A to="/v2/needs" className="flex-none text-nano text-text-3 hover:text-text-1">Needs you</A>
+        <A to="/needs" className="flex-none text-nano text-text-3 hover:text-text-1">Needs you</A>
       </div>
     </header>
   );
@@ -177,7 +177,7 @@ function DecisionsPane({
       <div className="flex h-[38px] flex-none items-center gap-2 border-b border-line-1 px-3">
         <span className="text-meta font-semibold text-text-1">Decisions</span>
         <span className="ac-mono text-nano text-text-3">{decisions.filter((d) => !exitingIds.has(d.id)).length} waiting</span>
-        <A to="/v2/needs" className="ml-auto text-micro text-text-3 hover:text-text-1">Needs you</A>
+        <A to="/needs" className="ml-auto text-micro text-text-3 hover:text-text-1">Needs you</A>
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
         {answerError ? (
@@ -409,8 +409,8 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const running = (workers.data ?? []).filter((w) => w.status === 'running').length;
   const sessionStrip = runtimeLimitStrip(accounts.data, conductorRuntime);
 
-  const openTicket = useCallback((identifier: string) => go('/v2/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } }), [go, ws]);
-  const openWorker = useCallback((workerId: string) => go('/v2/w/$ws/workers/$workerId', { params: { ws, workerId } }), [go, ws]);
+  const openTicket = useCallback((identifier: string) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } }), [go, ws]);
+  const openWorker = useCallback((workerId: string) => go('/w/$ws/workers/$workerId', { params: { ws, workerId } }), [go, ws]);
 
   const replyTo = useMemo(() => (draft.replyToId ? (messages.data ?? []).find((m) => m.id === draft.replyToId) ?? null : null), [draft.replyToId, messages.data]);
 

@@ -1,5 +1,5 @@
 /**
- * The V2 change explorer (`/v2/w/:ws/p/:project/changes/:number`, VS-452): a pull request's changes as
+ * The change explorer (`/w/:ws/p/:project/changes/:number`, VS-452): a pull request's changes as
  * a file tree on the left and one file's diff on the right, opened from a merge approval card so a
  * human can read what they are about to merge.
  *
@@ -85,16 +85,16 @@ export function V2ChangeExplorerScreen(): React.ReactElement {
   }, [requested, files, order, phone]);
 
   const openFile = useCallback((path: string) => {
-    go('/v2/w/$ws/p/$project/changes/$number', { params: { ws, project: params.project ?? '', number: params.number ?? '' }, search: { file: path }, replace: true });
+    go('/w/$ws/p/$project/changes/$number', { params: { ws, project: params.project ?? '', number: params.number ?? '' }, search: { file: path }, replace: true });
   }, [go, ws, params.project, params.number]);
 
   const clearFile = useCallback(() => {
-    go('/v2/w/$ws/p/$project/changes/$number', { params: { ws, project: params.project ?? '', number: params.number ?? '' }, search: {}, replace: true });
+    go('/w/$ws/p/$project/changes/$number', { params: { ws, project: params.project ?? '', number: params.number ?? '' }, search: {}, replace: true });
   }, [go, ws, params.project, params.number]);
 
   const goBack = useCallback(() => {
     if (typeof window !== 'undefined' && window.history.length > 1) { window.history.back(); return; }
-    go('/v2/w/$ws/p/$project', { params: { ws, project: params.project ?? '' } });
+    go('/w/$ws/p/$project', { params: { ws, project: params.project ?? '' } });
   }, [go, ws, params.project]);
 
   const totals = files.reduce((acc, f) => ({ additions: acc.additions + f.additions, deletions: acc.deletions + f.deletions }), { additions: 0, deletions: 0 });

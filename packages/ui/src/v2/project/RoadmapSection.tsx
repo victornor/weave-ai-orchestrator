@@ -113,7 +113,7 @@ export function RoadmapSection({ project, ws }: V2ProjectSectionProps): React.Re
                       <span className={cx('v2-tag flex-none', STATUS_TONE[item.status])}>{item.status}</span>
                       <span className="min-w-0 flex-1 truncate text-meta text-text-1">{item.title}</span>
                       {identifier ? (
-                        <A to="/v2/w/$ws/tickets/$ticketId" params={{ ws, ticketId: identifier }} className="ac-mono flex-none text-nano text-accent-link">
+                        <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: identifier }} className="ac-mono flex-none text-nano text-accent-link">
                           {identifier}
                         </A>
                       ) : null}

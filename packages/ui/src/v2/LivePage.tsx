@@ -182,7 +182,7 @@ export function LiveBody(): React.ReactElement {
   const viewportHeight = useViewportHeight();
   const [cols, setCols] = useState<number>(() => readLiveColumns());
   const [customHeight, setCustomHeight] = useState<number | null>(() => readLiveHeight());
-  // VS-455: the scope travels in the address, so `/v2/live?ws=<id>` opens pre-filtered to that
+  // VS-455: the scope travels in the address, so `/live?ws=<id>` opens pre-filtered to that
   // workspace (V1's `/w/$ws/live` redirects here) and a reload or shared link keeps it. With no
   // param the default is unchanged (Everywhere).
   const [scope, setScope] = useState<string>(() => search['ws'] ?? 'all');
@@ -194,7 +194,7 @@ export function LiveBody(): React.ReactElement {
   // worker, not the address, that names the workspace there.
   const chooseScope = (id: string): void => {
     setScope(id);
-    go('/v2/live', { search: { ...search, ws: id === 'all' ? undefined : id }, replace: true });
+    go('/live', { search: { ...search, ws: id === 'all' ? undefined : id }, replace: true });
   };
 
   // The chosen height is a device preference, so a drag is written once when its grip is released

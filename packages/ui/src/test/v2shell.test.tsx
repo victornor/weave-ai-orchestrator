@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import type { Upgrade, UpdateStatus } from '../api/types';
 
 const state = vi.hoisted(() => ({
-  path: '/v2/w/acme/work',
+  path: '/w/acme/work',
   workspaces: [{ id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 }],
   projectsByWs: { acme: [{ id: 'p1', slug: 'weave-services-plugin', name: 'Weave Services plugin' }] } as Record<string, Array<{ id: string; slug: string; name: string }>>,
   workersByWs: {
@@ -71,7 +71,7 @@ function mountShell(): ReturnType<typeof render> {
 }
 
 beforeEach(() => {
-  state.path = '/v2/w/acme/work';
+  state.path = '/w/acme/work';
   state.workspaces = [{ id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 }];
   state.projectsByWs = { acme: [{ id: 'p1', slug: 'weave-services-plugin', name: 'Weave Services plugin' }] };
   state.workersByWs = {
@@ -114,14 +114,14 @@ describe('the V2 rail', () => {
   });
 
   it('highlights the workspace Needs you shortcut rather than the global row', () => {
-    state.path = '/v2/w/acme/needs';
+    state.path = '/w/acme/needs';
     mountShell();
     const rail = screen.getByRole('complementary');
     const current = within(rail)
       .getAllByRole('link')
       .filter((a) => a.getAttribute('aria-current') === 'page');
     expect(current).toHaveLength(1);
-    expect(current[0]).toHaveAttribute('href', '/v2/w/acme/needs');
+    expect(current[0]).toHaveAttribute('href', '/w/acme/needs');
   });
 });
 
@@ -129,9 +129,9 @@ describe('scope preservation', () => {
   it('builds workspace rows against the current workspace and leaves global rows global', () => {
     mountShell();
     const rail = screen.getByRole('complementary');
-    expect(within(rail).getByRole('link', { name: /Work/ })).toHaveAttribute('href', '/v2/w/acme/work');
-    expect(within(rail).getByRole('link', { name: /Roles/ })).toHaveAttribute('href', '/v2/w/acme/roles');
-    expect(within(rail).getAllByRole('link', { name: /Needs you/ })[0]).toHaveAttribute('href', '/v2/needs');
+    expect(within(rail).getByRole('link', { name: /Work/ })).toHaveAttribute('href', '/w/acme/work');
+    expect(within(rail).getByRole('link', { name: /Roles/ })).toHaveAttribute('href', '/w/acme/roles');
+    expect(within(rail).getAllByRole('link', { name: /Needs you/ })[0]).toHaveAttribute('href', '/needs');
   });
 });
 
@@ -146,21 +146,21 @@ describe('each workspace group lists its own projects', () => {
       beta: [{ id: 'p2', slug: 'fernwood', name: 'Fernwood' }],
     };
     state.decisionsByWs = { acme: [], beta: [] };
-    for (const path of ['/v2/w/acme/work', '/v2/w/beta/work']) {
+    for (const path of ['/w/acme/work', '/w/beta/work']) {
       state.path = path;
       mountShell();
       const rail = screen.getByRole('complementary');
       expect(within(rail).getAllByRole('link', { name: 'WeaveAI' })).toHaveLength(1);
-      expect(within(rail).getByRole('link', { name: 'WeaveAI' })).toHaveAttribute('href', '/v2/w/acme/p/agent-conductor');
+      expect(within(rail).getByRole('link', { name: 'WeaveAI' })).toHaveAttribute('href', '/w/acme/p/agent-conductor');
       expect(within(rail).getAllByRole('link', { name: 'Fernwood' })).toHaveLength(1);
-      expect(within(rail).getByRole('link', { name: 'Fernwood' })).toHaveAttribute('href', '/v2/w/beta/p/fernwood');
+      expect(within(rail).getByRole('link', { name: 'Fernwood' })).toHaveAttribute('href', '/w/beta/p/fernwood');
       cleanup();
     }
   });
 
   it('highlights the project row when the route names it by slug (VS-424)', () => {
     state.projectsByWs = { acme: [{ id: 'p1', slug: 'agent-conductor', name: 'WeaveAI' }] };
-    state.path = '/v2/w/acme/p/agent-conductor';
+    state.path = '/w/acme/p/agent-conductor';
     mountShell();
     const rail = screen.getByRole('complementary');
     expect(within(rail).getByRole('link', { name: 'WeaveAI' })).toHaveAttribute('aria-current', 'page');
@@ -184,15 +184,15 @@ describe('the V2 rail shows a workspace\'s own loaded plugins with a page (VS-38
     // Every workspace group is expanded by default (the same as for projects), so both plugin
     // rows are present — each correctly scoped to its own workspace's href — and only the one
     // matching the current path is highlighted.
-    state.path = '/v2/w/acme/plugins/notes';
+    state.path = '/w/acme/plugins/notes';
     mountShell();
     const rail = screen.getByRole('complementary');
     const notesLink = within(rail).getByRole('link', { name: 'Notes' });
-    expect(notesLink).toHaveAttribute('href', '/v2/w/acme/plugins/notes');
+    expect(notesLink).toHaveAttribute('href', '/w/acme/plugins/notes');
     expect(notesLink).toHaveAttribute('aria-current', 'page');
     // "services" declares no name, so its row falls back to its id (VS-385 Decision 2).
     const servicesLink = within(rail).getByRole('link', { name: 'services' });
-    expect(servicesLink).toHaveAttribute('href', '/v2/w/beta/plugins/services');
+    expect(servicesLink).toHaveAttribute('href', '/w/beta/plugins/services');
     expect(servicesLink).not.toHaveAttribute('aria-current');
     cleanup();
 
@@ -200,7 +200,7 @@ describe('the V2 rail shows a workspace\'s own loaded plugins with a page (VS-38
     // reachable by its title/aria-label.
     localStorage.setItem('weave.v2.rail', 'collapsed');
     mountShell();
-    expect(screen.getByRole('link', { name: 'Notes' })).toHaveAttribute('href', '/v2/w/acme/plugins/notes');
+    expect(screen.getByRole('link', { name: 'Notes' })).toHaveAttribute('href', '/w/acme/plugins/notes');
     expect(screen.queryByRole('link', { name: 'services' })).not.toBeInTheDocument();
     localStorage.clear();
     cleanup();
@@ -210,7 +210,7 @@ describe('the V2 rail shows a workspace\'s own loaded plugins with a page (VS-38
     mountShell();
     fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'More' }));
     const dialog = screen.getByRole('dialog', { name: 'More' });
-    expect(within(dialog).getByRole('link', { name: 'Notes' })).toHaveAttribute('href', '/v2/w/acme/plugins/notes');
+    expect(within(dialog).getByRole('link', { name: 'Notes' })).toHaveAttribute('href', '/w/acme/plugins/notes');
     expect(within(dialog).queryByRole('link', { name: 'services' })).not.toBeInTheDocument();
   });
 
@@ -227,8 +227,8 @@ describe('the rail counts', () => {
     const rail = screen.getByRole('complementary');
     expect(within(rail).getByRole('link', { name: /Live/ })).toHaveTextContent('1');
     const needs = within(rail).getAllByRole('link', { name: /Needs you/ });
-    expect(needs.find((a) => a.getAttribute('href') === '/v2/needs')).toHaveTextContent('2');
-    expect(needs.find((a) => a.getAttribute('href') === '/v2/w/acme/needs')).toHaveTextContent('2');
+    expect(needs.find((a) => a.getAttribute('href') === '/needs')).toHaveTextContent('2');
+    expect(needs.find((a) => a.getAttribute('href') === '/w/acme/needs')).toHaveTextContent('2');
   });
 
   it('counts only workers that read as working, not those between turns (VS-415)', () => {
@@ -260,8 +260,8 @@ describe('the rail counts', () => {
     mountShell();
     const rail = screen.getByRole('complementary');
     const needs = within(rail).getAllByRole('link', { name: /Needs you/ });
-    expect(needs.find((a) => a.getAttribute('href') === '/v2/needs')).toHaveTextContent('3');
-    expect(needs.find((a) => a.getAttribute('href') === '/v2/w/acme/needs')).toHaveTextContent('3');
+    expect(needs.find((a) => a.getAttribute('href') === '/needs')).toHaveTextContent('3');
+    expect(needs.find((a) => a.getAttribute('href') === '/w/acme/needs')).toHaveTextContent('3');
   });
 });
 
@@ -269,9 +269,9 @@ describe('the rail carries the kept V1 screens', () => {
   it('shows Chats in Everywhere and Usage and Changelog under the workspace', () => {
     mountShell();
     const rail = screen.getByRole('complementary');
-    expect(within(rail).getByRole('link', { name: 'Chats' })).toHaveAttribute('href', '/v2/chats');
-    expect(within(rail).getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/v2/w/acme/usage');
-    expect(within(rail).getByRole('link', { name: 'Changelog' })).toHaveAttribute('href', '/v2/w/acme/changelog');
+    expect(within(rail).getByRole('link', { name: 'Chats' })).toHaveAttribute('href', '/chats');
+    expect(within(rail).getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/w/acme/usage');
+    expect(within(rail).getByRole('link', { name: 'Changelog' })).toHaveAttribute('href', '/w/acme/changelog');
   });
 
   it('shows Usage and Changelog under every workspace group, each scoped to its own workspace', () => {
@@ -284,20 +284,20 @@ describe('the rail carries the kept V1 screens', () => {
     mountShell();
     const rail = screen.getByRole('complementary');
     expect(within(rail).getAllByRole('link', { name: 'Usage' }).map((a) => a.getAttribute('href'))).toEqual([
-      '/v2/w/acme/usage',
-      '/v2/w/beta/usage',
+      '/w/acme/usage',
+      '/w/beta/usage',
     ]);
     expect(within(rail).getAllByRole('link', { name: 'Changelog' }).map((a) => a.getAttribute('href'))).toEqual([
-      '/v2/w/acme/changelog',
-      '/v2/w/beta/changelog',
+      '/w/acme/changelog',
+      '/w/beta/changelog',
     ]);
   });
 
   it('highlights exactly the kept row on each kept route', () => {
     for (const [path, href] of [
-      ['/v2/chats', '/v2/chats'],
-      ['/v2/w/acme/usage', '/v2/w/acme/usage'],
-      ['/v2/w/acme/changelog', '/v2/w/acme/changelog'],
+      ['/chats', '/chats'],
+      ['/w/acme/usage', '/w/acme/usage'],
+      ['/w/acme/changelog', '/w/acme/changelog'],
     ] as const) {
       state.path = path;
       cleanup();
@@ -313,9 +313,9 @@ describe('the rail carries the kept V1 screens', () => {
     localStorage.setItem('weave.v2.rail', 'collapsed');
     mountShell();
     const rail = screen.getByRole('complementary');
-    expect(within(rail).getByRole('link', { name: 'Chats' })).toHaveAttribute('href', '/v2/chats');
-    expect(within(rail).getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/v2/w/acme/usage');
-    expect(within(rail).getByRole('link', { name: 'Changelog' })).toHaveAttribute('href', '/v2/w/acme/changelog');
+    expect(within(rail).getByRole('link', { name: 'Chats' })).toHaveAttribute('href', '/chats');
+    expect(within(rail).getByRole('link', { name: 'Usage' })).toHaveAttribute('href', '/w/acme/usage');
+    expect(within(rail).getByRole('link', { name: 'Changelog' })).toHaveAttribute('href', '/w/acme/changelog');
   });
 });
 
@@ -413,7 +413,7 @@ describe('the rail update entry (VS-421)', () => {
     expect(entry).toHaveTextContent('Update available');
     expect(entry).toHaveTextContent('main · bbbbbbbbbb');
     expect(entry).toHaveTextContent('Open Updates');
-    expect(entry).toHaveAttribute('href', '/v2/settings?section=updates');
+    expect(entry).toHaveAttribute('href', '/settings?section=updates');
   });
 
   it('says the daemon is upgrading while one is in flight, ahead of an available update', () => {
@@ -438,7 +438,7 @@ describe('the rail update entry (VS-421)', () => {
     localStorage.setItem('weave.v2.rail', 'collapsed');
     mountShell();
     const entry = within(screen.getByRole('complementary')).getByLabelText('Daemon update available');
-    expect(entry).toHaveAttribute('href', '/v2/settings?section=updates');
+    expect(entry).toHaveAttribute('href', '/settings?section=updates');
     expect(entry.querySelector('svg[data-v2-glyph="update"]')).not.toBeNull();
   });
 
@@ -448,7 +448,7 @@ describe('the rail update entry (VS-421)', () => {
     fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'More' }));
     const entry = within(screen.getByRole('dialog', { name: 'More' })).getByLabelText('Daemon update available');
     expect(entry).toHaveTextContent('Open Updates');
-    expect(entry).toHaveAttribute('href', '/v2/settings?section=updates');
+    expect(entry).toHaveAttribute('href', '/settings?section=updates');
   });
 });
 
@@ -461,7 +461,7 @@ describe('the one-click way back to V1', () => {
 
 describe('live streams on global pages (VS-366, VS-369)', () => {
   it('opens exactly one stream per listed workspace on a global page', () => {
-    state.path = '/v2/needs';
+    state.path = '/needs';
     state.workspaces = [
       { id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 },
       { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 0 },
@@ -477,7 +477,7 @@ describe('live streams on global pages (VS-366, VS-369)', () => {
   });
 
   it('does not fan in on Global Chats, which opens one per pane', () => {
-    state.path = '/v2/chats';
+    state.path = '/chats';
     mountShell();
     expect(state.fanIn).toEqual([]);
   });
@@ -504,7 +504,7 @@ describe('the V2 page header', () => {
         { id: 'w3', kind: 'worker', ticketId: 't3', status: 'active', createdAt: '2026-09-13T00:00:00Z' },
       ],
     };
-    state.path = '/v2/w/beta/work';
+    state.path = '/w/beta/work';
     render(<V2Page title="Work" />);
     // Acme and Beta each have a working worker: the pill on Beta's page must read Beta's one, not
     // the daemon-wide two.

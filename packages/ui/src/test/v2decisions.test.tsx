@@ -20,7 +20,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@tanstack/react-router', () => ({
   Outlet: () => null,
-  useRouterState: () => '/v2/needs',
+  useRouterState: () => '/needs',
   useParams: () => ({}),
 }));
 vi.mock('../app/link', () => ({
@@ -345,13 +345,13 @@ describe('artifacts and the narrow variant', () => {
     renderCard({ ticketIdentifier: 'ACME-42' });
     expect(screen.getByRole('link', { name: 'How theming resolves' })).toHaveAttribute(
       'href',
-      '/v2/w/ws1/tickets/tk_1/artifacts/overview',
+      '/w/ws1/tickets/tk_1/artifacts/overview',
     );
   });
 
   it('renders the work-product link and Ask the worker in the narrow variant', () => {
     renderCard({ narrow: true, ticketIdentifier: 'ACME-42' });
-    expect(screen.getByRole('link', { name: 'Ask the worker' })).toHaveAttribute('href', '/v2/w/ws1/tickets/tk_1');
+    expect(screen.getByRole('link', { name: 'Ask the worker' })).toHaveAttribute('href', '/w/ws1/tickets/tk_1');
   });
 });
 
@@ -410,13 +410,13 @@ describe('the merge card\'s Review changes control (VS-452)', () => {
     mergePr();
     renderCard({ decision: makeDecision({ kind: 'merge_approval' }), ticketIdentifier: 'ACME-42', projectSlug: 'api' });
     const link = screen.getByRole('link', { name: 'Review changes' });
-    expect(link).toHaveAttribute('href', '/v2/w/ws1/p/api/changes/42');
+    expect(link).toHaveAttribute('href', '/w/ws1/p/api/changes/42');
   });
 
   it('falls back to the decision\'s own project id when no slug was supplied', () => {
     mergePr();
     renderCard({ decision: makeDecision({ kind: 'merge_approval', projectId: 'proj_9' }), ticketIdentifier: 'ACME-42' });
-    expect(screen.getByRole('link', { name: 'Review changes' })).toHaveAttribute('href', '/v2/w/ws1/p/proj_9/changes/42');
+    expect(screen.getByRole('link', { name: 'Review changes' })).toHaveAttribute('href', '/w/ws1/p/proj_9/changes/42');
   });
 
   it('is absent when the ticket has no pull request work product', () => {

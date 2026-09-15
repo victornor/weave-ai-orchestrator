@@ -42,7 +42,7 @@ class FakeEventSource {
 
 vi.mock('@tanstack/react-router', () => ({
   useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) =>
-    o?.select ? o.select({ location: { pathname: '/v2/w/ws1/work' } }) : '/v2/w/ws1/work',
+    o?.select ? o.select({ location: { pathname: '/w/ws1/work' } }) : '/w/ws1/work',
   useParams: () => ({ ws: 'ws1' }),
 }));
 // Keep the real `useWorkspaceEvents` shape — the live test must go through the real `EventStream`,
@@ -228,7 +228,7 @@ describe('V2 Work columns', () => {
     render(<V2WorkScreen />);
     fireEvent.click(document.querySelector('[data-v2-card="ACME-1"]') as HTMLElement);
     expect(state.go).toHaveBeenCalledWith(
-      '/v2/w/$ws/tickets/$ticketId',
+      '/w/$ws/tickets/$ticketId',
       expect.objectContaining({ params: { ws: 'ws1', ticketId: 'ACME-1' } }),
     );
   });
@@ -522,7 +522,7 @@ describe('V2 Work search', () => {
     expect(cardText('ACME-1')).toContain('Deploy the pipeline');
     expect(screen.getByText('1 ticket matches')).toBeInTheDocument();
     expect(state.go).toHaveBeenCalledWith(
-      '/v2/w/$ws/work',
+      '/w/$ws/work',
       expect.objectContaining({ params: { ws: 'ws1' }, replace: true, search: expect.objectContaining({ q: 'deploy' }) }),
     );
   });
@@ -627,7 +627,7 @@ describe('V2 Work motion', () => {
     const card = document.querySelector('[data-v2-card="ACME-3"]') as HTMLElement;
     fireEvent.click(card);
     expect(state.go).toHaveBeenCalledWith(
-      '/v2/w/$ws/tickets/$ticketId',
+      '/w/$ws/tickets/$ticketId',
       expect.objectContaining({ params: { ws: 'ws1', ticketId: 'ACME-3' } }),
     );
   });

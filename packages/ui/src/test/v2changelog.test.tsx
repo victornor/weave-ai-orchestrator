@@ -1,5 +1,5 @@
 /**
- * VS-352: the V2 Changelog screen (`/v2/w/:ws/changelog`) — the year heatmap over the newest-first,
+ * VS-352: the V2 Changelog screen (`/w/:ws/changelog`) — the year heatmap over the newest-first,
  * day/week/month timeline, restyled to V2, with V2 ticket links.
  */
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
@@ -18,14 +18,14 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: () => '/v2/w/ws1/changelog',
+  useRouterState: () => '/w/ws1/changelog',
   useParams: () => ({ ws: 'ws1' }),
 }));
 vi.mock('../api/context', () => ({ useWs: () => 'ws1', useHookWs: (o?: string) => o ?? 'ws1' }));
 vi.mock('../app/link', () => ({
   useGo: () => vi.fn(),
   A: ({ children, params, className, ...rest }: Record<string, unknown> & { children?: React.ReactNode }) => (
-    <a href={`/v2/w/ws1/tickets/${String((params as Record<string, string>)?.['ticketId'] ?? '')}`} className={className as string} {...(rest as Record<string, unknown>)}>
+    <a href={`/w/ws1/tickets/${String((params as Record<string, string>)?.['ticketId'] ?? '')}`} className={className as string} {...(rest as Record<string, unknown>)}>
       {children}
     </a>
   ),
@@ -108,11 +108,11 @@ describe('the V2 changelog screen', () => {
     expect(within(container.querySelector('[data-day="2026-08-31"]')!).getByRole('heading', { level: 3 }).textContent).toMatch(/Week of/);
   });
 
-  it('links an entry to its ticket under /v2', () => {
+  it('links an entry to its ticket', () => {
     state.entries = [entry('2026-09-02T10:00:00.000Z', { ticketId: 'tk_7', link: { kind: 'ticket', target: 'tk_7' }, summary: 'Landed: dark mode' })];
     render(<V2ChangelogScreen />);
     const link = screen.getByRole('link', { name: 'Landed: dark mode' });
-    expect(link.getAttribute('href')).toBe('/v2/w/ws1/tickets/tk_7');
+    expect(link.getAttribute('href')).toBe('/w/ws1/tickets/tk_7');
   });
 
   it('opens a pull request entry on the forge', () => {

@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import { useExitPresence } from '../v2/motion';
 
-vi.mock('@tanstack/react-router', () => ({ Outlet: () => null, useRouterState: () => '/v2/needs', useParams: () => ({}) }));
+vi.mock('@tanstack/react-router', () => ({ Outlet: () => null, useRouterState: () => '/needs', useParams: () => ({}) }));
 vi.mock('../app/link', () => ({
   A: ({ children }: { children?: ReactNode }) => children,
   useGo: () => () => undefined,

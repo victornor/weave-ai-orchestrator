@@ -354,7 +354,7 @@ export function V2DecisionCard({
   );
   const artifactHref =
     artifact && ws && decision.ticketId
-      ? `/v2/w/${encodeURIComponent(ws)}/tickets/${encodeURIComponent(decision.ticketId)}/artifacts/${encodeURIComponent(artifact.externalId!)}`
+      ? `/w/${encodeURIComponent(ws)}/tickets/${encodeURIComponent(decision.ticketId)}/artifacts/${encodeURIComponent(artifact.externalId!)}`
       : null;
 
   // VS-452: a merge card can open the change explorer for the pull request it is about. The number
@@ -369,7 +369,7 @@ export function V2DecisionCard({
   }, [products.data]);
   const reviewChangesHref =
     reviewNumber !== null && ws && reviewProject
-      ? `/v2/w/${encodeURIComponent(ws)}/p/${encodeURIComponent(reviewProject)}/changes/${reviewNumber}`
+      ? `/w/${encodeURIComponent(ws)}/p/${encodeURIComponent(reviewProject)}/changes/${reviewNumber}`
       : null;
 
   const approveKey = namedKind ? NAMED_CARD_OPTION_KEYS[namedKind].approve : 'approve';
@@ -736,7 +736,7 @@ export function V2DecisionCard({
 
         {narrow && ws && decision.ticketId ? (
           <div className="mt-2 border-t border-line-1 pt-2">
-            <A to={`/v2/w/${encodeURIComponent(ws)}/tickets/${encodeURIComponent(decision.ticketId)}`} className="v2-link text-micro">
+            <A to={`/w/${encodeURIComponent(ws)}/tickets/${encodeURIComponent(decision.ticketId)}`} className="v2-link text-micro">
               Ask the worker
             </A>
           </div>

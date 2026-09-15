@@ -1,46 +1,13 @@
 # plugins/web-pages Specification
 
 ## Purpose
-VS-334 gave plugins a page, storage, tools, routes and a nav entry — but every part of that
-contract still assumes V1. The Services plugin (VS-381) is meant to be Weave AI's first real
-plugin and the template others build from, built directly for V2, with no styling of its own and
-the real SDK. Today it cannot be: V1's `/w/:ws/plugins/:pluginId` route has no V2 counterpart or
-rail entry; `host.kitCss()` only returns V1's Artifact Kit CSS, so a plugin page can never look
-like V2's Mono theme or follow its live dark/light toggle; and `@weave-ai/plugin-sdk` is not
-published anywhere and is workspace-linked only via `pnpm`'s `workspace:*` protocol, so a plugin
-living in its own repository (outside this monorepo) cannot `import` it at all without vendoring a
-copy that drifts from the daemon it runs against. This change closes those three gaps in Weave AI
-itself, so VS-381 (and every plugin after it) needs no workaround.
+A plugin can serve its own page inside Weave AI: the daemon serves the plugin's HTML, the app
+renders it at `/w/:ws/plugins/:pluginId` in an opaque-origin sandbox with a scoped postMessage
+bridge to the plugin's own API routes, a data-driven rail entry reaches it, and the page is styled
+by a daemon-generated stylesheet that follows the app's live theme without the plugin shipping any
+CSS of its own.
 
 ## Requirements
-
-### Requirement: A plugin page renders only for a workspace that loads the plugin
-
-Both the V1 plugin page route (`/w/:ws/plugins/:pluginId`) and the V2 plugin page route
-(`/v2/w/:ws/plugins/:pluginId`) SHALL render the plugin's page, sandboxed, for a workspace that
-loads that plugin, and SHALL render a not-found state for a workspace that does not. Neither route
-SHALL require adding a route per plugin: both remain one static route with a dynamic plugin-id
-segment.
-
-#### Scenario: The page renders where the plugin is loaded (V1)
-
-- **WHEN** workspace `acme` loads a plugin with id `notes` that serves a page
-- **THEN** visiting `/w/acme/plugins/notes` renders that plugin's page
-
-#### Scenario: The page renders where the plugin is loaded (V2)
-
-- **WHEN** workspace `acme` loads a plugin with id `notes` that serves a page
-- **THEN** visiting `/v2/w/acme/plugins/notes` renders that plugin's page
-
-#### Scenario: The page does not render where the plugin is not loaded (V1)
-
-- **WHEN** workspace `beta` does not load the `notes` plugin
-- **THEN** visiting `/w/beta/plugins/notes` renders a not-found state, not the plugin's page
-
-#### Scenario: The page does not render where the plugin is not loaded (V2)
-
-- **WHEN** workspace `beta` does not load the `notes` plugin
-- **THEN** visiting `/v2/w/beta/plugins/notes` renders a not-found state, not the plugin's page
 
 ### Requirement: A plugin page runs in an opaque origin with no direct network access
 
@@ -113,50 +80,6 @@ event connection rather than opening a new one per page.
 
 - **WHEN** the workspace's event stream carries a `plugin.event` for a different plugin
 - **THEN** the hosted page does not receive it
-
-### Requirement: A nav entry appears only for a workspace that loads a plugin with a page
-
-Both V1's workspace nav and V2's rail (expanded, collapsed and the phone More list) SHALL show an
-entry linking to a loaded plugin's page only when that workspace actually loads a plugin that
-registered one, and SHALL show no such entry otherwise. This SHALL NOT require adding a build-time
-route or nav-array/rail-array entry per plugin.
-
-#### Scenario: The nav entry appears where the plugin is loaded (V1)
-
-- **WHEN** workspace `acme` loads the `notes` plugin's page
-- **THEN** `acme`'s nav includes an entry linking to `/w/acme/plugins/notes`
-
-#### Scenario: The rail entry appears where the plugin is loaded (V2)
-
-- **WHEN** workspace `acme` loads the `notes` plugin's page
-- **THEN** `acme`'s V2 rail (expanded and collapsed) and phone More list include an entry linking to
-  `/v2/w/acme/plugins/notes`, and that entry is the only one highlighted while that page is shown
-
-#### Scenario: The nav entry is absent where the plugin is not loaded
-
-- **WHEN** workspace `beta` does not load the `notes` plugin
-- **THEN** neither `beta`'s V1 nav nor its V2 rail has an entry for it
-
-#### Scenario: Two workspaces with different plugins show different rail entries
-
-- **WHEN** workspace `acme` loads a plugin with a page and workspace `beta` loads a different one
-- **THEN** each workspace's V2 rail shows only its own plugin's entry, not the other's
-
-#### Scenario: The existing static nav/rail is unaffected
-
-- **WHEN** no plugin with a page is loaded for a workspace
-- **THEN** the workspace's V1 `RAIL`/`TABS`/`MORE_ITEMS` nav and V2's `V2_EVERYWHERE`/`V2_WORKSPACE`/
-  `V2_KEPT` rail render exactly as they do today
-
-#### Scenario: A plugin's declared display name is used where present
-
-- **WHEN** a loaded plugin declares a display name
-- **THEN** the V2 rail entry's label and the plugin page's title show that name, not the plugin's id
-
-#### Scenario: The id is the fallback
-
-- **WHEN** a loaded plugin declares no display name
-- **THEN** the V2 rail entry's label and the plugin page's title show the plugin's id
 
 ### Requirement: A plugin page is styled through a small, versioned, visual-value-free vocabulary
 
@@ -296,3 +219,58 @@ depend on one.
 - **WHEN** the emitted link rule is inspected
 - **THEN** its colour comes from a token the generated stylesheet itself defines, not a literal
   colour value
+
+### Requirement: A plugin page renders at the root plugin route for a workspace that loads the plugin
+
+The plugin page route, `GET /w/:ws/plugins/:pluginId` in the app, SHALL render the plugin's page,
+sandboxed, for a workspace that loads that plugin, and SHALL render a not-found state for a
+workspace that does not. It SHALL NOT require adding a route per plugin: it remains one static
+route with a dynamic plugin-id segment.
+
+#### Scenario: The page renders where the plugin is loaded
+
+- **WHEN** workspace `acme` loads a plugin with id `notes` that serves a page
+- **THEN** visiting `/w/acme/plugins/notes` renders that plugin's page
+
+#### Scenario: The page does not render where the plugin is not loaded
+
+- **WHEN** workspace `beta` does not load the `notes` plugin
+- **THEN** visiting `/w/beta/plugins/notes` renders a not-found state, not the plugin's page
+
+### Requirement: A rail entry appears only for a workspace that loads a plugin with a page
+
+The rail (expanded, collapsed and the phone More list) SHALL show an entry linking to a loaded
+plugin's page only when that workspace actually loads a plugin that registered one, and SHALL show
+no such entry otherwise. This SHALL NOT require adding a build-time route or rail-array entry per
+plugin.
+
+#### Scenario: The rail entry appears where the plugin is loaded
+
+- **WHEN** workspace `acme` loads the `notes` plugin's page
+- **THEN** `acme`'s rail (expanded and collapsed) and phone More list include an entry linking to
+  `/w/acme/plugins/notes`, and that entry is the only one highlighted while that page is shown
+
+#### Scenario: The rail entry is absent where the plugin is not loaded
+
+- **WHEN** workspace `beta` does not load the `notes` plugin
+- **THEN** `beta`'s rail has no entry for it
+
+#### Scenario: Two workspaces with different plugins show different rail entries
+
+- **WHEN** workspace `acme` loads a plugin with a page and workspace `beta` loads a different one
+- **THEN** each workspace's rail shows only its own plugin's entry, not the other's
+
+#### Scenario: The existing static rail is unaffected
+
+- **WHEN** no plugin with a page is loaded for a workspace
+- **THEN** the workspace's rail renders exactly as it does today
+
+#### Scenario: A plugin's declared display name is used where present
+
+- **WHEN** a loaded plugin declares a display name
+- **THEN** the rail entry's label and the plugin page's title show that name, not the plugin's id
+
+#### Scenario: The id is the fallback
+
+- **WHEN** a loaded plugin declares no display name
+- **THEN** the rail entry's label and the plugin page's title show the plugin's id

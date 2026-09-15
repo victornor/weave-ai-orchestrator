@@ -88,7 +88,7 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
           code="WORKER_NOT_FOUND"
           message="That worker has been archived."
           actions={
-            <Button variant="link" onClick={() => go('/v2/w/$ws/roles', { params: { ws } })}>
+            <Button variant="link" onClick={() => go('/w/$ws/roles', { params: { ws } })}>
               Back to Roles
             </Button>
           }
@@ -120,7 +120,7 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
         </span>
         <div className="flex flex-none gap-2">
           {ticket ? (
-            <Button variant="ghost" size="sm" onClick={() => go('/v2/w/$ws/tickets/$ticketId', { params: { ws, ticketId: ticket.identifier } })}>
+            <Button variant="ghost" size="sm" onClick={() => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: ticket.identifier } })}>
               Ticket
             </Button>
           ) : null}

@@ -14,45 +14,45 @@ import {
 
 describe('scope from a V2 path', () => {
   it('reads the workspace out of a workspace path', () => {
-    expect(workspaceFromV2Path('/v2/w/acme/work')).toBe('acme');
-    expect(workspaceFromV2Path('/v2/w/acme')).toBe('acme');
-    expect(workspaceFromV2Path('/v2/w/acme/tickets/ACME-1')).toBe('acme');
+    expect(workspaceFromV2Path('/w/acme/work')).toBe('acme');
+    expect(workspaceFromV2Path('/w/acme')).toBe('acme');
+    expect(workspaceFromV2Path('/w/acme/tickets/ACME-1')).toBe('acme');
   });
 
   it('is Everywhere for a path that names no workspace', () => {
-    expect(workspaceFromV2Path('/v2/needs')).toBeNull();
-    expect(workspaceFromV2Path('/v2')).toBeNull();
-    expect(workspaceFromV2Path('/v2/chats')).toBeNull();
+    expect(workspaceFromV2Path('/needs')).toBeNull();
+    expect(workspaceFromV2Path('/')).toBeNull();
+    expect(workspaceFromV2Path('/chats')).toBeNull();
   });
 });
 
 describe('the single highlighted row', () => {
   it('highlights the global row on a global path', () => {
-    expect(activeNavKey('/v2/needs')).toBe('global-needs');
-    expect(activeNavKey('/v2/live')).toBe('global-live');
-    expect(activeNavKey('/v2/chats')).toBe('global-chats');
-    expect(activeNavKey('/v2/runs')).toBe('global-runs');
-    expect(activeNavKey('/v2/runs/01ABC')).toBe('global-runs');
+    expect(activeNavKey('/needs')).toBe('global-needs');
+    expect(activeNavKey('/live')).toBe('global-live');
+    expect(activeNavKey('/chats')).toBe('global-chats');
+    expect(activeNavKey('/runs')).toBe('global-runs');
+    expect(activeNavKey('/runs/01ABC')).toBe('global-runs');
   });
 
   it('highlights the workspace row on a workspace path', () => {
-    expect(activeNavKey('/v2/w/acme/chat')).toBe('ws-chat');
-    expect(activeNavKey('/v2/w/acme/needs')).toBe('ws-needs');
-    expect(activeNavKey('/v2/w/acme/work')).toBe('ws-work');
-    expect(activeNavKey('/v2/w/acme/roles')).toBe('ws-roles');
-    expect(activeNavKey('/v2/w/acme/knowledge')).toBe('ws-knowledge');
+    expect(activeNavKey('/w/acme/chat')).toBe('ws-chat');
+    expect(activeNavKey('/w/acme/needs')).toBe('ws-needs');
+    expect(activeNavKey('/w/acme/work')).toBe('ws-work');
+    expect(activeNavKey('/w/acme/roles')).toBe('ws-roles');
+    expect(activeNavKey('/w/acme/knowledge')).toBe('ws-knowledge');
   });
 
   it('maps a drill-down to the destination that owns it', () => {
-    expect(activeNavKey('/v2/w/acme/tickets/ACME-1')).toBe('ws-work');
-    expect(activeNavKey('/v2/w/acme/workers/w1')).toBe('ws-roles');
-    expect(activeNavKey('/v2/w/acme/artifacts/a1')).toBe('ws-knowledge');
-    expect(activeNavKey('/v2/w/acme/p/web')).toBe(projectRowKey('web'));
+    expect(activeNavKey('/w/acme/tickets/ACME-1')).toBe('ws-work');
+    expect(activeNavKey('/w/acme/workers/w1')).toBe('ws-roles');
+    expect(activeNavKey('/w/acme/artifacts/a1')).toBe('ws-knowledge');
+    expect(activeNavKey('/w/acme/p/web')).toBe(projectRowKey('web'));
   });
 
   it('is null where nothing owns the path', () => {
-    expect(activeNavKey('/v2')).toBeNull();
-    expect(activeNavKey('/v2/w/acme/nonsense')).not.toBeNull();
+    expect(activeNavKey('/')).toBeNull();
+    expect(activeNavKey('/w/acme/nonsense')).not.toBeNull();
   });
 });
 
@@ -61,15 +61,15 @@ describe('addresses preserve scope', () => {
   const needs = V2_EVERYWHERE.find((d) => d.key === 'global-needs')!;
 
   it('fills $ws from the current workspace scope', () => {
-    expect(v2Href(work, { kind: 'workspace', ws: 'acme' })).toBe('/v2/w/acme/work');
+    expect(v2Href(work, { kind: 'workspace', ws: 'acme' })).toBe('/w/acme/work');
   });
 
   it('fills $ws from the fallback when the scope is Everywhere', () => {
-    expect(v2Href(work, { kind: 'everywhere' }, 'acme')).toBe('/v2/w/acme/work');
+    expect(v2Href(work, { kind: 'everywhere' }, 'acme')).toBe('/w/acme/work');
   });
 
   it('leaves a global address alone', () => {
-    expect(v2Href(needs, { kind: 'workspace', ws: 'acme' }, 'acme')).toBe('/v2/needs');
+    expect(v2Href(needs, { kind: 'workspace', ws: 'acme' }, 'acme')).toBe('/needs');
   });
 });
 

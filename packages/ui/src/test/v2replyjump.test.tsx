@@ -161,7 +161,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@tanstack/react-router', () => ({
   Outlet: () => null,
-  useRouterState: () => '/v2/w/ws1/chat',
+  useRouterState: () => '/w/ws1/chat',
   useParams: () => ({}),
 }));
 vi.mock('../app/link', () => ({

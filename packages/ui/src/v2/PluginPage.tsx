@@ -1,5 +1,5 @@
 /**
- * `/v2/w/:ws/plugins/:pluginId` (VS-385): the V2 home for a plugin's page, mirroring V1's
+ * `/w/:ws/plugins/:pluginId` (VS-385): the V2 home for a plugin's page, mirroring V1's
  * `routes/PluginPage.tsx` — one static route, a dynamic `$pluginId` segment, the same
  * `resolveBridgePath`-scoped postMessage bridge (design.md Decision 1: the security boundary does
  * not change between V1 and V2, so it is reused verbatim rather than forked).

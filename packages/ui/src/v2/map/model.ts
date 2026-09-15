@@ -49,7 +49,7 @@ export function buildWorkerMapModel(workspaces: readonly WorkerMapInput[]): MapM
       title: w.name,
       workspaceId: w.id,
       workspaceName: w.name,
-      href: `/v2/w/${encodeURIComponent(w.id)}/chat`,
+      href: `/w/${encodeURIComponent(w.id)}/chat`,
       updatedAt: null,
     });
 
@@ -62,7 +62,7 @@ export function buildWorkerMapModel(workspaces: readonly WorkerMapInput[]): MapM
         title: projectLabel(p),
         workspaceId: w.id,
         workspaceName: w.name,
-        href: `/v2/w/${encodeURIComponent(w.id)}/work`,
+        href: `/w/${encodeURIComponent(w.id)}/work`,
         search: { project: p.id },
         projectId: p.id,
         projectSlug: p.slug,
@@ -80,7 +80,7 @@ export function buildWorkerMapModel(workspaces: readonly WorkerMapInput[]): MapM
         title: worker.name,
         workspaceId: w.id,
         workspaceName: w.name,
-        href: '/v2/live',
+        href: '/live',
         search: { worker: worker.id },
         projectId: worker.projectId ?? undefined,
         projectSlug: project?.slug,

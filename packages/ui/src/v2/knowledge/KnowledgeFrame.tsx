@@ -5,7 +5,7 @@
  * Each tab is its own route, so the address reflects it and reload / back / forward work. The
  * `?project=` scope is carried into every tab link, so switching tabs keeps the chosen project, as
  * V1's in-page tab state does. The rail's Knowledge row stays highlighted on all five, because they
- * all live under `/v2/w/$ws/knowledge` (`activeNavKey`).
+ * all live under `/w/$ws/knowledge` (`activeNavKey`).
  */
 import type { ReactNode } from 'react';
 import { A, useGo, useSearchParams } from '../../app/link';
@@ -18,16 +18,16 @@ export type KnowledgeTab = 'knowledge' | 'explorer' | 'changelog' | 'graph' | 's
 
 /** V1's order (`packages/ui/src/routes/Knowledge.tsx`). */
 export const KNOWLEDGE_TABS: ReadonlyArray<{ key: KnowledgeTab; label: string; path: string }> = [
-  { key: 'knowledge', label: 'Knowledge', path: '/v2/w/$ws/knowledge' },
-  { key: 'explorer', label: 'Explorer', path: '/v2/w/$ws/knowledge/explorer' },
-  { key: 'changelog', label: 'Changelog', path: '/v2/w/$ws/knowledge/changelog' },
-  { key: 'graph', label: 'Graph', path: '/v2/w/$ws/knowledge/graph' },
-  { key: 'specs', label: 'Specs', path: '/v2/w/$ws/knowledge/specs' },
+  { key: 'knowledge', label: 'Knowledge', path: '/w/$ws/knowledge' },
+  { key: 'explorer', label: 'Explorer', path: '/w/$ws/knowledge/explorer' },
+  { key: 'changelog', label: 'Changelog', path: '/w/$ws/knowledge/changelog' },
+  { key: 'graph', label: 'Graph', path: '/w/$ws/knowledge/graph' },
+  { key: 'specs', label: 'Specs', path: '/w/$ws/knowledge/specs' },
 ];
 
 /** The address of a tab, for the project picker to stay on the tab it scopes. */
 export function knowledgeTabPath(tab: KnowledgeTab): string {
-  return KNOWLEDGE_TABS.find((t) => t.key === tab)?.path ?? '/v2/w/$ws/knowledge';
+  return KNOWLEDGE_TABS.find((t) => t.key === tab)?.path ?? '/w/$ws/knowledge';
 }
 
 /** The current `?project=` scope, as every Knowledge body reads it. */

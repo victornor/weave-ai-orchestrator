@@ -1,7 +1,7 @@
 /**
  * The V2 root and its shell layout. `V2Root` owns the scoped `.v2-root` element that carries the
  * Mono tokens and the active theme; the shell (rail, phone tab bar) is a separate pathless layout
- * inside it, so `/v2/login` renders the tokens and theme with no chrome (VS-353).
+ * inside it, so `/login` renders the tokens and theme with no chrome (VS-353).
  */
 import { createContext, useContext } from 'react';
 import { Outlet, useParams } from '@tanstack/react-router';
@@ -33,7 +33,7 @@ export function V2Root(): React.ReactElement {
   );
 }
 
-/** The chrome for every signed-in V2 page. `/v2/login` is a sibling, so it renders without it. */
+/** The chrome for every signed-in V2 page. `/login` is a sibling, so it renders without it. */
 export function V2ShellLayout(): React.ReactElement {
   const { theme, setTheme } = useV2ThemeState();
   return <V2Shell theme={theme} onTheme={setTheme} />;

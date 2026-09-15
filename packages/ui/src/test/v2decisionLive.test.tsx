@@ -54,7 +54,7 @@ vi.mock('../api/client', async () => {
 vi.mock('@tanstack/react-router', () => ({
   Outlet: () => null,
   useRouterState: (opts?: { select?: (s: { location: { pathname: string } }) => unknown }) =>
-    opts?.select ? opts.select({ location: { pathname: '/v2/needs' } }) : '/v2/needs',
+    opts?.select ? opts.select({ location: { pathname: '/needs' } }) : '/needs',
   useParams: () => ({}),
 }));
 vi.mock('../app/link', () => ({

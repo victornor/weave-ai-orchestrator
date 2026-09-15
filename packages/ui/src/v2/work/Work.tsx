@@ -210,7 +210,7 @@ export function V2WorkScreen(): React.ReactElement {
   const boardQuery = searching ? searchTickets : tickets;
 
   const openTicket = (identifier: string): void =>
-    go('/v2/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } });
+    go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } });
 
   const chooseFinished = (mode: FinishedMode): void => setFinished(mode);
 
@@ -232,7 +232,7 @@ export function V2WorkScreen(): React.ReactElement {
   /** Keep `?q=` current without stacking history, so the query survives reload and back/forward. */
   const commitQuery = (value: string): void => {
     setQ(value);
-    go('/v2/w/$ws/work', { params: { ws }, search: { ...search, q: value.trim() || undefined }, replace: true });
+    go('/w/$ws/work', { params: { ws }, search: { ...search, q: value.trim() || undefined }, replace: true });
   };
   const clearQuery = (): void => commitQuery('');
 

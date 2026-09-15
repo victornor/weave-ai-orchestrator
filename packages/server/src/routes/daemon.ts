@@ -152,7 +152,7 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   app.get('/incidents/:id', (c) => c.json(deps.incidents.get(c.req.param('id'))));
 
   /**
-   * A run by id alone (VS-386). The V2 run detail at `/v2/runs/$runId` is a global, cross-workspace
+   * A run by id alone (VS-386). The run detail at `/runs/$runId` is a global, cross-workspace
    * screen (HANDOFF §12), so it has no workspace from its route and the runs API is per workspace.
    * Search the loaded workspaces and return the first match — the same bare `Run` the per-workspace
    * route serves, which already carries `workspaceId`. A run belongs to exactly one workspace, so

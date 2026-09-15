@@ -185,11 +185,11 @@ export function RunsBody(): React.ReactElement {
   const errored = pages.length > 0 && pages.every((q) => q.isError);
 
   const nameOf = (id: string): string => nameById.get(id) ?? 'Unknown agent';
-  const open = (r: Run): void => go('/v2/runs/$runId', { params: { runId: r.id } });
+  const open = (r: Run): void => go('/runs/$runId', { params: { runId: r.id } });
 
   /** Keep the URL current without stacking history, so the choice survives reload and back/forward. */
   const commit = (patch: Record<string, string | undefined>): void => {
-    go('/v2/runs', { search: { ...search, ...patch }, replace: true });
+    go('/runs', { search: { ...search, ...patch }, replace: true });
   };
   const chooseScope = (id: string): void => {
     setScope(id);

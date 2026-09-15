@@ -409,7 +409,7 @@ function WorkerRow({
 
   const onClick = (): void => {
     if (canExpand) onToggle(worker.id);
-    else go('/v2/w/$ws/workers/$workerId', { params: { ws, workerId: worker.id } });
+    else go('/w/$ws/workers/$workerId', { params: { ws, workerId: worker.id } });
   };
 
   return (
@@ -447,7 +447,7 @@ function WorkerRow({
           <WorkerFeed agentId={worker.id} ws={ws} compact resizable label={`Live feed for ${worker.name}`} />
           <div className="flex items-center gap-2 border-t border-line-1 px-2.5 py-1.5">
             <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{spendLabel(run)}</span>
-            <A to="/v2/live" className="flex-none text-nano text-text-2 hover:text-text-1">
+            <A to="/live" className="flex-none text-nano text-text-2 hover:text-text-1">
               Open in Live
             </A>
           </div>
@@ -477,7 +477,7 @@ function StartSessionForm({
 
   const openWorker = (agentId: string): void => {
     onCancel();
-    go('/v2/w/$ws/workers/$workerId', { params: { ws, workerId: agentId } });
+    go('/w/$ws/workers/$workerId', { params: { ws, workerId: agentId } });
   };
 
   return (

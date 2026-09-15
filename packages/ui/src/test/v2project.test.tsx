@@ -1,5 +1,5 @@
 /**
- * VS-352: the V2 project overview (`/v2/w/:ws/p/:project`) — the kept V1 sections restyled, the header
+ * VS-352: the V2 project overview (`/w/:ws/p/:project`) — the kept V1 sections restyled, the header
  * links, the commit graph, the pull requests and their shared diff, and the unknown-project state.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react';
@@ -18,7 +18,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: () => '/v2/w/ws1/p/web',
+  useRouterState: () => '/w/ws1/p/web',
   useParams: () => ({ ws: 'ws1', project: state.param }),
 }));
 
@@ -96,9 +96,9 @@ describe('the V2 project overview', () => {
     expect(screen.getByText('git@example.invalid:web.git')).toBeInTheDocument();
     expect(screen.getByText('Ship the V2 kept screens')).toBeInTheDocument();
     const links = screen.getAllByRole('link').map((a) => a.getAttribute('href'));
-    expect(links).toContain('/v2/w/ws1/work');
-    expect(links).toContain('/v2/w/ws1/knowledge');
-    expect(links).toContain('/v2/w/ws1/chat');
+    expect(links).toContain('/w/ws1/work');
+    expect(links).toContain('/w/ws1/knowledge');
+    expect(links).toContain('/w/ws1/chat');
     expect(links.some((h) => h?.includes('merge-queue'))).toBe(false);
   });
 
@@ -133,7 +133,7 @@ describe('the V2 project overview', () => {
     const section = roadmapSection();
     const titles = within(section).getAllByText(/^(Dark mode|Shortcuts)$/).map((el) => el.textContent);
     expect(titles).toEqual(['Dark mode', 'Shortcuts']);
-    expect(within(section).getByRole('link', { name: 'ACME-42' })).toHaveAttribute('href', '/v2/w/ws1/tickets/ACME-42');
+    expect(within(section).getByRole('link', { name: 'ACME-42' })).toHaveAttribute('href', '/w/ws1/tickets/ACME-42');
     expect(within(section).getByText('Later').tagName).toBe('STRONG');
     // Each item's own select shows its current status.
     expect((within(section).getByLabelText('Status of Dark mode') as HTMLSelectElement).value).toBe('planned');

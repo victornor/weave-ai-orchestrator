@@ -36,6 +36,10 @@ describe('PushDispatcher', () => {
       body: 'It needs a yes',
       path: `/w/${harness.runtime.ctx.config.id}/needs`,
     });
+    // VS-456: the deep link is a root path, never the retired `/v2` one.
+    const { path } = sendPush.mock.calls[0]?.[3] as { path: string };
+    expect(path.startsWith('/w/')).toBe(true);
+    expect(path).not.toContain('/v2');
     dispatcher.stop();
   });
 

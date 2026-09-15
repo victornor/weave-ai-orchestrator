@@ -9,7 +9,7 @@ import { eventually } from './eventually';
 const state = vi.hoisted(() => ({ docs: [] as KnowledgeDocSummary[], hubs: [] as Array<Record<string, unknown>> }));
 
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
-const linkState = vi.hoisted(() => ({ path: '/v2/w/ws1/knowledge/explorer', search: {} as Record<string, string | undefined>, go: vi.fn() }));
+const linkState = vi.hoisted(() => ({ path: '/w/ws1/knowledge/explorer', search: {} as Record<string, string | undefined>, go: vi.fn() }));
 vi.mock('@tanstack/react-router', () => ({
   useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) =>
     o?.select ? o.select({ location: { pathname: linkState.path } }) : linkState.path,
@@ -91,7 +91,7 @@ describe('the V2 knowledge explorer route', () => {
     await eventually(() => expect(screen.getByText('Theming decisions')).toBeInTheDocument());
     fireEvent.click(screen.getByText('Theming decisions'));
     const call = linkState.go.mock.calls.at(-1);
-    expect(call?.[0]).toBe('/v2/w/$ws/knowledge/explorer');
+    expect(call?.[0]).toBe('/w/$ws/knowledge/explorer');
     expect(call?.[1]).toMatchObject({ replace: true, search: { project: 'p1', doc: 'project:theming' } });
   });
 });

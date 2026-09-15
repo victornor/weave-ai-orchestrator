@@ -1,0 +1,34 @@
+[
+  {
+    "theme": "dark",
+    "host": {
+      "url": "/w/acme/plugins/notes",
+      "theme": "dark",
+      "hasIframe": true
+    },
+    "frame": {
+      "theme": "dark",
+      "card": "rgb(11, 11, 13) / 0px",
+      "text": "ADD A NOTE Add LINKS Both of these are styled by the host, never by this plugin:"
+    },
+    "errors": [
+      "SecurityError: Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag."
+    ]
+  },
+  {
+    "theme": "light",
+    "host": {
+      "url": "/w/acme/plugins/notes",
+      "theme": "light",
+      "hasIframe": true
+    },
+    "frame": {
+      "theme": "light",
+      "card": "rgb(255, 255, 255) / 0px",
+      "text": "ADD A NOTE Add LINKS Both of these are styled by the host, never by this plugin:"
+    },
+    "errors": [
+      "SecurityError: Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag."
+    ]
+  }
+]

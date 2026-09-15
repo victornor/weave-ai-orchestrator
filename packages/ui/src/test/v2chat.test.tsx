@@ -33,7 +33,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@tanstack/react-router', () => ({
   Outlet: () => null,
-  useRouterState: () => '/v2/w/ws1/chat',
+  useRouterState: () => '/w/ws1/chat',
   useParams: () => ({}),
 }));
 vi.mock('../app/link', () => ({
@@ -351,7 +351,7 @@ describe('the V2 Chat screen', () => {
     expect(tag.tagName).toBe('A');
     expect(tag.getAttribute('href')).toBe('#ticket:ACME-42');
     fireEvent.click(tag);
-    expect(state.go).toHaveBeenCalledWith('/v2/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'ACME-42' } });
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'ACME-42' } });
 
     expect(screen.getByText('main').tagName).toBe('CODE');
     expect(screen.getByText('docs').getAttribute('href')).toBe('/guide');
@@ -427,7 +427,7 @@ describe('the V2 Chat screen', () => {
     expect(phoneNotes).toHaveLength(1);
     expect(phoneNotes[0]!.textContent).toBe('You answered: API key — Which rate-limit key should we use?');
     // A decision with no ticket links to Needs you.
-    expect(phoneNotes[0]!.querySelector('a')?.getAttribute('href')).toBe('/v2/needs');
+    expect(phoneNotes[0]!.querySelector('a')?.getAttribute('href')).toBe('/needs');
     // The real message is untouched; the card's prose fallback is not a message.
     expect(document.querySelectorAll('[data-chat-message]')).toHaveLength(1);
     expect(screen.queryByText(/endpoint sits behind/)).toBeNull();
@@ -585,9 +585,9 @@ describe('the V2 Chat screen', () => {
 
     // A chip with a worker opens the worker; one filed before a worker exists opens the ticket.
     fireEvent.click(chips[0]!);
-    expect(state.go).toHaveBeenCalledWith('/v2/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'w1' } });
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'w1' } });
     fireEvent.click(chips[1]!);
-    expect(state.go).toHaveBeenCalledWith('/v2/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'VS-2' } });
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'VS-2' } });
 
     // The live worker no message accounts for sits in its own row, glyph and name.
     const row = document.querySelector('[data-v2-live-worker-row]');

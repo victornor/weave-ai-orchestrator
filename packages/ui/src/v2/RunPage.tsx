@@ -93,7 +93,7 @@ export function RunBody({ runId }: { runId: string }): React.ReactElement {
         <StatusGlyph status={RUN_UI[run.status]} size="sm" pulse={run.status === 'running'} />
         <span className={`ac-mono text-ui ${STATUS_TEXT[RUN_UI[run.status]]}`}>{run.status}</span>
         <span className="v2-tag text-text-3">{turnEnded(run)}</span>
-        <button type="button" onClick={() => go('/v2/runs')} className="ml-auto text-micro text-text-2 hover:text-text-1">
+        <button type="button" onClick={() => go('/runs')} className="ml-auto text-micro text-text-2 hover:text-text-1">
           All runs
         </button>
       </div>

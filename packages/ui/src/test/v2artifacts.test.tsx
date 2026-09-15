@@ -75,7 +75,7 @@ describe('the V2 ticket artifact reader', () => {
     expect(screen.getByText('web')).toBeInTheDocument();
     expect(screen.getByText(/Backend Engineer #7/)).toBeInTheDocument();
     const link = screen.getByRole('link', { name: 'Ticket' });
-    expect(link).toHaveAttribute('href', '/v2/w/ws1/tickets/ACME-42');
+    expect(link).toHaveAttribute('href', '/w/ws1/tickets/ACME-42');
     const frame = document.querySelector('iframe') as HTMLIFrameElement;
     expect(frame.getAttribute('sandbox')).toContain('allow-scripts');
     expect(screen.getByText(/sandboxed frame/)).toBeInTheDocument();

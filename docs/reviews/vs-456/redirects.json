@@ -1,0 +1,118 @@
+{
+  "shots": [
+    {
+      "theme": "dark",
+      "url": "/w/acme/needs",
+      "file": "vs456-needs-dark.png",
+      "text": "WeaveAI EVERYWHERE Needs you Live Chats Incidents Map Runs Scheduled Settings Acme Chat Needs you Work Roles Knowledge U",
+      "errors": []
+    },
+    {
+      "theme": "light",
+      "url": "/w/acme/needs",
+      "file": "vs456-needs-light.png",
+      "text": "WeaveAI EVERYWHERE Needs you Live Chats Incidents Map Runs Scheduled Settings Acme Chat Needs you Work Roles Knowledge U",
+      "errors": []
+    },
+    {
+      "theme": "dark",
+      "url": "/w/acme/chat",
+      "file": "vs456-chat-dark.png",
+      "text": "WeaveAI EVERYWHERE Needs you Live Chats Incidents Map Runs Scheduled Settings Acme Chat Needs you Work Roles Knowledge U",
+      "errors": []
+    },
+    {
+      "theme": "light",
+      "url": "/w/acme/chat",
+      "file": "vs456-chat-light.png",
+      "text": "WeaveAI EVERYWHERE Needs you Live Chats Incidents Map Runs Scheduled Settings Acme Chat Needs you Work Roles Knowledge U",
+      "errors": []
+    },
+    {
+      "theme": "dark",
+      "url": "/w/acme/tickets/ACME-1",
+      "file": "vs456-ticket-dark.png",
+      "text": "WeaveAI EVERYWHERE Needs you Live Chats Incidents Map Runs Scheduled Settings Acme Chat Needs you Work Roles Knowledge U",
+      "errors": []
+    },
+    {
+      "theme": "light",
+      "url": "/w/acme/tickets/ACME-1",
+      "file": "vs456-ticket-light.png",
+      "text": "WeaveAI EVERYWHERE Needs you Live Chats Incidents Map Runs Scheduled Settings Acme Chat Needs you Work Roles Knowledge U",
+      "errors": []
+    }
+  ],
+  "redirects": [
+    {
+      "from": "/v2/w/acme/work",
+      "expected": "/w/acme/work",
+      "final": "/w/acme/work",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "from": "/v2/runs?ws=acme",
+      "expected": "/runs?ws=acme",
+      "final": "/runs?ws=acme",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "from": "/w/acme/board",
+      "expected": "/w/acme/work",
+      "final": "/w/acme/work",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "from": "/w/acme/merge-queue?project=p1",
+      "expected": "/w/acme/work?project=p1",
+      "final": "/w/acme/work?project=p1",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "from": "/w/acme/team",
+      "expected": "/w/acme/roles",
+      "final": "/w/acme/roles",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "from": "/w/acme/live",
+      "expected": "/live?ws=acme",
+      "final": "/live?ws=acme",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "from": "/w/acme/runs",
+      "expected": "/runs?ws=acme",
+      "final": "/runs?ws=acme",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "from": "/w/acme/runs/run_1",
+      "expected": "/runs/run_1",
+      "final": "/runs/run_1",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "from": "/w/acme/settings",
+      "expected": "/settings?scope=acme",
+      "final": "/settings?scope=acme",
+      "ok": true,
+      "errors": []
+    },
+    {
+      "from": "/",
+      "expected": "/w/acme/needs",
+      "final": "/w/acme/needs",
+      "ok": true,
+      "errors": []
+    }
+  ]
+}

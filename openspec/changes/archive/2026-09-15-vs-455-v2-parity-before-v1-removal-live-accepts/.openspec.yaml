@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "V2 parity before V1 removal: Live accepts ?ws= to open pre-filtered to a workspace, and /v2/w/$ws/team redirects to Roles"
+skip_specs: true

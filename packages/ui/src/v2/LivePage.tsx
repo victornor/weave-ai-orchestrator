@@ -8,13 +8,14 @@
  * `WorkerFeed`, so Live opens no private run stream. VS-372 gives the floor one shared tile height;
  * VS-429 moves its control from an invisible bar above the grid onto a corner grip on every tile, so
  * one drag, keyboard press or double-click reset on any tile resizes them all, remembered beside
- * the per-row count.
+ * the per-row count. VS-455 makes the scope URL-addressable (`?ws=`), so a `/w/$ws/live` link
+ * lands pre-filtered to that workspace.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { projectLabel, type Agent, type Ticket, type UiStatus } from '@weave-ai/shared';
 import { resolveModel } from '@weave-ai/render';
 import { useModelsMany, useRuntimeModels, useTicketsMany, useWorkersMany, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
-import { useSearchParams } from '../app/link';
+import { useGo, useSearchParams } from '../app/link';
 import { liveWorkingAgents } from '../lib/board';
 import { agentIsWorking, cellUiStatus, orderByRunning, useRunningWorkerIds } from '../lib/liveOrder';
 import { modelOptionLabel } from '../lib/runtime';
@@ -167,6 +168,7 @@ export function V2LivePage(): React.ReactElement {
 
 export function LiveBody(): React.ReactElement {
   const search = useSearchParams();
+  const go = useGo();
   const workspaces = useWorkspaces();
   const listed = workspaces.data ?? [];
   const ids = useMemo(() => listed.map((w) => w.id), [listed]);
@@ -180,7 +182,20 @@ export function LiveBody(): React.ReactElement {
   const viewportHeight = useViewportHeight();
   const [cols, setCols] = useState<number>(() => readLiveColumns());
   const [customHeight, setCustomHeight] = useState<number | null>(() => readLiveHeight());
-  const [scope, setScope] = useState<string>('all');
+  // VS-455: the scope travels in the address, so `/v2/live?ws=<id>` opens pre-filtered to that
+  // workspace (V1's `/w/$ws/live` redirects here) and a reload or shared link keeps it. With no
+  // param the default is unchanged (Everywhere).
+  const [scope, setScope] = useState<string>(() => search['ws'] ?? 'all');
+  // A `ws` naming no loaded workspace reads as Everywhere rather than an empty floor, as RunsPage's does.
+  const shownScope = scope === 'all' || listed.some((w) => w.id === scope) ? scope : 'all';
+
+  // Choosing a scope writes it back into the URL without stacking history, so the choice survives a
+  // reload and back/forward. The `?worker=` focus below still sets the scope directly: it is the
+  // worker, not the address, that names the workspace there.
+  const chooseScope = (id: string): void => {
+    setScope(id);
+    go('/v2/live', { search: { ...search, ws: id === 'all' ? undefined : id }, replace: true });
+  };
 
   // The chosen height is a device preference, so a drag is written once when its grip is released
   // (see `commitHeight`) rather than on every move; an arrow step or reset writes immediately.
@@ -218,7 +233,7 @@ export function LiveBody(): React.ReactElement {
     return m;
   }, [ticketQueries]);
 
-  const filtered = useMemo(() => ordered.filter((c) => scope === 'all' || c.ws === scope), [ordered, scope]);
+  const filtered = useMemo(() => ordered.filter((c) => shownScope === 'all' || c.ws === shownScope), [ordered, shownScope]);
 
   // A Map worker node opens Live with `?worker=`: apply that worker's workspace scope once, when the
   // parameter first resolves, and mark it focused. Applying it on every render would fight the scope
@@ -261,9 +276,9 @@ export function LiveBody(): React.ReactElement {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-1.5 border-b border-line-1 px-4 py-2">
-        <Chip label="Everywhere" active={scope === 'all'} onClick={() => setScope('all')} />
+        <Chip label="Everywhere" active={shownScope === 'all'} onClick={() => chooseScope('all')} />
         {listed.map((w) => (
-          <Chip key={w.id} label={w.name} active={scope === w.id} onClick={() => setScope(w.id)} />
+          <Chip key={w.id} label={w.name} active={shownScope === w.id} onClick={() => chooseScope(w.id)} />
         ))}
         <span className="ml-auto ac-mono text-micro text-text-3" aria-live="polite">
           {filtered.filter((c) => workingIds.has(c.id)).length} running · showing {filtered.length}

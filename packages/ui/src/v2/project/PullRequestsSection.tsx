@@ -5,9 +5,9 @@
  *
  * Read-only: nothing here approves, merges, reviews or comments.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { DiffHunk } from '@weave-ai/render';
-import { highlightLine, languageForPath, useHighlighter } from '../../lib/highlight';
+import { languageForPath, useHighlighter } from '../../lib/highlight';
 import { usePullRequest, usePullRequestDiffContext, usePullRequestDiffFile, usePullRequestDiffFiles, usePullRequests } from '../../api/hooks';
 import { A, useSearchParams } from '../../app/link';
 import { StatusGlyph } from '../../components/StatusGlyph';
@@ -286,9 +286,8 @@ function FileRow({ file, isOpen, onToggle, projectId, number, layout }: { file: 
 function FileBody({ projectId, number, path, manifest, layout }: { projectId: string; number: number; path: string; manifest: T.DiffFileSummary; layout: DiffLayout }): React.ReactElement {
   const skip = manifest.binary || manifest.tooLarge;
   const diffFile = usePullRequestDiffFile(projectId, number, skip ? null : path);
-  const hljs = useHighlighter();
   const lang = languageForPath(path);
-  const highlight = useCallback<Highlighter>((text) => highlightLine(hljs, text, lang), [hljs, lang]);
+  const highlight = useHighlighter(lang);
 
   if (manifest.binary) return <p className="px-2.5 py-2 text-meta text-text-3">This file is binary.</p>;
   if (manifest.tooLarge) return <p className="px-2.5 py-2 text-meta text-text-3">This file's change is too large to render.</p>;
@@ -299,7 +298,7 @@ function FileBody({ projectId, number, path, manifest, layout }: { projectId: st
 
   const hunks = data.file.hunks;
   return (
-    <div className="v2-anim-fade ac-diff-code ac-mono overflow-x-auto border-t border-line-1 text-nano">
+    <div className="v2-anim-fade ac-code ac-mono overflow-x-auto border-t border-line-1 text-nano">
       {hunks.map((hunk, i) => (
         <div key={`${hunk.oldStart}-${hunk.newStart}`}>
           {i > 0 ? <Gap projectId={projectId} number={number} path={path} prev={hunks[i - 1]!} next={hunk} highlight={highlight} /> : null}

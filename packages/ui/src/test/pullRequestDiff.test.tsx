@@ -17,6 +17,10 @@ const state = vi.hoisted(() => ({
   context: null as PullRequestDiffContextResult | null,
 }));
 
+/** A stable identity highlighter: `useHighlighter` must return the same function across re-renders,
+ *  or `Code`'s memo rebuilds and rewrites the line's DOM (VS-323). */
+const { identityHighlight } = vi.hoisted(() => ({ identityHighlight: (text: string) => text }));
+
 vi.mock('../api/hooks', () => ({
   usePullRequestDiffFiles: () => ({ data: state.files, isLoading: false }),
   usePullRequestDiffFile: (_p: unknown, _n: unknown, path: string | null) => {
@@ -31,8 +35,7 @@ vi.mock('../api/hooks', () => ({
 }));
 vi.mock('../lib/highlight', () => ({
   languageForPath: () => null,
-  useHighlighter: () => null,
-  highlightLine: (_hljs: unknown, text: string) => text,
+  useHighlighter: () => identityHighlight,
 }));
 
 const { PullRequestDiff } = await import('../routes/project/PullRequestDiff');
@@ -212,7 +215,7 @@ describe('unified vs. side-by-side', () => {
     fireEvent.click(screen.getByRole('button', { expanded: false }));
     expect(container.querySelector('.grid-cols-2')).toBeNull();
     // VS-344: the pull-request view keeps horizontal scrolling, so its unified rows do not wrap.
-    const row = container.querySelector('.ac-diff-code div.flex')!;
+    const row = container.querySelector('.ac-code div.flex')!;
     expect(row.className).toContain('whitespace-pre');
     expect(row.className).not.toContain('whitespace-pre-wrap');
   });

@@ -77,6 +77,21 @@
   --diff-add-fg: #3fb950;
   --diff-remove-fg: #e5484d;
 
+  /* Syntax keeps hue in Mono too (VS-445). Mono greys its accent and status palettes on purpose,
+     and the code tokens used to borrow them, so every file-edit preview read as one ink. These are
+     their own palette — the same tuned dark values V1 uses — so a token colour in V2 never means a
+     state and never collapses to the Mono grey. */
+  --syntax-keyword: #c678dd;
+  --syntax-string: #98c379;
+  --syntax-number: #d19a66;
+  --syntax-function: #61afef;
+  --syntax-type: #e5c07b;
+  --syntax-comment: #8b9bb4;
+  --syntax-attr: #e06c75;
+  --syntax-builtin: #56b6c2;
+  --syntax-meta: #f97583;
+  --syntax-punctuation: #a3adc2;
+
   /* Project identity is not a state; these are the same hand-picked hues V1 assigns. */
   --project-1: #2dd4bf;
   --project-2: #38bdf8;
@@ -157,6 +172,17 @@
   --diff-remove-bg: rgb(194 43 49 / 0.12);
   --diff-add-fg: #1f8a34;
   --diff-remove-fg: #c22b31;
+
+  --syntax-keyword: #a626a4;
+  --syntax-string: #2e7d32;
+  --syntax-number: #986801;
+  --syntax-function: #4078f2;
+  --syntax-type: #9a6a00;
+  --syntax-comment: #6e7781;
+  --syntax-attr: #c0392b;
+  --syntax-builtin: #0b7285;
+  --syntax-meta: #9c36b5;
+  --syntax-punctuation: #57606a;
 
   --project-1: #0f766e;
   --project-2: #0369a1;

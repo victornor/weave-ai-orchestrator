@@ -49,9 +49,11 @@ import { useFlipList } from './flip';
 type WorkView = 'kanban' | 'table';
 
 /**
- * One width for every kanban column, empty or full (VS-411). A column never grows to fill free
- * space, so a board where only Done has cards shows six equal columns rather than a Done column
- * stretched across the pane; when they are wider than the pane the board scrolls instead.
+ * The minimum width of every kanban column (VS-471). Columns take an equal share of the pane
+ * (`flex: 1 1 0`) and grow together to fill it, so a board where only Done has cards shows six equal
+ * columns rather than a Done column stretched across the pane. The explicit minimum overrides
+ * `min-width: auto`, so a card can never widen its column past the equal share; when the pane is
+ * narrower than six times this, the columns sit at this width and the board scrolls horizontally.
  */
 export const V2_KANBAN_COLUMN_WIDTH = 236;
 
@@ -574,7 +576,7 @@ function KanbanColumn({
     <section
       data-v2-column={column.key}
       data-empty={empty ? 'true' : undefined}
-      style={{ flex: `0 0 ${V2_KANBAN_COLUMN_WIDTH}px`, minWidth: V2_KANBAN_COLUMN_WIDTH }}
+      style={{ flex: '1 1 0', minWidth: V2_KANBAN_COLUMN_WIDTH }}
       className="flex flex-col border-r border-line-1 bg-bg-0"
     >
       <header className="flex flex-none items-center gap-2 px-3 pb-2 pt-2.5">

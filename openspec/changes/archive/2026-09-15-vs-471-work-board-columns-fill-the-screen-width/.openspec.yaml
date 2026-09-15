@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Work board columns fill the screen width: every kanban column takes an
+  equal share of the pane, with 236px as the minimum before the board scrolls"

@@ -145,24 +145,27 @@ describe('V2 Work columns', () => {
     expect(within(column('done')).getByText('Landed')).toBeInTheDocument();
   });
 
-  it('gives every column one fixed width, empty or full (VS-411)', () => {
+  it('gives every column one equal-share growing rule, empty or full (VS-471)', () => {
     render(<V2WorkScreen />);
-    const widths = [...document.querySelectorAll('[data-v2-column]')].map((c) => (c as HTMLElement).style.flex);
-    expect(widths).toHaveLength(6);
-    expect(new Set(widths)).toEqual(new Set([`0 0 ${V2_KANBAN_COLUMN_WIDTH}px`]));
+    const columns = [...document.querySelectorAll('[data-v2-column]')] as HTMLElement[];
+    expect(columns).toHaveLength(6);
+    // One identical growing rule for every column: `flex: 1 1 0` (grow an equal share, shrink, zero
+    // basis) with the shared 236px minimum. A column never grows beyond its share and never shrinks
+    // below the minimum, whatever it holds.
+    expect(new Set(columns.map((c) => c.style.flex))).toEqual(new Set(['1 1 0px']));
+    expect(new Set(columns.map((c) => c.style.minWidth))).toEqual(new Set([`${V2_KANBAN_COLUMN_WIDTH}px`]));
     // The empty marker stays, but an empty column is no narrower than a populated one.
     expect(column('in_review').getAttribute('data-empty')).toBe('true');
-    expect(column('in_review').style.minWidth).toBe(`${V2_KANBAN_COLUMN_WIDTH}px`);
-    expect(column('proposed').style.minWidth).toBe(`${V2_KANBAN_COLUMN_WIDTH}px`);
   });
 
-  it('keeps every column one fixed width when only Done has cards (VS-411)', () => {
+  it('keeps every column one equal-share growing rule when only Done has cards (VS-471)', () => {
     state.active = [];
     state.finished = [ticket({ id: 'tk_4', identifier: 'ACME-4', title: 'Landed', status: 'done', completedAt: new Date().toISOString() })];
     render(<V2WorkScreen />);
     expect(within(column('done')).getByText('Landed')).toBeInTheDocument();
-    const widths = [...document.querySelectorAll('[data-v2-column]')].map((c) => (c as HTMLElement).style.flex);
-    expect(new Set(widths)).toEqual(new Set([`0 0 ${V2_KANBAN_COLUMN_WIDTH}px`]));
+    const columns = [...document.querySelectorAll('[data-v2-column]')] as HTMLElement[];
+    expect(new Set(columns.map((c) => c.style.flex))).toEqual(new Set(['1 1 0px']));
+    expect(new Set(columns.map((c) => c.style.minWidth))).toEqual(new Set([`${V2_KANBAN_COLUMN_WIDTH}px`]));
   });
 
   it('does not tag a card with the status of the column it sits in', () => {

@@ -7,7 +7,7 @@
  * `WEAVE_PLUGIN_CLIENT_JS` may be a colour, spacing, radius or font-size value.
  */
 import { describe, expect, it } from 'vitest';
-import { WEAVE_PLUGIN_CLASS, WEAVE_PLUGIN_CLIENT_JS } from './index.js';
+import { WEAVE_PLUGIN_CLASS, WEAVE_PLUGIN_TABLE_CELL, WEAVE_PLUGIN_CLIENT_JS } from './index.js';
 
 const VISUAL_VALUE_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
   { name: 'hex colour', pattern: /#[0-9a-fA-F]{3,8}\b/ },
@@ -28,6 +28,23 @@ describe('the vocabulary carries no visual values (VS-385)', () => {
     for (const value of Object.values(WEAVE_PLUGIN_CLASS)) {
       expect(value).toMatch(/^[a-z0-9-]+$/);
     }
+  });
+
+  it('WEAVE_PLUGIN_CLASS exports the link role (VS-458)', () => {
+    expect(WEAVE_PLUGIN_CLASS.link).toBe('v2-link');
+  });
+
+  it('WEAVE_PLUGIN_TABLE_CELL names the table cell roles only, including actions (VS-458)', () => {
+    const serialized = JSON.stringify(WEAVE_PLUGIN_TABLE_CELL);
+    for (const { name, pattern } of VISUAL_VALUE_PATTERNS) {
+      expect(serialized, `WEAVE_PLUGIN_TABLE_CELL should carry no ${name}`).not.toMatch(pattern);
+    }
+    for (const value of Object.values(WEAVE_PLUGIN_TABLE_CELL)) {
+      expect(value).toMatch(/^[a-z0-9-]+$/);
+    }
+    expect(WEAVE_PLUGIN_TABLE_CELL.actions).toBe('actions');
+    expect(WEAVE_PLUGIN_TABLE_CELL.primary).toBe('primary');
+    expect(WEAVE_PLUGIN_TABLE_CELL.secondary).toBe('secondary');
   });
 
   it('WEAVE_PLUGIN_CLIENT_JS is bridge logic only, no styling literal', () => {

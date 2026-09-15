@@ -380,6 +380,13 @@
   background: var(--approve-blocked);
   color: var(--approve-blocked-ink);
 }
+/* Compact variant (VS-458) for a control that sits in a dense row — a table's `actions` cell: the
+   same button recipe a step smaller, so a row's buttons do not set the row's own height. */
+.v2-button[data-size='small'] {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+}
 
 /* Shared input recipe (VS-385), lifted from the settings-density input used across Workspace,
    Scheduled and Models settings (`inputCx`), the same density a plugin's own form uses. */
@@ -460,6 +467,15 @@
   font-family: var(--ff-mono);
   font-size: 11px;
   color: var(--text-3);
+}
+/* A row's own inline controls (VS-458): a trailing group sized for the compact button variant, so
+   a table row can carry per-row actions instead of the page moving editing into a separate form. */
+.v2-table [data-cell='actions'] {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 /* Hover/press feedback (VS-427): every interactive element in V2 eases its colour on the fast

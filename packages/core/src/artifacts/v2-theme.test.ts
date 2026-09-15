@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
-  V2_THEME_MARKERS, V2_THEME_TOKEN_NAMES, V2_BASE_TOKEN_NAMES, V2_STATUS_TONE_NAMES, WEAVE_PLUGIN_CLASS, generateV2PluginCss,
+  V2_THEME_MARKERS, V2_THEME_TOKEN_NAMES, V2_BASE_TOKEN_NAMES, V2_STATUS_TONE_NAMES, WEAVE_PLUGIN_CLASS, WEAVE_PLUGIN_TABLE_CELL, generateV2PluginCss,
 } from './v2-theme.js';
 import { extractCssBlock, parseCssCustomProperties } from './parse.js';
 
@@ -72,6 +72,26 @@ describe('generateV2PluginCss — completeness', () => {
     for (const tone of V2_STATUS_TONE_NAMES) {
       expect(generated, tone).toMatch(new RegExp(`\\[data-tone='${tone}'\\]`));
     }
+  });
+
+  it('emits the link recipe at a bare <a> and the link class, carrying v2.css\'s own token (VS-458)', () => {
+    expect(generated).toMatch(/a,\s*a\.v2-link\s*\{[^}]*color:\s*var\(--accent-link\)/);
+    expect(generated).toMatch(/a:hover,\s*a\.v2-link:hover\s*\{[^}]*color:\s*var\(--accent-hover\)/);
+  });
+
+  it('emits the table actions-cell rule (VS-458)', () => {
+    expect(generated).toMatch(/\.v2-table \[data-cell='actions'\]\s*\{/);
+  });
+
+  it('every WEAVE_PLUGIN_TABLE_CELL role has a matching rule', () => {
+    for (const role of Object.values(WEAVE_PLUGIN_TABLE_CELL)) {
+      expect(generated, role).toMatch(new RegExp(`\\[data-cell='${role}'\\]`));
+    }
+  });
+
+  it('fails if the link rule is missing entirely from the source (proves the link check bites)', () => {
+    const withoutLink = V2_CSS.replace(/a\.v2-link\b/g, 'a.v2-link-renamed');
+    expect(() => generateV2PluginCss(withoutLink, INDEX_CSS)).toThrow(/no a\.v2-link rule found/);
   });
 
   it('fails if a component class is missing entirely from the source (proves the completeness check bites)', () => {

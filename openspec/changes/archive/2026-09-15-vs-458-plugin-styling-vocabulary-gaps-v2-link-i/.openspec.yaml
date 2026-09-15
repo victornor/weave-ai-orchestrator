@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Plugin styling vocabulary gaps: .v2-link is not emitted in the plugin
+  theme stylesheet, and .v2-table has no action-cell role for per-row controls"

@@ -5,7 +5,7 @@
  * See `openspec/changes/vs-398-captain-can-t-plan-a-large-feature-inter`.
  */
 import { newId, nowIso } from '@weave-ai/db';
-import { OcError, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, TICKET_PRIORITIES, type Plan, type PlanDraft, type PlanDraftKind, type PlanDraftTier, type TicketPriority } from '@weave-ai/shared';
+import { OcError, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, PLAN_TITLE_MAX_WORDS, TICKET_PRIORITIES, type Plan, type PlanDraft, type PlanDraftKind, type PlanDraftTier, type PlanSummary, type PlanTitleSource, type TicketPriority } from '@weave-ai/shared';
 import type { Actor, CoreServices, PlanDraftInput, PlanDraftPatch, PlanningService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { tx } from '../tickets/tx.js';
@@ -18,6 +18,13 @@ function isTier(v: unknown): v is PlanDraftTier {
 }
 function isPriority(v: unknown): v is TicketPriority {
   return (TICKET_PRIORITIES as readonly string[]).includes(String(v));
+}
+
+/** VS-477: a tab title is trimmed, whitespace-collapsed and stripped of wrapping quotes; an auto title is capped at six words. */
+function normalisePlanTitle(raw: string, source: PlanTitleSource): string {
+  let t = raw.trim().replace(/\s+/g, ' ').replace(/^["'`]+|["'`]+$/g, '').trim();
+  if (source === 'auto') t = t.split(' ').slice(0, PLAN_TITLE_MAX_WORDS).join(' ');
+  return t.slice(0, 80).trim();
 }
 
 export function createPlanningService(ctx: WorkspaceContext, deps: () => CoreServices): PlanningService {
@@ -115,24 +122,50 @@ export function createPlanningService(ctx: WorkspaceContext, deps: () => CoreSer
 
     getDrafting(projectId) {
       const pid = resolveProject(projectId);
-      const row = db.get<Omit<Plan, 'workspaceId'>>("SELECT * FROM plans WHERE project_id = ? AND status = 'drafting'", [pid]);
+      // VS-477: a project may hold several drafting plans; `start` resumes the most recently created.
+      const row = db.get<Omit<Plan, 'workspaceId'>>(
+        "SELECT * FROM plans WHERE project_id = ? AND status = 'drafting' ORDER BY created_at DESC, id DESC LIMIT 1", [pid]);
       return row ? asPlan(row) : null;
+    },
+
+    listDrafting(projectId) {
+      const pid = resolveProject(projectId);
+      return db.all<PlanSummary>(
+        `SELECT p.id, p.project_id, p.title, p.title_source, p.status,
+                (SELECT COUNT(*) FROM plan_drafts d WHERE d.plan_id = p.id) AS draft_count,
+                p.created_at, p.updated_at
+           FROM plans p
+          WHERE p.project_id = ? AND p.status = 'drafting'
+          ORDER BY p.created_at DESC, p.id DESC`, [pid]);
     },
 
     create(actor, projectId, input) {
       const pid = resolveProject(projectId);
-      if (db.get('SELECT id FROM plans WHERE project_id = ? AND status = ?', [pid, 'drafting'])) {
-        throw new OcError('validation', `project ${pid} already has a drafting plan`, { projectId: pid });
-      }
       const now = nowIso();
       const id = newId();
       db.insert('plans', {
-        id, workspaceId: ws, projectId: pid, threadId: input.threadId, title: input.title ?? null, status: 'drafting',
+        id, workspaceId: ws, projectId: pid, threadId: input.threadId, title: input.title ?? null,
+        // A title supplied at creation is captain's; a plan created without one is labelled by the planner later.
+        titleSource: input.title ? 'human' : 'auto', status: 'drafting',
         createdByKind: actor.kind, createdById: actor.id ?? '', createdAt: now, updatedAt: now,
       });
       const plan = get(id);
       ctx.events.emit('plan.created', 'plan', id, { projectId: pid });
       return plan;
+    },
+
+    setTitle(actor, planId, title, source) {
+      const plan = get(planId);
+      requireDrafting(plan);
+      if (source === 'auto' && plan.titleSource === 'human') {
+        throw new OcError('validation', `plan ${planId} was renamed by captain; an auto title cannot replace it`, { planId });
+      }
+      const normalised = normalisePlanTitle(title, source);
+      if (!normalised) throw new OcError('validation', 'title is required');
+      db.update('plans', planId, { title: normalised, titleSource: source, updatedAt: nowIso() });
+      const updated = get(planId);
+      ctx.events.emit('plan.titled', 'plan', planId, { projectId: plan.projectId, source, by: actor.id });
+      return updated;
     },
 
     setAgent(planId, agentId) {

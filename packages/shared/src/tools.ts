@@ -36,6 +36,8 @@ export const PLANNER_TOOLS = [
   'weave_knowledge_docs', 'weave_knowledge_doc_get', 'weave_knowledge_get', 'weave_knowledge_search',
   'weave_role_list', 'weave_role_get',
   'weave_plan_get', 'weave_plan_draft_add', 'weave_plan_draft_update', 'weave_plan_draft_remove', 'weave_plan_draft_reorder',
+  /** VS-477: the planner names its own plan (≤ 6 words) so its tab is labelled; refused once captain renamed it. */
+  'weave_plan_set_title',
   /** The planner's own reply tool — `weave_human_send` is weaver-only and `weave_ticket_comment` needs a ticket the planner never has. */
   'weave_plan_reply',
 ] as const;

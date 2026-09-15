@@ -998,5 +998,39 @@ describe('workers', () => {
       expect(second.plan.id).not.toBe(first.plan.id);
       expect(second.plan.status).toBe('drafting');
     });
+
+    it('createPlan makes a second drafting plan with its own thread and planner (VS-477)', async () => {
+      const first = await workers.createPlan(HUMAN, h.projectId);
+      const second = await workers.createPlan(HUMAN, h.projectId);
+      expect(second.plan.id).not.toBe(first.plan.id);
+      expect(second.plan.threadId).not.toBe(first.plan.threadId);
+      expect(second.agent.id).not.toBe(first.agent.id);
+      expect(second.agent.planId).toBe(second.plan.id);
+      expect(h.services.threads!.get(second.plan.threadId).agentId).toBe(second.agent.id);
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM agents WHERE kind = 'planner' AND status = 'active'")!.n).toBe(2);
+      // startOrResumePlan resumes the newest, not a fresh one.
+      const resumed = await workers.startOrResumePlan(HUMAN, h.projectId);
+      expect(resumed.plan.id).toBe(second.plan.id);
+    });
+
+    it('retireIdlePlanners retires an idle, unfocused planner and leaves the focused one (VS-477)', async () => {
+      const first = await workers.createPlan(HUMAN, h.projectId);
+      const second = await workers.createPlan(HUMAN, h.projectId);
+      // Backdate both planners so they count as idle; keep `second` focused.
+      h.db.run("UPDATE agents SET last_run_at = '2000-01-01T00:00:00.000Z' WHERE kind = 'planner'");
+      const retired = await workers.retireIdlePlanners(h.projectId, { keepPlanId: second.plan.id });
+      expect(retired).toBe(1);
+      expect(workers.get(first.agent.id).status).toBe('retired');
+      expect(workers.get(second.agent.id).status).toBe('active');
+      // The plan, its thread and its drafts survive retirement.
+      expect(h.services.planning!.get(first.plan.id).status).toBe('drafting');
+    });
+
+    it('retireIdlePlanners never retires a planner with a running turn (VS-477)', async () => {
+      const plan = await workers.createPlan(HUMAN, h.projectId);
+      h.db.update('agents', plan.agent.id, { status: 'running', lastRunAt: '2000-01-01T00:00:00.000Z' });
+      expect(await workers.retireIdlePlanners(h.projectId)).toBe(0);
+      expect(workers.get(plan.agent.id).status).toBe('running');
+    });
   });
 });

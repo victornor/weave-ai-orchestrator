@@ -1047,6 +1047,14 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'weave_plan_set_title', scope: 'planner', input: z.object({ title: z.string().min(1) }),
+    description: 'Name this plan so its tab is labelled, from the conversation you are having. Six words at most, no quotes. Call it once, on your first turn for a plan — early, before or alongside your first drafts. Call it again on a later turn ONLY if the plan\'s scope clearly changed and the title is still yours to set; it is refused once captain has renamed the plan, and captain\'s title always wins.',
+    handler: (ctx, i) => {
+      const planId = requireOwnPlanner(ctx);
+      return svc(ctx).planning.setTitle(ctx.actor, planId, i.title, 'auto');
+    },
+  },
+  {
     name: 'weave_plan_draft_add', scope: 'planner', input: z.object({
       title: z.string().min(1),
       description: z.string().optional(),

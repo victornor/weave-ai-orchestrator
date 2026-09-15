@@ -643,6 +643,63 @@ describe('migrations', () => {
     });
   });
 
+  describe('0043_plan_multi (VS-477)', () => {
+    const planCols = (db: Db): string[] => db.all<{ name: string }>('PRAGMA table_info(plans)').map((c) => c.name);
+
+    function seedPlanBase(db: Db): void {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at)
+         VALUES ('p1', 'w1', 'api', 'API', 'git@e:a/b.git', 'main', '/tmp/p', 4, 'git', 1, '{}', 'ready', 't0', 't0')`);
+      db.run(`INSERT INTO channels (id, workspace_id, kind, config_json, status) VALUES ('c1', 'w1', 'web', '{}', 'active')`);
+      db.run(`INSERT INTO channel_threads (id, channel_id, agent_id, is_primary, created_at) VALUES ('th1', 'c1', 'a1', 1, 't0')`);
+      db.run(`INSERT INTO channel_threads (id, channel_id, agent_id, is_primary, created_at) VALUES ('th2', 'c1', 'a2', 0, 't0')`);
+    }
+    const seedPlan = (db: Db, id: string, thread: string, title: string | null, status = 'drafting'): void => {
+      db.run(
+        `INSERT INTO plans (id, workspace_id, project_id, thread_id, title, status, created_by_kind, created_by_id, created_at, updated_at)
+         VALUES (?, 'w1', 'p1', ?, ?, ?, 'human', 'victor', 't0', 't0')`, [id, thread, title, status]);
+    };
+
+    it('drops the single-drafting-plan index so two drafting plans can coexist', () => {
+      const path = join(dir, 'plan-multi.sqlite');
+      const before = openDbAsOf(path, '0042_thread_message_replies.sql');
+      expect(before.all<{ name: string }>('PRAGMA index_list(plans)').map((i) => i.name)).toContain('plans_one_drafting_per_project');
+      seedPlanBase(before);
+      seedPlan(before, 'plan-a', 'th1', 'Dark mode rollout');
+      expect(() => seedPlan(before, 'plan-b', 'th2', null)).toThrow(/UNIQUE constraint failed/);
+      before.close();
+
+      const db = openDb(path);
+      expect(db.all<{ name: string }>('PRAGMA index_list(plans)').map((i) => i.name)).not.toContain('plans_one_drafting_per_project');
+      seedPlan(db, 'plan-b', 'th2', null);
+      expect(db.all<{ id: string }>("SELECT id FROM plans WHERE status = 'drafting' ORDER BY id").map((r) => r.id)).toEqual(['plan-a', 'plan-b']);
+      db.close();
+    });
+
+    it('adds title_source, defaults it to auto, and backfills an existing title as human', () => {
+      const path = join(dir, 'plan-title-source.sqlite');
+      const before = openDbAsOf(path, '0042_thread_message_replies.sql');
+      expect(planCols(before)).not.toContain('title_source');
+      seedPlanBase(before);
+      seedPlan(before, 'titled', 'th1', 'Dark mode rollout');
+      seedPlan(before, 'untitled', 'th2', null, 'discarded');
+      before.close();
+
+      const db = openDb(path);
+      expect(planCols(db)).toContain('title_source');
+      expect(db.get<{ titleSource: string }>('SELECT title_source FROM plans WHERE id = ?', ['titled'])!.titleSource).toBe('human');
+      expect(db.get<{ titleSource: string }>('SELECT title_source FROM plans WHERE id = ?', ['untitled'])!.titleSource).toBe('auto');
+      db.close();
+
+      const again = openDb(path);
+      expect(again.all("SELECT value FROM meta WHERE key = 'migration:0043_plan_multi.sql'")).toHaveLength(1);
+      again.close();
+    });
+  });
+
   describe('0022_incidents', () => {
     it('creates the daemon-level incidents table with no foreign keys', () => {
       const db = openDbAsOf(join(dir, 'incidents.sqlite'), '0022_incidents.sql');
@@ -1359,7 +1416,8 @@ describe('migrations', () => {
       ]));
       expect(cols(db, 'plan_draft_blockers')).toEqual(['plan_draft_id', 'blocks_on_draft_id']);
       const planIdx = db.all<{ name: string }>('PRAGMA index_list(plans)').map((i) => i.name);
-      expect(planIdx).toContain('plans_one_drafting_per_project');
+      // VS-477 dropped plans_one_drafting_per_project; the project/status index remains.
+      expect(planIdx).toContain('plans_project_status');
       const draftIdx = db.all<{ name: string }>('PRAGMA index_list(plan_drafts)').map((i) => i.name);
       expect(draftIdx).toContain('plan_drafts_plan_position');
       db.close();
@@ -1382,15 +1440,16 @@ describe('migrations', () => {
       db.close();
     });
 
-    it('allows only one drafting plan per project, but any number of submitted/discarded ones', () => {
+    it('allows any number of drafting, submitted and discarded plans for a project (VS-477)', () => {
       const db = openDb(join(dir, 'plan-one-drafting.sqlite'));
       seedPlanProject(db, 'p1');
       insertPlan(db, 'pl1', 'p1');
-      expect(() => insertPlan(db, 'pl2', 'p1')).toThrow(/UNIQUE constraint failed/);
-      insertPlan(db, 'pl2', 'p1', { status: 'submitted', submittedAt: 't1' });
-      insertPlan(db, 'pl3', 'p1', { status: 'discarded', discardedAt: 't1' });
+      // Two drafting plans coexist since 0043 dropped the single-drafting-plan index.
+      insertPlan(db, 'pl2', 'p1');
+      insertPlan(db, 'pl3', 'p1', { status: 'submitted', submittedAt: 't1' });
+      insertPlan(db, 'pl4', 'p1', { status: 'discarded', discardedAt: 't1' });
       expect(db.all<{ id: string }>('SELECT id FROM plans WHERE project_id = ?', ['p1']).map((r) => r.id).sort())
-        .toEqual(['pl1', 'pl2', 'pl3']);
+        .toEqual(['pl1', 'pl2', 'pl3', 'pl4']);
       db.close();
     });
 

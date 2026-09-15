@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft } from '@weave-ai/shared';
+import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanSummary } from '@weave-ai/shared';
 import { dayKey } from '@weave-ai/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -344,7 +344,60 @@ export function useStartOrResumePlan(): UseMutationResult<{ plan: Plan; agent: {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ projectId, title }) => api.ws(ws, `/projects/${projectId}/plans/start`, { method: 'POST', body: title ? { title } : {} }),
-    onSuccess: ({ plan }) => { void qc.invalidateQueries({ queryKey: qk.plan(ws, plan.id) }); },
+    onSuccess: ({ plan }) => {
+      void qc.invalidateQueries({ queryKey: qk.plan(ws, plan.id) });
+      void qc.invalidateQueries({ queryKey: qk.plans(ws, plan.projectId) });
+    },
+  });
+}
+
+/** VS-477: a project's drafting plans as tab summaries (id, title, titleSource, status, draftCount), newest first. */
+export function usePlans(projectId: string | null | undefined): UseQueryResult<{ plans: PlanSummary[] }> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.plans(ws, projectId ?? ''),
+    queryFn: () => api.ws<{ plans: PlanSummary[] }>(ws, `/projects/${projectId}/plans?status=drafting`),
+    enabled: Boolean(projectId),
+  });
+}
+
+/** VS-477: create a fresh drafting plan (with its own thread and planner) alongside any the project already has; the modal focuses the new tab. */
+export function useCreatePlan(): UseMutationResult<{ plan: Plan; agent: { id: string; status: string; runtimeId: string } }, Error, { projectId: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId }) => api.ws(ws, `/projects/${projectId}/plans`, { method: 'POST', body: {} }),
+    onSuccess: ({ plan }) => {
+      void qc.invalidateQueries({ queryKey: qk.plan(ws, plan.id) });
+      void qc.invalidateQueries({ queryKey: qk.plans(ws, plan.projectId) });
+    },
+  });
+}
+
+/**
+ * VS-477: focus a plan tab — ensure its planner is live (resuming it if it was retired) and sweep
+ * the project's other planners that have gone idle. Returns the planner's `runtimeId` so the modal
+ * can resolve its model's context window for the turn summary (VS-442).
+ */
+export function useActivatePlan(): UseMutationResult<{ plan: Plan; agent: { id: string; status: string; runtimeId: string } }, Error, { projectId: string; planId: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, planId }) => api.ws(ws, `/projects/${projectId}/plans/${planId}/activate`, { method: 'POST', body: {} }),
+    onSuccess: (_d, { planId }) => { void qc.invalidateQueries({ queryKey: qk.plan(ws, planId) }); },
+  });
+}
+
+/** VS-477: captain's rename of a plan tab; stored as human, so an auto-generated title never overwrites it. */
+export function useRenamePlan(): UseMutationResult<Plan, Error, { projectId: string; planId: string; title: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, planId, title }) => api.ws<Plan>(ws, `/projects/${projectId}/plans/${planId}`, { method: 'PATCH', body: { title } }),
+    onSuccess: (_d, { planId, projectId }) => {
+      void qc.invalidateQueries({ queryKey: qk.plan(ws, planId) });
+      void qc.invalidateQueries({ queryKey: qk.plans(ws, projectId) });
+    },
   });
 }
 
@@ -372,7 +425,10 @@ export function useSubmitPlan(): UseMutationResult<Plan, Error, { projectId: str
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ projectId, planId }) => api.ws<Plan>(ws, `/projects/${projectId}/plans/${planId}/submit`, { method: 'POST' }),
-    onSuccess: (_d, { planId }) => { void qc.invalidateQueries({ queryKey: qk.plan(ws, planId) }); },
+    onSuccess: (_d, { planId, projectId }) => {
+      void qc.invalidateQueries({ queryKey: qk.plan(ws, planId) });
+      void qc.invalidateQueries({ queryKey: qk.plans(ws, projectId) });
+    },
   });
 }
 
@@ -381,7 +437,10 @@ export function useDiscardPlan(): UseMutationResult<Plan, Error, { projectId: st
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ projectId, planId }) => api.ws<Plan>(ws, `/projects/${projectId}/plans/${planId}/discard`, { method: 'POST' }),
-    onSuccess: (_d, { planId }) => { void qc.invalidateQueries({ queryKey: qk.plan(ws, planId) }); },
+    onSuccess: (_d, { planId, projectId }) => {
+      void qc.invalidateQueries({ queryKey: qk.plan(ws, planId) });
+      void qc.invalidateQueries({ queryKey: qk.plans(ws, projectId) });
+    },
   });
 }
 

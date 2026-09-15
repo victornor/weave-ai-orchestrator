@@ -88,6 +88,24 @@ describe('the weave_plan_* tools (VS-398)', () => {
     expect(h.runtime.services.planning.getDraft(foreignDraft.id).title).toBe('Foreign');
   });
 
+  it('lets the planner name its own plan, but never overwrite captain\'s rename (VS-477)', async () => {
+    const h = makeHarness(); harness = h; seed(h);
+    // A plan created without a title is auto-titled by the planner.
+    const plan = h.runtime.services.planning.create({ kind: 'human', id: 'victor' }, 'proj1', { threadId: 'th1' });
+    const claims = planner(plan.id);
+
+    const titled = await call(h, 'weave_plan_set_title', { title: 'Dark mode rollout' }, claims);
+    expect(titled.ok).toBe(true);
+    expect(dataOf<Plan>(titled)).toMatchObject({ title: 'Dark mode rollout', titleSource: 'auto' });
+    expect(h.runtime.services.planning.get(plan.id).title).toBe('Dark mode rollout');
+
+    // Once captain renames it, the planner's title is refused.
+    h.runtime.services.planning.setTitle({ kind: 'human', id: 'victor' }, plan.id, 'Captain title', 'human');
+    const refused = await call(h, 'weave_plan_set_title', { title: 'auto again' }, claims);
+    expect(refused.ok).toBe(false);
+    expect(h.runtime.services.planning.get(plan.id).title).toBe('Captain title');
+  });
+
   it('has no ticket-creation, worker-messaging, decision-answering or submit tool available to the planner', async () => {
     const h = makeHarness(); harness = h; seed(h);
     const plan = startPlan(h);
@@ -143,6 +161,7 @@ describe('the weave_plan_* tools (VS-398)', () => {
     for (const [name, input] of [
       ['weave_plan_get', { planId: plan.id }],
       ['weave_plan_draft_add', { title: 'x', kind: 'change', suggestedTier: 'standard' }],
+      ['weave_plan_set_title', { title: 'x' }],
       ['weave_plan_draft_link', { draftId: 'd1', ticketId: 't1' }],
     ] as const) {
       const res = await call(h, name, input, WORKER);

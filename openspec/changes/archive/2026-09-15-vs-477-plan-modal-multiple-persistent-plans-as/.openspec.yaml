@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Plan modal: multiple persistent plans as tabs, start a new plan, delete a
+  plan without executing it, and AI-generated tab titles"

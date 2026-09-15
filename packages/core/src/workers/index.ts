@@ -23,6 +23,9 @@ export { renderHome, ensureHomeCurrent, skillsFor } from './home.js';
 
 const LIVE = "('provisioning','active','running','paused','error')";
 
+/** VS-477: a planner whose tab has been unfocused and which has taken no turn for this long is retired by an idle sweep, bounding how many planner worktrees several tabs can hold. */
+export const PLANNER_IDLE_RETIRE_MS = 15 * 60_000;
+
 /**
  * VS-333: a terminal ticket's stale pull-request record is refreshed from the forge before a
  * retirement is refused, but `retireFinished` runs on every supervisor tick (15 s), so a genuinely
@@ -357,13 +360,8 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       ctx.events.emit('worker.retired', 'agent', agent.id, { kind: 'planner', planId });
     },
 
-    async startOrResumePlan(actor: Actor, projectId: string, opts: { title?: string | null } = {}): Promise<{ plan: Plan; agent: Agent }> {
+    async createPlan(actor: Actor, projectId: string, opts: { title?: string | null } = {}): Promise<{ plan: Plan; agent: Agent }> {
       const project = projectOf(projectId);
-      const existing = deps().planning.getDrafting(project.id);
-      if (existing) {
-        const agent = await service.ensurePlanner(actor, existing.id);
-        return { plan: existing, agent };
-      }
       // The thread needs an owning agent id before the agent row can exist (its FK is NOT NULL), and
       // the agent needs a plan id before it can be spawned, and the plan needs the thread id before
       // it can be created — so the agent id is minted here, up front, and handed to `ensurePlanner`
@@ -373,6 +371,41 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const plan = deps().planning.create(actor, project.id, { threadId: thread.id, title: opts.title ?? null });
       const agent = await service.ensurePlanner(actor, plan.id, { agentId: plannerAgentId });
       return { plan, agent };
+    },
+
+    async startOrResumePlan(actor: Actor, projectId: string, opts: { title?: string | null } = {}): Promise<{ plan: Plan; agent: Agent }> {
+      const project = projectOf(projectId);
+      // VS-477: several drafting plans may exist; resume the most recently created one.
+      const existing = deps().planning.getDrafting(project.id);
+      if (existing) {
+        const agent = await service.ensurePlanner(actor, existing.id);
+        return { plan: existing, agent };
+      }
+      return service.createPlan(actor, project.id, opts);
+    },
+
+    async retireIdlePlanners(projectId: string, opts: { keepPlanId?: string | null; idleMs?: number } = {}): Promise<number> {
+      const project = projectOf(projectId);
+      const idleMs = opts.idleMs ?? PLANNER_IDLE_RETIRE_MS;
+      const rows = ctx.db.all<Agent & { planUpdatedAt: string | null }>(
+        `SELECT a.*, p.updated_at AS plan_updated_at
+           FROM agents a JOIN plans p ON p.id = a.plan_id
+          WHERE a.project_id = ? AND a.kind = 'planner' AND a.status IN ${LIVE} AND a.plan_id IS NOT NULL`,
+        [project.id],
+      );
+      const now = Date.now();
+      let retired = 0;
+      for (const a of rows) {
+        if (opts.keepPlanId && a.planId === opts.keepPlanId) continue;
+        // Never retire a planner mid-turn, and never one that was active within the idle window.
+        if (a.status === 'running') continue;
+        const lastRun = a.lastRunAt ? Date.parse(a.lastRunAt) : Number.NaN;
+        const reference = Number.isFinite(lastRun) ? lastRun : Date.parse(a.planUpdatedAt ?? a.createdAt);
+        if (!Number.isFinite(reference) || now - reference < idleMs) continue;
+        await service.retirePlanner(a.planId!);
+        retired += 1;
+      }
+      return retired;
     },
 
     async spawnCurator(actor: Actor, projectId: string): Promise<Agent> {

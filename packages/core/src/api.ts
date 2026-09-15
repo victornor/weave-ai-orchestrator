@@ -350,11 +350,22 @@ export interface WorkersService {
   /** Retires the plan's planning agent and removes its worktree. A no-op if the plan has none. */
   retirePlanner(planId: string): Promise<void>;
   /**
-   * VS-398: the project's one drafting plan and its live planner agent — resumes both if a drafting
-   * plan already exists, else creates the plan (with its own thread) and spawns its planner, in the
-   * same action, immediately.
+   * VS-477: create a fresh drafting plan for the project — its own thread and its own planner — and
+   * return both, independent of any other drafting plan the project already holds.
+   */
+  createPlan(actor: Actor, projectId: string, opts?: { title?: string | null }): Promise<{ plan: S.Plan; agent: S.Agent }>;
+  /**
+   * VS-398/VS-477: resume the project's most recently created drafting plan and its live planner
+   * agent, or create one (see `createPlan`) when none is drafting.
    */
   startOrResumePlan(actor: Actor, projectId: string, opts?: { title?: string | null }): Promise<{ plan: S.Plan; agent: S.Agent }>;
+  /**
+   * VS-477: retire every planner in the project that is not `keepPlanId`'s, has no running turn and
+   * has taken no turn within `idleMs` (default `PLANNER_IDLE_RETIRE_MS`). Returns how many were
+   * retired. Called when a plan tab is focused, so several drafting plans do not hold several live
+   * planners. The plans and their data are untouched.
+   */
+  retireIdlePlanners(projectId: string, opts?: { keepPlanId?: string | null; idleMs?: number }): Promise<number>;
   /**
    * Start an interactive session (VS-101): always against a ticket, either one that already exists
    * or one created in the same action. Marks the ticket `interactiveSession` and calls the ordinary
@@ -850,9 +861,16 @@ export interface PlanningService {
   /** The project's plan history, most recent first. */
   list(projectId: string): S.Plan[];
   get(planId: string): S.Plan;
-  /** The project's one `drafting` plan, or null if none is in progress. */
+  /** The project's most recently created `drafting` plan, or null if none is in progress (VS-477). */
   getDrafting(projectId: string): S.Plan | null;
+  /** VS-477: the project's `drafting` plans as tab summaries (title, status, draft count), newest first. */
+  listDrafting(projectId: string): S.PlanSummary[];
   create(actor: Actor, projectId: string, input: { threadId: string; title?: string | null }): S.Plan;
+  /**
+   * VS-477: set a plan's tab title. `source: 'auto'` is the planner naming its own plan and is
+   * refused once captain has renamed it; `source: 'human'` is captain's own rename and always wins.
+   */
+  setTitle(actor: Actor, planId: string, title: string, source: S.PlanTitleSource): S.Plan;
   /** Sets or clears the plan's live planning agent (VS-398 storage: `plans.agent_id`). */
   setAgent(planId: string, agentId: string | null): S.Plan;
   discard(actor: Actor, planId: string): S.Plan;

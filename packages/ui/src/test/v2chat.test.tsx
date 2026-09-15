@@ -118,6 +118,10 @@ vi.mock('../api/hooks', () => ({
   // never actually run, but they must exist or mounting ChatPage (which always renders PlanModal)
   // throws on the first hook call.
   useStartOrResumePlan: () => ({ mutate: vi.fn() }),
+  usePlans: () => ({ data: { plans: [] } }),
+  useCreatePlan: () => ({ mutate: vi.fn(), isPending: false }),
+  useActivatePlan: () => ({ mutate: vi.fn(), isPending: false }),
+  useRenamePlan: () => ({ mutate: vi.fn(), isPending: false }),
   usePlan: () => ({ data: undefined }),
   useRoles: () => ({ data: [] }),
   usePatchPlanDraft: () => ({ mutate: vi.fn() }),

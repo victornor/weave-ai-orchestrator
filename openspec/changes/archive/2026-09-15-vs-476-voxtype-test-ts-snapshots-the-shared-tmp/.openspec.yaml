@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Isolate packages/server/test/voxtype.test.ts from the shared tmpdir so
+  concurrent suite runs cannot fail it on another process's temp files
+skip_specs: true

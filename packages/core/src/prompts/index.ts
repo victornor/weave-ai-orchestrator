@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { landingBranchOf, projectLabel, yoloEnabled } from '@weave-ai/shared';
+import { carriesWeaverReview, landingBranchOf, projectLabel, yoloEnabled } from '@weave-ai/shared';
 import { formatAge } from '@weave-ai/render';
 import type * as S from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
@@ -361,7 +361,10 @@ export async function buildTurnPrompt(
       parts.push('\n## Open decisions');
       parts.push(bounded(pending, 8, (d) => {
         const scope = d.ticketIdentifier ? `, ${d.ticketIdentifier} ${d.ticketStatus}` : '';
-        return `- ${d.id} [${d.kind}, owner ${d.owner}${scope}, ${formatAge(d.createdAt)}] ${d.title}`;
+        // VS-469: an open approval the weaver has not marked is not ordinary open work — say so, so a
+        // weaver that believes it already reviewed the card cannot read the line as such.
+        const unreviewed = carriesWeaverReview(d.kind) && (d.weaverReviewStatus ?? 'unseen') === 'unseen' ? ' — NOT REVIEWED' : '';
+        return `- ${d.id} [${d.kind}, owner ${d.owner}${scope}, ${formatAge(d.createdAt)}] ${d.title}${unreviewed}`;
       }, 'call `weave_briefing`'));
     }
   }

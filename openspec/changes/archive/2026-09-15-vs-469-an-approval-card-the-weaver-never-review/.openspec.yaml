@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Re-wake the weaver while a plan, merge or action approval stays unseen,
+  list it as not reviewed in the digest, and show captain it is waiting on
+  review

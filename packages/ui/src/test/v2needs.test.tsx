@@ -111,6 +111,9 @@ describe('the V2 Needs you screen', () => {
     ];
     render(<V2NeedsPage />);
     expect(screen.getByText('Unreviewed plan')).toBeInTheDocument();
+    // VS-469: the card stays listed and reads as waiting on the weaver, not as plain approvable work.
+    expect(screen.getByText(/Weaver hasn't reviewed yet/)).toBeInTheDocument();
+    expect(screen.getByText(/Approval waits on the weaver's review/)).toBeInTheDocument();
     expect(screen.getByText('1 waiting')).toBeInTheDocument();
   });
 

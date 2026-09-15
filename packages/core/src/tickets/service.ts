@@ -347,6 +347,41 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   }
 
   /**
+   * VS-472: post an auto-merge waiting comment only when the reason, or the pull request head it is
+   * waiting on, is new for this ticket. The sweep runs on every supervisor tick (~15 s), so an
+   * unchanged hold would otherwise add an identical comment on every pass — measured at 18 comments
+   * in 4 minutes on a single held ticket — burying the worker's own comments. The last hold lives in
+   * the ticket's `delivery` JSON (surfaced by `clearAutoMergeHold`) so a daemon restart does not
+   * re-post it.
+   */
+  function recordAutoMergeHold(t: Ticket, reason: string, head: string | null): void {
+    const delivery = (t.delivery ?? {}) as Record<string, unknown>;
+    const last = delivery['autoMergeHold'] as { reason?: string; head?: string | null } | undefined;
+    if (last?.reason === reason && (last['head'] ?? null) === head) {
+      log.debug({ ticketId: t.id, reason }, 'auto-merge hold unchanged; not commenting again');
+      return;
+    }
+    tx(db, () => {
+      touch(t.id, { deliveryJson: { ...delivery, autoMergeHold: { reason, head, at: nowIso() } } });
+      systemComment(t.id, reason, { kind: 'system', id: null });
+      ctx.events.emit('ticket.updated', 'ticket', t.id, get(t.id));
+    });
+  }
+
+  /**
+   * Drop the recorded auto-merge hold once the ticket advances, so a ticket that returns to
+   * `in_review` and is held again for the same reason comments afresh (VS-472).
+   */
+  function clearAutoMergeHold(t: Ticket): void {
+    const delivery = (t.delivery ?? {}) as Record<string, unknown>;
+    if (!delivery['autoMergeHold']) return;
+    const rest = { ...delivery };
+    delete rest['autoMergeHold'];
+    touch(t.id, { deliveryJson: rest });
+    ctx.events.emit('ticket.updated', 'ticket', t.id, get(t.id));
+  }
+
+  /**
    * Whether this `action` revision already has an `open` or `answered` `action_approval`. A
    * missing `target` still counts as covering so a legacy/test row cannot re-enter the repair loop
    * (VS-225). Plan and merge repairs do not use this: they terminate because answering changes the
@@ -1535,6 +1570,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         .filter((t) => t.autoMerge || yolo(t));
       let advanced = 0;
       for (const t of rows) {
+        // VS-472: the pull request head this pass is waiting on, so an unchanged hold can be told
+        // apart from one the worker pushed anew. Resolved in the CI check, or from the delivery head.
+        let prHead: string | null = null;
         try {
           const project = t.projectId ? deps().projects.get(t.projectId) : null;
           const policies = (project?.policies ?? {}) as { deliveryMode?: string; requireCi?: boolean };
@@ -1545,8 +1583,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
             if (pr?.url && forge) {
               const state = await forge.prState(project.clonePath, pr.url).catch(() => null);
               if (!state) continue;
+              prHead = state.headSha ?? null;
               if (state.ciState === 'pending') continue;
-              if (state.ciState === 'failure') { systemComment(t.id, 'auto-merge is waiting: CI is red on the PR', { kind: 'system', id: null }); continue; }
+              if (state.ciState === 'failure') { recordAutoMergeHold(t, 'auto-merge is waiting: CI is red on the PR', prHead); continue; }
             }
           }
           // The work is ready to land. A YOLO ticket has a real merge decision waiting: answer it,
@@ -1555,12 +1594,14 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           const pending = openApproval(t.id, 'merge_approval');
           if (pending) await autoApprove(t, pending);
           else await service.transition({ kind: 'system', id: null }, t.id, { to: 'merging', note: 'auto-merge: no approval required for this ticket' });
+          // The hold is gone: a ticket that comes back held for the same reason comments again.
+          clearAutoMergeHold(t);
           advanced++;
         } catch (e) {
           // VS-266: a YOLO ticket's merge approval can be held by a weaver concern exactly like a
           // human-owned one — surfaced on the ticket the same way the CI-red wait is, rather than
           // only a log line, so the human sees why auto-merge stalled here.
-          if (e instanceof OcError && e.code === 'revision_pending') { systemComment(t.id, 'auto-merge is waiting: the weaver has concerns', { kind: 'system', id: null }); continue; }
+          if (e instanceof OcError && e.code === 'revision_pending') { recordAutoMergeHold(t, 'auto-merge is waiting: the weaver has concerns', prHead ?? await resolveDeliveryHead(t)); continue; }
           log.warn({ ticket: t.identifier, err: String(e) }, 'auto-merge advance failed');
         }
       }

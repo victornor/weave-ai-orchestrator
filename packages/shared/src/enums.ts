@@ -212,6 +212,23 @@ export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
 export const COMPACTION_TRIGGERS = ['auto', 'manual'] as const;
 export type CompactionTrigger = (typeof COMPACTION_TRIGGERS)[number];
 
+/**
+ * VS-461: run event types that are not evidence of progress — session housekeeping, a step boundary
+ * that has produced nothing yet, raw runtime chatter and the engine's own bookkeeping. A provider
+ * that accepts a request and never starts it (2026-09-14's DeepSeek outage) keeps opencode's retry
+ * loop alive, which re-emits `session.resumed`/`turn.started` without any work; a silence window
+ * measured from the last event of any kind is reset by that noise and never fires. Progress is every
+ * event type not listed here: model text and thinking, tool calls and results, commands, file
+ * writes, usage, plan proposals, errors, turn completion and human input.
+ */
+export const NON_PROGRESS_RUN_EVENT_TYPES: readonly RunEventType[] = [
+  'session.started', 'session.resumed', 'session.compaction.started', 'session.compaction.completed',
+  'turn.started', 'runtime.raw', 'run.started', 'run.finalized', 'run.phase.timing', 'supervisor.action',
+];
+export function isProgressRunEvent(type: RunEventType): boolean {
+  return !NON_PROGRESS_RUN_EVENT_TYPES.includes(type);
+}
+
 export const WORKTREE_STATUSES = ['active', 'dirty', 'landed', 'removed', 'orphaned'] as const;
 export type WorktreeStatus = (typeof WORKTREE_STATUSES)[number];
 

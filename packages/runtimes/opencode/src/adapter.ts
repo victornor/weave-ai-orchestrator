@@ -1,17 +1,54 @@
 import { execFile } from 'node:child_process';
+import { closeSync, openSync, readSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type {
   AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
   RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@weave-ai/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, which, writeFiles } from '@weave-ai/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, truncate, which, writeFiles } from '@weave-ai/runtime-sdk';
 import { extractReport } from '@weave-ai/shared';
 import { describeOpenCodeAccount } from './account.js';
 import { buildArgs, CONFIG_RELATIVE_PATH, opencodeConfig, resumeCommand } from './args.js';
-import { createOpenCodeParser } from './events.js';
+import { createOpenCodeParser, parseOpenCodeProviderErrors, type OpenCodeProviderError } from './events.js';
 import { asOpenCodeSession, type OpenCodeSessionRef } from './session.js';
 
 const pExecFile = promisify(execFile);
+
+/**
+ * VS-461: opencode logs a provider error to its own file and retries silently; nothing reaches
+ * stdout, so the stream parser cannot see it. Read only the bytes appended since the turn started
+ * (bounded), so the cost is proportional to one turn — not the whole shared, multi-megabyte log.
+ */
+const PROVIDER_LOG_TAIL_MAX_BYTES = 2 * 1024 * 1024;
+function providerLogPath(configHome: string | null | undefined): string | null {
+  return configHome ? join(configHome, 'opencode', 'log', 'opencode.log') : null;
+}
+function logSize(path: string | null): number {
+  if (!path) return 0;
+  try { return statSync(path).size; } catch { return 0; }
+}
+function readAppended(path: string, offset: number): string | null {
+  try {
+    const size = statSync(path).size;
+    if (size <= offset) return null;                       // nothing appended, or the log rotated
+    const start = Math.max(offset, size - PROVIDER_LOG_TAIL_MAX_BYTES);
+    const length = size - start;
+    const fd = openSync(path, 'r');
+    try {
+      const buf = Buffer.allocUnsafe(length);
+      const read = readSync(fd, buf, 0, length, start);
+      return buf.subarray(0, read).toString('utf8');
+    } finally { closeSync(fd); }
+  } catch { return null; }
+}
+
+/** The provider error this turn's session logged after `offset`, or null. Exported for its test. */
+export function readProviderError(logPath: string | null, offset: number, sessionId: string | null): OpenCodeProviderError | null {
+  if (!logPath || !sessionId) return null;
+  const appended = readAppended(logPath, offset);
+  return appended ? parseOpenCodeProviderErrors(appended, sessionId) : null;
+}
 
 export const capabilities: RuntimeCapabilities = {
   resumableSessions: true,
@@ -169,6 +206,10 @@ export const adapter: RuntimeAdapter = {
     const built = buildArgs(input);
     writeFiles(built.files);
 
+    // VS-461: where opencode's own log stood before this turn, so only what this turn appended is read.
+    const providerLog = providerLogPath(input.configHome);
+    const logOffset = logSize(providerLog);
+
     const parser = createOpenCodeParser({ resumed: built.resumed });
     let seq = 0;
     const launch = launchCommand(built.cmd, built.env);
@@ -191,13 +232,31 @@ export const adapter: RuntimeAdapter = {
     for (const ev of parser.finish()) sink.onEvent({ ...ev, seq: seq++ });
 
     const st = parser.state;
+    const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError;
+    // The provider error the CLI logged for this session, if the turn ended without succeeding.
+    const providerError = failed ? readProviderError(providerLog, logOffset, st.sessionId ?? built.sessionId ?? null) : null;
+    if (providerError) {
+      // A typed event on the run, so the run page and `weave_run_inspect` show the provider's words
+      // rather than only "interrupted"; the engine also keeps the message on the run row.
+      sink.onEvent({
+        seq: seq++,
+        ts: new Date().toISOString(),
+        type: 'error',
+        payload: {
+          name: 'ProviderError', provider: providerError.provider, model: providerError.model,
+          sessionId: providerError.sessionId, source: 'runtime_log', message: truncate(providerError.message, 2000),
+        },
+      });
+    }
     // No native structured output: the report is a fenced json block in the final text (§9.4).
     const structured = extractReport(st.finalText) ?? undefined;
-    const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError;
+    const classified = failed ? classifyError(outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) : null;
+    // A real classification (auth, quota, transient) wins; the provider's own message beats the
+    // generic `unknown` a silent CLI retry leaves behind.
     const error = failed
-      ? classifyError(outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) ?? {
-        code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'opencode turn failed',
-      }
+      ? (classified && classified.family !== 'unknown' ? classified : providerError
+        ? { code: 'provider_error', family: 'unknown' as const, message: truncate(`provider ${providerError.provider ?? 'unknown'}: ${providerError.message}`, 4000) }
+        : classified ?? { code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'opencode turn failed' })
       : undefined;
 
     return {

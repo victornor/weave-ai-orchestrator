@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
 import {
   AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents, OcError, landingBranchOf,
-  isWorkerOptionConfigured, MCP_SERVER_NAME, PLANNER_TOOLS, FIRST_TURN_TOOLS,
+  isWorkerOptionConfigured, isProgressRunEvent, MCP_SERVER_NAME, PLANNER_TOOLS, FIRST_TURN_TOOLS,
   type Agent, type AgentKind, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
   type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
 } from '@weave-ai/shared';
@@ -252,7 +252,18 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     const clean = redact(payload) as Record<string, unknown>;
     try {
       ctx.db.run('INSERT INTO run_events (run_id, seq, ts, type, stream, level, payload_json) VALUES (?,?,?,?,?,?,?)', [runId, seq, ts, type, stream, level, JSON.stringify(boundPayload(clean))]);
-      ctx.db.run('UPDATE runs SET last_event_at = ? WHERE id = ?', [ts, runId]);
+      // VS-461: the silence window is measured from `last_progress_at`, not `last_event_at` — a retry
+      // loop re-emits session/step-boundary events without doing any work, and those must not reset it.
+      if (isProgressRunEvent(type)) {
+        ctx.db.run('UPDATE runs SET last_event_at = ?, last_progress_at = ? WHERE id = ?', [ts, ts, runId]);
+      } else {
+        ctx.db.run('UPDATE runs SET last_event_at = ? WHERE id = ?', [ts, runId]);
+      }
+      // The run's own error text, so the provider's words survive the turn and are readable from the
+      // run view (the transcript reads the `error` event; this reads the row).
+      if (type === 'error' && typeof clean['message'] === 'string') {
+        ctx.db.run('UPDATE runs SET last_error = ? WHERE id = ?', [truncate(clean['message'], 4000), runId]);
+      }
     } catch (e) { log.warn({ err: String(e) }, 'failed to persist run event'); }
     try { appendFileSync(eventsPath, JSON.stringify({ seq, ts, type, stream, payload: clean }) + '\n', 'utf8'); } catch { /* disk full etc; the DB row is authoritative */ }
     const ev: RunEvent = { id: String(seq), runId, seq, ts, type, stream, level, payload: clean };
@@ -347,7 +358,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     Object.assign(ticket, restored);
   }
 
-  ctx.db.update('runs', runId, { status: 'running', startedAt: nowIso(), runtimeId: setting.runtime, model: setting.model ?? null });
+  ctx.db.update('runs', runId, { status: 'running', startedAt: nowIso(), lastProgressAt: nowIso(), runtimeId: setting.runtime, model: setting.model ?? null });
   ctx.db.update('agents', agent.id, { status: 'running', runtimeId: setting.runtime, updatedAt: nowIso() });
   // The row was loaded before that update; finalize reads it for what this turn ran on, so it has to
   // carry the resolved values rather than what the dispatcher queued the run with.
@@ -827,7 +838,7 @@ export function countRetries(ctx: WorkspaceContext, runId: string): number {
  * on the ticket. Nothing is scheduled here: the worker stays parked, spending nothing, until the
  * human answers (VS-56 — the previous version booked a quota retry the human had not asked for).
  */
-function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: FinalizeInput, family: RunErrorFamily | null, code: string | null, message: string | null): void {
+export function parkForHuman(ctx: WorkspaceContext, deps: () => CoreServices, f: { run: Pick<Run, 'id' | 'runtimeId'>; agent: Agent }, family: RunErrorFamily | null, code: string | null, message: string | null): void {
   const log = ctx.log('run').child({ runId: f.run.id });
   const ticketId = f.agent.ticketId;
   const quota = family === 'provider_quota';

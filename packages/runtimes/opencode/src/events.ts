@@ -169,3 +169,41 @@ export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: fal
 
   return { state, handle, finish, get sessionAnnounced() { return announced; } };
 }
+
+/**
+ * A provider error opencode logged for one session. Its `run` CLI retries such an error silently —
+ * the failure never appears on stdout, so the stream parser above cannot see it (VS-461). The only
+ * account is opencode's own log line:
+ *
+ *   timestamp=… level=ERROR run=… message="stream error" providerID=deepseek modelID=deepseek-flash
+ *   session.id=ses_… small=false agent=build mode=primary error.error.message="We were unable to
+ *   start processing your request within the 900-second timeout limit. Please try again later."
+ */
+export interface OpenCodeProviderError {
+  sessionId: string;
+  provider: string | null;
+  model: string | null;
+  message: string;
+}
+
+const FIELD = (name: string): RegExp => new RegExp(`(?:^|\\s)${name.replace('.', '\\.')}=(\\S+)`);
+const QUOTED = (name: string): RegExp => new RegExp(`(?:^|\\s)${name.replace(/\./g, '\\.')}="((?:[^"\\\\]|\\\\.)*)"`);
+
+/**
+ * The last provider error in `text` logged for `sessionId`, or null. Only level-ERROR `stream error`
+ * lines count; a line for another session (concurrent turns share one log) is ignored. `sessionId`
+ * null returns null rather than guessing, so one worker's error is never attributed to another's run.
+ */
+export function parseOpenCodeProviderErrors(text: string, sessionId: string | null): OpenCodeProviderError | null {
+  if (!sessionId) return null;
+  let found: OpenCodeProviderError | null = null;
+  for (const line of text.split('\n')) {
+    if (!line.includes('level=ERROR') || !line.includes('message="stream error"')) continue;
+    const sid = FIELD('session.id').exec(line)?.[1] ?? null;
+    if (sid !== sessionId) continue;
+    const message = QUOTED('error.error.message').exec(line)?.[1]?.replace(/\\"/g, '"') ?? null;
+    if (!message) continue;
+    found = { sessionId, provider: FIELD('providerID').exec(line)?.[1] ?? null, model: FIELD('modelID').exec(line)?.[1] ?? null, message };
+  }
+  return found;
+}

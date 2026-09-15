@@ -1,9 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { adapter } from '../src/adapter.js';
+import { adapter, readProviderError } from '../src/adapter.js';
 
 const dirs: string[] = [];
 const tmp = (p: string) => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push(d); return d; };
@@ -55,5 +55,29 @@ describe('opencode adapter', () => {
 
   it('detects the installed binary', async () => {
     expect(['available', 'missing_binary', 'broken']).toContain((await adapter.detect()).status);
+  });
+
+  // VS-461: the line is copied from the live log during the 2026-09-14 DeepSeek outage; opencode
+  // retried it silently, so only this file carried it. Only the bytes appended since the turn
+  // started are read, and only the turn's own session counts.
+  it('reads the provider error its CLI logged for the turn\'s session, from the bytes the turn appended', () => {
+    const SESSION = 'ses_f5edbbd24ffeQj03OjwcFApn8m';
+    const line = (sid: string, at: string, msg: string): string =>
+      `timestamp=${at} level=ERROR run=abc message="stream error" providerID=deepseek modelID=deepseek-flash `
+      + `session.id=${sid} small=false agent=build mode=primary error.error.message="${msg}"`;
+    const logPath = join(tmp('ac-log-'), 'opencode', 'log', 'opencode.log');
+    mkdirSync(dirname(logPath), { recursive: true });
+    // A previous, different session's error sits before this turn's offset and must not be read.
+    writeFileSync(logPath, `${line('ses_earlier', '2026-09-14T18:30:00.000Z', 'older failure')}\n`);
+    const offset = statSync(logPath).size;
+    writeFileSync(logPath, `${line(SESSION, '2026-09-14T18:46:51.593Z', 'We were unable to start processing your request within the 900-second timeout limit. Please try again later.')}\n`, { flag: 'a' });
+
+    const found = readProviderError(logPath, offset, SESSION);
+    expect(found).toMatchObject({ sessionId: SESSION, provider: 'deepseek', model: 'deepseek-flash' });
+    expect(found!.message).toContain('900-second timeout');
+    // A concurrent session sharing the log is never attributed to this turn, and a turn that
+    // appended nothing reads nothing.
+    expect(readProviderError(logPath, offset, 'ses_other')).toBeNull();
+    expect(readProviderError(logPath, statSync(logPath).size, SESSION)).toBeNull();
   });
 }, 90_000);

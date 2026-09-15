@@ -5,6 +5,7 @@ import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, SELF_WAKE
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
+import { parkForHuman } from '../runs/engine.js';
 import { ungateRuntime } from '../runs/authgate.js';
 import { archivedDirFor } from '../openspec/index.js';
 import { CURATION_BUDGET_FRACTION, budgetOf, isDocPath } from '../knowledge/files.js';
@@ -189,16 +190,44 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     if (removed.length > 0) log.info({ removed: removed.length, bytes, paths: removed.map((r) => r.path) }, 'swept stale scratch worktrees');
   }
 
+  /** VS-461: did this run record any event that shows progress, or only the turn start? */
+  function runProgressed(run: Run): boolean {
+    const p = run.lastProgressAt ? Date.parse(run.lastProgressAt) : NaN;
+    const s = Date.parse(run.startedAt ?? run.createdAt);
+    return Number.isFinite(p) && Number.isFinite(s) && p - s > 1_000;
+  }
+
+  /** VS-461: was this run interrupted by the watchdog for silence (its own `silence_interrupt` event)? */
+  function wasSilenceInterrupted(runId: string): boolean {
+    return Boolean(ctx.db.get<{ n: number }>(
+      "SELECT COUNT(*) n FROM run_events WHERE run_id = ? AND type = 'supervisor.action' AND payload_json LIKE '%\"action\":\"silence_interrupt\"%'",
+      [runId],
+    )?.n);
+  }
+
+  /** The run this one followed for the same agent, if any. */
+  function previousFinishedRun(agentId: string, runId: string): Run | null {
+    return ctx.db.get<Run>(
+      'SELECT * FROM runs WHERE agent_id = ? AND id != ? AND finished_at IS NOT NULL ORDER BY created_at DESC, rowid DESC LIMIT 1',
+      [agentId, runId],
+    ) ?? null;
+  }
+
   async function watchdog(): Promise<void> {
     const silenceMs = (ctx.config.defaults.silenceTimeoutSec ?? 600) * 1000;
     const timeoutMs = (ctx.config.defaults.turnTimeoutSec ?? 2700) * 1000;
     const running = ctx.db.all<Run>("SELECT * FROM runs WHERE workspace_id = ? AND status = 'running'", [ctx.workspaceId]);
     for (const run of running) {
       const startedAt = new Date(run.startedAt ?? run.createdAt).getTime();
-      const lastEventAt = new Date((run as unknown as { lastEventAt?: string }).lastEventAt ?? run.startedAt ?? run.createdAt).getTime();
+      // VS-461: silence is measured from the last *progress* event (`isProgressRunEvent`), not the
+      // last event of any kind. A provider that accepts a request and never starts it keeps the
+      // runtime's retry loop re-emitting session/step-boundary events, which used to reset this clock
+      // without any work being done. Rows written before the column existed fall back to the last
+      // event and then the turn start.
+      const lastProgressAt = new Date(run.lastProgressAt ?? run.lastEventAt ?? run.startedAt ?? run.createdAt).getTime();
       const now = Date.now();
       const hardTimedOut = now - startedAt > timeoutMs;
-      const silent = now - lastEventAt > silenceMs;
+      const silent = now - lastProgressAt > silenceMs;
       if (!hardTimedOut && !silent) { interrupted.delete(run.id); continue; }
 
       if (silent && !hardTimedOut) {
@@ -213,9 +242,28 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       const firstAt = interrupted.get(run.id);
       if (!firstAt) {
         interrupted.set(run.id, now);
-        supervisorEvent(run.id, hardTimedOut ? 'hard_timeout_interrupt' : 'silence_interrupt', { silentMs: now - lastEventAt });
-        ctx.events.emit('worker.stalled', 'agent', run.agentId, { runId: run.id, reason: hardTimedOut ? 'hard timeout' : 'silence' });
-        log.warn({ runId: run.id, agentId: run.agentId, hardTimedOut }, 'interrupting a stuck run');
+        // VS-461: the run's own last upstream error travels with the alarm, so the conductor sees
+        // *why* the turn went quiet, not only that it did.
+        const lastError = run.lastError ?? null;
+        supervisorEvent(run.id, hardTimedOut ? 'hard_timeout_interrupt' : 'silence_interrupt', { silentMs: now - lastProgressAt, lastError });
+        ctx.events.emit('worker.stalled', 'agent', run.agentId, { runId: run.id, reason: hardTimedOut ? 'hard timeout' : 'silence', lastError });
+        log.warn({ runId: run.id, agentId: run.agentId, hardTimedOut, lastError }, 'interrupting a stuck run');
+        // VS-461: one automatic resume of a no-progress silence cut is allowed; a second consecutive
+        // one is not — the same upstream error will not clear by spending a third turn. Park the
+        // worker with the provider's own words, and suppress the watchdog's retry wake below.
+        const prior = previousFinishedRun(run.agentId, run.id);
+        if (!hardTimedOut && !runProgressed(run) && prior && !runProgressed(prior) && wasSilenceInterrupted(prior.id)) {
+          const stalled = ctx.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [run.agentId]);
+          if (stalled) {
+            retried.add(run.id);
+            supervisorEvent(run.id, 'park_after_repeated_silence', { priorRunId: prior.id, lastError });
+            parkForHuman(
+              ctx, deps, { run: { id: run.id, runtimeId: run.runtimeId }, agent: stalled },
+              'tooling', 'repeated_provider_no_progress',
+              lastError ?? 'the runtime made no progress across two consecutive turns',
+            );
+          }
+        }
         try { if (entry) { entry.cancelled = { mode: 'interrupt' }; await entry.cancel('interrupt'); } } catch { /* already gone */ }
         continue;
       }

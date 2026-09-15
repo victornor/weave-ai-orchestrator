@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Auto-merge sweep comments 'auto-merge is waiting' on every 15-second
+  pass: comment once per waiting reason, not on every sweep"
+skip_specs: true

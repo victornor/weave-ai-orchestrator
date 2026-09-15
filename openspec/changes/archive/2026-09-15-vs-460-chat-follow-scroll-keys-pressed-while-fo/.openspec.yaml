@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Chat follow: scroll keys pressed while focus is outside the transcript
+  scroll it without pausing the follow, so the next update yanks the view back
+  down"
+skip_specs: true

@@ -643,6 +643,37 @@ describe('the V2 Chat screen', () => {
     expect(screen.queryByRole('button', { name: /Scroll to bottom/ })).toBeNull();
   });
 
+  it('pauses the follow when a scroll key is pressed with focus outside the transcript (VS-460)', async () => {
+    state.messages = [message({ id: 'm1', body: 'History line' })];
+    const { container, rerender } = render(<V2ChatPage />);
+    await screen.findByText('History line');
+
+    const el = container.querySelector('[data-v2-chat-scroll]') as HTMLElement;
+    let top = 0;
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => 1000 });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => 300 });
+    Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = Math.max(0, Math.min(v, 700)); } });
+
+    // PageUp with focus on the body: the event never reaches the scroller, but the browser routes
+    // the key to it and the follow must still pause rather than read the move as a reflow.
+    top = 700;
+    fireEvent.scroll(el);
+    fireEvent.keyDown(document.body, { key: 'PageUp' });
+    top = 100;
+    fireEvent.scroll(el);
+    expect(screen.getByRole('button', { name: /Scroll to bottom/ })).toBeInTheDocument();
+
+    // A reply arriving while it is paused stays below the fold instead of yanking the view down.
+    state.messages = [
+      state.messages[0]!,
+      message({ id: 'm2', body: 'A reply while reading back', createdAt: '2026-09-13T09:00:05.000Z' }),
+    ];
+    rerender(<V2ChatPage />);
+    await screen.findByText('A reply while reading back');
+    expect(top).toBe(100);
+    expect(screen.getByRole('button', { name: /Scroll to bottom/ })).toBeInTheDocument();
+  });
+
   it('streams a new weaver reply in, but never re-animates what was already on screen (VS-425)', async () => {
     state.messages = [message({ id: 'm1', body: 'History line', createdAt: '2026-09-13T09:00:00.000Z' })];
     const { rerender } = render(<V2ChatPage />);

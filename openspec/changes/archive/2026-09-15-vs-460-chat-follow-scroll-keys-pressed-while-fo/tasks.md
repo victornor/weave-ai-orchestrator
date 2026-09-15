@@ -1,0 +1,6 @@
+# Tasks
+
+- [x] 1. In `packages/ui/src/lib/stickToBottom.ts`, arm the scroll-key gesture from a `document`-level `keydown` listener so the `SCROLL_KEYS` set (PageUp/PageDown/Home/End/arrows/Space) pauses the follow whatever element has focus, and ignore keys whose target is editable (`input`, `textarea`, `select`, `contenteditable`). Every other VS-451 rule — gestureless reflows, downward moves, the composer, the follow's own frames, button/unread/paging/reduced motion — stays exactly as it is.
+- [x] 2. Tests in `packages/ui/src/test/stickToBottom.test.tsx`: PageUp and ArrowUp with focus on `document.body`, and a scroll key targeting a control outside the scroller, pause the follow; ArrowUp, Space and PageDown on an `input`, a `textarea` and a `contenteditable` do not; the VS-451 gesture/reflow/scrollbar cases still pass.
+- [x] 3. Evidence: a throwaway headless-Chromium run against the real hook (message link focused, PageUp pressed, streaming lines arriving) reporting whether the view stays up and the distance from the bottom, before and after; record the result in the pull request.
+- [ ] 4. `pnpm lint`, `pnpm typecheck` and both test suites pass; tick tasks; open the PR and move to review.

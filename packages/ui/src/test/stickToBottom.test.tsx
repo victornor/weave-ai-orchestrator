@@ -87,6 +87,11 @@ function mount(initial: readonly unknown[]) {
   return hook;
 }
 
+/** A scroll key pressed on `target`; it bubbles the way a real keydown from a focused element does. */
+function press(key: string, target: EventTarget = document.body): void {
+  target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+}
+
 describe('the exact follow', () => {
   it('settles exactly on the true bottom, not the padded sentinel position', () => {
     const s = scroller(1000);
@@ -258,5 +263,52 @@ describe('the exact follow', () => {
     act(() => { s.setTop(60); s.scroll(); });
     expect(result.current.following.current).toBe(false);
     act(() => { window.dispatchEvent(new Event('pointerup')); });
+  });
+
+  it('a scroll key pressed on the body pauses the follow, though no keydown reaches the scroller (VS-460)', () => {
+    const s = scroller(1000);
+    const { result } = mount([0]);
+    act(() => result.current.scrollRef(s.el));
+    act(() => { s.setTop(s.bottom()); s.scroll(); });
+
+    // The browser routes PageUp to the nearest scrollable, but the event target is the body: the
+    // old scroller-local listener never saw it, so the move below read as a gestureless reflow.
+    act(() => { press('PageUp'); s.setTop(120); s.scroll(); });
+    expect(result.current.atBottom).toBe(false);
+    expect(result.current.following.current).toBe(false);
+  });
+
+  it('a scroll key on a control outside the scroller pauses the follow (VS-460)', () => {
+    const s = scroller(1000);
+    const { result } = mount([0]);
+    act(() => result.current.scrollRef(s.el));
+    act(() => { s.setTop(s.bottom()); s.scroll(); });
+
+    const link = document.createElement('button');
+    document.body.appendChild(link);
+
+    act(() => { press('ArrowUp', link); s.setTop(140); s.scroll(); });
+    expect(result.current.following.current).toBe(false);
+  });
+
+  it('a scroll key that edits text never pauses the follow (VS-460)', () => {
+    const s = scroller(1000);
+    const { result } = mount([0]);
+    act(() => result.current.scrollRef(s.el));
+    act(() => { s.setTop(s.bottom()); s.scroll(); });
+
+    // The composer: ArrowUp moves the caret, Space types, PageDown is a no-op — none of them
+    // scrolls the transcript, and arming the gesture here would pause it on the next reflow.
+    const composer = document.createElement('textarea');
+    const field = document.createElement('input');
+    const editable = document.createElement('div');
+    editable.setAttribute('contenteditable', 'true');
+    const typed = document.createElement('span');
+    editable.appendChild(typed);
+    document.body.append(composer, field, editable);
+
+    act(() => { press('ArrowUp', composer); press(' ', field); press('PageDown', typed); s.setTop(140); s.scroll(); });
+    expect(result.current.atBottom).toBe(true);
+    expect(result.current.following.current).toBe(true);
   });
 });

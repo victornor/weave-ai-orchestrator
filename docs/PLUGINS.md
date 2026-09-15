@@ -245,6 +245,14 @@ function pageHtml(host) {
     <div class="${WEAVE_PLUGIN_CLASS.formRow}">
       <button type="submit" class="${WEAVE_PLUGIN_CLASS.button}" data-variant="primary">Add</button>
     </div>
+    <div class="${WEAVE_PLUGIN_CLASS.formRow}">
+      <span>Advanced</span>
+      <button type="button" id="toggle-extra" class="${WEAVE_PLUGIN_CLASS.button}">Toggle extra field</button>
+    </div>
+    <div class="${WEAVE_PLUGIN_CLASS.formRow}" id="extra-row" hidden>
+      <span>Extra field</span>
+      <input class="${WEAVE_PLUGIN_CLASS.input}" type="text" placeholder="hidden until toggled" />
+    </div>
   </div>
 </form>
 <div id="notes" class="${WEAVE_PLUGIN_CLASS.table}"></div>
@@ -253,6 +261,10 @@ function pageHtml(host) {
   var client = window.weavePluginClient();
   client.request('GET', '/notes').then(function (res) { /* res.data */ });
   client.onEvent('note.created', function (payload) { /* live update */ });
+  document.getElementById('toggle-extra').addEventListener('click', function () {
+    var row = document.getElementById('extra-row');
+    row.hidden = !row.hidden;
+  });
 </script>
 </body>
 </html>`;
@@ -317,6 +329,20 @@ Artifact Kit CSS (the same one `GET /api/w/:ws/artifacts/kit.css` serves) for a 
 V1's look instead; neither method is a static import from `@weave-ai/core` — `@weave-ai/plugin-sdk`
 (and everything built against it) may depend on `shared` and the runtime/channel/surface SDKs only,
 never `core`.
+
+**Styling — page rhythm and `hidden`.** Two gaps a bare vocabulary leaves are closed by the same
+generated stylesheet, so a plugin needs no wrapper element and no local CSS for either:
+
+- **Vertical rhythm between sections.** `body > * + * { margin-top: var(--space-6); }` spaces a
+  plugin page's top-level sections (the add card and the notes table above, for example) using the
+  design's own `--space-6` token, which the generated `:root` defines. There is no page-stack class
+  to add: put your sections directly in `<body>` and they are spaced. A section that must sit flush
+  with the previous one belongs inside the same parent, or takes the spacing back itself.
+- **`[hidden]` hides.** The standard `hidden` attribute works on every vocabulary class, not only on
+  classless elements: `[hidden] { display: none !important; }` in the generated stylesheet beats the
+  vocabulary's own `display` recipes (`.v2-form-row`'s `flex`, `.v2-button`'s `inline-flex`, …). A
+  toggled `<div class="v2-form-row" hidden>` therefore really disappears — no wrapper needed, as the
+  `#extra-row` in the example shows.
 
 **Nav.** Both V1's workspace nav and V2's rail (expanded, collapsed, and the phone More list) read
 the workspace summary (`GET /api/w/:ws`)'s `plugins` field to know which loaded plugins registered a

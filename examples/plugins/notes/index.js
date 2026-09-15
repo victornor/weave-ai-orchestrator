@@ -23,6 +23,11 @@ const newNoteId = () => `${Date.now().toString(36)}${Math.random().toString(36).
  * inline `host.themeCss()` is optional, purely to avoid a flash of unstyled content before the
  * bridge's own `stylesheet` push arrives (`weavePluginClient()` applies that push automatically,
  * with no extra code here).
+ *
+ * VS-465: the two top-level sections (the add card and the notes table) show the generated
+ * stylesheet's own page stack, so they are spaced without any wrapper; and the second add-card row
+ * is toggled through the standard `hidden` attribute, which the generated `[hidden]` rule makes win
+ * over `.v2-form-row`'s own `display: flex`.
  */
 function pageHtml(host) {
   return `<!doctype html>
@@ -40,6 +45,14 @@ function pageHtml(host) {
     </label>
     <div class="${WEAVE_PLUGIN_CLASS.formRow}">
       <button type="submit" class="${WEAVE_PLUGIN_CLASS.button}" data-variant="primary">Add</button>
+    </div>
+    <div class="${WEAVE_PLUGIN_CLASS.formRow}">
+      <span>Advanced</span>
+      <button type="button" id="toggle-extra" class="${WEAVE_PLUGIN_CLASS.button}">Toggle extra field</button>
+    </div>
+    <div class="${WEAVE_PLUGIN_CLASS.formRow}" id="extra-row" hidden>
+      <span>Extra field</span>
+      <input id="extra-text" class="${WEAVE_PLUGIN_CLASS.input}" type="text" placeholder="hidden until toggled" />
     </div>
   </div>
 </form>
@@ -103,6 +116,10 @@ function pageHtml(host) {
     var text = input.value.trim();
     if (!text) return;
     client.request('POST', '/notes', { text: text }).then(function () { input.value = ''; });
+  });
+  document.getElementById('toggle-extra').addEventListener('click', function () {
+    var row = document.getElementById('extra-row');
+    row.hidden = !row.hidden;
   });
 </script>
 </body>

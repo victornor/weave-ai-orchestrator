@@ -157,19 +157,34 @@ export function generateV2PluginCss(v2Css: string, indexCss: string): string {
 
 :root, body {${baseBlock}}
 
-/* The one hand-authored rule in this generator, not extracted from any source file: the base
-   reset a real V2 page gets for free from Tailwind's own preflight, pulled into index.css by its
-   framework entry point. A plugin page has no bundler to load that from, so without this,
-   .v2-input's width: 100% plus its own border/padding overflows its card, and a form control
-   keeps the browser's own default font instead of inheriting the page's. */
+/* Hand-authored rules, not extracted from any source file. The base reset a real V2 page gets for
+   free from Tailwind's own preflight, pulled into index.css by its framework entry point — a plugin
+   page has no bundler to load that from, so without this .v2-input's width: 100% plus its own
+   border/padding overflows its card, and a form control keeps the browser's own default font
+   instead of inheriting the page's. */
 *, *::before, *::after { box-sizing: border-box; }
 body { margin: 0; }
 button, input, select, textarea { font-family: inherit; font-size: inherit; }
+
+/* VS-465 (2/2): the vocabulary gives each section its own surface but no vertical rhythm, so
+   adjacent top-level .v2-card/.v2-table blocks sit flush (0px). The app's own pages space sections
+   with Tailwind's gap-4/gap-5; the --space-6 token (1rem) is one the generated :root above already
+   defines, so the rhythm needs no literal and no new vocabulary class. */
+body > * + * { margin-top: var(--space-6); }
 
 ${components}
 
 ${links}
 
 ${tones}
+
+/* VS-465 (1/2): the vocabulary's own display recipes (.v2-form-row flex, .v2-button inline-flex,
+   …) carry author origin and a class + element specificity, so they beat the browser's default
+   [hidden] { display: none } and a hidden region stays visible. !important makes the standard
+   attribute win on every vocabulary class. It is written last, after every extracted recipe, so it
+   reads the same way a naive cascade evaluates it too; the generated stylesheet only ever reaches a
+   plugin document (inlined via host.themeCss() or pushed over the bridge), so it is scoped to plugin
+   documents by construction. */
+[hidden] { display: none !important; }
 `;
 }

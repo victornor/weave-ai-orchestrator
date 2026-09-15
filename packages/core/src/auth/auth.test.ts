@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDb, type Db } from '@weave-ai/db';
 import { DaemonConfigSchema } from '@weave-ai/shared';
 import { createAuthService } from './index.js';
@@ -22,7 +22,7 @@ describe('auth', () => {
     auth = createAuthService(db, DaemonConfigSchema.parse({ auth: { lockoutAttempts: 3, lockoutMinutes: 15 } }));
     await auth.setPassword('victor', 'correct horse battery');
   });
-  afterEach(() => { try { db.close(); } catch { /* closed */ } rmSync(dir, { recursive: true, force: true }); });
+  afterEach(() => { vi.useRealTimers(); try { db.close(); } catch { /* closed */ } rmSync(dir, { recursive: true, force: true }); });
 
   it('creates the operator and logs in with a hashed opaque token', async () => {
     expect(auth.hasOperator()).toBe(true);
@@ -43,6 +43,12 @@ describe('auth', () => {
   });
 
   it('requires and verifies a TOTP code once enabled, and accepts a recovery code once', async () => {
+    // otplib verifies with window 0, so a code generated at the end of a 30s step is
+    // rejected if the verifier reads the next step. Freeze the clock so generate() and
+    // check() always share one window, mid-step (VS-475).
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-01-01T00:00:15.000Z'));
+
     const setup = await auth.totpSetup();
     await auth.totpEnable(authenticator.generate(setup.secret));
     expect(auth.totpEnabled()).toBe(true);

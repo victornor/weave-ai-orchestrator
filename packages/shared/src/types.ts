@@ -449,14 +449,23 @@ export interface RoutineListItem extends Routine {
 /**
  * A remembered idea on one project's roadmap (VS-397). Not a ticket: it belongs to a project, sits in
  * a manual order, and carries a status until captain decides to start it — at which point a ticket is
- * filed and linked through `ticketId`.
+ * filed and linked through `ticketId`. Since VS-478 it may also be a **pending ticket**: assigned to
+ * a block and carrying the fields a real ticket needs (`description`, `kind`, `priority`, `roleId`).
  */
 export interface RoadmapItem {
   id: string;
   workspaceId: string;
   projectId: string;
+  /** The block this item is a pending ticket of; null means a loose item (VS-478). */
+  blockId: string | null;
   title: string;
   notes: string;
+  /** The markdown body the created ticket will carry, acceptance criteria included (VS-478). */
+  description: string;
+  kind: E.TicketKind;
+  priority: E.TicketPriority;
+  /** The role the pending ticket targets; null when the weaver will pick one (VS-478). */
+  roleId: string | null;
   position: number;
   status: E.RoadmapStatus;
   ticketId: string | null;
@@ -465,6 +474,56 @@ export interface RoadmapItem {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * One merged-away pending ticket, recorded on the item that absorbed it (VS-478). The merged item is
+ * deleted by the merge, so its title and description are snapshotted here — the record has to outlive
+ * the row it came from.
+ */
+export interface RoadmapMergeRecord {
+  id: string;
+  itemId: string;
+  sourceItemId: string;
+  sourceTitle: string;
+  sourceDescription: string;
+  mergedByKind: E.AuthorKind;
+  mergedById: string | null;
+  mergedAt: string;
+}
+
+/**
+ * An ordered, named group of pending tickets on one project's roadmap (VS-478). The weaver builds a
+ * block up from chat and starts it: `status` is the stored lifecycle, while `reportedStatus` adds the
+ * derived `done` once every linked ticket is terminal.
+ */
+export interface RoadmapBlock {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  title: string;
+  notes: string;
+  position: number;
+  status: E.RoadmapBlockStoredStatus;
+  reportedStatus: E.RoadmapBlockStatus;
+  startedAt: string | null;
+  createdByKind: E.AuthorKind;
+  createdById: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** The block's pending tickets, in the project's item order. */
+  items: RoadmapItem[];
+}
+
+/** A pending ticket returned by `start` as the fields a real ticket needs (VS-478). */
+export interface RoadmapBlockDraft {
+  itemId: string;
+  title: string;
+  description: string;
+  kind: E.TicketKind;
+  priority: E.TicketPriority;
+  roleId: string | null;
+}
+
 
 /**
  * A captain-authored, pre-ticket planning session (VS-398): a read-only planning agent chats with

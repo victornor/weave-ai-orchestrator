@@ -16,7 +16,7 @@ import { decisionCarriesSecret } from '../lib/decisionSecrets';
 import { isClosedRefusal, staleAnswerCopy } from '../lib/decisionStaleness';
 import { chatEntries, chatRows } from '../lib/dispatch';
 import type { ChatEntry } from '../lib/dispatch';
-import { draftKey, useDraft } from '../lib/drafts';
+import { draftKey, readDraft, takeSeededDraft, useDraft } from '../lib/drafts';
 import { enqueue, useQueueCount } from '../lib/queue';
 import { useNewOutboundMessageIds } from '../lib/streamReveal';
 import { cx } from '../lib/cx';
@@ -322,6 +322,16 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
     if (first) setThreadId(first.id);
     else if (threads.isSuccess && !createThread.isPending && !createThread.data) createThread.mutate({}, { onSuccess: (t) => setThreadId(t.id) });
   }, [threads.data, threads.isSuccess, fetchId, createThread]);
+
+  // A prompt another screen seeded (VS-478): placed in this conversation's composer once its thread
+  // id exists, unsent and editable. Only when the composer is empty, so a seed never overwrites
+  // something the human was typing; it is consumed once.
+  useEffect(() => {
+    if (!fetchId) return;
+    if (readDraft(draftKey(ws, `thread:${fetchId}`)).text) return;
+    const seed = takeSeededDraft(ws);
+    if (seed) patch({ text: seed });
+  }, [fetchId, ws, patch, draft.text]);
 
   // Resume a turn in flight, and follow the weaver's own runs (V1's live-turn stream).
   useEffect(() => {

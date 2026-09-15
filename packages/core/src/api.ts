@@ -927,9 +927,54 @@ export interface RoadmapPatch {
   ticketId?: string | null;
 }
 
+/** A new roadmap block (VS-478): an ordered, named group of pending tickets. */
+export interface RoadmapBlockCreateInput {
+  title: string;
+  notes?: string;
+}
+
+export interface RoadmapBlockPatch {
+  title?: string;
+  notes?: string;
+  status?: S.RoadmapBlockStoredStatus;
+  position?: number;
+}
+
+/** A new pending ticket inside a block (VS-478): the fields a real ticket needs. */
+export interface RoadmapItemCreateInput {
+  blockId: string;
+  title: string;
+  notes?: string;
+  description?: string;
+  kind?: S.TicketKind;
+  priority?: S.TicketPriority;
+  roleId?: string | null;
+}
+
+/** A pending-ticket write (VS-478): fields plus the move (`blockId`) and the ticket link. */
+export interface RoadmapItemPatch {
+  title?: string;
+  notes?: string;
+  description?: string;
+  kind?: S.TicketKind;
+  priority?: S.TicketPriority;
+  roleId?: string | null;
+  status?: S.RoadmapStatus;
+  position?: number;
+  blockId?: string | null;
+  ticketId?: string | null;
+}
+
+/** What starting a block returned: the block and the drafts the weaver files (VS-478). */
+export interface RoadmapBlockStart {
+  block: S.RoadmapBlock;
+  drafts: S.RoadmapBlockDraft[];
+}
+
 /**
  * A project's roadmap (VS-397): durable ideas that are not tickets. Scoped to one project; `get`
- * exists so a route or tool can resolve an item before writing it.
+ * exists so a route or tool can resolve an item before writing it. VS-478 adds blocks of pending
+ * tickets, the bundling merge, and the start that returns filing-ready drafts.
  */
 export interface RoadmapService {
   list(projectId: string): S.RoadmapItem[];
@@ -937,6 +982,21 @@ export interface RoadmapService {
   create(actor: Actor, projectId: string, input: RoadmapCreateInput): S.RoadmapItem;
   update(actor: Actor, itemId: string, patch: RoadmapPatch): S.RoadmapItem;
   remove(actor: Actor, itemId: string): void;
+  /** A project's blocks in order, each with its pending tickets in order (VS-478). */
+  listBlocks(projectId: string): S.RoadmapBlock[];
+  getBlock(blockId: string): S.RoadmapBlock;
+  createBlock(actor: Actor, projectId: string, input: RoadmapBlockCreateInput): S.RoadmapBlock;
+  updateBlock(actor: Actor, blockId: string, patch: RoadmapBlockPatch): S.RoadmapBlock;
+  /** Starts a block and returns its items still without a linked ticket as filing-ready drafts. */
+  startBlock(actor: Actor, blockId: string): RoadmapBlockStart;
+  /** Adds a pending ticket to a block, appending it to that block's order. */
+  addItem(actor: Actor, input: RoadmapItemCreateInput): S.RoadmapItem;
+  /** Writes a pending ticket: its fields, its move between blocks, and its created ticket. */
+  updateItem(actor: Actor, itemId: string, patch: RoadmapItemPatch): S.RoadmapItem;
+  /** Merges two or more pending tickets of one project into the first, recording what it absorbed. */
+  mergeItems(actor: Actor, itemIds: string[]): S.RoadmapItem;
+  /** The records of what an item absorbed, newest last. */
+  merges(itemId: string): S.RoadmapMergeRecord[];
 }
 
 export interface RoutineCreateInput {

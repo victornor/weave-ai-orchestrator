@@ -134,6 +134,27 @@ export function writeDraft(key: string | null, draft: Draft): void {
 }
 
 /**
+ * A one-shot prompt another screen hands the chat (VS-478), so an empty roadmap's "ask the weaver
+ * about roadmaps" button opens chat with the question already typed. Stored under a reserved thread
+ * segment in the same per-workspace store, so a seed can never be read in another workspace and the
+ * chat can consume it once its thread id exists (which is after the first render).
+ */
+const SEED_THREAD = '__seed__';
+
+export function seedDraft(ws: string, text: string): void {
+  writeDraft(draftKey(ws, SEED_THREAD), { text });
+}
+
+/** The seeded prompt, consumed: read and cleared in one call, so it is shown at most once. */
+export function takeSeededDraft(ws: string): string | null {
+  const key = draftKey(ws, SEED_THREAD);
+  const text = readDraft(key).text;
+  if (!text) return null;
+  clearDraft(key);
+  return text;
+}
+
+/**
  * The draft for one conversation, kept in sync with every other reader and writer of the same key.
  * `key` may be null while the thread is still loading; the snapshot is re-read when it changes, so
  * switching thread or workspace never carries the previous one over.

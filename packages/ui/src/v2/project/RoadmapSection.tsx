@@ -11,7 +11,7 @@ import { Markdown } from '../../components/Markdown';
 import { SkeletonRows } from '../../components/Skeleton';
 import { EmptyState } from '../../components/States';
 import { useToast } from '../../components/Toast';
-import { useCreateRoadmapItem, usePatchRoadmapItem, useRemoveRoadmapItem, useRoadmap, useTickets } from '../../api/hooks';
+import { useCreateRoadmapItem, usePatchRoadmapItem, useRemoveRoadmapItem, useRoadmap, useRoadmapBlocks, useTickets } from '../../api/hooks';
 import { cx } from '../../lib/cx';
 import type { V2ProjectSectionProps } from './sections';
 
@@ -27,6 +27,7 @@ const inputCx = 'h-8 w-full rounded-r4 border border-line-2 bg-bg-input px-2 tex
 
 export function RoadmapSection({ project, ws }: V2ProjectSectionProps): React.ReactElement {
   const road = useRoadmap(project.id);
+  const blocks = useRoadmapBlocks(project.id);
   const tickets = useTickets({ limit: 300 });
   const create = useCreateRoadmapItem();
   const patch = usePatchRoadmapItem();
@@ -39,6 +40,7 @@ export function RoadmapSection({ project, ws }: V2ProjectSectionProps): React.Re
   const [editNotes, setEditNotes] = useState('');
 
   const items = road.data ?? [];
+  const blockTitle = new Map((blocks.data ?? []).map((b) => [b.id, b.title]));
   const identifierOf = (ticketId: string | null): string | null =>
     ticketId ? (tickets.data ?? []).find((t) => t.id === ticketId)?.identifier ?? null : null;
   const fail = (title: string) => (e: Error) => toast.push({ title, detail: e.message, status: 'failed' });
@@ -112,6 +114,9 @@ export function RoadmapSection({ project, ws }: V2ProjectSectionProps): React.Re
                     <div className="flex items-center gap-2">
                       <span className={cx('v2-tag flex-none', STATUS_TONE[item.status])}>{item.status}</span>
                       <span className="min-w-0 flex-1 truncate text-meta text-text-1">{item.title}</span>
+                      {item.blockId && blockTitle.get(item.blockId) ? (
+                        <span className="v2-tag flex-none text-text-3" title="Roadmap block">{blockTitle.get(item.blockId)}</span>
+                      ) : null}
                       {identifier ? (
                         <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: identifier }} className="ac-mono flex-none text-nano text-accent-link">
                           {identifier}
@@ -142,6 +147,10 @@ export function RoadmapSection({ project, ws }: V2ProjectSectionProps): React.Re
           })}
         </ul>
       )}
+
+      <A to="/w/$ws/p/$project/roadmap" params={{ ws, project: project.slug }} className="v2-link text-micro font-medium">
+        Open the full roadmap
+      </A>
     </div>
   );
 }

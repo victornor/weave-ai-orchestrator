@@ -3,7 +3,14 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, PLANNER_TOOLS, HUMAN_REPLY_TOOL, isHumanReplyToolEvent } from './tools.js';
-import { ROADMAP_STATUSES, ROUTINE_ACTIONS, ROUTINE_STATUSES } from './enums.js';
+import {
+  ROADMAP_STATUSES,
+  ROADMAP_BLOCK_STATUSES,
+  REPORTED_ROADMAP_BLOCK_STATUSES,
+  roadmapBlockStatus,
+  ROUTINE_ACTIONS,
+  ROUTINE_STATUSES,
+} from './enums.js';
 
 const event = (type: string, payload: Record<string, unknown> | null) => ({ type, payload });
 
@@ -37,6 +44,36 @@ describe('roadmap tools (VS-397)', () => {
 describe('roadmap statuses (VS-397)', () => {
   it('are idea, planned and dropped, in order', () => {
     expect(ROADMAP_STATUSES).toEqual(['idea', 'planned', 'dropped']);
+  });
+});
+
+describe('roadmap block tools and statuses (VS-478)', () => {
+  const NEW_TOOLS = [
+    'weave_roadmap_block_create', 'weave_roadmap_block_list', 'weave_roadmap_block_update', 'weave_roadmap_block_start',
+    'weave_roadmap_item_add', 'weave_roadmap_item_update', 'weave_roadmap_item_merge',
+  ] as const;
+
+  it('registers the block and pending-ticket tools as weaver-only', () => {
+    for (const tool of NEW_TOOLS) {
+      expect(WEAVER_TOOLS).toContain(tool);
+      expect(COMMON_TOOLS as readonly string[]).not.toContain(tool);
+    }
+  });
+
+  it('stores open, started and dropped, and reports done as well', () => {
+    expect(ROADMAP_BLOCK_STATUSES).toEqual(['open', 'started', 'dropped']);
+    expect(REPORTED_ROADMAP_BLOCK_STATUSES).toEqual(['open', 'started', 'done', 'dropped']);
+    expect(ROADMAP_BLOCK_STATUSES as readonly string[]).not.toContain('done');
+  });
+
+  it('derives done only for a started block whose every linked ticket is terminal', () => {
+    expect(roadmapBlockStatus('open', [null])).toBe('open');
+    expect(roadmapBlockStatus('dropped', ['done'])).toBe('dropped');
+    expect(roadmapBlockStatus('started', [])).toBe('started');
+    expect(roadmapBlockStatus('started', [null])).toBe('started');
+    expect(roadmapBlockStatus('started', ['done'])).toBe('done');
+    expect(roadmapBlockStatus('started', ['done', 'cancelled'])).toBe('done');
+    expect(roadmapBlockStatus('started', ['done', 'in_progress'])).toBe('started');
   });
 });
 

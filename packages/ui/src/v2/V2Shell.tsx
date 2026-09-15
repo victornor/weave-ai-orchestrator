@@ -5,7 +5,7 @@
  */
 import { useMemo, useState, type ReactNode } from 'react';
 import { Outlet, useRouterState } from '@tanstack/react-router';
-import { projectLabel } from '@weave-ai/shared';
+import { projectLabel, type Project } from '@weave-ai/shared';
 import { A } from '../app/link';
 import { cx } from '../lib/cx';
 import { projectColorVar } from '../lib/projectColor';
@@ -254,6 +254,43 @@ function RailFooter({
   );
 }
 
+/**
+ * A project's row and its secondary **Roadmap** child link (VS-478). One component so the desktop
+ * rail and the phone More list render the same pair, and the project's Roadmap page is reachable on
+ * both. The project row is the highlighted row on either its overview or its roadmap, because
+ * `activeNavKey` maps `p/<slug>` and `p/<slug>/roadmap` to the same `project:<slug>` key.
+ */
+function ProjectRow({
+  ws,
+  project,
+  siblingIds,
+  active,
+  onNavigate,
+  tall,
+}: {
+  ws: string;
+  project: Project;
+  siblingIds: string[];
+  active: boolean;
+  onNavigate?: () => void;
+  tall?: boolean;
+}): React.ReactElement {
+  const base = `/w/${encodeURIComponent(ws)}/p/${encodeURIComponent(project.slug)}`;
+  const row = cx('v2-row', tall && 'min-h-11');
+  return (
+    <div className="flex flex-col">
+      <A to={base} aria-current={active ? 'page' : undefined} className={row} onClick={onNavigate}>
+        <span className="flex-1 truncate" style={{ color: projectColorVar(project.id, siblingIds) }} data-project-color>
+          {projectLabel(project)}
+        </span>
+      </A>
+      <A to={`${base}/roadmap`} className={cx(row, 'v2-row-child')} onClick={onNavigate}>
+        <span className="flex-1 truncate">Roadmap</span>
+      </A>
+    </div>
+  );
+}
+
 function WorkspaceGroups({
   workspaces,
   scope,
@@ -315,23 +352,16 @@ function WorkspaceGroups({
                   />
                 ))}
                 <div className="my-1 h-px bg-line-1" />
-                {projects.map((p) => {
-                  const key = projectRowKey(p.slug);
-                  const href = `/w/${encodeURIComponent(w.id)}/p/${encodeURIComponent(p.slug)}`;
-                  return (
-                    <A
-                      key={p.id}
-                      to={href}
-                      aria-current={isActive && activeKey === key ? 'page' : undefined}
-                      className="v2-row"
-                      onClick={onNavigate}
-                    >
-                      <span className="flex-1 truncate" style={{ color: projectColorVar(p.id, siblingIds) }} data-project-color>
-                        {projectLabel(p)}
-                      </span>
-                    </A>
-                  );
-                })}
+                {projects.map((p) => (
+                  <ProjectRow
+                    key={p.id}
+                    ws={w.id}
+                    project={p}
+                    siblingIds={siblingIds}
+                    active={isActive && activeKey === projectRowKey(p.slug)}
+                    onNavigate={onNavigate}
+                  />
+                ))}
                 {(pluginsByWs[w.id] ?? []).map((p) => (
                   <RailRow
                     key={p.id}
@@ -358,6 +388,7 @@ function MoreList({
   activeKey,
   counts,
   workspaces,
+  projects,
   plugins,
   update,
   onNavigate,
@@ -367,11 +398,14 @@ function MoreList({
   activeKey: string | null;
   counts: V2Counts;
   workspaces: WorkspaceListItem[];
+  projects: Project[];
   plugins: WorkspacePlugin[];
   update: UpdateEntry | null;
   onNavigate: () => void;
 }): React.ReactElement {
   const wsScope: V2Scope = scope.kind === 'workspace' ? scope : { kind: 'workspace', ws: fallbackWs };
+  const projectWs = wsScope.kind === 'workspace' ? wsScope.ws : fallbackWs;
+  const siblingIds = projects.map((p) => p.id);
   return (
     <div className="flex flex-col gap-4">
       {update ? <UpdateRailEntry update={update} onNavigate={onNavigate} /> : null}
@@ -385,6 +419,23 @@ function MoreList({
           <MoreRow key={d.key} dest={d} scope={wsScope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} onNavigate={onNavigate} />
         ))}
       </MoreGroup>
+      {/* The rail is hidden at phone width, so projects get their own group here (VS-478) — each with
+          the same Roadmap child row the rail shows, so the page is reachable on a phone. */}
+      {projects.length > 0 ? (
+        <MoreGroup title="Projects">
+          {projects.map((p) => (
+            <ProjectRow
+              key={p.id}
+              ws={projectWs}
+              project={p}
+              siblingIds={siblingIds}
+              active={activeKey === projectRowKey(p.slug)}
+              onNavigate={onNavigate}
+              tall
+            />
+          ))}
+        </MoreGroup>
+      ) : null}
       <div className="border-t border-line-1 pt-3">
         <A to="/" onClick={onNavigate} className="flex h-12 items-center px-3 text-ui text-text-2 hover:bg-bg-2">
           Open V1
@@ -606,6 +657,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
               activeKey={activeKey}
               counts={counts}
               workspaces={list}
+              projects={projectsByWs[fallbackWs]?.projects ?? []}
               plugins={pluginsByWs[fallbackWs] ?? []}
               update={update}
               onNavigate={() => setMoreOpen(false)}

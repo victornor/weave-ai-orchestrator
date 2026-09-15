@@ -16,6 +16,10 @@ export const WEAVER_TOOLS = [
   'weave_run_inspect', 'weave_run_list', 'weave_worker_models',
   'weave_routine_list', 'weave_routine_create', 'weave_routine_update', 'weave_routine_remove',
   'weave_roadmap_add', 'weave_roadmap_update', 'weave_roadmap_remove',
+  // VS-478: blocks of pending tickets, the bundling merge, and starting a block into filing-ready
+  // drafts. All weaver-only, like the item writes above.
+  'weave_roadmap_block_create', 'weave_roadmap_block_list', 'weave_roadmap_block_update', 'weave_roadmap_block_start',
+  'weave_roadmap_item_add', 'weave_roadmap_item_update', 'weave_roadmap_item_merge',
   'weave_incident_list', 'weave_incident_get', 'weave_incident_resolve',
   'weave_artifact_put',
   /** VS-398: reads a submitted (or in-progress) draft plan back, and records what became of each draft once tickets are created from it. */

@@ -10,7 +10,7 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
   COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, PLANNER_TOOLS, FIRST_TURN_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   SELF_WAKE_MAX_DELAY_MS, SELF_WAKE_MIN_DELAY_MS,
-  TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES, ROADMAP_STATUSES,
+  TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES, ROADMAP_STATUSES, ROADMAP_BLOCK_STATUSES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
   ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS, ATTACHMENT_MAX_PER_MESSAGE,
   PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS,
@@ -1037,6 +1037,81 @@ export const TOOLS: ToolDef[] = [
     name: 'weave_roadmap_remove', scope: 'weaver', input: z.object({ itemId: z.string().min(1) }),
     description: 'Remove a roadmap item. Use status dropped instead when the idea should stay visible as considered and set aside.',
     handler: (ctx, i) => { svc(ctx).roadmap.remove(ctx.actor, i.itemId); return { ok: true }; },
+  },
+  {
+    name: 'weave_roadmap_block_create', scope: 'weaver', input: z.object({
+      projectId: z.string().min(1),
+      title: z.string().min(1),
+      notes: z.string().optional(),
+    }),
+    description: 'Create a named roadmap block: a group of related pending tickets the roadmap builds up and bundles, so one worker can do them in one ticket instead of one ticket and one worker each. Blocks are appended to the project\'s order; add pending tickets with weave_roadmap_item_add.',
+    handler: (ctx, i) => svc(ctx).roadmap.createBlock(ctx.actor, i.projectId, { title: i.title, notes: i.notes }),
+  },
+  {
+    name: 'weave_roadmap_block_list', scope: 'weaver', input: z.object({ projectId: z.string().min(1) }),
+    description: 'List a project\'s roadmap blocks in order, each with its pending tickets in order, plus the project\'s loose items. A started block whose every linked ticket is terminal reports done.',
+    handler: (ctx, i) => {
+      const s = svc(ctx);
+      const blocks = s.roadmap.listBlocks(i.projectId);
+      const projectId = s.projects.get(i.projectId).id;
+      return { blocks, loose: s.roadmap.list(projectId).filter((item) => item.blockId === null) };
+    },
+  },
+  {
+    name: 'weave_roadmap_block_update', scope: 'weaver', input: z.object({
+      blockId: z.string().min(1),
+      title: z.string().min(1).optional(),
+      notes: z.string().optional(),
+      status: z.enum(ROADMAP_BLOCK_STATUSES).optional(),
+      position: z.number().int().optional(),
+    }),
+    description: 'Change a roadmap block: its title, notes, status (open|started|dropped) or manual position within the project. Set status dropped to set a block aside without deleting it; done is derived from the block\'s tickets and cannot be set.',
+    handler: (ctx, i) => {
+      const { blockId, ...patch } = i;
+      return svc(ctx).roadmap.updateBlock(ctx.actor, blockId, patch);
+    },
+  },
+  {
+    name: 'weave_roadmap_block_start', scope: 'weaver', input: z.object({ blockId: z.string().min(1) }),
+    description: 'Start a roadmap block: marks it started and returns its pending tickets as filing-ready drafts (title, description, kind, priority, target role). It creates no tickets itself — file each draft with weave_ticket_create, bundling related ones into as few tickets as the work allows, then link each created ticket with weave_roadmap_item_update. Calling it again returns only the items still without a ticket.',
+    handler: (ctx, i) => svc(ctx).roadmap.startBlock(ctx.actor, i.blockId),
+  },
+  {
+    name: 'weave_roadmap_item_add', scope: 'weaver', input: z.object({
+      blockId: z.string().min(1),
+      title: z.string().min(1),
+      notes: z.string().optional(),
+      description: z.string().optional(),
+      kind: z.enum(TICKET_KINDS).optional(),
+      priority: z.enum(TICKET_PRIORITIES).optional(),
+      roleId: z.string().min(1).nullish(),
+    }),
+    description: 'Add a pending ticket to a roadmap block — use this for a small ask that belongs with related work ("fix this as part of the UI polish block") instead of filing its own ticket now. Nothing is filed; the ticket is created when the block is started. description is the ticket body; target a role with roleId.',
+    handler: (ctx, i) => svc(ctx).roadmap.addItem(ctx.actor, { blockId: i.blockId, title: i.title, notes: i.notes, description: i.description, kind: i.kind, priority: i.priority, roleId: i.roleId ?? null }),
+  },
+  {
+    name: 'weave_roadmap_item_update', scope: 'weaver', input: z.object({
+      itemId: z.string().min(1),
+      title: z.string().min(1).optional(),
+      notes: z.string().optional(),
+      description: z.string().optional(),
+      kind: z.enum(TICKET_KINDS).optional(),
+      priority: z.enum(TICKET_PRIORITIES).optional(),
+      roleId: z.string().min(1).nullish(),
+      position: z.number().int().optional(),
+      blockId: z.string().min(1).nullish(),
+      ticketId: z.string().min(1).nullish(),
+    }),
+    description: 'Change a pending ticket: its title, notes, description, kind, priority, target role or order. Send blockId to move it to another block of its project (null returns it to a loose item), and ticketId when the block is started and you have filed its ticket, so the item records what it became.',
+    handler: (ctx, i) => {
+      const { itemId, ...patch } = i;
+      return svc(ctx).roadmap.updateItem(ctx.actor, itemId, patch);
+    },
+  },
+  {
+    name: 'weave_roadmap_item_merge', scope: 'weaver', input: z.object({ itemIds: z.array(z.string().min(1)).min(2) }),
+    description: 'Bundle two or more pending tickets of one project into one, combining their descriptions so one worker can do the work in one ticket. The first id survives and keeps its block and status; the rest are absorbed and recorded. Refused when any item already has a linked ticket.',
+    handler: (ctx, i) => svc(ctx).roadmap.mergeItems(ctx.actor, i.itemIds),
   },
   {
     name: 'weave_plan_get', scope: 'weaver', input: z.object({ planId: z.string().min(1).optional() }),

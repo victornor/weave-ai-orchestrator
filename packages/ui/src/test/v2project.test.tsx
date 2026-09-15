@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   prDetail: null as Record<string, unknown> | null,
   openingPull: false,
   roadmap: [] as Array<Record<string, unknown>>,
+  blocks: [] as Array<Record<string, unknown>>,
   calls: [] as Array<{ kind: string; args: unknown }>,
 }));
 
@@ -24,7 +25,7 @@ vi.mock('@tanstack/react-router', () => ({
 
 vi.mock('../app/link', () => ({
   A: ({ to, params, children, ...rest }: { to: string; params?: Record<string, unknown>; children?: ReactNode } & Record<string, unknown>) => (
-    <a href={to.replace(/\$ws/g, String(params?.['ws'] ?? '')).replace(/\$ticketId/g, String(params?.['ticketId'] ?? '')).replace(/\$workerId/g, String(params?.['workerId'] ?? ''))} {...rest}>
+    <a href={to.replace(/\$ws/g, String(params?.['ws'] ?? '')).replace(/\$project/g, String(params?.['project'] ?? '')).replace(/\$ticketId/g, String(params?.['ticketId'] ?? '')).replace(/\$workerId/g, String(params?.['workerId'] ?? ''))} {...rest}>
       {children}
     </a>
   ),
@@ -71,6 +72,7 @@ vi.mock('../api/hooks', () => ({
   useTickets: () => ({ isLoading: false, data: [{ id: 'tk_1', identifier: 'ACME-42' }] }),
   useRuns: () => ({ isLoading: false, data: [] }),
   useRoadmap: () => ({ isLoading: false, data: state.roadmap }),
+  useRoadmapBlocks: () => ({ isLoading: false, data: state.blocks }),
   useCreateRoadmapItem: () => ({ isPending: false, mutate: (args: unknown, opts?: { onSuccess?: () => void }) => { state.calls.push({ kind: 'create', args }); opts?.onSuccess?.(); } }),
   usePatchRoadmapItem: () => ({ isPending: false, mutate: (args: unknown, opts?: { onSuccess?: () => void }) => { state.calls.push({ kind: 'patch', args }); opts?.onSuccess?.(); } }),
   useRemoveRoadmapItem: () => ({ isPending: false, mutate: (args: unknown, opts?: { onSuccess?: () => void }) => { state.calls.push({ kind: 'remove', args }); opts?.onSuccess?.(); } }),
@@ -86,6 +88,7 @@ beforeEach(() => {
   state.prDetail = null;
   state.openingPull = false;
   state.roadmap = [];
+  state.blocks = [];
   state.calls = [];
 });
 
@@ -125,9 +128,10 @@ describe('the V2 project overview', () => {
     screen.getByRole('heading', { name: 'Roadmap' }).closest('section') as HTMLElement;
 
   it('shows the roadmap in order with status, notes and the linked ticket', () => {
+    state.blocks = [{ id: 'b1', projectId: 'p1', title: 'UI polish', reportedStatus: 'open', items: [] }];
     state.roadmap = [
-      { id: 'r1', projectId: 'p1', title: 'Dark mode', notes: '**Later**', position: 0, status: 'planned', ticketId: 'tk_1' },
-      { id: 'r2', projectId: 'p1', title: 'Shortcuts', notes: '', position: 1, status: 'idea', ticketId: null },
+      { id: 'r1', projectId: 'p1', blockId: 'b1', title: 'Dark mode', notes: '**Later**', position: 0, status: 'planned', ticketId: 'tk_1' },
+      { id: 'r2', projectId: 'p1', blockId: null, title: 'Shortcuts', notes: '', position: 1, status: 'idea', ticketId: null },
     ];
     render(<V2ProjectScreen />);
     const section = roadmapSection();
@@ -135,6 +139,9 @@ describe('the V2 project overview', () => {
     expect(titles).toEqual(['Dark mode', 'Shortcuts']);
     expect(within(section).getByRole('link', { name: 'ACME-42' })).toHaveAttribute('href', '/w/ws1/tickets/ACME-42');
     expect(within(section).getByText('Later').tagName).toBe('STRONG');
+    // An item in a block names its block; the section links to the full Roadmap page (VS-478).
+    expect(within(section).getByText('UI polish')).toBeInTheDocument();
+    expect(within(section).getByRole('link', { name: 'Open the full roadmap' })).toHaveAttribute('href', '/w/ws1/p/web/roadmap');
     // Each item's own select shows its current status.
     expect((within(section).getByLabelText('Status of Dark mode') as HTMLSelectElement).value).toBe('planned');
     expect((within(section).getByLabelText('Status of Shortcuts') as HTMLSelectElement).value).toBe('idea');

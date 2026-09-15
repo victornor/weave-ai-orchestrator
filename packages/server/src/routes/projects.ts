@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { OcError, ProjectConfigSchema, ProjectPoliciesSchema, ROADMAP_STATUSES, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, TICKET_PRIORITIES, projectLabel } from '@weave-ai/shared';
+import { OcError, ProjectConfigSchema, ProjectPoliciesSchema, ROADMAP_STATUSES, ROADMAP_BLOCK_STATUSES, TICKET_KINDS, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, TICKET_PRIORITIES, projectLabel } from '@weave-ai/shared';
 import type { CoreServices } from '@weave-ai/core';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
@@ -18,6 +18,25 @@ const RoadmapPatchSchema = z.object({
   status: z.enum(ROADMAP_STATUSES).optional(),
   position: z.number().int().optional(),
   ticketId: z.string().min(1).nullish(),
+  // VS-478: the pending-ticket fields, so the HTTP item write shares the service's one path.
+  description: z.string().optional(),
+  kind: z.enum(TICKET_KINDS).optional(),
+  priority: z.enum(TICKET_PRIORITIES).optional(),
+  roleId: z.string().min(1).nullish(),
+  blockId: z.string().min(1).nullish(),
+}).strict();
+
+// VS-478: a block of pending tickets.
+const RoadmapBlockCreateSchema = z.object({
+  title: z.string().min(1),
+  notes: z.string().optional(),
+}).strict();
+
+const RoadmapBlockPatchSchema = z.object({
+  title: z.string().min(1).optional(),
+  notes: z.string().optional(),
+  status: z.enum(ROADMAP_BLOCK_STATUSES).optional(),
+  position: z.number().int().optional(),
 }).strict();
 
 // VS-398: captain's own direct edit of a draft (add/reorder are the planner's; see design.md Decision 1).
@@ -148,12 +167,31 @@ export function projectRoutes(): Hono<AppEnv> {
   app.patch('/:id/roadmap/:itemId', async (c) => {
     const s = c.get('ws').services;
     const itemId = scopedItemId(s.roadmap, s.projects.get(c.req.param('id')).id, c.req.param('itemId'));
-    return c.json(s.roadmap.update(c.get('actor'), itemId, await body(c, RoadmapPatchSchema)));
+    // `updateItem` is the one item write path (VS-478): it covers the VS-397 fields too, so the HTTP
+    // PATCH accepts status/position as well as the pending-ticket fields.
+    return c.json(s.roadmap.updateItem(c.get('actor'), itemId, await body(c, RoadmapPatchSchema)));
   });
   app.delete('/:id/roadmap/:itemId', (c) => {
     const s = c.get('ws').services;
     s.roadmap.remove(c.get('actor'), scopedItemId(s.roadmap, s.projects.get(c.req.param('id')).id, c.req.param('itemId')));
     return c.json({ ok: true });
+  });
+
+  // VS-478: the project's blocks of pending tickets, read by the Roadmap page. Editing (including
+  // starting a block) goes through the weaver tools, so these routes are list/create/update only.
+  app.get('/:id/roadmap/blocks', (c) => {
+    const s = c.get('ws').services;
+    return c.json({ blocks: s.roadmap.listBlocks(s.projects.get(c.req.param('id')).id) });
+  });
+  app.post('/:id/roadmap/blocks', async (c) => {
+    const s = c.get('ws').services;
+    const input = await body(c, RoadmapBlockCreateSchema);
+    return c.json(s.roadmap.createBlock(c.get('actor'), s.projects.get(c.req.param('id')).id, input), 201);
+  });
+  app.patch('/:id/roadmap/blocks/:blockId', async (c) => {
+    const s = c.get('ws').services;
+    const blockId = scopedBlockId(s.roadmap, s.projects.get(c.req.param('id')).id, c.req.param('blockId'));
+    return c.json(s.roadmap.updateBlock(c.get('actor'), blockId, await body(c, RoadmapBlockPatchSchema)));
   });
 
   // VS-398: a captain-authored draft plan. Reached only by an operator session — run tokens are
@@ -276,6 +314,13 @@ function scopedItemId(roadmap: CoreServices['roadmap'], projectId: string, itemI
   const item = roadmap.get(itemId);
   if (item.projectId !== projectId) throw new OcError('not_found', `roadmap item ${itemId} is not in this project`, {});
   return itemId;
+}
+
+/** The `:blockId` only when it is one of the project's own blocks; another project's id is `not_found`. */
+function scopedBlockId(roadmap: CoreServices['roadmap'], projectId: string, blockId: string): string {
+  const block = roadmap.getBlock(blockId);
+  if (block.projectId !== projectId) throw new OcError('not_found', `roadmap block ${blockId} is not in this project`, {});
+  return blockId;
 }
 
 function prNumber(raw: string): number {

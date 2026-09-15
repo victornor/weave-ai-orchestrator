@@ -130,6 +130,8 @@ const v2KnowledgeSpecsRoute = v2WsRouteFor('knowledge/specs', 'V2KnowledgeSpecsP
 const v2UsageRoute = v2WsRouteFor('usage', 'V2UsagePage');
 const v2ChangelogRoute = v2WsRouteFor('changelog', 'V2ChangelogPage');
 const v2ProjectRoute = v2WsRouteFor('p/$project', 'V2ProjectPage');
+// VS-478: the project's Roadmap page, a sibling of the overview.
+const v2RoadmapRoute = v2WsRouteFor('p/$project/roadmap', 'V2RoadmapPage');
 // VS-452: the change explorer, deep-linkable per file. A sibling of the project page rather than a
 // child, so a file's own URL is stable (`p/:project/changes/:number?file=`).
 const v2ChangesRoute = createRoute({
@@ -262,6 +264,7 @@ const routeTree = rootRoute.addChildren([
         v2UsageRoute,
         v2ChangelogRoute,
         v2ProjectRoute,
+        v2RoadmapRoute,
         v2ChangesRoute,
         v2TicketRoute,
         v2TicketArtifactRoute,

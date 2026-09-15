@@ -7,7 +7,10 @@
  * values are the defaults rather than an override scoped to `.v2-root`.
  * Dark is the designed theme. Light is authored, not inverted: surfaces
  * get warmer and flatter, borders darker relative to their surface.
- * The V2 component vocabulary and motion live at the bottom of this file.
+ * `.v2-root` paints its own ground and inherited ink from these tokens
+ * (its rule below), so the app's theme does not depend on the theme the
+ * document root happens to carry. The V2 component vocabulary and motion
+ * live at the bottom of this file.
  * ------------------------------------------------------------------ */
 
 :root,
@@ -195,6 +198,23 @@
   --overlay: rgb(16 24 32 / 0.28);
   --elev-sheet: 0 16px 48px rgb(16 24 32 / 0.18);
   --elev-float: 0 4px 16px rgb(61 65 72 / 0.3);
+}
+
+/* The app ground and inherited ink (VS-482). V2 carries its theme on `.v2-root`, not on `<html>`
+   (VS-343), so the app must paint its own ground: without this, `body`'s rule resolves against
+   whatever theme the document root says and the app grounds a `.v2-root` that sets no background of
+   its own (V2Root's and V2Page's body regions) show the document body through. The `color` matters
+   for the same reason — an element with no ink class of its own (the rail's `currentColor` brand
+   mark) would otherwise inherit the document root's ink. Restored from the deleted `v2.css` when
+   VS-457's stylesheet merge dropped it; the base typography rides along as it did there. */
+.v2-root {
+  background: var(--bg-0);
+  color: var(--text-1);
+  font-family: var(--ff-ui);
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  font-feature-settings: 'tnum' 1, 'cv05' 1;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* space · radii · type · motion (theme-independent) */
@@ -796,7 +816,9 @@
 /* ------------------------------------------------------------------ *
  * The V2 component vocabulary and motion. Moved here from v2/v2.css (VS-457) when V1's
  * stylesheet and V2's delta were merged into this one file; the `.v2-root` token scope is
- * gone, so the tokens above are the only defaults, and these selectors are unscoped.
+ * gone (the tokens above are keyed on `:root`/`[data-theme]`), so these selectors are
+ * unscoped. `.v2-root` keeps one rule of its own — the ground/ink paint near the top of
+ * this file (VS-482).
  * ------------------------------------------------------------------ */
 
 /* Prose links: Mono has no link hue, so the affordance is non-chromatic (HANDOFF §2). */

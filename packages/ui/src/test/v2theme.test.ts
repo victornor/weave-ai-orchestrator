@@ -37,10 +37,15 @@ describe('the Mono token set', () => {
 
   it('drops the `.v2-root` token scope now that V1 is gone', () => {
     const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
-    // No selector still roots a rule at `.v2-root`; the class itself may remain on elements for
-    // non-CSS reasons (Toast mirrors it, `flip.ts` reads it), but it scopes nothing.
-    expect(withoutComments).not.toMatch(/^\s*\.v2-root\b/m);
-    expect(withoutComments).not.toMatch(/\.v2-root[ .:[]/);
+    // `.v2-root` scopes no component rule (no `.v2-root .x`, `.v2-root:x`, `.v2-root[x]`,
+    // `.v2-root.x`) and declares no custom properties. It keeps exactly its own paint rule — the
+    // ground, ink and base typography (VS-482) — because V2 carries the theme on that element, not
+    // on `<html>`. The class itself also stays on elements for non-CSS reasons (Toast mirrors it,
+    // `flip.ts` reads it).
+    expect(withoutComments).not.toMatch(/\.v2-root[.:[]/);
+    const paintStart = withoutComments.indexOf('.v2-root');
+    const paint = withoutComments.slice(paintStart, withoutComments.indexOf('}', paintStart));
+    expect(paint).not.toMatch(/--[a-z0-9-]+\s*:/);
   });
 });
 

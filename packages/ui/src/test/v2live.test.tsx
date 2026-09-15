@@ -9,6 +9,7 @@ import { LIVE_HEIGHT_MIN } from '../v2/prefs';
 const state = vi.hoisted(() => ({
   phone: false,
   search: {} as Record<string, string | undefined>,
+  go: vi.fn(),
   workspaces: [] as { id: string; name: string }[],
   workers: {} as Record<string, Agent[]>,
   tickets: {} as Record<string, Ticket[]>,
@@ -21,7 +22,7 @@ vi.mock('@tanstack/react-router', () => ({
   useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/v2/live' } }) : '/v2/live'),
   useParams: () => ({}),
 }));
-vi.mock('../app/link', () => ({ useSearchParams: () => state.search, useGo: () => vi.fn() }));
+vi.mock('../app/link', () => ({ useSearchParams: () => state.search, useGo: () => state.go }));
 vi.mock('../api/hooks', () => ({
   useWorkspaces: () => ({ data: state.workspaces, isError: false, refetch: vi.fn() }),
   useWorkersMany: (ids: string[]) => ids.map((id) => ({ data: state.workers[id] ?? [] })),
@@ -57,6 +58,7 @@ const grid = (): HTMLElement => document.querySelector('[data-v2-live-grid]') as
 
 beforeEach(() => {
   state.search = {};
+  state.go = vi.fn();
   state.projects = [project({ id: 'p1', slug: 'web', name: 'web' })];
   state.options = [
     { id: 'standard', description: 'Standard', runtime: 'claude-code', model: 'sonnet-4.6' },
@@ -148,6 +150,31 @@ describe('V2 Live', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Everywhere' }));
     expect(screen.getByText('2 running · showing 3')).toBeInTheDocument();
     expect(document.querySelector('[data-v2-live-card="a1"]')).toBeTruthy();
+  });
+
+  it('opens pre-filtered when the address names a workspace (VS-455)', () => {
+    state.search = { ws: 'ws2' };
+    render(<LiveBody />);
+    expect(screen.getByRole('button', { name: 'Fernwood' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Everywhere' })).toHaveAttribute('aria-pressed', 'false');
+    expect(document.querySelector('[data-v2-live-card="a3"]')).toBeTruthy();
+    expect(document.querySelector('[data-v2-live-card="a1"]')).toBeNull();
+    expect(screen.getByText('1 running · showing 1')).toBeInTheDocument();
+  });
+
+  it('writes a chosen scope back to the URL, and drops it for Everywhere (VS-455)', () => {
+    render(<LiveBody />);
+    fireEvent.click(screen.getByRole('button', { name: 'Acme' }));
+    expect(state.go).toHaveBeenLastCalledWith('/v2/live', { search: { ws: 'ws1' }, replace: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Everywhere' }));
+    expect(state.go).toHaveBeenLastCalledWith('/v2/live', { search: { ws: undefined }, replace: true });
+  });
+
+  it('reads a ws that names no workspace as Everywhere, so the floor is never empty (VS-455)', () => {
+    state.search = { ws: 'nope' };
+    render(<LiveBody />);
+    expect(screen.getByRole('button', { name: 'Everywhere' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('2 running · showing 3')).toBeInTheDocument();
   });
 });
 

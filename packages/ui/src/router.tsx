@@ -221,6 +221,16 @@ const v2ChatRoute = v2WsRouteFor('chat', 'V2ChatPage');
 const v2WsNeedsRoute = v2WsRouteFor('needs', 'V2NeedsPage');
 const v2WorkRoute = v2WsRouteFor('work', 'V2WorkPage');
 const v2RolesRoute = v2WsRouteFor('roles', 'V2RolesPage');
+// The page was named Team before VS-333; V1 keeps the old address resolving and V2 mirrors the
+// alias, so a `/team` link lands on Roles (VS-455).
+const v2TeamRedirectRoute = createRoute({
+  getParentRoute: () => v2WsRoute,
+  path: '/team',
+  beforeLoad: ({ params }) => {
+    throw redirect({ to: '/v2/w/$ws/roles', params: { ws: (params as { ws: string }).ws } } as never);
+  },
+  component: () => null,
+});
 const v2KnowledgeRoute = v2WsRouteFor('knowledge', 'V2KnowledgePage');
 const v2KnowledgeGraphRoute = v2WsRouteFor('knowledge/graph', 'V2GraphPage');
 const v2KnowledgeExplorerRoute = v2WsRouteFor('knowledge/explorer', 'V2ExplorerPage');
@@ -346,6 +356,7 @@ const routeTree = rootRoute.addChildren([
         v2WsNeedsRoute,
         v2WorkRoute,
         v2RolesRoute,
+        v2TeamRedirectRoute,
         v2KnowledgeRoute,
         v2KnowledgeGraphRoute,
         v2KnowledgeExplorerRoute,

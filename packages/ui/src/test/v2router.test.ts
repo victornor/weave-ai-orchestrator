@@ -96,6 +96,21 @@ describe('the V2 route tree (VS-343, VS-353)', () => {
     );
   });
 
+  it('redirects the old Team address to Roles in V2 (VS-455)', () => {
+    const ws = child(shell!, 'w/$ws');
+    const team = child(ws!, 'team');
+    expect(team).toBeDefined();
+    let thrown: unknown;
+    try {
+      team?.options?.beforeLoad?.({ params: { ws: 'acme' }, search: {} });
+    } catch (e) {
+      thrown = e;
+    }
+    const opts = (thrown as { options?: { to?: string; params?: { ws?: string } } } | undefined)?.options;
+    expect(opts?.to).toBe('/v2/w/$ws/roles');
+    expect(opts?.params?.ws).toBe('acme');
+  });
+
   it('renders V2PluginPage at the plugin route (VS-385)', () => {
     const ws = child(shell!, 'w/$ws');
     const pluginRoute = child(ws!, 'plugins/$pluginId');

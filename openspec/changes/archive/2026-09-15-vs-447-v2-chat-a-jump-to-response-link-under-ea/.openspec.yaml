@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-14
+goal: 'V2 chat: a "Jump to response" link under each of the human''s messages that
+  scrolls to and highlights the weaver''s reply'
+skip_specs: true

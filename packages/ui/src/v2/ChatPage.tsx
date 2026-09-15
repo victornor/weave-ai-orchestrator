@@ -18,6 +18,7 @@ import { isClosedRefusal, staleAnswerCopy } from '../lib/decisionStaleness';
 import { chatEntries, chatRows } from '../lib/dispatch';
 import { draftKey, useDraft } from '../lib/drafts';
 import { enqueue, useQueueCount } from '../lib/queue';
+import { replyTargets } from '../lib/replyTargets';
 import { useStickToBottom } from '../lib/stickToBottom';
 import { useNewOutboundMessageIds } from '../lib/streamReveal';
 import { cx } from '../lib/cx';
@@ -54,6 +55,14 @@ import { DIVIDER_MAX, DIVIDER_MIN, clampDivider, readDivider, shouldSplit, useEl
 
 /** How long a finished turn is held on screen when no row replaces it (V1's SETTLE_MS). */
 const SETTLE_MS = 4000;
+
+/** How long a jumped-to message stays marked before the highlight clears (VS-447). */
+const JUMP_HIGHLIGHT_MS = 1600;
+
+/** Whether the human asked for reduced motion — a jump scrolls instantly rather than smoothly. */
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
 
 /** The answer shown in a note: the chosen option's label, else the first line of the free text. */
 function decisionAnswerLabel(decision: Decision): string {
@@ -315,6 +324,11 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const [divider, setDivider] = useState(readDivider);
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef<{ x: number; width: number } | null>(null);
+  // VS-447: the conversation scroller itself, for finding a message anchor to jump to, and the ids
+  // currently marked by a jump.
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [highlightIds, setHighlightIds] = useState<ReadonlySet<string>>(() => new Set());
   const { ref: shellRef, width: shellWidth } = useElementWidth<HTMLDivElement>();
 
   const offline = conn.state === 'offline' || conn.state === 'unreachable';
@@ -481,7 +495,53 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // Only a weaver reply that arrived after this thread opened streams in; history never re-animates
   // and the human's own messages do not reveal.
   const revealIds = useNewOutboundMessageIds(messages.data, fetchId);
-  const attachScroll = useCallback((el: HTMLDivElement | null) => { stick.scrollRef(el); }, [stick.scrollRef]);
+  const attachScroll = useCallback((el: HTMLDivElement | null) => { scrollerRef.current = el; stick.scrollRef(el); }, [stick.scrollRef]);
+
+  // Which human message each weaver reply answers, computed from the loaded conversation (VS-447).
+  const { responses, repliesTo } = useMemo(() => replyTargets(messages.data ?? []), [messages.data]);
+
+  /**
+   * Jump to and briefly mark the named messages: centre the first in the conversation scroller,
+   * move focus to it, and stop the follow so it cannot yank the view back to the bottom. The scroll
+   * is instant under reduced motion; the mark clears itself after a beat.
+   */
+  const onJumpTo = useCallback(
+    (ids: string[]): void => {
+      const first = ids[0];
+      const scroller = scrollerRef.current;
+      if (!first || !scroller) return;
+      const target = Array.from(scroller.querySelectorAll<HTMLElement>('[data-message-id]')).find(
+        (el) => el.dataset['messageId'] === first,
+      );
+      if (!target) return;
+      stick.pause();
+      // Centre the target inside the conversation scroller itself. `scrollIntoView` would scroll
+      // every ancestor as well, shifting the shell and the panes on narrower widths, so compute the
+      // target's offset within the scroller and move only that.
+      const scrollerRect = scroller.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const centred = scroller.scrollTop + (targetRect.top - scrollerRect.top) - (scroller.clientHeight - targetRect.height) / 2;
+      const to = Math.max(0, Math.min(centred, scroller.scrollHeight - scroller.clientHeight));
+      if (prefersReducedMotion() || typeof scroller.scrollTo !== 'function') scroller.scrollTop = to;
+      else scroller.scrollTo({ top: to, behavior: 'smooth' });
+      // Focus after the scroll so the browser does not scroll again to bring it into view.
+      target.focus({ preventScroll: true });
+      setHighlightIds(new Set(ids));
+      if (highlightTimer.current !== null) clearTimeout(highlightTimer.current);
+      highlightTimer.current = setTimeout(() => {
+        highlightTimer.current = null;
+        setHighlightIds(new Set());
+      }, JUMP_HIGHLIGHT_MS);
+    },
+    [stick.pause],
+  );
+
+  useEffect(
+    () => () => {
+      if (highlightTimer.current !== null) clearTimeout(highlightTimer.current);
+    },
+    [],
+  );
 
   // Sending always returns the view to the bottom and resumes following (VS-451): the human's own
   // message and the weaver's reply must not land behind a follow a stray upward scroll paused. Both
@@ -612,10 +672,17 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                     rows.map((row) => {
                       if (row.kind !== 'message') return null;
                       const m = row.entry.message;
+                      const highlighted = highlightIds.has(m.id);
                       const cards = decisionCardPartsOf(m.parts);
                       if (cards.length > 0) {
                         return (
-                          <div key={row.key} className="flex flex-col gap-1.5">
+                          <div
+                            key={row.key}
+                            className={cx('flex flex-col gap-1.5', highlighted && 'v2-jump-highlight')}
+                            data-message-id={m.id}
+                            data-jump-highlight={highlighted || undefined}
+                            tabIndex={-1}
+                          >
                             {cards.map((card) => {
                               const d = decisionsById.get(card.ref.id);
                               if (!d) return null;
@@ -658,6 +725,10 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                             projectName={projectNameFor(m.projectId)}
                             onTicket={openTicket}
                             reveal={revealIds.has(m.id)}
+                            highlighted={highlighted}
+                            responseIds={responses.get(m.id)}
+                            jumpBackTo={repliesTo.get(m.id) ?? null}
+                            onJumpTo={onJumpTo}
                             {...(m.direction === 'outbound' ? { onReply: () => patch({ replyToId: m.id }) } : {})}
                           />
                           {m.direction === 'outbound' && trace ? (

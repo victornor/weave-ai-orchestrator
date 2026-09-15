@@ -60,6 +60,20 @@
   --diff-add-fg: #3fb950;
   --diff-remove-fg: #e5484d;
 
+  /* syntax palette (VS-445) — its own ink, deliberately not --accent* or --status-*: V2's Mono
+     theme greys those out, which is what left every code token the same colour there. Both themes
+     need every token distinguishable and readable over --diff-add-bg / --diff-remove-bg. */
+  --syntax-keyword: #c678dd;
+  --syntax-string: #98c379;
+  --syntax-number: #d19a66;
+  --syntax-function: #61afef;
+  --syntax-type: #e5c07b;
+  --syntax-comment: #8b9bb4;
+  --syntax-attr: #e06c75;
+  --syntax-builtin: #56b6c2;
+  --syntax-meta: #f97583;
+  --syntax-punctuation: #a3adc2;
+
   /* project identity (VS-149) — kept clear of the nine status hues and --accent */
   --project-1: #2dd4bf;
   --project-2: #38bdf8;
@@ -116,6 +130,17 @@
   --diff-remove-bg: rgb(194 43 49 / 0.10);
   --diff-add-fg: #1f8a34;
   --diff-remove-fg: #c22b31;
+
+  --syntax-keyword: #a626a4;
+  --syntax-string: #2e7d32;
+  --syntax-number: #986801;
+  --syntax-function: #4078f2;
+  --syntax-type: #9a6a00;
+  --syntax-comment: #6e7781;
+  --syntax-attr: #c0392b;
+  --syntax-builtin: #0b7285;
+  --syntax-meta: #9c36b5;
+  --syntax-punctuation: #57606a;
 
   --project-1: #0f766e;
   --project-2: #0369a1;
@@ -297,6 +322,17 @@
   --color-diff-remove-bg: var(--diff-remove-bg);
   --color-diff-add-fg: var(--diff-add-fg);
   --color-diff-remove-fg: var(--diff-remove-fg);
+
+  --color-syntax-keyword: var(--syntax-keyword);
+  --color-syntax-string: var(--syntax-string);
+  --color-syntax-number: var(--syntax-number);
+  --color-syntax-function: var(--syntax-function);
+  --color-syntax-type: var(--syntax-type);
+  --color-syntax-comment: var(--syntax-comment);
+  --color-syntax-attr: var(--syntax-attr);
+  --color-syntax-builtin: var(--syntax-builtin);
+  --color-syntax-meta: var(--syntax-meta);
+  --color-syntax-punctuation: var(--syntax-punctuation);
 
   --radius-r4: var(--r4);
   --radius-r6: var(--r6);
@@ -658,33 +694,48 @@
 [data-copy-state='unavailable']::after { content: "Can't copy here"; }
 [data-copy-state='failed']::after { content: "Couldn't copy"; }
 
-/* highlight.js token classes (VS-107 diff viewer): scoped under one class so a plain diff line
-   (no language recognised, or the grammar still loading) is unaffected. */
-.ac-diff-code .hljs-keyword,
-.ac-diff-code .hljs-selector-tag,
-.ac-diff-code .hljs-literal,
-.ac-diff-code .hljs-section,
-.ac-diff-code .hljs-tag { color: var(--accent-link); }
-.ac-diff-code .hljs-title,
-.ac-diff-code .hljs-title.function_,
-.ac-diff-code .hljs-title.class_,
-.ac-diff-code .hljs-built_in,
-.ac-diff-code .hljs-name,
-.ac-diff-code .hljs-attr,
-.ac-diff-code .hljs-attribute { color: var(--accent); }
-.ac-diff-code .hljs-string,
-.ac-diff-code .hljs-symbol,
-.ac-diff-code .hljs-regexp { color: var(--status-done); }
+/* highlight.js token classes (VS-107 diff viewer; VS-445 syntax palette): scoped under one class
+   so a plain line (no language recognised, or the grammar still loading) is unaffected. The class
+   is on every surface that renders highlighted lines — the shared `DiffHunks` roots, a written
+   file's body and both PR diff views — so the chat trace, Live tiles, worker feed and run page
+   colour exactly as a PR diff does. Colour comes from the `--syntax-*` tokens, never `--accent*`
+   or `--status-*`: those are greyscale under V2's Mono theme, which is what hid the colours. */
+.ac-code .hljs-keyword,
+.ac-code .hljs-selector-tag,
+.ac-code .hljs-literal,
+.ac-code .hljs-section,
+.ac-code .hljs-tag,
+.ac-code .hljs-name,
+.ac-code .hljs-doctag { color: var(--syntax-keyword); }
+.ac-code .hljs-title,
+.ac-code .hljs-title.function_ { color: var(--syntax-function); }
+.ac-code .hljs-title.class_,
+.ac-code .hljs-type { color: var(--syntax-type); }
+.ac-code .hljs-built_in { color: var(--syntax-builtin); }
+.ac-code .hljs-string,
+.ac-code .hljs-symbol,
+.ac-code .hljs-regexp,
+.ac-code .hljs-template-tag,
+.ac-code .hljs-selector-attr,
+.ac-code .hljs-selector-pseudo { color: var(--syntax-string); }
+.ac-code .hljs-number { color: var(--syntax-number); }
+.ac-code .hljs-attr,
+.ac-code .hljs-attribute,
+.ac-code .hljs-property,
+.ac-code .hljs-variable,
+.ac-code .hljs-template-variable,
+.ac-code .hljs-params { color: var(--syntax-attr); }
 /* The added/removed whole-line classes are a diff's own signal, not syntax: they use the diff
-   tokens so V2 keeps a green/red read even though Mono greys out the done status. */
-.ac-diff-code .hljs-addition { color: var(--diff-add-fg); }
-.ac-diff-code .hljs-comment,
-.ac-diff-code .hljs-quote { color: var(--text-4); font-style: italic; }
-.ac-diff-code .hljs-deletion { color: var(--diff-remove-fg); font-style: italic; }
-.ac-diff-code .hljs-number,
-.ac-diff-code .hljs-type,
-.ac-diff-code .hljs-variable,
-.ac-diff-code .hljs-template-variable { color: var(--text-1); }
-.ac-diff-code .hljs-doctag,
-.ac-diff-code .hljs-strong { font-weight: 600; }
-.ac-diff-code .hljs-emphasis { font-style: italic; }
+   tokens so V2 keeps a green/red read even though Mono greys out the done status (VS-419). */
+.ac-code .hljs-addition { color: var(--diff-add-fg); }
+.ac-code .hljs-comment,
+.ac-code .hljs-quote { color: var(--syntax-comment); font-style: italic; }
+.ac-code .hljs-deletion { color: var(--diff-remove-fg); font-style: italic; }
+.ac-code .hljs-meta,
+.ac-code .hljs-meta .hljs-keyword,
+.ac-code .hljs-meta-string { color: var(--syntax-meta); }
+.ac-code .hljs-punctuation,
+.ac-code .hljs-operator { color: var(--syntax-punctuation); }
+.ac-code .hljs-doctag,
+.ac-code .hljs-strong { font-weight: 600; }
+.ac-code .hljs-emphasis { font-style: italic; }

@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Edit previews get real syntax highlighting everywhere — a syntax palette that
+  survives V2's Mono theme, and per-language lazy grammars far beyond highlight.js
+  "common"
+skip_specs: true

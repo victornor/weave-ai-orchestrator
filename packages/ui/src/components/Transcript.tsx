@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { RunEvent } from '@weave-ai/shared';
 import { diffHunksForEdits, type DiffHunk } from '@weave-ai/render';
 import { groupConsecutiveTools, reportUiStatus, runEventsToTranscript, targetBaseName } from '../lib/transcript';
@@ -6,7 +6,7 @@ import type { EditPayload, ToolBlock, TranscriptBlock } from '../lib/transcript'
 import { StatusGlyph } from './StatusGlyph';
 import { Markdown } from './Markdown';
 import { Code, SplitHunk, UnifiedHunk, type Highlighter } from './DiffHunks';
-import { highlightLine, languageForPath, useHighlighter } from '../lib/highlight';
+import { languageForPath, useHighlighter } from '../lib/highlight';
 import { duration, tokens as fmtTokens } from '../lib/format';
 import { cx } from '../lib/cx';
 
@@ -255,9 +255,8 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
  * ever carry the same edits (VS-324 review).
  */
 export function EditPayloadBody({ id, path, payload }: { id: string; path: string; payload: EditPayload }): React.ReactElement {
-  const hljs = useHighlighter();
   const lang = languageForPath(path);
-  const highlight = useCallback<Highlighter>((text) => highlightLine(hljs, text, lang), [hljs, lang]);
+  const highlight = useHighlighter(lang);
   // Hooks run unconditionally regardless of `payload.kind`; the write branch simply never uses
   // `hunks`. Deliberately keyed on `id` alone, not `payload` — see the doc comment above.
   const hunks = useMemo(() => (payload.kind === 'edit' ? diffHunksForEdits(payload.edits) : []), [id]);
@@ -324,7 +323,7 @@ function WrittenFile({ content, highlight }: { content: string; highlight: Highl
   const [shown, setShown] = useState(() => Math.min(lines.length, CONTENT_WINDOW));
   const visible = lines.slice(0, shown);
   return (
-    <div className="ac-mono border-t border-line-1 text-nano">
+    <div className="ac-code ac-mono border-t border-line-1 text-nano">
       {visible.map((line, i) => (
         <div key={i} className="flex whitespace-pre">
           <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{i + 1}</span>

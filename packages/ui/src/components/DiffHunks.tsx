@@ -35,7 +35,7 @@ export function Code({ text, highlight }: { text: string; highlight: Highlighter
  */
 export function UnifiedHunk({ hunk, highlight, wrap = true }: { hunk: DiffHunk; highlight: Highlighter; wrap?: boolean }): React.ReactElement {
   return (
-    <div>
+    <div className="ac-code">
       {hunk.lines.map((line, i) => (
         <div key={i} className={cx('flex', wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre', LINE_BG[line.kind])}>
           <span className="w-10 flex-none select-none px-1.5 text-right text-text-4">{line.oldLine ?? ''}</span>
@@ -63,7 +63,7 @@ export function SplitHunk({ hunk, highlight }: { hunk: DiffHunk; highlight: High
   const right = hunk.lines.filter((l) => l.kind !== 'remove');
   const rows = Math.max(left.length, right.length);
   return (
-    <div className="grid grid-cols-2 divide-x divide-line-1">
+    <div className="ac-code grid grid-cols-2 divide-x divide-line-1">
       <div className="min-w-0 overflow-hidden">
         {Array.from({ length: rows }, (_, i) => left[i]).map((line, i) => (
           <div key={i} className={cx('flex', line ? LINE_BG[line.kind] : '')}>

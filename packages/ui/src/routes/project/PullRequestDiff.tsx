@@ -7,9 +7,9 @@
  * Read-only throughout: nothing here edits, comments, approves or merges. That stays the decision
  * card's, and the pull request's description/checks panel above this, exactly as VS-97 left them.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { DiffHunk } from '@weave-ai/render';
-import { highlightLine, languageForPath, useHighlighter } from '../../lib/highlight';
+import { languageForPath, useHighlighter } from '../../lib/highlight';
 import { usePullRequestDiffContext, usePullRequestDiffFile, usePullRequestDiffFiles } from '../../api/hooks';
 import { Badge } from '../../components/StatusGlyph';
 import { Button } from '../../components/Button';
@@ -110,11 +110,10 @@ function FileBody({
   // hunks that will never render.
   const skip = manifest.binary || manifest.tooLarge;
   const diffFile = usePullRequestDiffFile(projectId, number, skip ? null : path);
-  const hljs = useHighlighter();
   const lang = languageForPath(path);
-  // Stable across re-renders, so a line whose text is unchanged keeps its `{ __html }` object (and
-  // its DOM) instead of having React rewrite it on every render and clear a selection (VS-323).
-  const highlight = useCallback<Highlighter>((text) => highlightLine(hljs, text, lang), [hljs, lang]);
+  // Stable per (language, readiness), so a line whose text is unchanged keeps its `{ __html }` object
+  // (and its DOM) instead of having React rewrite it on every render and clear a selection (VS-323).
+  const highlight = useHighlighter(lang);
 
   if (manifest.binary) return <p className="px-2.5 py-2 text-meta text-text-3">This file is binary.</p>;
   if (manifest.tooLarge) return <p className="px-2.5 py-2 text-meta text-text-3">This file's change is too large to render.</p>;
@@ -125,7 +124,7 @@ function FileBody({
 
   const hunks = data.file.hunks;
   return (
-    <div className="ac-diff-code ac-mono overflow-x-auto border-t border-line-1 text-nano">
+    <div className="ac-code ac-mono overflow-x-auto border-t border-line-1 text-nano">
       {hunks.map((hunk, i) => (
         <div key={`${hunk.oldStart}-${hunk.newStart}`}>
           {i > 0 ? <Gap projectId={projectId} number={number} path={path} prev={hunks[i - 1]!} next={hunk} highlight={highlight} /> : null}

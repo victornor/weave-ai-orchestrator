@@ -237,3 +237,51 @@ describe('the V2 Needs you Held filter', () => {
     expect(screen.getByRole('button', { name: 'Held' })).toBeInTheDocument();
   });
 });
+
+describe('the V2 Needs you route scope (VS-459)', () => {
+  // `/v2/w/$ws/needs` reuses the mounted screen when only `$ws` changes, so the route, not the first
+  // mount, owns the scope chip. These re-render the same instance with a new `state.path`, which is
+  // exactly what a rail click from A's Needs you to B's does.
+  it('follows the route when switching from one workspace to another', () => {
+    state.path = '/v2/w/ws1/needs';
+    const { rerender } = render(<V2NeedsPage />);
+    expect(screen.getByText('Approve the plan for ACME-51')).toBeInTheDocument();
+    expect(screen.queryByText('Where should the theme preference live?')).toBeNull();
+
+    state.path = '/v2/w/ws2/needs';
+    rerender(<V2NeedsPage />);
+    expect(screen.getByText('Where should the theme preference live?')).toBeInTheDocument();
+    expect(screen.queryByText('Approve the plan for ACME-51')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Fernwood' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('shows every workspace when the route moves from a workspace to Everywhere', () => {
+    state.path = '/v2/w/ws1/needs';
+    const { rerender } = render(<V2NeedsPage />);
+    expect(screen.queryByText('Where should the theme preference live?')).toBeNull();
+
+    state.path = '/v2/needs';
+    rerender(<V2NeedsPage />);
+    expect(screen.getByText('Approve the plan for ACME-51')).toBeInTheDocument();
+    expect(screen.getByText('Where should the theme preference live?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Everywhere' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('respects a chip picked on the page until the route changes again', () => {
+    const { rerender } = render(<V2NeedsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Fernwood' }));
+    expect(screen.getByText('Where should the theme preference live?')).toBeInTheDocument();
+    expect(screen.queryByText('Approve the plan for ACME-51')).toBeNull();
+
+    // A re-render with no route change keeps the chip the human picked.
+    rerender(<V2NeedsPage />);
+    expect(screen.getByRole('button', { name: 'Fernwood' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText('Approve the plan for ACME-51')).toBeNull();
+
+    // The next route change resets it to the route's scope.
+    state.path = '/v2/w/ws1/needs';
+    rerender(<V2NeedsPage />);
+    expect(screen.getByText('Approve the plan for ACME-51')).toBeInTheDocument();
+    expect(screen.queryByText('Where should the theme preference live?')).toBeNull();
+  });
+});

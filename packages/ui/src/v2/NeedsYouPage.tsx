@@ -6,7 +6,9 @@
  * shown is the length of the one filtered array the list renders — never a second figure.
  *
  * The screen at `/v2/w/:ws/needs` and the one at `/v2/needs` are the same page: the scope starts
- * from the route (`useV2Scope`), which is how VS-343's workspace shortcut pre-applies it.
+ * from the route (`useV2Scope`), which is how VS-343's workspace shortcut pre-applies it. It also
+ * follows the route afterwards (VS-459): switching workspace reuses this mounted screen, so the chip
+ * resets to whatever the new route names.
  */
 import { useMemo, useState } from 'react';
 import { projectLabel, type Decision, type DecisionAnswerInputs } from '@weave-ai/shared';
@@ -83,8 +85,17 @@ export function V2NeedsScreen(): React.ReactElement {
   const listed = workspaces.data ?? [];
   const ids = listed.map((w) => w.id);
   const scope = useV2Scope();
+  // VS-459: `/v2/w/$ws/needs` reuses this mounted screen when only `$ws` changes, so the route, not
+  // the first mount, owns the scope chip. Reset it whenever the route's scope changes; a chip picked
+  // on the page overrides the filter until the next route change.
+  const routeScope = scope.kind === 'workspace' ? scope.ws : 'all';
 
-  const [scopeFilter, setScopeFilter] = useState<string>(() => (scope.kind === 'workspace' ? scope.ws : 'all'));
+  const [scopeFilter, setScopeFilter] = useState<string>(routeScope);
+  const [routeScopeSeen, setRouteScopeSeen] = useState<string>(routeScope);
+  if (routeScopeSeen !== routeScope) {
+    setRouteScopeSeen(routeScope);
+    setScopeFilter(routeScope);
+  }
   const [kindFilter, setKindFilter] = useState<string>('all');
   // The design's Held chip: a filter over `weaverReviewStatus === 'concerns'`. It is one selection
   // with the kind chips — `heldOnly` and a non-`all` `kindFilter` never hold at the same time.

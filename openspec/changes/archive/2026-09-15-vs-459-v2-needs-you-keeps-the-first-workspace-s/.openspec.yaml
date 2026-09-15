@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: V2 Needs you follows the route's scope so switching workspace shows that
+  workspace's cards
+skip_specs: true

@@ -168,8 +168,10 @@ export function definePlugin(p: WeaveAIPlugin): WeaveAIPlugin { return p; }
  * value — the actual CSS behind them is generated and served by the running daemon (`host.themeCss()`,
  * and the bridge's `stylesheet` push), so restyling the app never requires a plugin rebuild or a new
  * `@weave-ai/plugin-sdk` version. Changing this object's own shape is the only thing that does.
- * `section`/`badge` are the app's own real classes (`.v2-card`/`.v2-tag`); the other four are shared
- * classes added to `packages/ui/src/v2/v2.css` alongside real screens that use them.
+ * `section`/`badge` are the app's own real classes (`.v2-card`/`.v2-tag`); the other five are shared
+ * classes added to `packages/ui/src/v2/v2.css` alongside real screens that use them. `link` is the
+ * anchor role (VS-458): the generated stylesheet also styles a bare `<a>` in a plugin page, so a
+ * plugin that writes a plain link is styled too.
  */
 export const WEAVE_PLUGIN_CLASS = {
   section: 'v2-card',
@@ -178,6 +180,20 @@ export const WEAVE_PLUGIN_CLASS = {
   button: 'v2-button',
   input: 'v2-input',
   formRow: 'v2-form-row',
+  link: 'v2-link',
+} as const;
+
+/**
+ * The `.v2-table` recipe's cell roles (VS-385/VS-458) — the values a row cell's `data-cell`
+ * attribute takes. Separate from `WEAVE_PLUGIN_CLASS` because these are attribute values, not class
+ * names, and both constants share the same rule: names only, never a colour, spacing or font value.
+ * `actions` is a cell holding a row's own inline controls, laid out for `.v2-button`s — use the
+ * compact `data-size="small"` variant so a row's buttons do not set the row's height (VS-458).
+ */
+export const WEAVE_PLUGIN_TABLE_CELL = {
+  primary: 'primary',
+  secondary: 'secondary',
+  actions: 'actions',
 } as const;
 
 /**

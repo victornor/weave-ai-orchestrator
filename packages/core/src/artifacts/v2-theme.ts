@@ -6,9 +6,9 @@
  * restyle of `v2.css` changes this function's output the next time it runs — there is no copy to
  * fall out of sync.
  */
-import { WEAVE_PLUGIN_CLASS } from '@weave-ai/plugin-sdk';
+import { WEAVE_PLUGIN_CLASS, WEAVE_PLUGIN_TABLE_CELL } from '@weave-ai/plugin-sdk';
 import { extractCssBlock, parseCssCustomProperties } from './parse.js';
-export { WEAVE_PLUGIN_CLASS };
+export { WEAVE_PLUGIN_CLASS, WEAVE_PLUGIN_TABLE_CELL };
 
 /** Marker substrings locating each block in `v2.css`/`index.css` — the drift test uses these too. */
 export const V2_THEME_MARKERS = {
@@ -92,14 +92,40 @@ function extractRulesByPrefix(css: string, prefix: string): string {
   return rules.map((r) => r.full).join('\n');
 }
 
+/** Matches the anchor selectors `v2.css` authors for the link recipe (base and `:hover`). */
+const LINK_SELECTOR = /a\.v2-link(:hover)?$/;
+
+/**
+ * The prose-link recipe (VS-458), re-rooted for a standalone plugin document. `v2.css` scopes it to
+ * `.v2-root a.v2-link`, which the class-prefix extractor cannot see; a plugin page also has no
+ * `.v2-root` wrapper, so the generated form targets the bare `<a>` and the vocabulary's `link` class
+ * together — `a, a.v2-link` and `a:hover, a.v2-link:hover` — keeping each source rule's own
+ * declarations so a restyle of `v2.css`'s link rule reaches a plugin unchanged. The app's own
+ * `.v2-root a.v2-link` rule is untouched (it is what keeps the settings `<button class="v2-link">`
+ * elements unstyled as links).
+ */
+function linkRules(css: string): string {
+  const matched = topLevelRules(stripComments(css)).filter((r) =>
+    r.selector.split(',').some((part) => LINK_SELECTOR.test(part.trim())));
+  if (matched.length === 0) throw new Error('generateV2PluginCss: no a.v2-link rule found in v2.css');
+  return matched
+    .map((r) => {
+      const part = r.selector.split(',').map((p) => p.trim()).find((p) => LINK_SELECTOR.test(p))!;
+      const pseudo = LINK_SELECTOR.exec(part)![1] ?? '';
+      return `a${pseudo}, a.v2-link${pseudo} ${r.full.slice(r.full.indexOf('{'))}`;
+    })
+    .join('\n');
+}
+
 /**
  * Builds a plugin page's stylesheet from `v2.css`'s and `index.css`'s real current text: the
  * theme-independent type/scale tokens (`--ff-*`/`--fs-*`/`--r*`) `v2.css` itself only references,
  * the dark/light token blocks (re-rooted for a standalone document, since a plugin page has no
  * `.v2-root` wrapper of its own), the plain base rule (page chrome — background/color/font), the
- * six shared component classes verbatim (every rule belonging to each, not just its first), and one
- * generated `[data-tone]` colour rule per status token (`.v2-tag` relies on a Tailwind colour
- * utility class for tone, which a plugin's static page has none of).
+ * shared component classes verbatim (every rule belonging to each, not just its first), the link
+ * recipe re-rooted at both a bare `<a>` and the `link` class (VS-458), and one generated
+ * `[data-tone]` colour rule per status token (`.v2-tag` relies on a Tailwind colour utility class
+ * for tone, which a plugin's static page has none of).
  */
 export function generateV2PluginCss(v2Css: string, indexCss: string): string {
   const darkIdx = v2Css.indexOf(V2_THEME_MARKERS.dark);
@@ -114,6 +140,10 @@ export function generateV2PluginCss(v2Css: string, indexCss: string): string {
   const components = COMPONENT_CLASS_PREFIXES
     .map((prefix) => extractRulesByPrefix(v2Css, prefix))
     .join('\n\n');
+
+  // The link recipe is not a class-prefix recipe: its selector is `.v2-root a.v2-link`, so it is
+  // extracted and re-rooted separately (VS-458) — see linkRules.
+  const links = linkRules(v2Css);
 
   const tones = V2_STATUS_TONE_NAMES
     .map((tone) => `[data-tone='${tone}'] { color: var(--status-${tone}); }`)
@@ -137,6 +167,8 @@ body { margin: 0; }
 button, input, select, textarea { font-family: inherit; font-size: inherit; }
 
 ${components}
+
+${links}
 
 ${tones}
 `;

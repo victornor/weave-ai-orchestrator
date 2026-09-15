@@ -10,7 +10,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GhForge, checkTally, parsePullRequestUrl, pullRequestDetailFromGh, pullRequestFromGh, repoVisibilityFromGh, workflowCountFromGh } from './gh.js';
+import { GhForge, checkTally, parsePullRequestUrl, pullRequestDetailFromGh, pullRequestFromGh, pullRequestRunsFromGh, repoVisibilityFromGh, runnerLabelsFromGh, workflowCountFromGh } from './gh.js';
 
 let home: string;
 
@@ -33,6 +33,43 @@ function fakeGh(stdout: string, exitCode = 0, stderr = ''): void {
 const args = (): string => readFileSync(join(home, 'bin', 'args.txt'), 'utf8');
 /** The exact argv the fake `gh` was handed, one argument per element. */
 const argsList = (): string[] => args().trim().split('\n');
+
+/**
+ * A `gh` that answers each invocation with its own stdout/stderr/exit, so a multi-call method
+ * (`rerunChecks`) can be driven through every step. Each call's argv is appended to `args.txt`
+ * between `---call---` lines; `calls()` splits them back apart.
+ */
+function fakeGhSequence(calls: Array<{ stdout?: string; stderr?: string; exitCode?: number }>): void {
+  const dir = join(home, 'bin');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'args.txt'), '');
+  writeFileSync(join(dir, 'n'), '0');
+  calls.forEach((c, i) => {
+    writeFileSync(join(dir, `out-${i}`), c.stdout ?? '');
+    writeFileSync(join(dir, `err-${i}`), c.stderr ?? '');
+    writeFileSync(join(dir, `code-${i}`), String(c.exitCode ?? 0));
+  });
+  const path = join(dir, 'gh');
+  writeFileSync(path, `#!/bin/sh
+d="${dir}"
+n=$(cat "$d/n" 2>/dev/null || echo 0)
+printf '%s\\n' "$@" >> "$d/args.txt"
+printf '%s\\n' '---call---' >> "$d/args.txt"
+cat "$d/out-$n" 2>/dev/null
+cat "$d/err-$n" 2>/dev/null >&2
+echo $((n+1)) > "$d/n"
+exit "$(cat "$d/code-$n" 2>/dev/null || echo 0)"
+`);
+  chmodSync(path, 0o755);
+  vi.stubEnv('PATH', `${dir}${delimiter}${process.env['PATH'] ?? ''}`);
+}
+
+/** The argv of each invocation the sequence fake served, one flat argument list per call. */
+const calls = (): string[][] =>
+  readFileSync(join(home, 'bin', 'args.txt'), 'utf8')
+    .split('---call---\n')
+    .slice(0, -1)
+    .map((chunk) => chunk.trim().split('\n'));
 
 /** One pull request as `gh pr list --json …` prints it, fields and all. */
 const MERGED = {
@@ -399,5 +436,124 @@ describe('repoInfo (VS-359)', () => {
   it('answers null when gh fails, so an unreachable forge shows no warning', async () => {
     fakeGh('', 1, 'gh: not logged in');
     await expect(new GhForge().repoInfo(home)).resolves.toBeNull();
+  });
+});
+
+/**
+ * VS-467: VS-466's audit found four heads that merged with only a failed `pull_request` run. These
+ * are the real `statusCheckRollup` arrays `gh pr view <n> --json statusCheckRollup` returned for
+ * each merged head on 2026-09-15 (workflow name and detailsUrl dropped; every field the mapping
+ * reads is kept). Each must read `failure`, never a pass, so the gate can never merge it.
+ */
+describe('the four failure-only landings VS-466 audited (VS-467)', () => {
+  const node = (name: string, conclusion: string) => ({ name, workflowName: 'CI', status: 'COMPLETED', conclusion });
+  const LANDINGS = [
+    { pr: 283, ticket: 'VS-340', head: 'c18a7e70e387', rollup: [node('lint', 'SUCCESS'), node('typecheck', 'SUCCESS'), node('test-core', 'FAILURE'), node('test-ui', 'SUCCESS')] },
+    { pr: 300, ticket: 'VS-363', head: 'ac57b77e86ff', rollup: [node('lint', 'SUCCESS'), node('typecheck', 'SUCCESS'), node('test-core', 'FAILURE'), node('test-ui', 'SUCCESS')] },
+    { pr: 302, ticket: 'VS-358', head: 'd2f3ae5cc1d9', rollup: [node('lint', 'SUCCESS'), node('typecheck', 'SUCCESS'), node('test-core', 'FAILURE'), node('test-ui', 'SUCCESS')] },
+    { pr: 282, ticket: 'archive backfill', head: 'af0980c68825', rollup: [node('lint', 'SUCCESS'), node('typecheck', 'SUCCESS'), node('test-core (shard 1/4)', 'SUCCESS'), node('test-core (shard 2/4)', 'FAILURE'), node('test-core (shard 3/4)', 'SUCCESS'), node('test-core (shard 4/4)', 'SUCCESS')] },
+  ];
+
+  for (const { pr, ticket, head, rollup } of LANDINGS) {
+    it(`PR #${pr} (${ticket}, ${head}) reads failure`, () => {
+      expect(pullRequestFromGh({ ...DRAFT, statusCheckRollup: rollup }).checks).toBe('failure');
+      expect(checkTally(rollup)).toEqual({ passed: rollup.filter((c) => c.conclusion === 'SUCCESS').length, total: rollup.length });
+    });
+  }
+});
+
+describe('hasUsableCheckRun (VS-467)', () => {
+  const HEAD = JSON.stringify({ headRefOid: 'abc123' });
+  const runs = (list: Array<{ id: number; event?: string; status?: string; conclusion?: string | null }>): string =>
+    JSON.stringify({ total_count: list.length, workflow_runs: list.map((r) => ({ event: 'pull_request', ...r })) });
+
+  it('is true while a pull_request run is still queued or running', async () => {
+    for (const status of ['queued', 'in_progress']) {
+      fakeGhSequence([{ stdout: HEAD }, { stdout: runs([{ id: 42, status, conclusion: null }]) }]);
+      await expect(new GhForge().hasUsableCheckRun(home, 'https://github.com/acme/api/pull/7')).resolves.toBe(true);
+    }
+  });
+
+  it('is true once a pull_request run has concluded success or failure', async () => {
+    for (const conclusion of ['success', 'failure']) {
+      fakeGhSequence([{ stdout: HEAD }, { stdout: runs([{ id: 42, status: 'completed', conclusion }]) }]);
+      await expect(new GhForge().hasUsableCheckRun(home, 'https://github.com/acme/api/pull/7')).resolves.toBe(true);
+    }
+  });
+
+  it('is false for no run at all, or only skipped/cancelled/startup_failure runs', async () => {
+    fakeGhSequence([{ stdout: HEAD }, { stdout: runs([]) }]);
+    await expect(new GhForge().hasUsableCheckRun(home, 'https://github.com/acme/api/pull/7')).resolves.toBe(false);
+    // VS-453's real shapes: run 34920301125 concluded skipped, run 34920310370 concluded cancelled.
+    for (const conclusion of ['skipped', 'cancelled', 'startup_failure']) {
+      fakeGhSequence([{ stdout: HEAD }, { stdout: runs([{ id: 42, status: 'completed', conclusion }]) }]);
+      await expect(new GhForge().hasUsableCheckRun(home, 'https://github.com/acme/api/pull/7')).resolves.toBe(false);
+    }
+  });
+
+  it('ignores schedule and workflow_dispatch runs, and answers null when gh cannot tell', async () => {
+    const body = JSON.stringify({ workflow_runs: [
+      { id: 1, event: 'workflow_dispatch', status: 'completed', conclusion: 'success' },
+      { id: 2, event: 'schedule', status: 'completed', conclusion: 'success' },
+    ] });
+    fakeGhSequence([{ stdout: HEAD }, { stdout: body }]);
+    await expect(new GhForge().hasUsableCheckRun(home, 'https://github.com/acme/api/pull/7')).resolves.toBe(false);
+
+    fakeGhSequence([{ stdout: HEAD }, { stdout: 'not json' }]);
+    await expect(new GhForge().hasUsableCheckRun(home, 'https://github.com/acme/api/pull/7')).resolves.toBeNull();
+
+    fakeGhSequence([{ stdout: '' , stderr: 'HTTP 500', exitCode: 1 }]);
+    await expect(new GhForge().hasUsableCheckRun(home, 'https://github.com/acme/api/pull/7')).resolves.toBeNull();
+
+    fakeGhSequence([{ stdout: JSON.stringify({}) }]);
+    await expect(new GhForge().hasUsableCheckRun(home, 'https://github.com/acme/api/pull/7')).resolves.toBeNull();
+  });
+});
+
+describe('runnerStatus (VS-467)', () => {
+  it('maps the labels an online runner serves, ignoring offline runners', () => {
+    const body = JSON.stringify({ total_count: 2, runners: [
+      { name: 'weave-ci-01', status: 'online', labels: [{ name: 'self-hosted' }, { name: 'weave-ci' }] },
+      { name: 'offline-box', status: 'offline', labels: [{ name: 'nightly' }] },
+    ] });
+    expect(runnerLabelsFromGh(body)).toEqual({ onlineLabels: ['self-hosted', 'weave-ci'] });
+  });
+
+  it('answers null when the body is not the runners document', () => {
+    expect(runnerLabelsFromGh('not json')).toBeNull();
+    expect(runnerLabelsFromGh('{"total_count":0}')).toBeNull();
+    expect(runnerLabelsFromGh('{"runners":[]}')).toEqual({ onlineLabels: [] });
+  });
+
+  it('asks gh for the runners and answers null when it fails', async () => {
+    fakeGh(JSON.stringify({ runners: [{ status: 'online', labels: [{ name: 'weave-ci' }] }] }));
+    await expect(new GhForge().runnerStatus(home)).resolves.toEqual({ onlineLabels: ['weave-ci'] });
+    expect(args()).toContain('actions/runners');
+    fakeGh('', 1, 'HTTP 403');
+    await expect(new GhForge().runnerStatus(home)).resolves.toBeNull();
+  });
+});
+
+describe('the pull_request-run mapping (VS-467)', () => {
+  it('keeps only pull_request runs with an id, newest first as gh lists them', () => {
+    const body = JSON.stringify({ workflow_runs: [
+      { id: 3, event: 'schedule', status: 'completed', conclusion: 'success' },
+      { id: 2, event: 'pull_request', status: 'completed', conclusion: 'cancelled' },
+      { event: 'pull_request', status: 'completed', conclusion: 'success' },
+    ] });
+    expect(pullRequestRunsFromGh(body)).toEqual([{ id: 2, status: 'completed', conclusion: 'cancelled' }]);
+    expect(pullRequestRunsFromGh('not json')).toEqual([]);
+  });
+
+  // VS-467 item 3: the unstick route must produce a rollup the gate reads as a pass. A
+  // `workflow_dispatch` run's checks are on the commit (REST `commits/{sha}/check-runs`) but are NOT
+  // in the pull request's `statusCheckRollup` — verified on PR #400, where the head's rollup held only
+  // the 5 skipped `pull_request` checks while an in-progress `workflow_dispatch` run existed. So the
+  // route is a `synchronize` push, whose `pull_request` run's checks do appear. This is the real
+  // rollup of VS-466's own PR #396 (head 6a65f911ff36), a green `pull_request` run: it reads success.
+  it('reads a real green pull_request rollup from PR #396 as success', () => {
+    const rollup = ['lint', 'typecheck', 'test-core (shard 1/4)', 'test-core (shard 2/4)', 'test-core (shard 3/4)', 'test-core (shard 4/4)', 'test-ui', 'test-core']
+      .map((name) => ({ name, workflowName: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' }));
+    expect(pullRequestFromGh({ ...DRAFT, statusCheckRollup: rollup }).checks).toBe('success');
   });
 });

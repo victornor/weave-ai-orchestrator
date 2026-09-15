@@ -97,6 +97,21 @@ export interface ForgeAdapter {
    * cannot answer simply omits it, and the caller shows no warning rather than failing.
    */
   repoInfo?(cwd: string, remote?: string): Promise<{ private: boolean } | null>;
+  /**
+   * Optional (VS-467): whether a `pull_request` workflow run for the pull request's current head is
+   * still going to produce a result — either still queued/running, or already concluded success or
+   * failure. `false` means an unusable head: no `pull_request` run at all, or only completed runs
+   * that concluded `skipped`/`cancelled`/`startup_failure`, which the landing gate can never read as
+   * a pass. `null` means the forge cannot say. Used only to decide whether a fresh run must be
+   * started; a forge that omits it is waited on as before.
+   */
+  hasUsableCheckRun?(cwd: string, url: string): Promise<boolean | null>;
+  /**
+   * Optional (VS-467): the labels served by an online self-hosted runner, or `null` when the forge
+   * cannot answer. Used only to explain a stalled landing — a repository whose workflows target a
+   * label no online runner serves says so in the alarm. A forge that cannot answer omits it.
+   */
+  runnerStatus?(cwd: string): Promise<{ onlineLabels: string[] } | null>;
 }
 export interface Logger { debug(msg: string, data?: Record<string, unknown>): void; info(msg: string, data?: Record<string, unknown>): void; warn(msg: string, data?: Record<string, unknown>): void; error(msg: string, data?: Record<string, unknown>): void }
 /** A plugin's own namespaced, durable document store (VS-334). One value per key, JSON-shaped. */

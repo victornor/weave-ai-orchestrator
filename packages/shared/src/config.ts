@@ -320,6 +320,13 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
    * latency and well under the 20 minutes the VS-199 incident sat unnoticed.
    */
   stalledWorkerTimeoutSec: z.number().int().min(60).default(300),
+  /**
+   * VS-467: how long a merge-slot holder may sit with unresolved checks before the supervisor raises
+   * its weaver-visible alarm — and how often the alarm repeats while it stays unresolved. A run that
+   * never starts, is cancelled and never re-runs, or belongs to a head the gate will not accept
+   * would otherwise hold the serial merge queue with no signal at all.
+   */
+  mergeChecksAlarmSec: z.number().int().min(60).default(1200),
   bootstrapBudgetTokens: z.number().int().default(16000),
   knowledgeBudgetTokens: KnowledgeBudgetsSchema.default({}),
   workerArchiveDays: z.number().int().default(30),

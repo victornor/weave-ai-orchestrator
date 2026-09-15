@@ -91,6 +91,10 @@ Everything below assumes `weave` is on your PATH. Where it is not, substitute
 Root scripts: `pnpm build`, `pnpm test` (vitest), `pnpm lint` (the boundary and console guards),
 `pnpm typecheck`, `pnpm dev` (daemon in the foreground).
 
+CI runs the same checks on a **self-hosted GitHub Actions runner** on the maintainer's host, not on
+GitHub-hosted minutes — see [`docs/OPERATIONS.md` §9 "Self-hosted CI runner"](docs/OPERATIONS.md#9-self-hosted-ci-runner)
+for the setup, status, logs and removal commands.
+
 ---
 
 ## Quickstart A — one machine, local development

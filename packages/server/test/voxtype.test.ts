@@ -1,4 +1,4 @@
-import { chmodSync, mkdtempSync, rmSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +15,7 @@ const { analyzeWav, createVoxtypeProbe, extractVoxtypeTranscript, parseVoxtypeMo
 const dirs: string[] = [];
 afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  vi.unstubAllEnvs();
   logSpy.info.mockClear();
   logSpy.warn.mockClear();
 });
@@ -249,11 +250,17 @@ describe('VoxtypeProbe', () => {
   });
 
   it('transcribes a wav via the fake binary and deletes the temp file', async () => {
-    const before = new Set(readdirSync(tmpdir()).filter((n) => n.startsWith('ac-voxtype-')));
-    const text = await createVoxtypeProbe({ binary: fakeBin('transcribe') }).transcribe(Buffer.from('RIFF'), 'base.en');
+    // VS-476: `transcribe()` makes its temp dir under os.tmpdir(). Point TMPDIR at a per-test
+    // directory (the seam os.tmpdir() already honours) so the scan can only see dirs this test
+    // caused. Scanning the shared tmpdir let a concurrent suite's in-flight `ac-voxtype-*` dir
+    // appear between snapshots and fail the cleanup assertion (7/9 under a 3×3 stress).
+    const binary = fakeBin('transcribe');
+    const scratch = mkdtempSync(join(tmpdir(), 'ac-voxtype-tmpdir-'));
+    dirs.push(scratch);
+    vi.stubEnv('TMPDIR', scratch);
+    const text = await createVoxtypeProbe({ binary }).transcribe(Buffer.from('RIFF'), 'base.en');
     expect(text).toBe('ok:base.en');
-    const leftover = readdirSync(tmpdir()).filter((n) => n.startsWith('ac-voxtype-') && !before.has(n));
-    expect(leftover.every((n) => !existsSync(join(tmpdir(), n)))).toBe(true);
+    expect(readdirSync(scratch)).toEqual([]);
   });
 
   it('spawns voxtype with -q before the subcommand, with and without a model (VS-219)', async () => {

@@ -1,0 +1,6 @@
+# Tasks
+
+- [x] 1. Reproduce with 3 concurrent server suites sharing one `TMPDIR`: **7/9** runs failed, every one on `voxtype.test.ts > transcribes a wav via the fake binary and deletes the temp file`, `expected false to be true` at line 256 (`AssertionError: expected false to be true`).
+- [x] 2. `packages/server/test/voxtype.test.ts`: the cleanup test now stubs `TMPDIR` to a fresh `mkdtempSync` for the call and asserts that directory is empty (`expect(readdirSync(scratch)).toEqual([])`); `afterEach` gained `vi.unstubAllEnvs()` so a throwing call still restores the environment. Product code untouched — no leak found.
+- [x] 3. Swept `packages/**/*.test.ts`: `voxtype.test.ts` was the only server or core test asserting on a whole `tmpdir()` listing (`rg "readdir(Sync)?\(\s*tmpdir\(\)"` → none left). Other `readdirSync` calls read their own temp/config dirs; remaining `tmpdir()` uses are `mkdtemp` bases or a `git clone` destination. Nothing else converted.
+- [x] 4. Prove it: `voxtype.test.ts` alone **50/50**; shared-`TMPDIR` concurrent stress 3×3 → **0/9 voxtype failures, 9/9 full suites green**; `pnpm lint` clean; `pnpm typecheck` exit 0; `pnpm test` both blocks green (core/server 232 passed | 1 skipped files, 3603 passed | 1 skipped tests; ui 175 passed, 2636 passed), pasted on the ticket.

@@ -1,7 +1,7 @@
 /**
- * The V2 destination registry — one description of every place V2 can go, from which the expanded
- * rail, the collapsed rail, the phone tab bar and the More list are all derived. Paths are relative
- * to `/v2` and carry `$ws` where the destination is workspace-scoped.
+ * The app's destination registry — one description of every place it can go, from which the expanded
+ * rail, the collapsed rail, the phone tab bar and the More list are all derived. Paths are root
+ * paths (VS-456) and carry `$ws` where the destination is workspace-scoped.
  *
  * This module is pure so the rail, the highlighting rule and the scope rule can be tested without a
  * router or a browser.
@@ -30,7 +30,7 @@ export interface V2Dest {
   label: string;
   glyph: V2GlyphName;
   scopeKind: 'everywhere' | 'workspace';
-  /** Relative to `/v2`; `$ws` where workspace-scoped. */
+  /** A root path; `$ws` where workspace-scoped. */
   path: string;
   /** Which one-source count the row carries, if any. */
   count?: 'needs' | 'live' | 'incidents';
@@ -89,15 +89,15 @@ export const V2_RAIL_WORKSPACE: V2Dest[] = [
 
 export type V2Scope = { kind: 'everywhere' } | { kind: 'workspace'; ws: string };
 
-/** The workspace named in a `/v2/w/<ws>…` path, or `null` for an Everywhere path. */
+/** The workspace named in a `/w/<ws>…` path, or `null` for an Everywhere path. */
 export function workspaceFromV2Path(pathname: string): string | null {
-  const m = /^\/v2\/w\/([^/]+)(?:\/|$)/.exec(pathname);
+  const m = /^\/w\/([^/]+)(?:\/|$)/.exec(pathname);
   return m ? decodeURIComponent(m[1] ?? '') : null;
 }
 
-/** The single highlighted row for a V2 path. Drill-downs map to the destination that owns them. */
+/** The single highlighted row for an app path. Drill-downs map to the destination that owns them. */
 export function activeNavKey(pathname: string): string | null {
-  const m = /^\/v2\/w\/([^/]+)\/?(.*)$/.exec(pathname);
+  const m = /^\/w\/([^/]+)\/?(.*)$/.exec(pathname);
   if (m) {
     const rest = m[2] ?? '';
     const [section = '', second = ''] = rest.split('/');
@@ -129,23 +129,23 @@ export function activeNavKey(pathname: string): string | null {
         return 'ws-work';
     }
   }
-  if (/^\/v2\/runs\/[^/]+$/.test(pathname)) return 'global-runs';
+  if (/^\/runs\/[^/]+$/.test(pathname)) return 'global-runs';
   switch (pathname) {
-    case '/v2/needs':
+    case '/needs':
       return 'global-needs';
-    case '/v2/live':
+    case '/live':
       return 'global-live';
-    case '/v2/incidents':
+    case '/incidents':
       return 'global-incidents';
-    case '/v2/map':
+    case '/map':
       return 'global-map';
-    case '/v2/runs':
+    case '/runs':
       return 'global-runs';
-    case '/v2/scheduled':
+    case '/scheduled':
       return 'global-scheduled';
-    case '/v2/settings':
+    case '/settings':
       return 'global-settings';
-    case '/v2/chats':
+    case '/chats':
       return 'global-chats';
     default:
       return null;
@@ -155,10 +155,10 @@ export function activeNavKey(pathname: string): string | null {
 /** A destination's address, filling `$ws` from the current scope. */
 export function v2Href(dest: V2Dest, scope: V2Scope, fallbackWs = ''): string {
   const ws = scope.kind === 'workspace' ? scope.ws : fallbackWs;
-  // With no workspace to name, a workspace-scoped destination cannot build `/v2/w//…`; onboarding is
+  // With no workspace to name, a workspace-scoped destination cannot build `/w//…`; onboarding is
   // where a workspace is created, so that is where it points (VS-353).
-  if (!ws && dest.scopeKind === 'workspace') return '/v2/onboarding';
-  return `/v2${dest.path.replace('$ws', encodeURIComponent(ws))}`;
+  if (!ws && dest.scopeKind === 'workspace') return '/onboarding';
+  return dest.path.replace('$ws', encodeURIComponent(ws));
 }
 
 export const V2_WORK_PATH = '/w/$ws/work';

@@ -1,5 +1,5 @@
 /**
- * V2 sign-in helpers. Two facts the router guard and the sign-in page share: where a V2 sign-in may
+ * Sign-in helpers. Two facts the router guard and the sign-in page share: where a sign-in may
  * return to, and whether the daemon refuses this browser as unauthenticated.
  *
  * "Refused" is deliberately narrow. A request the daemon answers 200 — including a trusted loopback
@@ -9,7 +9,7 @@
  */
 import { ApiError, api } from '../api/client';
 
-/** The `?next=` a V2 sign-in may return to: a `/v2` path, never the sign-in itself. */
+/** The `?next=` a sign-in may return to: a root path, never the sign-in itself. */
 export function v2NextTarget(search?: string): string | null {
   const raw = search ?? (typeof window === 'undefined' ? '' : window.location.search);
   const value = new URLSearchParams(raw).get('next');
@@ -23,14 +23,14 @@ export function v2NextTarget(search?: string): string | null {
       return null;
     }
   }
-  return path.startsWith('/v2/') && !path.startsWith('/v2/login') ? path : null;
+  return path.startsWith('/') && !path.startsWith('//') && !path.startsWith('/login') ? path : null;
 }
 
-/** Where a V2 sign-in lands: the remembered target, else the first workspace, else onboarding. */
+/** Where a sign-in lands: the remembered target, else the first workspace, else onboarding. */
 export function v2Landing(workspaceId: string | null): string {
   const next = v2NextTarget();
   if (next) return next;
-  return workspaceId ? `/v2/w/${encodeURIComponent(workspaceId)}/needs` : '/v2/onboarding';
+  return workspaceId ? `/w/${encodeURIComponent(workspaceId)}/needs` : '/onboarding';
 }
 
 let cache: { at: number; promise: Promise<boolean> } | null = null;

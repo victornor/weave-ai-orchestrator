@@ -1,5 +1,5 @@
 /**
- * The V2 project overview (`/v2/w/:ws/p/:project`, web-v2/project-overview): everything happening in
+ * The V2 project overview (`/w/:ws/p/:project`, web-v2/project-overview): everything happening in
  * one project, in one place, in V2's Mono language.
  *
  * The page resolves the address against the project list the shell has already loaded — the daemon
@@ -44,7 +44,7 @@ export function V2ProjectScreen(): React.ReactElement {
             title="No such project in this workspace."
             detail={param ? <span className="ac-mono">{param}</span> : undefined}
             action={
-              <button type="button" onClick={() => go(`/v2/w/${ws}/work`)} className="rounded-r4 border border-line-2 px-3 py-1.5 text-micro text-text-2 hover:bg-bg-2">
+              <button type="button" onClick={() => go(`/w/${ws}/work`)} className="rounded-r4 border border-line-2 px-3 py-1.5 text-micro text-text-2 hover:bg-bg-2">
                 Open Work
               </button>
             }
@@ -62,9 +62,9 @@ export function V2ProjectScreen(): React.ReactElement {
       subtitle={project.slug}
       actions={
         <div className="flex flex-wrap items-center gap-1.5">
-          <HeaderLink to="/v2/w/$ws/work" ws={ws} search={{ project: project.id }} label="Work" />
-          <HeaderLink to="/v2/w/$ws/knowledge" ws={ws} search={{ project: project.id }} label="Knowledge" />
-          <HeaderLink to="/v2/w/$ws/chat" ws={ws} label="Chat" />
+          <HeaderLink to="/w/$ws/work" ws={ws} search={{ project: project.id }} label="Work" />
+          <HeaderLink to="/w/$ws/knowledge" ws={ws} search={{ project: project.id }} label="Knowledge" />
+          <HeaderLink to="/w/$ws/chat" ws={ws} label="Chat" />
         </div>
       }
     >

@@ -1,5 +1,5 @@
 /**
- * VS-352: the V2 Usage screen (`/v2/w/:ws/usage`) — the same windows, grain, figures and breakdowns as
+ * VS-352: the V2 Usage screen (`/w/:ws/usage`) — the same windows, grain, figures and breakdowns as
  * V1, composed into V2's page frame and cards.
  */
 import { fireEvent, render, screen, within } from '@testing-library/react';
@@ -15,7 +15,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: () => '/v2/w/ws1/usage',
+  useRouterState: () => '/w/ws1/usage',
   useParams: () => ({ ws: 'ws1' }),
 }));
 

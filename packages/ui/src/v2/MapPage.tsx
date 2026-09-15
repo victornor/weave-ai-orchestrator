@@ -80,15 +80,15 @@ export function MapBody(): React.ReactElement {
 
   const onOpen = (node: MapNode): void => {
     if (node.kind === 'worker') {
-      go('/v2/live', { search: { worker: node.search?.worker } });
+      go('/live', { search: { worker: node.search?.worker } });
       return;
     }
     if (node.kind === 'project') {
       // Work filters tickets by project id (`filterTickets`), so carry the id, not the slug.
-      go('/v2/w/$ws/work', { params: { ws: node.workspaceId }, search: { project: node.projectId } });
+      go('/w/$ws/work', { params: { ws: node.workspaceId }, search: { project: node.projectId } });
       return;
     }
-    go('/v2/w/$ws/chat', { params: { ws: node.workspaceId } });
+    go('/w/$ws/chat', { params: { ws: node.workspaceId } });
   };
 
   if (workspaces.isError) {

@@ -361,11 +361,6 @@ describe('asking for work goes through the chat', () => {
     expect(hotkeys.current.find((k) => k.key === 'Space')).toBeUndefined();
   });
 
-  it('offers the V2 preview from the rail footer (VS-343)', () => {
-    render(<AppShell />);
-    expect(screen.getByRole('link', { name: 'V2' })).toHaveAttribute('href', '/v2');
-  });
-
   it('sends the palette’s Create ticket to the weave chat', () => {
     render(<AppShell />);
     const create = palette.commands.find((c) => c.id === 'create');

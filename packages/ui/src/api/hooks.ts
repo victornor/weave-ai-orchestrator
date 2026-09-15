@@ -1481,7 +1481,7 @@ export function useRun(id: string): UseQueryResult<T.RunDetail> {
 }
 
 /**
- * One run by id alone, for the global `/v2/runs/$runId` route (VS-386). The run's own workspace is
+ * One run by id alone, for the global `/runs/$runId` route (VS-386). The run's own workspace is
  * resolved daemon-side, so the screen needs no `WorkspaceProvider` and does not assume which
  * workspace is first. Run started/finished events invalidate this key alongside `qk.run`.
  */

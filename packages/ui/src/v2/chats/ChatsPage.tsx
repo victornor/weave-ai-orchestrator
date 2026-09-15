@@ -1,5 +1,5 @@
 /**
- * V2 Global Chats (`/v2/chats`): one pane per workspace, each running VS-349's V2 Chat screen
+ * V2 Global Chats (`/chats`): one pane per workspace, each running VS-349's V2 Chat screen
  * (web-v2/global-chats).
  *
  * The multi-pane behaviour is V1's (VS-336), and so is the model: order, per-pane width and collapsed

@@ -7,7 +7,7 @@ daemon running.
 
 1. Add a temporary `screenshot.html` + `src/screenshot.tsx` that seeds a `QueryClient` by `qk`
    key (`staleTime: Infinity`), and wraps the target route in `WorkspaceProvider` plus a memory
-   router (`/w/$ws` → `AppShell` is enough).
+   router (`/w/$ws` → `V2Workspace` is enough).
 2. Stub `window.EventSource` before the app boots — otherwise the connection banner shows.
 3. Stub `window.fetch` for `/api/*` before the app boots, returning the seeded data.
 4. `pnpm exec vite`, then `chromium --headless --window-size=1440,900 --virtual-time-budget=6000 --screenshot`.

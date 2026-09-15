@@ -9,7 +9,7 @@ import type { Decision } from '@weave-ai/shared';
 import { decision as makeDecision } from './factories';
 
 const state = vi.hoisted(() => ({
-  path: '/v2/needs',
+  path: '/needs',
   decisions: [] as Decision[],
   workers: {} as Record<string, Array<{ id: string; name: string }>>,
 }));
@@ -58,7 +58,7 @@ vi.mock('../api/runStream', () => ({
 const { V2NeedsPage } = await import('../v2/NeedsYouPage');
 
 beforeEach(() => {
-  state.path = '/v2/needs';
+  state.path = '/needs';
   state.workers = {};
   state.decisions = [
     makeDecision({ id: 'd1', workspaceId: 'ws1', title: 'Approve the plan for ACME-51', kind: 'plan_approval', options: [{ key: 'approve', label: 'Approve' }] }),
@@ -115,7 +115,7 @@ describe('the V2 Needs you screen', () => {
   });
 
   it('pre-applies the workspace scope from the route', () => {
-    state.path = '/v2/w/ws1/needs';
+    state.path = '/w/ws1/needs';
     render(<V2NeedsPage />);
     expect(screen.getByRole('button', { name: 'Acme' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText('1 waiting')).toBeInTheDocument();
@@ -123,7 +123,7 @@ describe('the V2 Needs you screen', () => {
   });
 
   it('shows a decision whose workspace id is the internal id on the workspace-scoped screen', () => {
-    state.path = '/v2/w/ws1/needs';
+    state.path = '/w/ws1/needs';
     state.decisions = [
       makeDecision({ id: 'd1', workspaceId: 'ulid-ws1', title: 'Scoped decision', kind: 'question', options: [], allowFreeText: true }),
     ];
@@ -239,16 +239,16 @@ describe('the V2 Needs you Held filter', () => {
 });
 
 describe('the V2 Needs you route scope (VS-459)', () => {
-  // `/v2/w/$ws/needs` reuses the mounted screen when only `$ws` changes, so the route, not the first
+  // `/w/$ws/needs` reuses the mounted screen when only `$ws` changes, so the route, not the first
   // mount, owns the scope chip. These re-render the same instance with a new `state.path`, which is
   // exactly what a rail click from A's Needs you to B's does.
   it('follows the route when switching from one workspace to another', () => {
-    state.path = '/v2/w/ws1/needs';
+    state.path = '/w/ws1/needs';
     const { rerender } = render(<V2NeedsPage />);
     expect(screen.getByText('Approve the plan for ACME-51')).toBeInTheDocument();
     expect(screen.queryByText('Where should the theme preference live?')).toBeNull();
 
-    state.path = '/v2/w/ws2/needs';
+    state.path = '/w/ws2/needs';
     rerender(<V2NeedsPage />);
     expect(screen.getByText('Where should the theme preference live?')).toBeInTheDocument();
     expect(screen.queryByText('Approve the plan for ACME-51')).toBeNull();
@@ -256,11 +256,11 @@ describe('the V2 Needs you route scope (VS-459)', () => {
   });
 
   it('shows every workspace when the route moves from a workspace to Everywhere', () => {
-    state.path = '/v2/w/ws1/needs';
+    state.path = '/w/ws1/needs';
     const { rerender } = render(<V2NeedsPage />);
     expect(screen.queryByText('Where should the theme preference live?')).toBeNull();
 
-    state.path = '/v2/needs';
+    state.path = '/needs';
     rerender(<V2NeedsPage />);
     expect(screen.getByText('Approve the plan for ACME-51')).toBeInTheDocument();
     expect(screen.getByText('Where should the theme preference live?')).toBeInTheDocument();
@@ -279,7 +279,7 @@ describe('the V2 Needs you route scope (VS-459)', () => {
     expect(screen.queryByText('Approve the plan for ACME-51')).toBeNull();
 
     // The next route change resets it to the route's scope.
-    state.path = '/v2/w/ws1/needs';
+    state.path = '/w/ws1/needs';
     rerender(<V2NeedsPage />);
     expect(screen.getByText('Approve the plan for ACME-51')).toBeInTheDocument();
     expect(screen.queryByText('Where should the theme preference live?')).toBeNull();

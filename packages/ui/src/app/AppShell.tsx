@@ -236,10 +236,6 @@ export function AppShell({ children }: { children?: ReactNode } = {}): React.Rea
             <span className="ac-mono text-micro text-text-nav">⌘K</span>
             <span className="text-micro text-text-nav">everything</span>
           </button>
-          {/* VS-343: the one additive V1 control — the way into the V2 preview. */}
-          <A to="/v2" className="px-2.5 py-2.5 text-micro text-text-nav hover:text-text-1">
-            V2
-          </A>
         </div>
       </aside>
 

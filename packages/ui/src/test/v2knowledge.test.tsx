@@ -141,6 +141,6 @@ describe('the V2 Knowledge tab', () => {
     state.weaverArtifacts = [WEAVER_ARTIFACT];
     render(<KnowledgeHome />);
 
-    expect(screen.getByRole('link', { name: /Workspace overview/ })).toHaveAttribute('href', '/v2/w/acme/artifacts/plan');
+    expect(screen.getByRole('link', { name: /Workspace overview/ })).toHaveAttribute('href', '/w/acme/artifacts/plan');
   });
 });

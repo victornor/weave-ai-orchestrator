@@ -29,7 +29,7 @@ function routine(over: Partial<RoutineListItem> = {}): RoutineListItem {
   };
 }
 
-vi.mock('@tanstack/react-router', () => ({ Outlet: () => null, useRouterState: () => '/v2/scheduled', useParams: () => ({}) }));
+vi.mock('@tanstack/react-router', () => ({ Outlet: () => null, useRouterState: () => '/scheduled', useParams: () => ({}) }));
 vi.mock('../app/link', () => ({ useGo: () => vi.fn(), useSearchParams: () => ({}) }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(), dismiss: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({

@@ -1104,6 +1104,9 @@ describe('real core services over HTTP', () => {
       expect(first.ok).toBe(true);
       expect(first.data.revision).toBe(1);
       expect(first.data.url).toBe(`/w/${harness.workspaceId}/artifacts/overview`);
+      // VS-456: the in-app URL a weaver shares is a root path, never the retired `/v2` one.
+      expect(first.data.url.startsWith('/w/')).toBe(true);
+      expect(first.data.url).not.toContain('/v2');
 
       const listed = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/artifacts`, { headers: H }))).json();
       expect(listed).toHaveLength(1);

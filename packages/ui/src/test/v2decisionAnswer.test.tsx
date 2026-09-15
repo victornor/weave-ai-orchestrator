@@ -18,7 +18,7 @@ type AnswerOutcome = 'ok' | 'wrong_status' | 'revision_pending';
 
 const state = vi.hoisted(() => ({
   ctxWs: '',
-  path: '/v2/needs',
+  path: '/needs',
   decisions: {} as Record<string, Decision[]>,
   posts: [] as Array<{ ws: string; path: string }>,
   outcome: 'ok' as AnswerOutcome,
@@ -138,7 +138,7 @@ function mount(ui: ReactNode): QueryClient {
 beforeEach(() => {
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
   state.ctxWs = '';
-  state.path = '/v2/needs';
+  state.path = '/needs';
   state.decisions = {};
   state.posts = [];
   state.outcome = 'ok';
@@ -167,7 +167,7 @@ describe('answering a V2 decision card', () => {
 
   it('removes the card through the chat pane path (context workspace, no explicit ws)', async () => {
     state.ctxWs = 'ws1';
-    state.path = '/v2/w/ws1/chat';
+    state.path = '/w/ws1/chat';
     state.decisions = { ws1: [question({ workspaceId: 'ws1' })] };
     mount(<V2ChatPage />);
     await screen.findByText('Approve now');

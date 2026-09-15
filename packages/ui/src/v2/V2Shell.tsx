@@ -149,7 +149,7 @@ function CollapsedRow({
 function UpdateRailEntry({ update, onNavigate }: { update: UpdateEntry; onNavigate?: () => void }): React.ReactElement {
   return (
     <A
-      to="/v2/settings"
+      to="/settings"
       search={{ section: 'updates' }}
       aria-label={updateEntryLabel(update)}
       onClick={onNavigate}
@@ -169,7 +169,7 @@ function UpdateRailEntry({ update, onNavigate }: { update: UpdateEntry; onNaviga
 function CollapsedUpdateEntry({ update }: { update: UpdateEntry }): React.ReactElement {
   return (
     <A
-      to="/v2/settings"
+      to="/settings"
       search={{ section: 'updates' }}
       title={`${update.title} · ${update.detail}`}
       aria-label={updateEntryLabel(update)}
@@ -319,7 +319,7 @@ function WorkspaceGroups({
                 <div className="my-1 h-px bg-line-1" />
                 {projects.map((p) => {
                   const key = projectRowKey(p.slug);
-                  const href = `/v2/w/${encodeURIComponent(w.id)}/p/${encodeURIComponent(p.slug)}`;
+                  const href = `/w/${encodeURIComponent(w.id)}/p/${encodeURIComponent(p.slug)}`;
                   return (
                     <A
                       key={p.id}
@@ -474,7 +474,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
   // (a card created, answered, superseded or reviewed while it is open) until a stream is
   // subscribed. Workspace pages get theirs from `V2Workspace`, and Global Chats opens one per pane,
   // so neither fans in here (VS-369).
-  const fanIn = !ws && !path.startsWith('/v2/chats');
+  const fanIn = !ws && !path.startsWith('/chats');
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">

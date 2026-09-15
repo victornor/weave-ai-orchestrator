@@ -1,5 +1,5 @@
 /**
- * V2 Usage (`/v2/w/:ws/usage`): what the workspace spent — tokens, cost, runs and their breakdowns —
+ * V2 Usage (`/w/:ws/usage`): what the workspace spent — tokens, cost, runs and their breakdowns —
  * over a chosen window and grain (web-v2/usage, PLAN §16.3).
  *
  * It is V1's Usage screen (`routes/Usage.tsx`) restyled: the same hooks, the same scoped query and the

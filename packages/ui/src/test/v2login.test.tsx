@@ -1,5 +1,5 @@
 /**
- * The V2 sign-in screen (VS-353): it reuses V1's password → TOTP flow, and returns to the `/v2`
+ * The sign-in screen (VS-353, VS-456): it reuses V1's password → TOTP flow, and returns to the root
  * address it was sent from — and to no other.
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -49,7 +49,7 @@ beforeEach(() => {
   go.mockClear();
   root.mockReset();
   resetRefused.mockClear();
-  window.history.replaceState({}, '', '/v2/login');
+  window.history.replaceState({}, '', '/login');
 });
 
 describe('the V2 sign-in flow', () => {
@@ -61,8 +61,8 @@ describe('the V2 sign-in flow', () => {
     expect(screen.getByRole('group', { name: 'Six-digit authentication code' })).toBeInTheDocument();
   });
 
-  it('returns to the remembered /v2 address after sign-in', async () => {
-    window.history.replaceState({}, '', '/v2/login?next=' + encodeURIComponent('/v2/w/acme/work'));
+  it('returns to the remembered address after sign-in', async () => {
+    window.history.replaceState({}, '', '/login?next=' + encodeURIComponent('/w/acme/work'));
     root.mockImplementation(async (path: string) => {
       if (path === '/auth/login') return { token: 'tok' };
       if (path === '/health') return { version: 'x', tlsMode: 'none', operatorConfigured: true, workspaces: [{ id: 'acme' }] };
@@ -70,11 +70,11 @@ describe('the V2 sign-in flow', () => {
     });
     render(<V2Login />);
     signIn();
-    await waitFor(() => expect(go).toHaveBeenCalledWith('/v2/w/acme/work', { replace: true }));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('/w/acme/work', { replace: true }));
   });
 
-  it('ignores a next that is not a /v2 path', async () => {
-    window.history.replaceState({}, '', '/v2/login?next=' + encodeURIComponent('/w/acme/work'));
+  it('ignores a next that is not a root path', async () => {
+    window.history.replaceState({}, '', '/login?next=' + encodeURIComponent('w/acme/work'));
     root.mockImplementation(async (path: string) => {
       if (path === '/auth/login') return { token: 'tok' };
       if (path === '/health') return { version: 'x', tlsMode: 'none', operatorConfigured: true, workspaces: [{ id: 'acme' }] };
@@ -82,7 +82,7 @@ describe('the V2 sign-in flow', () => {
     });
     render(<V2Login />);
     signIn();
-    await waitFor(() => expect(go).toHaveBeenCalledWith('/v2/w/acme/needs', { replace: true }));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('/w/acme/needs', { replace: true }));
   });
 
   it('forgets the guard’s cached refusal before landing, so a fresh sign-in is not bounced back', async () => {
@@ -93,9 +93,9 @@ describe('the V2 sign-in flow', () => {
     });
     render(<V2Login />);
     signIn();
-    await waitFor(() => expect(go).toHaveBeenCalledWith('/v2/w/acme/needs', { replace: true }));
+    await waitFor(() => expect(go).toHaveBeenCalledWith('/w/acme/needs', { replace: true }));
     expect(resetRefused).toHaveBeenCalled();
-    expect(go.mock.calls[0]?.[0]).not.toBe('/v2/login');
+    expect(go.mock.calls[0]?.[0]).not.toBe('/login');
     // the cache is cleared before the landing navigation, not after it
     expect(resetRefused.mock.invocationCallOrder[0]).toBeLessThan(go.mock.invocationCallOrder[0]!);
   });

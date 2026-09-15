@@ -16,7 +16,7 @@ const client = vi.hoisted(() => ({ request: vi.fn(), wsGet: vi.fn() }));
 vi.mock('@tanstack/react-router', () => ({
   useParams: () => ({ pluginId: 'notes' }),
   useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) =>
-    (o?.select ? o.select({ location: { pathname: '/v2/w/ws1/plugins/notes' } }) : '/v2/w/ws1/plugins/notes'),
+    (o?.select ? o.select({ location: { pathname: '/w/ws1/plugins/notes' } }) : '/w/ws1/plugins/notes'),
 }));
 vi.mock('../api/context', () => ({
   useWorkspace: () => ({

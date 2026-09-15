@@ -1,136 +1,27 @@
 import { createRootRoute, createRoute, createRouter, lazyRouteComponent, Outlet, redirect } from '@tanstack/react-router';
 import { RouteError } from './components/RouteError';
-import { AppShell } from './app/AppShell';
-import { WorkspaceProvider } from './api/context';
 import { getWorkspaceId } from './api/client';
-import { LoginRoute } from './routes/Login';
-import { OnboardingRoute } from './routes/Onboarding';
-import { NeedsYouRoute } from './routes/NeedsYou';
-import { ChatRoute } from './routes/Chat';
-import { BoardRoute } from './routes/Board';
-import { LiveRoute } from './routes/Live';
-import { MergeQueueRoute } from './routes/MergeQueue';
-import { TicketRoute } from './routes/TicketPage';
-import { WeaverArtifactRoute } from './routes/WeaverArtifactPage';
-import { RolesRoute } from './routes/Roles';
-import { WorkerRoute } from './routes/WorkerPage';
-import { RunsRoute } from './routes/Runs';
-import { RunRoute } from './routes/RunPage';
-import { UsageRoute } from './routes/Usage';
-import { KnowledgeRoute } from './routes/Knowledge';
-import { ProjectOverviewRoute } from './routes/project/ProjectOverview';
-import { PluginPageRoute } from './routes/PluginPage';
-import { DaemonSettingsRoute, WorkspaceSettingsRoute } from './routes/Settings';
-import { redirectForSettingsRoute } from './lib/settings';
-import { GlobalNeedsRoute } from './routes/GlobalNeeds';
-import { GlobalLiveRoute } from './routes/GlobalLive';
-import { GlobalChatsRoute } from './routes/GlobalChats';
-import { GlobalIncidentsRoute } from './routes/GlobalIncidents';
-import { GlobalMapRoute } from './routes/GlobalMap';
-import { GlobalScheduledRoute } from './routes/GlobalScheduled';
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 
-const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: '/login', component: LoginRoute });
-const onboardingRoute = createRoute({ getParentRoute: () => rootRoute, path: '/onboarding', component: OnboardingRoute });
-
-const globalNeedsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/needs',
-  component: () => (
-    <AppShell>
-      <GlobalNeedsRoute />
-    </AppShell>
-  ),
-});
-const globalLiveRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/live',
-  component: () => (
-    <AppShell>
-      <GlobalLiveRoute />
-    </AppShell>
-  ),
-});
-const globalChatsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/chats',
-  component: () => (
-    <AppShell>
-      <GlobalChatsRoute />
-    </AppShell>
-  ),
-});
-const globalIncidentsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/incidents',
-  validateSearch: (s: Record<string, unknown>) => s,
-  component: () => (
-    <AppShell>
-      <GlobalIncidentsRoute />
-    </AppShell>
-  ),
-});
-const globalMapRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/map',
-  component: () => (
-    <AppShell>
-      <GlobalMapRoute />
-    </AppShell>
-  ),
-});
-const globalScheduledRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/scheduled',
-  validateSearch: (s: Record<string, unknown>) => s,
-  component: () => (
-    <AppShell>
-      <GlobalScheduledRoute />
-    </AppShell>
-  ),
-});
-
-// The daemon's settings, above the workspaces and in need of one (VS-230). A URL naming a
-// workspace section instead moves to a workspace's settings — or, with none remembered, sheds the
-// stale names and shows the daemon page's first section.
-export function DaemonSettingsShell(): React.ReactElement {
-  return (
-    <AppShell>
-      <DaemonSettingsRoute />
-    </AppShell>
-  );
-}
-
-const globalSettingsRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/settings',
-  validateSearch: (s: Record<string, unknown>) => s,
-  beforeLoad: ({ search }) => {
-    const r = redirectForSettingsRoute('daemon', search as Record<string, string | undefined>, getWorkspaceId());
-    if (r.type === 'redirect') {
-      throw redirect({ to: r.to, search: r.search, ...(r.ws ? { params: { ws: r.ws } } : {}) } as never);
-    }
-  },
-  component: DaemonSettingsShell,
-});
-
-// ---- V2 (VS-343) ----
-// A parallel frontend at `/v2`, served by the same SPA and no daemon change. The shell and every
-// page load through `lazyRouteComponent`, so V1's entry chunk does not carry V2's module or CSS.
-// Addresses mirror V1 under the prefix: workspace pages are `/v2/w/$ws/<section>`, global pages are
-// `/v2/<section>`.
+// ---- The app (VS-343), promoted from `/v2` to the root (VS-456) ----
+// One frontend, served at `/`: the shell and every page load through `lazyRouteComponent`, so the
+// entry chunk carries none of their module or CSS. Workspace pages are `/w/$ws/<section>`, global
+// pages are `/<section>`. V1's route tree is deliberately *not* mounted below — it answers no URL,
+// and the follow-up deletion ticket removes its modules. Retired addresses redirect at the end.
+// Pathless with an explicit id: it adds no URL segment, and every child below carries its full
+// root path. A path of `/` would instead collide with the index route's own id.
 const v2RootRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/v2',
+  id: 'app-root',
   component: lazyRouteComponent(() => import('./v2/V2Root'), 'V2Root'),
-  // Every signed-in V2 page needs a session; `/v2/login` is exempt so the guard cannot loop. Kept
-  // as a dynamic import so V1's entry bundle still carries none of the V2 module (VS-343/VS-353).
+  // Every signed-in page needs a session; `/login` is exempt so the guard cannot loop. Kept as a
+  // dynamic import so the app entry bundle still carries none of the shell module (VS-343/VS-353).
   beforeLoad: async ({ location }) => {
-    if (location.pathname === '/v2/login') return;
+    if (location.pathname === '/login') return;
     const { v2Refused } = await import('./v2/auth');
     if (await v2Refused()) {
-      throw redirect({ to: '/v2/login', search: { next: location.href } as never });
+      throw redirect({ to: '/login', search: { next: location.href } as never });
     }
   },
 });
@@ -140,7 +31,7 @@ const v2IndexRoute = createRoute({
   path: '/',
   beforeLoad: () => {
     const ws = getWorkspaceId();
-    throw redirect({ to: (ws ? `/v2/w/${ws}/needs` : '/v2/onboarding') as never });
+    throw redirect({ to: (ws ? `/w/${ws}/needs` : '/onboarding') as never });
   },
   component: () => null,
 });
@@ -154,7 +45,7 @@ const v2LoginRoute = createRoute({
 });
 
 // The rail and the phone tab bar wrap every signed-in destination. A pathless layout route adds no
-// URL segment, so no V2 address changes.
+// URL segment, so no address changes.
 const v2ShellRoute = createRoute({
   getParentRoute: () => v2RootRoute,
   id: 'v2-shell',
@@ -187,7 +78,7 @@ const v2WsIndexRoute = createRoute({
   getParentRoute: () => v2WsRoute,
   path: '/',
   beforeLoad: ({ params }) => {
-    throw redirect({ to: `/v2/w/${(params as { ws: string }).ws}/needs` as never });
+    throw redirect({ to: `/w/${(params as { ws: string }).ws}/needs` as never });
   },
   component: () => null,
 });
@@ -200,9 +91,9 @@ const v2WsRouteFor = <K extends keyof V2PageExports>(path: string, page: K) =>
   });
 
 const v2NeedsRoute = v2GlobalRoute('/needs', 'V2NeedsPage');
-// VS-350: Live reads a `worker` search param, so it validates search by passthrough like V1's pages.
+// Live reads a `worker` search param, so it validates search by passthrough like the other pages.
 // It is its own `createRoute` (not `v2GlobalRoute`) and so was missed when VS-353 re-parented the
-// V2 children under the shell; it must sit under the shell like every other signed-in destination.
+// children under the shell; it must sit under the shell like every other signed-in destination.
 const v2LiveRoute = createRoute({
   getParentRoute: () => v2ShellRoute,
   path: '/live',
@@ -221,13 +112,13 @@ const v2ChatRoute = v2WsRouteFor('chat', 'V2ChatPage');
 const v2WsNeedsRoute = v2WsRouteFor('needs', 'V2NeedsPage');
 const v2WorkRoute = v2WsRouteFor('work', 'V2WorkPage');
 const v2RolesRoute = v2WsRouteFor('roles', 'V2RolesPage');
-// The page was named Team before VS-333; V1 keeps the old address resolving and V2 mirrors the
+// The page was named Team before VS-333; V1 kept the old address resolving and V2 mirrors the
 // alias, so a `/team` link lands on Roles (VS-455).
 const v2TeamRedirectRoute = createRoute({
   getParentRoute: () => v2WsRoute,
   path: '/team',
   beforeLoad: ({ params }) => {
-    throw redirect({ to: '/v2/w/$ws/roles', params: { ws: (params as { ws: string }).ws } } as never);
+    throw redirect({ to: '/w/$ws/roles', params: { ws: (params as { ws: string }).ws } } as never);
   },
   component: () => null,
 });
@@ -253,97 +144,95 @@ const v2ArtifactRoute = v2WsRouteFor('artifacts/$key', 'V2ArtifactPage');
 const v2WorkerRoute = v2WsRouteFor('workers/$workerId', 'V2WorkerPage');
 const v2PluginPageRoute = v2WsRouteFor('plugins/$pluginId', 'V2PluginPage');
 
-const indexRoute = createRoute({
+// ---- Retired addresses (VS-456) ----
+// The app was served at `/v2` and V1 owned `/`. Both schemes must keep resolving, matching the
+// redirect table in the web-v2/navigation spec. These routes render nothing; they only redirect,
+// so a typed address or a hard reload lands on the destination address with its query intact.
+
+/** `/v2/*` loses the prefix; `/v2` alone becomes the root. */
+const legacyV2Route = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/',
-  beforeLoad: () => {
-    const ws = getWorkspaceId();
-    // Signing in from a phone is almost always prompted by something waiting,
-    // so the app lands on Needs you, not Chat. With no remembered workspace the
-    // onboarding decides: it creates the first one, or the 401 redirect sends
-    // an anonymous visitor to /login.
-    throw redirect({ to: (ws ? `/w/${ws}/needs` : '/onboarding') as never });
-  },
+  path: '/v2',
   component: () => null,
+  beforeLoad: ({ location }) => {
+    throw redirect({ href: `/${location.searchStr ?? ''}` });
+  },
+});
+const legacyV2WildRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/v2/$',
+  component: () => null,
+  beforeLoad: ({ location }) => {
+    const rest = location.pathname.replace(/^\/v2(?=\/|$)/, '');
+    throw redirect({ href: `${rest || '/'}${location.searchStr ?? ''}` });
+  },
 });
 
-function WorkspaceLayout(): React.ReactElement {
-  const { ws } = wsRoute.useParams() as { ws: string };
-  return (
-    <WorkspaceProvider ws={ws}>
-      <AppShell />
-    </WorkspaceProvider>
-  );
-}
-
-const wsRoute = createRoute({ getParentRoute: () => rootRoute, path: '/w/$ws', component: WorkspaceLayout });
-
-const wsIndexRoute = createRoute({
-  getParentRoute: () => wsRoute,
-  path: '/',
+/** `/w/$ws/board` → `/w/$ws/work`. */
+const legacyBoardRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$ws/board',
+  component: () => null,
   beforeLoad: ({ params }) => {
-    throw redirect({ to: `/w/${(params as { ws: string }).ws}/needs` as never });
+    throw redirect({ to: '/w/$ws/work', params: { ws: (params as { ws: string }).ws } } as never);
   },
-  component: () => null,
 });
 
-const child = (path: string, component: () => React.ReactElement, validateSearch?: (s: Record<string, unknown>) => Record<string, unknown>) =>
-  createRoute({ getParentRoute: () => wsRoute, path, component, ...(validateSearch ? { validateSearch } : {}) });
+/** `/w/$ws/merge-queue?project=X` → `/w/$ws/work?project=X`; the search is carried whole. */
+const legacyMergeQueueRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$ws/merge-queue',
+  validateSearch: (s: Record<string, unknown>) => s,
+  component: () => null,
+  beforeLoad: ({ params, search }) => {
+    throw redirect({ to: '/w/$ws/work', params: { ws: (params as { ws: string }).ws }, search } as never);
+  },
+});
 
-const searchPassthrough = (s: Record<string, unknown>): Record<string, unknown> => s;
+/** A workspace's Live is now the global Live, scoped: `/w/$ws/live` → `/live?ws=$ws`. */
+const legacyWorkspaceLiveRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$ws/live',
+  validateSearch: (s: Record<string, unknown>) => s,
+  component: () => null,
+  beforeLoad: ({ params, search }) => {
+    throw redirect({ to: '/live', search: { ...search, ws: (params as { ws: string }).ws } } as never);
+  },
+});
 
-const needsRoute = child('/needs', NeedsYouRoute);
-const chatRoute = child('/chat', ChatRoute, searchPassthrough);
-const boardRoute = child('/board', BoardRoute, searchPassthrough);
-const liveRoute = child('/live', LiveRoute);
-const mergeQueueRoute = child('/merge-queue', MergeQueueRoute, searchPassthrough);
-const ticketRoute = child('/tickets/$ticketId', TicketRoute, searchPassthrough);
-const weaverArtifactRoute = child('/artifacts/$key', WeaverArtifactRoute);
-const rolesRoute = child('/roles', RolesRoute, searchPassthrough);
-// The page was named Team before VS-333; old links must keep resolving.
-const teamRedirectRoute = createRoute({
-  getParentRoute: () => wsRoute,
-  path: '/team',
+/** A workspace's Runs is now the global Runs, scoped: `/w/$ws/runs` → `/runs?ws=$ws`. */
+const legacyWorkspaceRunsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$ws/runs',
+  validateSearch: (s: Record<string, unknown>) => s,
+  component: () => null,
+  beforeLoad: ({ params, search }) => {
+    throw redirect({ to: '/runs', search: { ...search, ws: (params as { ws: string }).ws } } as never);
+  },
+});
+
+/** A run detail drops its workspace segment: `/w/$ws/runs/$runId` → `/runs/$runId`. */
+const legacyWorkspaceRunRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$ws/runs/$runId',
+  component: () => null,
   beforeLoad: ({ params }) => {
-    throw redirect({ to: '/w/$ws/roles', params: { ws: (params as { ws: string }).ws } } as never);
+    throw redirect({ to: '/runs/$runId', params: { runId: (params as { runId: string }).runId } } as never);
   },
-  component: () => null,
 });
-const workerRoute = child('/workers/$workerId', WorkerRoute);
-const runsRoute = child('/runs', RunsRoute, searchPassthrough);
-const runRoute = child('/runs/$runId', RunRoute);
-const usageRoute = child('/usage', UsageRoute, searchPassthrough);
-const knowledgeRoute = child('/knowledge', KnowledgeRoute, searchPassthrough);
-// A project is addressed by its slug; its id resolves to the same page, as `GET /projects/:id` does.
-const projectRoute = child('/p/$project', ProjectOverviewRoute, searchPassthrough);
-// VS-334: one static route with a dynamic `$pluginId` segment — not a route added per plugin.
-const pluginPageRoute = child('/plugins/$pluginId', PluginPageRoute);
-// This workspace's settings only (VS-230). A URL naming the daemon side — `?area=daemon` or one of
-// its sections — moves to `/settings`, carrying the section and the rest of the search.
-const settingsRoute = createRoute({
-  getParentRoute: () => wsRoute,
-  path: '/settings',
-  validateSearch: searchPassthrough,
-  beforeLoad: ({ search, params }) => {
-    const r = redirectForSettingsRoute('workspace', search as Record<string, string | undefined>, params.ws);
-    if (r.type === 'redirect') {
-      throw redirect({ to: r.to, search: r.search, ...(r.ws ? { params: { ws: r.ws } } : {}) } as never);
-    }
+
+/** A workspace's settings is now the global settings, scoped: `/w/$ws/settings` → `/settings?scope=$ws`. */
+const legacyWorkspaceSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/w/$ws/settings',
+  validateSearch: (s: Record<string, unknown>) => s,
+  component: () => null,
+  beforeLoad: ({ params, search }) => {
+    throw redirect({ to: '/settings', search: { ...search, scope: (params as { ws: string }).ws } } as never);
   },
-  component: WorkspaceSettingsRoute,
 });
 
 const routeTree = rootRoute.addChildren([
-  indexRoute,
-  loginRoute,
-  onboardingRoute,
-  globalNeedsRoute,
-  globalLiveRoute,
-  globalChatsRoute,
-  globalIncidentsRoute,
-  globalMapRoute,
-  globalScheduledRoute,
-  globalSettingsRoute,
   v2RootRoute.addChildren([
     v2IndexRoute,
     v2LoginRoute,
@@ -382,26 +271,14 @@ const routeTree = rootRoute.addChildren([
       ]),
     ]),
   ]),
-  wsRoute.addChildren([
-    wsIndexRoute,
-    needsRoute,
-    chatRoute,
-    boardRoute,
-    liveRoute,
-    mergeQueueRoute,
-    ticketRoute,
-    weaverArtifactRoute,
-    rolesRoute,
-    teamRedirectRoute,
-    workerRoute,
-    runsRoute,
-    runRoute,
-    usageRoute,
-    knowledgeRoute,
-    projectRoute,
-    pluginPageRoute,
-    settingsRoute,
-  ]),
+  legacyV2Route,
+  legacyV2WildRoute,
+  legacyBoardRoute,
+  legacyMergeQueueRoute,
+  legacyWorkspaceLiveRoute,
+  legacyWorkspaceRunsRoute,
+  legacyWorkspaceRunRoute,
+  legacyWorkspaceSettingsRoute,
 ]);
 
 export const router = createRouter({ routeTree, defaultPreload: 'intent', defaultErrorComponent: RouteError });

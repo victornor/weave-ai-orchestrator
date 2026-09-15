@@ -7,52 +7,6 @@ destination, an obvious way to move between the two versions, and no effect on V
 
 ## Requirements
 
-### Requirement: V2 is served at `/v2` on the same daemon
-
-The web app SHALL render the V2 shell for every path under `/v2`, inside the existing UI app and on
-the same daemon as V1. Serving V2 SHALL NOT require a new daemon route, HTTP API route, config flag
-or migration; the daemon's existing static handler already serves the web app for a path that is not
-a built asset, and `/v2` SHALL resolve through that same handler. The V2 bundle's scripts and
-stylesheets SHALL load from the same built asset directory V1 uses.
-
-#### Scenario: Opening V2 from a signed-in browser
-
-- **WHEN** a signed-in user opens `/v2`
-- **THEN** the app renders the V2 shell without any daemon change having been made
-
-#### Scenario: A deep link into a V2 page
-
-- **WHEN** a user opens `/v2/w/<workspace>/work` directly, without visiting `/` first
-- **THEN** the app renders the V2 shell on that workspace's Work page
-
-#### Scenario: V2 assets are served
-
-- **WHEN** the V2 shell loads
-- **THEN** its scripts, stylesheet and images are served from the same asset path V1's build emits,
-  with no second static handler
-
-### Requirement: V2 loads lazily and leaves V1's address alone
-
-Opening `/` SHALL render V1 exactly as it did before this change. V2's code and styles SHALL load on
-the first navigation to a `/v2` path rather than as part of V1's initial bundle. Moving between the
-two versions SHALL NOT require a document reload and SHALL NOT alter the other version's route
-table, assets or stored keys.
-
-#### Scenario: `/` is still V1
-
-- **WHEN** a user opens `/`
-- **THEN** the app redirects and renders exactly as V1 did before, with no V2 chrome
-
-#### Scenario: V2 is not in V1's initial payload
-
-- **WHEN** the app is loaded at `/` and no `/v2` path has been visited
-- **THEN** the V2 shell's own module and stylesheet have not been fetched
-
-#### Scenario: A V2 visit does not disturb V1
-
-- **WHEN** a user navigates from a V2 page back to a V1 page
-- **THEN** the V1 page renders without a reload, with V1's own theme and chrome
-
 ### Requirement: Every V2 destination has a route and a header
 
 The V2 app SHALL provide an addressable route for every destination it navigates to, each rendering
@@ -98,59 +52,6 @@ SHALL NOT render a second header above or beside it.
 - **WHEN** a screen supplies no header actions
 - **THEN** the header renders exactly as before, with the label, breadcrumb and counts
 
-### Requirement: The V2 root resolves a workspace the way V1 does
-
-Opening `/v2` SHALL resolve within V2: the workspace this device last used when one is remembered,
-with the app landing on that workspace's V2 Needs you; when none is remembered and the visitor is
-signed in, the V2 onboarding address; and when the visitor is not signed in, the V2 sign-in address.
-The onboarding-or-sign-in decision SHALL be the same one V1's `/` makes, but it SHALL resolve to V2's
-own addresses rather than V1's `/onboarding` or `/login`. A remembered workspace the daemon no longer
-reports SHALL be forgotten rather than produce an error.
-
-#### Scenario: A returning device
-
-- **WHEN** a device that last used workspace Acme opens `/v2`
-- **THEN** the app shows Acme's V2 Needs you page and the V2 rail highlights that row
-
-#### Scenario: No workspace remembered
-
-- **WHEN** a signed-in device with nothing remembered opens `/v2`
-- **THEN** the app opens the V2 onboarding address
-
-#### Scenario: Not signed in
-
-- **WHEN** a device with nothing remembered and no session opens `/v2`
-- **THEN** the app opens the V2 sign-in address
-
-#### Scenario: A forgotten workspace
-
-- **WHEN** the remembered workspace is no longer reported by the daemon and `/v2` is opened
-- **THEN** the app forgets it and resolves to the first available workspace or the V2 onboarding
-  address, without an error
-
-### Requirement: One click moves between V1 and V2
-
-The V2 app SHALL offer one control that opens V1 at `/`, and the V1 app SHALL offer one control that
-opens V2 at `/v2`. Each SHALL require a single activation and SHALL NOT require typing a URL. The V1
-control SHALL be additive: it SHALL NOT change any existing V1 screen's layout, wording, behaviour
-or address beyond adding that control.
-
-#### Scenario: V2 back to V1
-
-- **WHEN** a user activates the V2 control that opens V1
-- **THEN** the app renders V1
-
-#### Scenario: V1 forward to V2
-
-- **WHEN** a user activates the V1 control that opens V2
-- **THEN** the app renders the V2 shell
-
-#### Scenario: The V1 control is additive
-
-- **WHEN** V1 is rendered
-- **THEN** every screen V1 showed before is present, and the only addition is the control that
-  opens V2
-
 ### Requirement: V1 is visually isolated from V2
 
 V2's design tokens and component styles SHALL be scoped to the V2 root so that no V1 element
@@ -171,3 +72,84 @@ whether or not a V2 page has been visited in the same session.
 
 - **WHEN** the existing UI test suite is run
 - **THEN** every V1 test passes unchanged
+
+### Requirement: The app is served at the root on the same daemon
+
+The web app SHALL render the V2 shell for every path of the app, served at the root (`/`) on the
+same daemon. Serving it SHALL NOT require a new daemon route, HTTP API route, config flag or
+migration; the daemon's existing static handler already serves the web app for a path that is not a
+built asset, and `/` SHALL resolve through that same handler. The app's scripts and stylesheets
+SHALL load from the same built asset directory the daemon already serves.
+
+#### Scenario: Opening the app from a signed-in browser
+
+- **WHEN** a signed-in user opens `/`
+- **THEN** the app renders the shell without any daemon change having been made
+
+#### Scenario: A deep link into a page
+
+- **WHEN** a user opens `/w/<workspace>/work` directly, without visiting `/` first
+- **THEN** the app renders the shell on that workspace's Work page
+
+#### Scenario: Assets are served
+
+- **WHEN** the shell loads
+- **THEN** its scripts, stylesheet and images are served from the build's own asset path, with no
+  second static handler
+
+### Requirement: The app answers every address at the root and V1 answers none
+
+No app address SHALL carry a `/v2` prefix: every destination SHALL be reachable at its root path,
+and navigating inside the app SHALL build root paths only. The V1 route tree SHALL NOT be mounted,
+so no V1-only address renders a V1 screen; the V1 route and shell modules remain in the tree for the
+follow-up deletion. The sign-in screen SHALL remain a chromeless sibling of the signed-in shell, at
+`/login`, and the shell's own code and styles SHALL still load on first navigation rather than as
+part of a V1 entry bundle.
+
+#### Scenario: No address carries the prefix
+
+- **WHEN** the app's route table is inspected
+- **THEN** every destination resolves at a root path and none at a `/v2` path
+
+#### Scenario: In-app links stay at the root
+
+- **WHEN** a user follows an in-app link, such as Work's ticket link or the rail's settings row
+- **THEN** the resulting address has no `/v2` segment
+
+#### Scenario: A V1-only address renders no V1 screen
+
+- **WHEN** a user opens a V1-only address such as `/w/<workspace>/board`
+- **THEN** no V1 screen is rendered
+
+#### Scenario: Sign-in stays chromeless
+
+- **WHEN** a signed-out user opens any app address
+- **THEN** the app shows its sign-in at `/login` without the rail
+
+### Requirement: The root resolves a workspace
+
+Opening `/` SHALL resolve within the app: the workspace this device last used when one is remembered,
+landing on that workspace's Needs you; when none is remembered and the visitor is signed in,
+onboarding; and when the visitor is not signed in, the sign-in screen. A remembered workspace the
+daemon no longer reports SHALL be forgotten rather than produce an error.
+
+#### Scenario: A returning device
+
+- **WHEN** a device that last used workspace Acme opens `/`
+- **THEN** the app shows Acme's Needs you page and the rail highlights that row
+
+#### Scenario: No workspace remembered
+
+- **WHEN** a signed-in device with nothing remembered opens `/`
+- **THEN** the app opens onboarding
+
+#### Scenario: Not signed in
+
+- **WHEN** a device with nothing remembered and no session opens `/`
+- **THEN** the app opens the sign-in screen
+
+#### Scenario: A forgotten workspace
+
+- **WHEN** the remembered workspace is no longer reported by the daemon and `/` is opened
+- **THEN** the app forgets it and resolves to the first available workspace or onboarding, without
+  an error

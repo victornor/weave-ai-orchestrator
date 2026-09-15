@@ -1,5 +1,5 @@
 /**
- * V2 Changelog (`/v2/w/:ws/changelog`): the workspace record — a year heatmap above a newest-first
+ * V2 Changelog (`/w/:ws/changelog`): the workspace record — a year heatmap above a newest-first
  * timeline, grouped by day, week and month (web-v2/changelog, PLAN §13.6).
  *
  * V1's `ChangelogPanel` (`routes/Changelog.tsx`) is the data reference; this renders its own V2 tree,
@@ -162,7 +162,7 @@ function EntryRow({ entry, ws }: { entry: ChangelogEntry; ws: string }): React.R
   if (entry.link?.kind === 'ticket') {
     return (
       <li>
-        <A to="/v2/w/$ws/tickets/$ticketId" params={{ ws, ticketId: entry.link.target }} className={className} aria-label={entry.summary}>
+        <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: entry.link.target }} className={className} aria-label={entry.summary}>
           {inner}
         </A>
       </li>

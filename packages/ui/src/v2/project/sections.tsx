@@ -4,7 +4,7 @@
  * Every section is a V2 card with a heading and a disclosure, and supplies only its content, so a
  * body can be replaced without the page learning anything about it. History and Pull requests live in
  * their own modules; the rest are here. All of them read the same hooks and pure view models V1's
- * sections do, with V2 chrome and links under `/v2`.
+ * sections do, with V2 chrome and links under `/.
  */
 import { useState } from 'react';
 import type { Project } from '@weave-ai/shared';
@@ -94,7 +94,7 @@ function NeedsYouSection({ project, ws }: V2ProjectSectionProps): React.ReactEle
         const t = d.ticketId ? byId.get(d.ticketId) : undefined;
         return (
           <li key={d.id}>
-            <A to="/v2/w/$ws/tickets/$ticketId" params={{ ws, ticketId: t?.identifier ?? d.ticketId ?? '' }} className="flex items-start gap-2.5 rounded-r4 px-1 py-1 hover:bg-bg-2">
+            <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: t?.identifier ?? d.ticketId ?? '' }} className="flex items-start gap-2.5 rounded-r4 px-1 py-1 hover:bg-bg-2">
               <StatusGlyph status="needs-you" size="xs" className="mt-1" />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-meta text-text-1">{d.title}</span>
@@ -146,7 +146,7 @@ function WorkSection({ project, ws }: V2ProjectSectionProps): React.ReactElement
               })();
               return (
                 <li key={t.id}>
-                  <A to="/v2/w/$ws/tickets/$ticketId" params={{ ws, ticketId: t.identifier }} className="flex flex-col gap-1 rounded-r4 px-1 py-1 hover:bg-bg-2">
+                  <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: t.identifier }} className="flex flex-col gap-1 rounded-r4 px-1 py-1 hover:bg-bg-2">
                     <span className="flex items-center gap-2">
                       <StatusGlyph status={ticketBoardStatus(t.status, { live: Boolean(worker) })} size="xs" />
                       <span className="ac-mono flex-none text-nano text-text-3">{t.identifier}</span>
@@ -186,7 +186,7 @@ function LandingsSection({ project, ws }: V2ProjectSectionProps): React.ReactEle
         <li key={`${l.ticketId ?? l.identifier}-${l.at}`} className="flex items-center gap-2 px-1 py-1">
           <StatusGlyph status="done" size="xs" />
           {l.identifier ? (
-            <A to="/v2/w/$ws/tickets/$ticketId" params={{ ws, ticketId: l.identifier }} className="ac-mono flex-none text-nano text-accent-link">
+            <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: l.identifier }} className="ac-mono flex-none text-nano text-accent-link">
               {l.identifier}
             </A>
           ) : null}
@@ -229,7 +229,7 @@ function ActivitySection({ project, ws }: V2ProjectSectionProps): React.ReactEle
             <li key={e.id} className="flex items-center gap-2 px-1 py-1">
               <span className="v2-tag flex-none text-text-3">{KIND_LABEL[e.kind]}</span>
               {e.ticketIdentifier ? (
-                <A to="/v2/w/$ws/tickets/$ticketId" params={{ ws, ticketId: e.ticketIdentifier }} className="ac-mono flex-none text-nano text-accent-link">
+                <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: e.ticketIdentifier }} className="ac-mono flex-none text-nano text-accent-link">
                   {e.ticketIdentifier}
                 </A>
               ) : null}
@@ -240,7 +240,7 @@ function ActivitySection({ project, ws }: V2ProjectSectionProps): React.ReactEle
         </ul>
       )}
 
-      <A to="/v2/w/$ws/changelog" params={{ ws }} className="v2-link text-micro font-medium">
+      <A to="/w/$ws/changelog" params={{ ws }} className="v2-link text-micro font-medium">
         Open the full changelog
       </A>
     </div>
@@ -318,7 +318,7 @@ function KnowledgeSection({ project, ws }: V2ProjectSectionProps): React.ReactEl
         )}
       </div>
 
-      <A to="/v2/w/$ws/knowledge" params={{ ws }} search={{ project: project.id }} className="v2-link text-micro font-medium">
+      <A to="/w/$ws/knowledge" params={{ ws }} search={{ project: project.id }} className="v2-link text-micro font-medium">
         Open this project's knowledge
       </A>
     </div>

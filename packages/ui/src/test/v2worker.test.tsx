@@ -16,7 +16,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/v2/w/ws1/workers/a1' } }) : '/v2/w/ws1/workers/a1'),
+  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/w/ws1/workers/a1' } }) : '/w/ws1/workers/a1'),
   useParams: () => ({ ws: 'ws1', workerId: 'a1' }),
 }));
 vi.mock('../app/link', () => ({ useGo: () => state.go, useSearchParams: () => ({}) }));

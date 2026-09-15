@@ -116,12 +116,12 @@ function Row({ pr, ws, projectId, onOpen }: { pr: T.ProjectPullRequest; ws: stri
         {pr.author ? <span>{pr.author}</span> : null}
         <span className="max-w-[16rem] truncate" title={pr.headRefName}>{pr.headRefName}</span>
         {pr.ticket ? (
-          <A to="/v2/w/$ws/tickets/$ticketId" params={{ ws, ticketId: pr.ticket.identifier }} className="text-accent-link">
+          <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: pr.ticket.identifier }} className="text-accent-link">
             {pr.ticket.identifier}
           </A>
         ) : null}
         {pr.changeName ? (
-          <A to="/v2/w/$ws/knowledge" params={{ ws }} search={{ project: projectId }} className="truncate text-accent-link" title={pr.changeName}>
+          <A to="/w/$ws/knowledge" params={{ ws }} search={{ project: projectId }} className="truncate text-accent-link" title={pr.changeName}>
             {pr.changeName}
           </A>
         ) : null}
@@ -175,17 +175,17 @@ function PullRequestDetail({ project, ws, number, onBack }: { project: V2Project
         {pr.author ? <span>{pr.author}</span> : null}
         <span className="truncate" title={`${pr.headRefName} → ${pr.baseRefName}`}>{pr.headRefName} → {pr.baseRefName}</span>
         {pr.ticket ? (
-          <A to="/v2/w/$ws/tickets/$ticketId" params={{ ws, ticketId: pr.ticket.identifier }} className="text-accent-link">
+          <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: pr.ticket.identifier }} className="text-accent-link">
             {pr.ticket.identifier}
           </A>
         ) : null}
         {pr.ticket?.hasPlan ? (
-          <A to="/v2/w/$ws/tickets/$ticketId" params={{ ws, ticketId: pr.ticket.identifier }} search={{ tab: 'plan' }} className="text-accent-link">
+          <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: pr.ticket.identifier }} search={{ tab: 'plan' }} className="text-accent-link">
             plan
           </A>
         ) : null}
         {pr.changeName ? (
-          <A to="/v2/w/$ws/knowledge" params={{ ws }} search={{ project: project.id }} className="truncate text-accent-link" title={pr.changeName}>
+          <A to="/w/$ws/knowledge" params={{ ws }} search={{ project: project.id }} className="truncate text-accent-link" title={pr.changeName}>
             {pr.changeName}
           </A>
         ) : null}

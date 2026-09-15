@@ -205,7 +205,7 @@ describe('the V2 Roles screen', () => {
     state.workers = [agent({ id: 'a9', roleId: 'r1', status: 'paused', name: 'Backend Engineer #9', ticketId: null })];
     render(<V2RolesScreen />);
     fireEvent.click(screen.getByRole('button', { name: /Backend Engineer #9/ }));
-    expect(state.go).toHaveBeenCalledWith('/v2/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'a9' } });
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'a9' } });
     expect(document.querySelector('[data-worker-feed]')).toBeNull();
   });
 
@@ -340,7 +340,7 @@ describe('the V2 Roles screen', () => {
       expect.objectContaining({ projectId: 'p1', roleId: 'r1', kind: 'task', title: 'Rotate credentials' }),
       expect.anything(),
     );
-    expect(state.go).toHaveBeenCalledWith('/v2/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'a_new' } });
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'a_new' } });
   });
 
   it('shows the error when starting a session fails', () => {

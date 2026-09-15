@@ -10,7 +10,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/v2/map' } }) : '/v2/map'),
+  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/map' } }) : '/map'),
   useParams: () => ({}),
 }));
 vi.mock('../app/link', () => ({ useSearchParams: () => ({}), useGo: () => state.go }));
@@ -74,13 +74,13 @@ describe('V2 Map', () => {
   it('routes each node kind to its screen', () => {
     render(<MapBody />);
     fireEvent.click(document.querySelector('[data-node="worker:a1"]') as HTMLElement);
-    expect(state.go).toHaveBeenCalledWith('/v2/live', { search: { worker: 'a1' } });
+    expect(state.go).toHaveBeenCalledWith('/live', { search: { worker: 'a1' } });
 
     fireEvent.click(document.querySelector('[data-node="project:p1"]') as HTMLElement);
-    expect(state.go).toHaveBeenCalledWith('/v2/w/$ws/work', { params: { ws: 'ws1' }, search: { project: 'p1' } });
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/work', { params: { ws: 'ws1' }, search: { project: 'p1' } });
 
     fireEvent.click(document.querySelector('[data-node="workspace:ws1"]') as HTMLElement);
-    expect(state.go).toHaveBeenCalledWith('/v2/w/$ws/chat', { params: { ws: 'ws1' } });
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/chat', { params: { ws: 'ws1' } });
   });
 
   it('draws a shape per node kind', () => {

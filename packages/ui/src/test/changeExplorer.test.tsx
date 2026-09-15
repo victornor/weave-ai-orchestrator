@@ -1,5 +1,5 @@
 /**
- * VS-452: the V2 change explorer (`/v2/w/:ws/p/:project/changes/:number`) — the file tree, the
+ * VS-452: the V2 change explorer (`/w/:ws/p/:project/changes/:number`) — the file tree, the
  * whole-file view assembled from hunks plus base context, the changes-only and unified/split toggles,
  * the binary and too-large states, the deep link and the keyboard. `../api/hooks` is mocked wholesale,
  * as every route test here does, and `../lib/highlight` too, so this exercises the view's own
@@ -19,7 +19,7 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: () => '/v2/w/ws1/p/web/changes/42',
+  useRouterState: () => '/w/ws1/p/web/changes/42',
   useParams: () => ({ ws: 'ws1', project: 'web', number: '42' }),
 }));
 
@@ -215,7 +215,7 @@ describe('the keyboard', () => {
     const tree = screen.getByRole('tree');
     fireEvent.keyDown(tree, { key: 'ArrowDown' });
     expect(state.go).toHaveBeenCalledWith(
-      '/v2/w/$ws/p/$project/changes/$number',
+      '/w/$ws/p/$project/changes/$number',
       expect.objectContaining({ search: { file: 'src/b.ts' } }),
     );
     fireEvent.keyDown(tree, { key: 'Enter' });

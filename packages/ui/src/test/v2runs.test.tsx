@@ -28,7 +28,7 @@ function serverSort(runs: Run[], sort: string, dir: string): Run[] {
 }
 
 vi.mock('@tanstack/react-router', () => ({
-  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/v2/runs' } }) : '/v2/runs'),
+  useRouterState: (o?: { select?: (s: { location: { pathname: string } }) => unknown }) => (o?.select ? o.select({ location: { pathname: '/runs' } }) : '/runs'),
   useParams: () => ({}),
 }));
 vi.mock('../app/link', () => ({ useSearchParams: () => state.search, useGo: () => state.go }));
@@ -141,7 +141,7 @@ describe('V2 Runs', () => {
     state.runsByWs = { ws1: [makeRun({ id: 'r1', agentId: 'a1', status: 'succeeded', createdAt: '2026-09-01T09:00:00.000Z' })], ws2: [] };
     render(<RunsBody />);
     fireEvent.click(document.querySelector('[data-v2-runs-table] tbody tr') as HTMLElement);
-    expect(state.go).toHaveBeenCalledWith('/v2/runs/$runId', expect.objectContaining({ params: { runId: 'r1' } }));
+    expect(state.go).toHaveBeenCalledWith('/runs/$runId', expect.objectContaining({ params: { runId: 'r1' } }));
   });
 });
 
@@ -195,10 +195,10 @@ describe('the V2 Runs workspace filter and sort (VS-410)', () => {
     render(<RunsBody />);
 
     fireEvent.change(screen.getByLabelText('Sort runs'), { target: { value: 'tokens:asc' } });
-    expect(state.go).toHaveBeenCalledWith('/v2/runs', { search: { sort: 'tokens', dir: 'asc' }, replace: true });
+    expect(state.go).toHaveBeenCalledWith('/runs', { search: { sort: 'tokens', dir: 'asc' }, replace: true });
 
     fireEvent.change(screen.getByLabelText('Workspace'), { target: { value: 'ws2' } });
-    expect(state.go).toHaveBeenCalledWith('/v2/runs', { search: { ws: 'ws2' }, replace: true });
+    expect(state.go).toHaveBeenCalledWith('/runs', { search: { ws: 'ws2' }, replace: true });
   });
 
   it('keeps the default recency order in the query until a measure is chosen', () => {

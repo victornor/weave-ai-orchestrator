@@ -234,7 +234,7 @@ function ArtifactsSection(): React.ReactElement {
         {weaverRows.map((a) => (
           <A
             key={a.key}
-            to="/v2/w/$ws/artifacts/$key"
+            to="/w/$ws/artifacts/$key"
             params={{ ws, key: a.key }}
             className="flex items-center gap-2.5 border-b border-line-1 py-2.5 text-left hover:bg-bg-1"
           >

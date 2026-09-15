@@ -25,7 +25,7 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@tanstack/react-router', () => ({
   Outlet: () => null,
-  useRouterState: () => '/v2/settings',
+  useRouterState: () => '/settings',
   useParams: () => ({}),
 }));
 
@@ -117,7 +117,7 @@ describe('the V2 Settings scope and section rows', () => {
   it('switches scope by writing the URL and resetting the section', () => {
     render(<V2Settings />);
     fireEvent.click(screen.getByText('Beta'));
-    expect(state.go.at(-1)).toEqual({ to: '/v2/settings', search: { scope: 'beta' }, replace: true });
+    expect(state.go.at(-1)).toEqual({ to: '/settings', search: { scope: 'beta' }, replace: true });
   });
 
   it('never offers a Budget section in either scope', () => {

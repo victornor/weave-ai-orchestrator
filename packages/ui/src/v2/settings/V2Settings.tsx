@@ -84,10 +84,10 @@ export function V2Settings(): React.ReactElement {
     const next: Record<string, string | undefined> = { ...search };
     if (id) next['scope'] = id; else delete next['scope'];
     delete next['section'];
-    go('/v2/settings', { search: next, replace: true });
+    go('/settings', { search: next, replace: true });
   };
   const chooseSection = (key: string): void => {
-    go('/v2/settings', { search: { ...search, ...(scope === 'workspace' ? { scope: wsId } : {}), section: key }, replace: true });
+    go('/settings', { search: { ...search, ...(scope === 'workspace' ? { scope: wsId } : {}), section: key }, replace: true });
   };
 
   const appliesTo = scope === 'daemon'

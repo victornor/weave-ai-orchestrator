@@ -37,11 +37,11 @@ describe('the V2 Knowledge tab row', () => {
 
   it('reaches Explorer and Graph at their existing addresses, and the new tabs at theirs', () => {
     render(<KnowledgeTabs current="knowledge" />);
-    expect(screen.getByRole('link', { name: 'Knowledge' })).toHaveAttribute('href', '/v2/w/ws1/knowledge');
-    expect(screen.getByRole('link', { name: 'Explorer' })).toHaveAttribute('href', '/v2/w/ws1/knowledge/explorer');
-    expect(screen.getByRole('link', { name: 'Changelog' })).toHaveAttribute('href', '/v2/w/ws1/knowledge/changelog');
-    expect(screen.getByRole('link', { name: 'Graph' })).toHaveAttribute('href', '/v2/w/ws1/knowledge/graph');
-    expect(screen.getByRole('link', { name: 'Specs' })).toHaveAttribute('href', '/v2/w/ws1/knowledge/specs');
+    expect(screen.getByRole('link', { name: 'Knowledge' })).toHaveAttribute('href', '/w/ws1/knowledge');
+    expect(screen.getByRole('link', { name: 'Explorer' })).toHaveAttribute('href', '/w/ws1/knowledge/explorer');
+    expect(screen.getByRole('link', { name: 'Changelog' })).toHaveAttribute('href', '/w/ws1/knowledge/changelog');
+    expect(screen.getByRole('link', { name: 'Graph' })).toHaveAttribute('href', '/w/ws1/knowledge/graph');
+    expect(screen.getByRole('link', { name: 'Specs' })).toHaveAttribute('href', '/w/ws1/knowledge/specs');
   });
 
   it('marks the current tab and carries the project scope into every link', () => {
@@ -49,7 +49,7 @@ describe('the V2 Knowledge tab row', () => {
     render(<KnowledgeTabs current="explorer" />);
     const explorer = screen.getByRole('link', { name: 'Explorer' });
     expect(explorer).toHaveAttribute('aria-current', 'page');
-    expect(explorer).toHaveAttribute('href', '/v2/w/ws1/knowledge/explorer?project=p1');
+    expect(explorer).toHaveAttribute('href', '/w/ws1/knowledge/explorer?project=p1');
     expect(screen.getByRole('link', { name: 'Knowledge' })).not.toHaveAttribute('aria-current');
   });
 

@@ -1,11 +1,10 @@
 /**
- * The routes a shared V1 component navigates to, supplied by whichever host renders it (VS-434).
+ * The routes a shared component navigates to, supplied by whichever host renders it (VS-434).
  *
  * V1's `routes/*` components are reused inside the V2 frame (`KnowledgeExplorer`,
- * `KnowledgeDocPanel`, the settings sections). A hard-coded `/w/…` path inside one of them throws the
- * reader back to V1, because V2's addresses live under `/v2/w/…`. Rather than special-case V2 in each
- * component, the host provides the routes: `V2Root` wraps the `/v2` tree in `V2_HOST_ROUTES`, and
- * everywhere else the default is V1's, so V1 is unchanged.
+ * `KnowledgeDocPanel`, the settings sections). The host provides the routes rather than each
+ * component hard-coding them: `V2Root` wraps the tree in `V2_HOST_ROUTES`. The V1 host is retired
+ * with the promotion (VS-456); its routes stay as the context default until the V1 code is deleted.
  */
 import { createContext, useContext } from 'react';
 import type { ReactNode } from 'react';
@@ -29,10 +28,10 @@ export const V1_HOST_ROUTES: HostRoutes = {
 };
 
 export const V2_HOST_ROUTES: HostRoutes = {
-  knowledgeExplorer: '/v2/w/$ws/knowledge/explorer',
+  knowledgeExplorer: '/w/$ws/knowledge/explorer',
   knowledgeExplorerSearch: {},
-  artifact: '/v2/w/$ws/artifacts/$key',
-  ticket: '/v2/w/$ws/tickets/$ticketId',
+  artifact: '/w/$ws/artifacts/$key',
+  ticket: '/w/$ws/tickets/$ticketId',
 };
 
 const HostRoutesCtx = createContext<HostRoutes>(V1_HOST_ROUTES);

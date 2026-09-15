@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Promote V2 to the root: serve the app at / without the /v2 prefix,
+  redirect every V1 and /v2 URL, and rewrite the server, CLI and TUI link
+  builders and docs to the new paths"

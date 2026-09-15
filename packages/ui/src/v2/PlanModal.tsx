@@ -140,7 +140,7 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
   const canSubmit = drafts.length > 0 && plan.data?.plan.status === 'drafting' && !submit.isPending;
   const plannerRunning = live?.running ?? false;
   const projectName = (id: string | null): string | null => (id ? projectLabel(projects.find((p) => p.id === id) ?? { slug: id, name: id }) : null);
-  const openTicket = (identifier: string): void => go('/v2/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } });
+  const openTicket = (identifier: string): void => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } });
 
   const send = (body: string, files: File[], opts: { idempotencyKey: string }): Promise<void> => {
     if (!plan.data || !effectiveProjectId) return Promise.reject(new Error('The planning conversation is still starting.'));

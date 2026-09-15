@@ -395,7 +395,7 @@ export function V2OnboardingPage(): React.ReactElement {
                   </ol>
                   <div className="flex items-center justify-end gap-2">
                     {createdId ? (
-                      <Button variant="primary" onClick={() => { writeResume(null); go(`/v2/w/${createdId}/needs`, { replace: true }); }}>Open {name}</Button>
+                      <Button variant="primary" onClick={() => { writeResume(null); go(`/w/${createdId}/needs`, { replace: true }); }}>Open {name}</Button>
                     ) : creating || progress.some((s) => s.state === 'running' || s.state === 'pending') ? (
                       <span className="text-meta text-text-3">Working…</span>
                     ) : (

@@ -1,0 +1,6 @@
+# Tasks
+
+- [x] 1. In `packages/ui/src/v2/NeedsYouPage.tsx`, derive `routeScope` from `useV2Scope()` (`scope.ws` for a workspace route, `'all'` otherwise) and reset `scopeFilter` to it whenever `routeScope` changes while the screen stays mounted; a chip click still overrides the filter until the next route change.
+- [x] 2. Audit the other scope-bearing V2 screens (`LivePage`, `MapPage`, `RunsPage`, `Work`, `RolesPage`, `UsagePage`, the Knowledge screens) for the same route-scope seed-once bug and fix any found; list the findings in the delivery.
+- [x] 3. Tests in `packages/ui/src/test/v2needs.test.tsx`: A→B within the mounted screen shows B's cards, B→Everywhere shows all, and a chip picked on the page is respected until the route changes again. Confirm the bug first by asserting the current seed-once behaviour fails, then fix.
+- [x] 4. Rendered evidence: captures of B's Needs you reached by switching from A in the rail, dark and light, from a real browser with two workspaces; `pnpm lint`, `pnpm typecheck` and both test suites pass.

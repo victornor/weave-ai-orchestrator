@@ -117,6 +117,17 @@ export interface ArchiveThenMergeOpts {
   /** VS-393: called once when the grace elapses and this sequence stops waiting and merges anyway, so the ticket records why. */
   onNoCiTimeout?: () => void | Promise<void>;
   /**
+   * VS-467: called once when the sequence has started a fresh `pull_request` run for a head that had
+   * none usable (a `synchronize` push on the non-draft pull request), so the ticket records it. The
+   * landing still waits for that run's success; this is a note, never a substitute for one.
+   */
+  onChecksRetriggered?: () => void | Promise<void>;
+  /**
+   * VS-467: test seam for the fresh-run trigger; defaults to an empty commit plus a push to `branch`.
+   * Receives the scratch worktree the landing holds and the branch name.
+   */
+  triggerLandingRun?: (worktreePath: string, branch: string) => Promise<void>;
+  /**
    * VS-408: when true, a stale branch whose rebase onto the landing tip conflicts is rebuilt from
    * that tip instead of being reported as `conflict`. Only the archive-backfill landing
    * (`tickets.landArchiveBackfill`) sets this: its branch holds the ticket's archive commit alone, so
@@ -156,8 +167,35 @@ const noneSinceByPr = new Map<string, number>();
 const CI_WORKFLOWS_TTL_MS = 5 * 60_000;
 const ciWorkflowsByClone = new Map<string, { at: number; value: boolean | null }>();
 
+/**
+ * VS-467: pull requests this process has already started a fresh run for, and how many trigger
+ * attempts failed before that. Kept in the daemon process, which holds the landing retries, so
+ * "once per pull request" survives them; a clean restart can at worst trigger once more, never merge
+ * without a success. A stuck entry is bounded by the alarm (`mergeChecksAlarmSec`) on the supervisor.
+ */
+const retriggeredByPr = new Set<string>();
+const retriggerAttemptsByPr = new Map<string, number>();
+/** A failed trigger is retried on a later landing attempt, but only this many times. */
+export const MAX_RETRIGGER_ATTEMPTS = 3;
+
+/**
+ * VS-467: start a fresh `pull_request` run for the landing head by pushing an empty trigger commit to
+ * the non-draft pull request's branch. A `synchronize` push is the only route that reliably satisfies
+ * the gate: a `workflow_dispatch` run's checks are absent from the pull request's `statusCheckRollup`
+ * (verified on this repository), and re-running a run triggered while the pull request was a draft
+ * re-evaluates the original `pull_request.draft == true` payload and skips every job again.
+ */
+async function pushLandingTriggerCommit(worktreePath: string, branch: string): Promise<void> {
+  const commit = await git(['commit', '--allow-empty', '-m', 'ci: trigger a pull_request run for the landing head'], worktreePath, 30_000);
+  if (!commit.ok) throw new OcError('internal', `could not create the CI trigger commit: ${commit.stderr.trim().slice(0, 300)}`, { branch });
+  const push = await git(['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${branch}`], worktreePath, 120_000);
+  if (!push.ok) throw new OcError('internal', `push of the CI trigger commit failed: ${push.stderr.trim().slice(0, 300)}`, { branch });
+}
+
 /** Test-only: forget the per-pull-request and per-clone no-CI state between cases. */
-export function resetNoCiStateForTests(): void { noneSinceByPr.clear(); ciWorkflowsByClone.clear(); }
+export function resetNoCiStateForTests(): void {
+  noneSinceByPr.clear(); ciWorkflowsByClone.clear(); retriggeredByPr.clear(); retriggerAttemptsByPr.clear();
+}
 
 async function repoHasCiWorkflows(forge: ForgeAdapter, clonePath: string): Promise<boolean | null> {
   if (!forge.hasCiWorkflows) return null;
@@ -183,6 +221,11 @@ async function repoHasCiWorkflows(forge: ForgeAdapter, clonePath: string): Promi
  * absent or all-skipped rollup. A repository with no CI workflows (VS-393) merges immediately; when
  * the forge cannot say, the sequence waits for `CI_NONE_GRACE_MS` and then merges anyway, so a
  * landing never retries forever on checks that will not come.
+ *
+ * VS-467: a CI repository's non-draft head with no usable `pull_request` run gets one fresh run
+ * started by a `synchronize` push of an empty trigger commit, once per pull request, so a head whose
+ * run never started or never re-ran does not hold the merge slot silently. See
+ * `pushLandingTriggerCommit` for why a re-run or a `workflow_dispatch` is not a route.
  */
 export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promise<ArchiveThenMergeOutcome> {
   const { clonePath, branch, landingBranch, changeName, forge, prUrl, method, requiresCi = false, scratch: scratchTarget } = opts;
@@ -272,6 +315,24 @@ export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promi
         // VS-466: a repository with CI workflows never lands on an absent (or all-skipped) rollup.
         // Wait for the run the transition above started; retry, never land, until it resolves.
         noneSinceByPr.delete(prUrl);
+        // VS-467: the common unstick — a non-draft head with no usable run (none at all, or only
+        // skipped/cancelled ones) gets one fresh `pull_request` run started by a `synchronize` push.
+        // Only on a retry where nothing was pushed (a fresh draft's own transition starts its run),
+        // once per pull request, and never on an unresolvable or unusable forge answer. The gate
+        // still waits and never merges without a success.
+        const canTrigger = !state.isDraft && !changed && !changedDraft && forge.hasUsableCheckRun && !retriggeredByPr.has(prUrl);
+        if (canTrigger) {
+          const usable = await forge.hasUsableCheckRun!(clonePath, prUrl).catch(() => null);
+          const attempts = retriggerAttemptsByPr.get(prUrl) ?? 0;
+          if (usable === false && attempts < MAX_RETRIGGER_ATTEMPTS) {
+            retriggerAttemptsByPr.set(prUrl, attempts + 1);
+            try {
+              await (opts.triggerLandingRun ?? pushLandingTriggerCommit)(scratch.path, branch);
+              retriggeredByPr.add(prUrl);
+              await opts.onChecksRetriggered?.();
+            } catch { /* a failed trigger is retried on a later attempt, up to the cap */ }
+          }
+        }
         return { kind: 'checks_pending' };
       }
       if (hasWorkflows === null) {

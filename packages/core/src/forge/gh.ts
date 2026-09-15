@@ -15,6 +15,9 @@ interface GhPrView {
   isDraft?: boolean;
 }
 
+/** One entry of `gh api repos/{owner}/{repo}/actions/runs`. */
+interface GhWorkflowRun { id?: number; event?: string; status?: string; conclusion?: string | null }
+
 /** One pull request exactly as `gh pr list --json` / `gh pr view --json` spells it. */
 interface GhPr {
   number?: number; title?: string; url?: string; body?: string;
@@ -152,6 +155,38 @@ export function workflowCountFromGh(stdout: string): boolean | null {
   if (!text) return null;
   const n = Number(text);
   return Number.isInteger(n) && n >= 0 ? n > 0 : null;
+}
+
+/**
+ * VS-467: the `pull_request` runs recorded for a head, newest first, from `gh api
+ * .../actions/runs?head_sha=<sha>`. Schedule and `workflow_dispatch` runs are ignored — only a
+ * pull-request run is the one the landing gate asks for. Pure and exported for the mapping tests.
+ */
+export function pullRequestRunsFromGh(stdout: string): Array<{ id: number; status: string; conclusion: string | null }> {
+  let doc: { workflow_runs?: GhWorkflowRun[] };
+  try { doc = JSON.parse(stdout) as { workflow_runs?: GhWorkflowRun[] }; } catch { return []; }
+  if (!Array.isArray(doc.workflow_runs)) return [];
+  return doc.workflow_runs
+    .filter((r) => r.event === 'pull_request' && typeof r.id === 'number')
+    .map((r) => ({ id: r.id as number, status: r.status ?? '', conclusion: r.conclusion ?? null }));
+}
+
+/**
+ * VS-467: the labels an online self-hosted runner serves, from `gh api .../actions/runners`. `null`
+ * means "the forge cannot say" (an unparseable or refused answer), never "no runners" — a valid
+ * empty list is `{ onlineLabels: [] }`. Offline and busy-with-no-impact runners are excluded; only
+ * `status === 'online'` counts.
+ */
+export function runnerLabelsFromGh(stdout: string): { onlineLabels: string[] } | null {
+  let doc: { runners?: Array<{ status?: string; labels?: Array<{ name?: string }> }> };
+  try { doc = JSON.parse(stdout) as typeof doc; } catch { return null; }
+  if (!Array.isArray(doc.runners)) return null;
+  const labels = new Set<string>();
+  for (const runner of doc.runners) {
+    if ((runner.status ?? '').toLowerCase() !== 'online') continue;
+    for (const l of runner.labels ?? []) if (l.name) labels.add(l.name);
+  }
+  return { onlineLabels: [...labels] };
 }
 
 /** Exported for the mapping tests, which run `gh`'s recorded JSON through it and never call GitHub. */
@@ -311,5 +346,36 @@ export class GhForge implements ForgeAdapter {
     const r = await sh('gh', args, { cwd, timeoutMs: 30_000, env: { NO_COLOR: '1' } });
     if (!r.ok) return null;
     return repoVisibilityFromGh(r.stdout);
+  }
+
+  /**
+   * VS-467: is there a `pull_request` run for the pull request's head that will produce a usable
+   * result? `true` when one is still queued/running, or one has already concluded success/failure;
+   * `false` when the head has no `pull_request` run at all, or only completed runs that concluded
+   * `skipped`/`cancelled`/`startup_failure` (a draft-guard skip, or a cancelled run — neither can
+   * ever satisfy the landing gate). `null` on any failure, so the caller waits rather than starting a
+   * redundant run. Reads only the runs API; no run is started here.
+   */
+  async hasUsableCheckRun(cwd: string, url: string): Promise<boolean | null> {
+    const view = await sh('gh', ['pr', 'view', url, '--json', 'headRefOid'], { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
+    if (!view.ok) return null;
+    let pr: { headRefOid?: string };
+    try { pr = JSON.parse(view.stdout) as typeof pr; } catch { return null; }
+    if (!pr.headRefOid) return null;
+
+    const runsRes = await sh('gh', ['api', `repos/{owner}/{repo}/actions/runs?head_sha=${pr.headRefOid}&per_page=50`], { cwd, timeoutMs: 30_000, env: { NO_COLOR: '1' } });
+    if (!runsRes.ok) return null;
+    try { JSON.parse(runsRes.stdout); } catch { return null; } // a body we cannot read is "cannot say", not "no run"
+    const runs = pullRequestRunsFromGh(runsRes.stdout);
+    if (runs.some((r) => r.status !== 'completed' || r.conclusion === null)) return true;
+    const newest = runs[0];
+    return Boolean(newest && (newest.conclusion === 'success' || newest.conclusion === 'failure'));
+  }
+
+  /** VS-467: the labels an online self-hosted runner serves, or `null` when `gh` cannot answer. */
+  async runnerStatus(cwd: string): Promise<{ onlineLabels: string[] } | null> {
+    const r = await sh('gh', ['api', 'repos/{owner}/{repo}/actions/runners'], { cwd, timeoutMs: 30_000, env: { NO_COLOR: '1' } });
+    if (!r.ok) return null;
+    return runnerLabelsFromGh(r.stdout);
   }
 }

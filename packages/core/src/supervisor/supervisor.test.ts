@@ -587,6 +587,102 @@ describe('supervisor scheduled passes', () => {
         await expect(supervisor.tick()).resolves.toBeUndefined();
         expect(h.db.get<{ delivery: unknown }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId])?.delivery).toBeNull();
       });
+
+      describe('stalled-check alarm (VS-467)', () => {
+        const alarmsFor = (ticketId: string): Array<Record<string, unknown>> =>
+          wake.calls
+            .map((c) => c.input as Record<string, unknown>)
+            .filter((input) => input.source === 'system'
+              && (input.payload as { kind?: string } | undefined)?.kind === 'merge_stalled'
+              && (input.payload as { ticketId?: string } | undefined)?.ticketId === ticketId);
+
+        it('alarms the conductor once the holder has waited past the threshold (VS-467)', async () => {
+          const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState: 'pending', headSha: 'sha-1', checks: { passed: 1, total: 3 } }));
+          setForge(prState);
+          const ticketId = seedMergingPr({ mergeStartedAt: new Date(Date.now() - 21 * 60_000).toISOString() });
+
+          await supervisor.tick();
+
+          const alarms = alarmsFor(ticketId);
+          expect(alarms).toHaveLength(1);
+          const reason = String(alarms[0]!['reason']);
+          expect(reason).toContain('TST-1');
+          expect(reason).toContain('sha-1');
+          expect(reason).toContain('run is in progress');
+        });
+
+        it('does not alarm before the threshold, then alarms and throttles at the cadence (VS-467)', async () => {
+          const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState: 'pending' }));
+          setForge(prState);
+          const ticketId = seedMergingPr(); // admitted just now
+
+          await supervisor.tick();
+          expect(alarmsFor(ticketId)).toHaveLength(0);
+
+          vi.useFakeTimers({ toFake: ['Date'] });
+          try {
+            vi.setSystemTime(Date.now() + 21 * 60_000);
+            resetMergePoll();
+            await supervisor.tick();
+            expect(alarmsFor(ticketId)).toHaveLength(1);
+
+            // A poll inside the cadence does not repeat the alarm.
+            resetMergePoll();
+            await supervisor.tick();
+            expect(alarmsFor(ticketId)).toHaveLength(1);
+
+            // Past the cadence again, it repeats.
+            vi.setSystemTime(Date.now() + 21 * 60_000);
+            resetMergePoll();
+            await supervisor.tick();
+            expect(alarmsFor(ticketId)).toHaveLength(2);
+          } finally { vi.useRealTimers(); }
+        });
+
+        it('clears the alarm when the checks resolve, so a later stall alarms afresh (VS-467)', async () => {
+          let ciState: 'pending' | 'success' = 'pending';
+          const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState }));
+          setForge(prState);
+          const ticketId = seedMergingPr({ mergeStartedAt: new Date(Date.now() - 21 * 60_000).toISOString() });
+
+          await supervisor.tick();
+          expect(alarmsFor(ticketId)).toHaveLength(1);
+
+          resetMergePoll();
+          ciState = 'success';
+          await supervisor.tick();
+          expect(alarmsFor(ticketId)).toHaveLength(1); // resolution is the existing worker wake, not an alarm
+
+          resetMergePoll();
+          ciState = 'pending';
+          await supervisor.tick();
+          expect(alarmsFor(ticketId)).toHaveLength(2);
+        });
+
+        it('names a self-hosted label no online runner serves (VS-467)', async () => {
+          const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState: 'pending' }));
+          const runnerStatus = vi.fn(async () => ({ onlineLabels: ['self-hosted'] }));
+          h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState, mergePr: async () => ({}), runnerStatus } as never);
+          const ticketId = seedMergingPr({ mergeStartedAt: new Date(Date.now() - 21 * 60_000).toISOString() });
+          mkdirSync(join(h.ctx.paths.projects, h.projectSlug, '.github', 'workflows'), { recursive: true });
+          writeFileSync(join(h.ctx.paths.projects, h.projectSlug, '.github', 'workflows', 'ci.yml'), 'jobs:\n  a:\n    runs-on: [self-hosted, weave-ci]\n');
+
+          await supervisor.tick();
+
+          expect(prState).toHaveBeenCalled();
+          expect(alarmsFor(ticketId)).toHaveLength(1);
+          expect(runnerStatus).toHaveBeenCalled();
+          expect(String(alarmsFor(ticketId)[0]!['reason'])).toContain('no online runner for `weave-ci`');
+        });
+
+        it('never alarms a holder still in draft (VS-467)', async () => {
+          const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState: 'pending', isDraft: true }));
+          setForge(prState);
+          const ticketId = seedMergingPr({ mergeStartedAt: new Date(Date.now() - 21 * 60_000).toISOString() });
+          await supervisor.tick();
+          expect(alarmsFor(ticketId)).toHaveLength(0);
+        });
+      });
     });
 
     it('moves a merged PR to merging and wakes the live worker to report only', async () => {

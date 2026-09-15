@@ -1394,6 +1394,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
                       // VS-393: the forge could not tell the repo has no CI, and no rollup appeared
                       // within the wait limit — merge anyway, with one line on the ticket saying so.
                       onNoCiTimeout: () => systemComment(t.id, 'no checks appeared within the wait limit; the forge could not confirm the repository has CI, so the merge proceeds as for a project with none', actor),
+                      // VS-467: the head had no usable run for a CI repository; one empty trigger
+                      // commit was pushed to start a fresh pull_request run. The landing still waits
+                      // for its success, never merging on the trigger.
+                      onChecksRetriggered: () => systemComment(t.id, 'no usable CI run existed for the landing head; pushed a trigger commit to start a fresh pull_request run and is still waiting for it to succeed before merging', actor),
                       scratch: { stateDir: ctx.paths.state, projectSlug: p.slug, label: t.identifier },
                     });
                   } catch (e) {

@@ -2,6 +2,7 @@ import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
 import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, SELF_WAKE_STALL_GRACE_MS, type Agent, type KnowledgeScope, type Run, type Ticket } from '@weave-ai/shared';
+import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
@@ -13,6 +14,7 @@ import { sh } from '../util/exec.js';
 import { sessionActivitySignal } from '../workers/activity-signal.js';
 import { handoverCommentBody, reconcileHandover, type HandoverSnapshot } from '../workers/handover-reconcile.js';
 import { sweepScratchWorktrees } from '../tickets/scratch.js';
+import { requestedRunnerLabels, runnerGaps } from '../forge/runners.js';
 
 const TICK_MS = 15_000;
 const LIVENESS_EVERY_MS = 60_000;
@@ -113,6 +115,12 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   const spawnWaitSince = new Map<string, number>();
   /** VS-202: agentId -> the `last_run_at` value already raised as stalled, so a still-stalled worker is not re-notified every sweep. */
   const stalledNotified = new Map<string, string>();
+  /**
+   * VS-467: ticketId -> when its stalled-check alarm was last raised, so a merge-slot holder stuck on
+   * unresolved checks alarms at the `mergeChecksAlarmSec` cadence, not on every merge poll. An entry
+   * is dropped as soon as the checks resolve or the ticket leaves the merge step.
+   */
+  const mergeChecksAlarmedAt = new Map<string, number>();
   let timer: NodeJS.Timeout | null = null;
   let ticking = false;
   let bootRecovered = false;
@@ -856,7 +864,43 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     }
   }
 
-  interface MergingPrRow { id: string; identifier: string; projectId: string; url: string; clonePath: string; delivery: Record<string, unknown> | null }
+  interface MergingPrRow { id: string; identifier: string; projectId: string; url: string; clonePath: string; delivery: Record<string, unknown> | null; mergeStartedAt: string | null }
+
+  /**
+   * VS-467: tell the weaver that a merge-slot holder has waited too long on unresolved checks. A
+   * supervisor alarm, not a ticket failure — the landing keeps waiting and the alarm clears itself
+   * when the checks resolve. Names the ticket, pull request, head SHA and what the rollup shows, and
+   * appends the self-hosted runner gap when a workflow asks for a label no online runner serves.
+   * Best-effort: it never throws into the tick.
+   */
+  async function raiseMergeChecksAlarm(forge: ForgeAdapter, row: MergingPrRow, ciState: string | null, checks: { passed: number; total: number } | null, head: string | null, thresholdMs: number): Promise<void> {
+    const description = ciState === 'pending'
+      ? `a run is in progress${checks ? ` (${checks.passed}/${checks.total} passed)` : ''}`
+      : `no successful run on ${head ?? 'the head'} (no run, all checks skipped or cancelled)`;
+    let runnerNote = '';
+    try {
+      const requested = requestedRunnerLabels(row.clonePath);
+      const online = forge.runnerStatus ? (await forge.runnerStatus(row.clonePath))?.onlineLabels ?? null : null;
+      const gaps = online ? runnerGaps(requested, online) : [];
+      if (gaps.length > 0) runnerNote = `; no online runner for ${gaps.map((label) => `\`${label}\``).join(', ')}`;
+    } catch { /* runner awareness is best-effort and never fails the alarm */ }
+    const mins = Math.round(thresholdMs / 60_000);
+    const message = `${row.identifier}: the merge slot has been held on ${row.url} for over ${mins} min with checks unresolved — ${description}${runnerNote} (head ${head ?? 'unknown'}). The landing is still waiting and has not merged.`;
+    log.warn({ ticket: row.identifier, url: row.url, ciState, head }, 'merge-slot holder stalled on checks');
+    try { deps().tickets.comment(SYSTEM, row.id, message, 'status'); }
+    catch (e) { log.warn({ ticket: row.identifier, err: String(e) }, 'merge-stall comment failed'); }
+    let conductor: Agent;
+    try { conductor = deps().workers.conductor(); } catch { return; }
+    try {
+      deps().wake.enqueue(conductor.id, {
+        source: 'system',
+        reason: message,
+        payload: { ticketId: row.id, kind: 'merge_stalled', prUrl: row.url, headSha: head, ciState, checks },
+        idempotencyKey: `merge-stalled:${row.id}:${Date.now()}`,
+        requestedBy: SYSTEM,
+      });
+    } catch (e) { log.warn({ ticket: row.identifier, err: String(e) }, 'merge-stall wake failed'); }
+  }
 
   /**
    * VS-391: wake the worker holding a project's merge slot when its pull request's checks resolve (or
@@ -870,7 +914,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     if (!forge) return;
     const rows = ctx.db.all<MergingPrRow>(
       `SELECT t.id AS id, t.identifier AS identifier, t.project_id AS project_id, wp.url AS url,
-              p.clone_path AS clone_path, t.delivery_json AS delivery_json
+              p.clone_path AS clone_path, t.delivery_json AS delivery_json, t.merge_started_at AS merge_started_at
          FROM tickets t
          JOIN ticket_work_products wp ON wp.ticket_id = t.id AND wp.type = 'pull_request' AND wp.url IS NOT NULL
          JOIN projects p ON p.id = t.project_id AND p.status = 'ready'
@@ -917,12 +961,27 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       // A draft's absent checks are not "resolved" (VS-393 makes ticket PRs drafts until the merge
       // step marks them ready), so a draft never wakes the worker.
       if (draft) continue;
+      const ciResolved = ciState === 'success' || ciState === 'failure';
+      // VS-467: a non-draft holder past the threshold with unresolved checks alarms the weaver,
+      // throttled to the same cadence; a resolved holder clears its entry. Fired before the
+      // worker lookup: the slot is held whether or not a live worker happens to exist.
+      const alarmThresholdMs = (ctx.config.defaults.mergeChecksAlarmSec ?? 1200) * 1000;
+      if (!ciResolved) {
+        const startedAt = row.mergeStartedAt ? Date.parse(row.mergeStartedAt) : NaN;
+        const last = mergeChecksAlarmedAt.get(row.id);
+        if (Number.isFinite(startedAt) && Date.now() - startedAt >= alarmThresholdMs
+          && (last === undefined || Date.now() - last >= alarmThresholdMs)) {
+          mergeChecksAlarmedAt.set(row.id, Date.now());
+          await raiseMergeChecksAlarm(forge, row, ciState, checks, head, alarmThresholdMs);
+        }
+      } else {
+        mergeChecksAlarmedAt.delete(row.id);
+      }
       const worker = liveWorkerFor(row.id);
       if (!worker) {
         log.warn({ ticket: row.identifier }, 'merge-slot pull request moved but the ticket has no live worker');
         continue;
       }
-      const ciResolved = ciState === 'success' || ciState === 'failure';
       const ciTransition = ciResolved && ((stored['ciState'] ?? null) !== ciState || (stored['ciHead'] ?? null) !== head);
       // `blocked` while checks are still pending is GitHub's normal running state, not news; it is a
       // trigger only once the rollup has resolved. `clean` always is.
@@ -952,6 +1011,8 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         } catch (e) { log.warn({ ticket: row.identifier, err: String(e) }, 'merge-state wake failed'); }
       }
     }
+    // VS-467: a ticket that has left the merge step (landed or withdrawn) keeps no alarm entry.
+    for (const id of [...mergeChecksAlarmedAt.keys()]) if (!seen.has(id)) mergeChecksAlarmedAt.delete(id);
   }
 
   /** A `change` ticket can be `done` while its OpenSpec change directory is still un-archived on disk (§12.4 drift). */

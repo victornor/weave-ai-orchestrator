@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 import { git } from '../util/git.js';
-import { archiveOnBranch, attemptArchiveThenMerge, isFreshAgainstLanding, rebaseOntoLanding, resetNoCiStateForTests } from './archive-before-merge.js';
+import { pullRequestFromGh } from '../forge/gh.js';
+import { MAX_RETRIGGER_ATTEMPTS, archiveOnBranch, attemptArchiveThenMerge, isFreshAgainstLanding, rebaseOntoLanding, resetNoCiStateForTests } from './archive-before-merge.js';
 import { SCRATCH_STALE_MS, activeScratchWorktrees, scratchBranchFrom, scratchLandWorktree, scratchRoot, sweepScratchWorktrees, type ScratchTarget } from './scratch.js';
 
 const BRANCH = 'ac/tst-1-dark-mode';
@@ -569,6 +570,166 @@ describe('archive-before-merge mechanics', () => {
       });
       expect(outcome).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
       expect(forge.hasCiWorkflows).toHaveBeenCalledWith(clone);
+    });
+
+    it('starts one fresh run when the head has no usable run, records it, and still waits (VS-467)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const hasUsableCheckRun = vi.fn(async () => false);
+      const triggerLandingRun = vi.fn(async () => {});
+      const onChecksRetriggered = vi.fn();
+      const forge = fakeForge({
+        hasCiWorkflows: vi.fn(async () => true),
+        markPullRequestReady: vi.fn(async () => ({ changed: false })),
+        prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const, isDraft: false })),
+        hasUsableCheckRun,
+      });
+      const opts = {
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge,
+        prUrl: 'https://example.com/pr/missing-run', method: 'squash', requiresCi: true, onChecksRetriggered, triggerLandingRun,
+      } as const;
+
+      expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'checks_pending' });
+      expect(hasUsableCheckRun).toHaveBeenCalledTimes(1);
+      expect(triggerLandingRun).toHaveBeenCalledTimes(1);
+      expect(onChecksRetriggered).toHaveBeenCalledTimes(1);
+
+      // Once per pull request: a landing retry does not start another run, and it never merges on it.
+      expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'checks_pending' });
+      expect(triggerLandingRun).toHaveBeenCalledTimes(1);
+      expect(forge.mergePr).not.toHaveBeenCalled();
+      await expectNoScratch();
+    });
+
+    it('retries a failed trigger on a later attempt, up to the cap (VS-467)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const triggerLandingRun = vi.fn().mockRejectedValueOnce(new Error('HTTP 500')).mockResolvedValue(undefined);
+      const forge = fakeForge({
+        hasCiWorkflows: vi.fn(async () => true),
+        prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const, isDraft: false })),
+        hasUsableCheckRun: vi.fn(async () => false),
+      });
+      const opts = {
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge,
+        prUrl: 'https://example.com/pr/retry-trigger', method: 'squash', requiresCi: true, triggerLandingRun,
+      } as const;
+
+      // The first attempt's trigger fails; a later attempt retries it (and then stops for this PR).
+      expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'checks_pending' });
+      expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'checks_pending' });
+      expect(triggerLandingRun).toHaveBeenCalledTimes(2);
+      expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'checks_pending' });
+      expect(triggerLandingRun).toHaveBeenCalledTimes(2);
+      await expectNoScratch();
+    });
+
+    it('gives up after MAX_RETRIGGER_ATTEMPTS failed triggers (VS-467)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const triggerLandingRun = vi.fn().mockRejectedValue(new Error('HTTP 503'));
+      const forge = fakeForge({
+        hasCiWorkflows: vi.fn(async () => true),
+        prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const, isDraft: false })),
+        hasUsableCheckRun: vi.fn(async () => false),
+      });
+      const opts = {
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge,
+        prUrl: 'https://example.com/pr/capped', method: 'squash', requiresCi: true, triggerLandingRun,
+      } as const;
+
+      for (let i = 0; i < MAX_RETRIGGER_ATTEMPTS + 2; i += 1) {
+        expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'checks_pending' });
+      }
+      expect(triggerLandingRun).toHaveBeenCalledTimes(MAX_RETRIGGER_ATTEMPTS);
+      await expectNoScratch();
+    });
+
+    it('does not start a run while the head has a usable run coming or resolved (VS-467)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const triggerLandingRun = vi.fn(async () => {});
+      const forge = fakeForge({
+        hasCiWorkflows: vi.fn(async () => true),
+        prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const, isDraft: false })),
+        hasUsableCheckRun: vi.fn(async () => true),
+      });
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge,
+        prUrl: 'https://example.com/pr/running', method: 'squash', requiresCi: true, triggerLandingRun,
+      });
+      expect(outcome).toEqual({ kind: 'checks_pending' });
+      expect(triggerLandingRun).not.toHaveBeenCalled();
+      await expectNoScratch();
+    });
+
+    it('does not start a run when the forge cannot say, or on the attempt that pushed the head (VS-467)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const triggerLandingRun = vi.fn(async () => {});
+      const cannotTell = fakeForge({
+        hasCiWorkflows: vi.fn(async () => true),
+        prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const, isDraft: false })),
+        hasUsableCheckRun: vi.fn(async () => null),
+      });
+      await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge: cannotTell,
+        prUrl: 'https://example.com/pr/cannot-tell', method: 'squash', requiresCi: true, triggerLandingRun,
+      });
+      expect(triggerLandingRun).not.toHaveBeenCalled();
+
+      // A fresh draft's own ready transition starts its run: the same attempt must not also trigger.
+      await commit(origin, 'later.ts', 'export const later = 1;\n', 'chore: landed first');
+      const readyOnPush = fakeForge({
+        hasCiWorkflows: vi.fn(async () => true),
+        markPullRequestReady: vi.fn(async () => ({ changed: true })),
+        prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const, isDraft: false })),
+        hasUsableCheckRun: vi.fn(async () => false),
+      });
+      await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge: readyOnPush,
+        prUrl: 'https://example.com/pr/ready-push', method: 'squash', requiresCi: true, triggerLandingRun,
+      });
+      expect(readyOnPush.hasUsableCheckRun).not.toHaveBeenCalled();
+      expect(triggerLandingRun).not.toHaveBeenCalled();
+      await expectNoScratch();
+    });
+
+    it('pushes a real empty trigger commit that the remote branch does not have (VS-467)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const before = (await git(['rev-parse', `refs/remotes/origin/${BRANCH}`], clone)).stdout.trim();
+      const forge = fakeForge({
+        hasCiWorkflows: vi.fn(async () => true),
+        prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const, isDraft: false })),
+        hasUsableCheckRun: vi.fn(async () => false),
+      });
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge,
+        prUrl: 'https://example.com/pr/real-trigger', method: 'squash', requiresCi: true,
+      });
+      expect(outcome).toEqual({ kind: 'checks_pending' });
+      // The default trigger is an empty commit pushed to the branch, i.e. a pull_request synchronize.
+      expect((await git(['ls-remote', origin, BRANCH], clone)).stdout.trim().split('\t')[0]).not.toBe(before);
+      await expectNoScratch();
+    });
+
+    it('never merges any of the four failure-only landings VS-466 audited (VS-467)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const node = (name: string, conclusion: string) => ({ name, workflowName: 'CI', status: 'COMPLETED', conclusion });
+      // The recorded `statusCheckRollup` of each merged head in VS-466's audit; see gh.test.ts.
+      const landings = [
+        { pr: 283, rollup: [node('lint', 'SUCCESS'), node('typecheck', 'SUCCESS'), node('test-core', 'FAILURE'), node('test-ui', 'SUCCESS')] },
+        { pr: 300, rollup: [node('lint', 'SUCCESS'), node('typecheck', 'SUCCESS'), node('test-core', 'FAILURE'), node('test-ui', 'SUCCESS')] },
+        { pr: 302, rollup: [node('lint', 'SUCCESS'), node('typecheck', 'SUCCESS'), node('test-core', 'FAILURE'), node('test-ui', 'SUCCESS')] },
+        { pr: 282, rollup: [node('lint', 'SUCCESS'), node('typecheck', 'SUCCESS'), node('test-core (shard 1/4)', 'SUCCESS'), node('test-core (shard 2/4)', 'FAILURE'), node('test-core (shard 3/4)', 'SUCCESS'), node('test-core (shard 4/4)', 'SUCCESS')] },
+      ];
+
+      for (const { pr, rollup } of landings) {
+        const ciState = pullRequestFromGh({ statusCheckRollup: rollup }).checks;
+        expect(ciState).toBe('failure');
+        const forge = fakeForge({ prState: vi.fn(async () => ({ state: 'open' as const, ciState })) });
+        const outcome = await attemptArchiveThenMerge({
+          clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge,
+          prUrl: `https://github.com/victornor/agent-conductor/pull/${pr}`, method: 'squash', requiresCi: true,
+        });
+        expect(outcome).toEqual({ kind: 'checks_failed' });
+        expect(forge.mergePr).not.toHaveBeenCalled();
+      }
     });
 
     it('waits on an absent rollup when the repository does have CI workflows (VS-393)', async () => {

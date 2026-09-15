@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Alarm the weaver when a merge-slot holder sits in checks_pending too long,
+  re-request a missing run once, and prove the gate blocks the failure-only
+  landings
+skip_specs: true

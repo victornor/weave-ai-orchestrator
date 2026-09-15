@@ -1662,6 +1662,9 @@ describe('ChatRoute follow the bottom', () => {
     Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => CLIENT });
     Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = v; } });
     return (to: number) => {
+      // A move up is the human's: only a gesture pauses the follow (VS-451), so a test that means
+      // "they scrolled up by hand" has to bring the wheel with it.
+      if (to < top) fireEvent.wheel(el, { deltaY: -120 });
       top = to;
       fireEvent.scroll(el);
     };
@@ -1815,7 +1818,11 @@ describe('ChatRoute on a phone with the keyboard open', () => {
     Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => client });
     Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = v; } });
     return {
-      to: (v: number) => { top = v; fireEvent.scroll(el); },
+      to: (v: number) => {
+        if (v < top) fireEvent.wheel(el, { deltaY: -120 });
+        top = v;
+        fireEvent.scroll(el);
+      },
       shrink: () => { client = SHRUNK; act(() => resizeObserved()); },
     };
   }
@@ -2170,6 +2177,7 @@ describe('ChatRoute reading position', () => {
     // The list opens at its newest message; the human scrolls up from there into the history.
     el.scrollTop = HEIGHT - CLIENT;
     fireEvent.scroll(el);
+    fireEvent.wheel(el, { deltaY: -120 });
     el.scrollTop = 380;
     fireEvent.scroll(el);
     unmount();
@@ -2190,6 +2198,7 @@ describe('ChatRoute reading position', () => {
     const el = list(container);
     el.scrollTop = HEIGHT - CLIENT;
     fireEvent.scroll(el);
+    fireEvent.wheel(el, { deltaY: -120 });
     el.scrollTop = 380;
     fireEvent.scroll(el);
     unmount();

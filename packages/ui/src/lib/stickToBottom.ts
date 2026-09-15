@@ -3,8 +3,11 @@
  *
  * The bottom: a transcript that always scrolls to the newest line yanks the human away the moment
  * they scroll up to read history. This follows new content only while they are already at the
- * bottom; scrolling up pauses the follow, and reaching the bottom again — by hand or through the
- * button — resumes it. The list is opened at its bottom outright, with no animation to sit through.
+ * bottom; a human scrolling up (a wheel, a touch, a scroll key, a scrollbar drag) pauses the follow,
+ * and reaching the bottom again — by hand or through the button — resumes it. A scroll the browser
+ * makes on its own never pauses: content shrinking under a clamped list, an older page anchoring, or
+ * the composer growing so the list gets shorter are all geometry, not the human (VS-451). The list
+ * is opened at its bottom outright, with no animation to sit through.
  *
  * The top: when the caller pages its history, reaching the top asks for the page before the loaded
  * one, and the viewport is held on what the human was reading while that page is inserted above.
@@ -25,6 +28,17 @@ export function isAtBottom(el: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 
 }
 /** Within this many pixels of the top counts as asking for the page before the loaded history. */
 const NEAR_TOP_PX = 120;
+
+/**
+ * How long after a scroll gesture a scroll event still counts as the human's. The events an input
+ * causes arrive in the frames after it — a wheel's easing, a touch's momentum — so the gesture is
+ * remembered rather than only honoured while it is held. Short enough that a later reflow is not
+ * mistaken for it.
+ */
+const HUMAN_SCROLL_MS = 200;
+
+/** The keys a browser scrolls a focused list on; a typed character must not count as a gesture. */
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Spacebar']);
 
 /** The older end of the list, for a caller that pages its history. */
 export interface OlderPages {
@@ -165,10 +179,28 @@ export function useStickToBottom(
 
   useEffect(() => {
     if (!el) return;
-    // Only an upward scroll pauses the follow. A smooth scroll of our own fires scroll events all the
-    // way down, and each one is still short of the bottom until the animation lands; treating those
-    // as "the human scrolled away" would stop the follow it was in the middle of restoring.
+    // Only a scroll the human made pauses the follow (VS-451). The browser also moves `scrollTop`
+    // on its own — content shrinking under a list clamped at its end, an older page anchoring, the
+    // composer growing so the list gets shorter and its maximum offset drops — and reading any of
+    // those as "the human scrolled up" is what stopped the follow without one. So an off-bottom
+    // position only pauses when a wheel, touch, scroll key or scrollbar drag is behind it; a purely
+    // geometric move never does. Our own smooth follow moves *down*, so it is never mistaken for
+    // the human's, and the upward-scroll button/unread behaviour is unchanged for a real scroll-up.
     let last = el.scrollTop;
+    let lastHuman = 0;
+    let pointerDown = false;
+    let touching = false;
+    const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const markHuman = (): void => { lastHuman = now(); };
+    const human = (): boolean => touching || pointerDown || now() - lastHuman <= HUMAN_SCROLL_MS;
+    const onWheel = (): void => markHuman();
+    const onTouchStart = (): void => { touching = true; markHuman(); };
+    const onTouchMove = (): void => markHuman();
+    const onTouchEnd = (): void => { touching = false; markHuman(); };
+    const onKeyDown = (e: KeyboardEvent): void => { if (SCROLL_KEYS.has(e.key)) markHuman(); };
+    // A scrollbar drag starts on the scroller itself; a click on a message must not arm it.
+    const onPointerDown = (e: PointerEvent): void => { if (e.target === el) { pointerDown = true; markHuman(); } };
+    const onPointerUp = (): void => { if (!pointerDown) return; pointerDown = false; markHuman(); };
     const onScroll = (): void => {
       const top = el.scrollTop;
       const up = top < last;
@@ -177,7 +209,9 @@ export function useStickToBottom(
         following.current = true;
         setAtBottom(true);
         setUnread(false);
-      } else if (up) {
+      } else if (up && human()) {
+        // Their own movement away from the bottom, not ours: a downward scroll (including the
+        // frames of our own follow, which can still fall inside the gesture window) never pauses.
         following.current = false;
         setAtBottom(false);
       }
@@ -191,7 +225,27 @@ export function useStickToBottom(
       }
     };
     el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
+    el.addEventListener('wheel', onWheel, { passive: true });
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    el.addEventListener('touchcancel', onTouchEnd, { passive: true });
+    el.addEventListener('keydown', onKeyDown);
+    el.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+      el.removeEventListener('touchcancel', onTouchEnd);
+      el.removeEventListener('keydown', onKeyDown);
+      el.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
   }, [el]);
 
   // Before the paint that reveals an older page: put the viewport back the same distance from the

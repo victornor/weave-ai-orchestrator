@@ -425,44 +425,6 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
 
   const replyTo = useMemo(() => (draft.replyToId ? (messages.data ?? []).find((m) => m.id === draft.replyToId) ?? null : null), [draft.replyToId, messages.data]);
 
-  const send = useCallback(
-    (text: string, files: File[], opts: { projectId: string | null; replyToMessageId: string | null; idempotencyKey: string }): void | Promise<void> => {
-      if (!fetchId) return;
-      const body = {
-        body: text,
-        ...(opts.projectId ? { projectId: opts.projectId } : {}),
-        ...(opts.replyToMessageId ? { replyToMessageId: opts.replyToMessageId } : {}),
-        ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
-      };
-      const queueThisMessage = (): void => {
-        enqueue({ kind: 'thread', path: `/threads/${fetchId}/messages`, body, label: text.slice(0, 60) });
-      };
-      if (files.length > 0) {
-        if (offline) return Promise.reject(new Error('Attachments cannot be queued offline — reconnect and try again.'));
-        setSending(true);
-        return withTimeout(
-          post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, files, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId }),
-          SEND_TIMEOUT_MS,
-        )
-          .then(() => { setSending(false); clear(); })
-          .catch((e: unknown) => { setSending(false); throw e; });
-      }
-      if (offline) { queueThisMessage(); clear(); return; }
-      setSending(true);
-      return withTimeout(
-        post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId }),
-        SEND_TIMEOUT_MS,
-      )
-        .then(() => { setSending(false); clear(); })
-        .catch((e: unknown) => {
-          setSending(false);
-          if (e instanceof NetworkError) { queueThisMessage(); clear(); return; }
-          throw e;
-        });
-    },
-    [fetchId, offline, post, clear],
-  );
-
   const onAnswer = useCallback(
     (id: string, a: V2Answer): void => {
       const d = openDecisions.find((x) => x.id === id);
@@ -520,6 +482,50 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // and the human's own messages do not reveal.
   const revealIds = useNewOutboundMessageIds(messages.data, fetchId);
   const attachScroll = useCallback((el: HTMLDivElement | null) => { stick.scrollRef(el); }, [stick.scrollRef]);
+
+  // Sending always returns the view to the bottom and resumes following (VS-451): the human's own
+  // message and the weaver's reply must not land behind a follow a stray upward scroll paused. Both
+  // the successful send and the queued one go through here, so a queued message counts too; the
+  // reply arrives later and is followed because `following` is true again.
+  const toBottom = stick.toBottom;
+  const send = useCallback(
+    (text: string, files: File[], opts: { projectId: string | null; replyToMessageId: string | null; idempotencyKey: string }): void | Promise<void> => {
+      if (!fetchId) return;
+      const body = {
+        body: text,
+        ...(opts.projectId ? { projectId: opts.projectId } : {}),
+        ...(opts.replyToMessageId ? { replyToMessageId: opts.replyToMessageId } : {}),
+        ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
+      };
+      const queueThisMessage = (): void => {
+        enqueue({ kind: 'thread', path: `/threads/${fetchId}/messages`, body, label: text.slice(0, 60) });
+        toBottom();
+      };
+      if (files.length > 0) {
+        if (offline) return Promise.reject(new Error('Attachments cannot be queued offline — reconnect and try again.'));
+        setSending(true);
+        return withTimeout(
+          post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, files, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId }),
+          SEND_TIMEOUT_MS,
+        )
+          .then(() => { setSending(false); clear(); toBottom(); })
+          .catch((e: unknown) => { setSending(false); throw e; });
+      }
+      if (offline) { queueThisMessage(); clear(); return; }
+      setSending(true);
+      return withTimeout(
+        post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId }),
+        SEND_TIMEOUT_MS,
+      )
+        .then(() => { setSending(false); clear(); toBottom(); })
+        .catch((e: unknown) => {
+          setSending(false);
+          if (e instanceof NetworkError) { queueThisMessage(); clear(); return; }
+          throw e;
+        });
+    },
+    [fetchId, offline, post, clear, toBottom],
+  );
 
   const canSplit = shouldSplit(shellWidth);
   // Desktop is split by default: the pane stays whether or not anything is waiting, so the layout
@@ -594,7 +600,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                 onBack={() => setAnchor(null)}
               />
             ) : (
-              <div ref={attachScroll} className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-5">
+              <div ref={attachScroll} data-v2-chat-scroll className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-5">
                 <div className="mx-auto flex w-full max-w-[720px] flex-col gap-5">
                   {messages.data === undefined && !messages.isError ? (
                     <p className="text-micro text-text-4">Loading the conversation…</p>

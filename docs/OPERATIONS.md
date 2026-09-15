@@ -631,3 +631,110 @@ else references them once the run is finished). `weave worker purge <id>` remove
 worktree (refuses a dirty worktree without `--force`). Never delete a live worker's `work/` by hand —
 `weave worktree verify <id>` tells you whether the work has landed, and `weave worktree discard <id>` is
 the supported destructive path.
+
+---
+
+## 9. Self-hosted CI runner
+
+`.github/workflows/ci.yml` — `lint`, `typecheck`, `test-core` and `test-ui` — runs on a self-hosted
+GitHub Actions runner on this host, not on paid GitHub-hosted minutes (VS-394 built it, VS-395
+pointed the jobs at it). It is a persistent, resource-capped Docker container, isolated from the
+daemon and the LAN, and registered for the `victornor/agent-conductor` repository only. Its labels
+are `self-hosted, linux, x64, weave-ci` (GitHub stores them `self-hosted, Linux, X64, weave-ci`;
+matching is case-insensitive), so `ci.yml` uses `runs-on: [self-hosted, linux, x64, weave-ci]`.
+
+### What runs where
+
+| Piece | Where |
+|---|---|
+| Runner | container `weave-ci-runner`, image `weave-ci-runner:2.337.0`, build context `/srv/weave-ci-runner/` (base `ghcr.io/actions/actions-runner:2.337.0`) |
+| Firewall | container `weave-ci-fw`, image `weave-ci-fw:1`, build context `/srv/weave-ci-fw/` |
+| Network | bridge `weave-ci-net`, subnet `172.30.250.0/24` |
+| Job state | `/home/runner/_work` inside the container; a job hook wipes the workspace contents and the pnpm/npm caches before and after every job |
+
+The image installs `xz-utils` (VS-394) plus `libatomic1`, `tmux`, `git`, `unzip` and `rsync`
+(VS-395). `libatomic1` is what pnpm's bundled native executable (`@pnpm/exe`, used by
+`pnpm/action-setup`) links against — without it every job exits `127` before its first step.
+`tmux`, `git` and `unzip` are host tools the core tests shell out to and that `ubuntu-latest`
+happens to provide; `rsync` is the warm-copy tool the git worktree provider uses
+(`packages/core/src/worktrees/git.ts`), so its absence fails `test-core`'s worktree warm-path test.
+
+### Resource caps
+
+`--cpus=8 --memory=16g --memory-swap=16g --pids-limit=8192 --cap-drop=ALL
+--security-opt no-new-privileges`, with `--init` and `--restart unless-stopped`: 8 of the host's 32
+cores and a hard 16 GiB with no in-container swap, one job at a time. A CFS quota does not change
+what `nproc`/`os.availableParallelism()` report inside the container — still the host's 32 cores — so
+`ci.yml` caps vitest's forks at the quota with `VITEST_MAX_FORKS=8`.
+
+### Network isolation
+
+`weave-ci-fw` runs on the host network with only `NET_ADMIN`/`NET_RAW` and inserts ten
+`iptables-nft` DROP rules — the CI subnet to `100.64.0.0/10`, `10.0.0.0/8`, `172.16.0.0/12`,
+`192.168.0.0/16` and `169.254.0.0/16`, in both `INPUT` (host-destined traffic is `local`/`RTN_LOCAL`
+on this host) and `DOCKER-USER` (forwarded). It verifies every rule with `-C` and exits non-zero
+otherwise. The runner's entrypoint is fail-closed: it does not start listening for jobs until all
+three host probes — the daemon at `100.64.0.10:7433`, the bridge gateway at `172.30.250.1:7433`
+and the LAN at `192.168.1.40:9` — time out with `curl` exit **28** (SYN dropped; a refusal, exit 7,
+would mean the host answered). Both containers carry `--cap-drop=ALL` and `no-new-privileges`; the
+runner has no docker socket, no host mounts and no host network.
+
+The container must pass `--dns 1.1.1.1 --dns 1.0.0.1`: `daemon.json` sets `"dns": ["172.17.0.1"]`,
+which the DROP rules block, so DNS — and with it registration and every job — fails without the
+override. Keep it on every recreate.
+
+### Boot and registration
+
+```bash
+systemctl is-enabled docker          # "enabled": this host ships docker socket-activated only, and
+                                     # docker.service is what brings the containers back after a reboot
+
+# Register once. GitHub → repo Settings → Actions → Runners → New self-hosted runner → copy --token.
+# The in-container read works in zsh; the host-shell `read -rs … | docker exec -i` form does not.
+sudo docker exec -it weave-ci-runner bash -c 'read -rsp "Token: " T && printf %s "$T" > /home/runner/.registration-token && echo; echo saved'
+sudo docker logs --tail=40 -f weave-ci-runner
+# expect: "registering weave-ci-01" / "registered" / "firewall verified…" / "starting runner" / "Listening for Jobs"
+```
+
+There is no stored secret: the registration token is one-hour, supplied once and deleted on success.
+**Recreating the container — any image rebuild — loses the runner credentials**, so re-register with
+a fresh one-hour token and keep `--dns`.
+
+### Status, logs and removal
+
+```bash
+systemctl is-enabled docker
+sudo docker ps --filter name='weave-ci-'
+sudo docker exec weave-ci-fw iptables-nft -S INPUT
+sudo docker exec weave-ci-fw iptables-nft -S DOCKER-USER
+sudo docker inspect -f 'NanoCpus={{.HostConfig.NanoCpus}} Memory={{.HostConfig.Memory}} Swap={{.HostConfig.MemorySwap}} Pids={{.HostConfig.PidsLimit}}' weave-ci-runner
+sudo docker logs --tail=200 -f weave-ci-runner          # boot log also at /home/runner/runner-boot.log
+
+# full removal — the iptables rules outlive the sidecar, so delete them too
+sudo docker rm -f weave-ci-runner weave-ci-fw
+for chain in INPUT DOCKER-USER; do
+  for r in 100.64.0.0/10 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16; do
+    sudo iptables-nft -D "$chain" -s 172.30.250.0/24 -d "$r" -j DROP
+  done
+done
+sudo docker rmi weave-ci-runner:2.337.0 weave-ci-fw:1
+sudo docker network rm weave-ci-net
+sudo rm -rf /srv/weave-ci-runner /srv/weave-ci-fw
+GH_TOKEN="$(gh auth token)" gh api /repos/victornor/agent-conductor/actions/runners    # then DELETE .../actions/runners/<id>
+```
+
+### Benign log noise
+
+`ERR BrokerServer … TaskCanceledException` right after a job finishes, and a `session … already
+exists` Conflict right after re-registering (the old container's broker session), are both expected;
+the runner's ~30s retry clears the second.
+
+### Accepted risks
+
+- **Persistent, not ephemeral.** A job runs as the same `runner` user, so it can alter the runner's
+  top-level scripts and read `.runner`/`.credentials` (runner-scoped). Acceptable for a private repo
+  with no external forks; move to a JIT/ephemeral controller before the repository goes public.
+- **The firewall sidecar holds `NET_ADMIN` in the host network namespace**, running one idempotent
+  script only.
+- **One job at a time, 8 of 32 cores and a 16 GiB hard cap** — the limit that keeps CI from starving
+  the daemon and local worker test runs.

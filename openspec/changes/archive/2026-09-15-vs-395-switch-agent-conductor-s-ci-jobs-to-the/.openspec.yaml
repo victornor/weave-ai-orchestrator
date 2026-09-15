@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Switch agent-conductor's CI jobs to the self-hosted runner now that VS-394
+  has it online
+skip_specs: true

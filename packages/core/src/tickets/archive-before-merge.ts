@@ -171,16 +171,18 @@ async function repoHasCiWorkflows(forge: ForgeAdapter, clonePath: string): Promi
 /**
  * The archive-then-merge sequence (design.md Decision 1/2): fetch the current landing tip, rebase
  * the ticket's branch onto it if it has fallen behind (Decision 5), archive the ticket's OpenSpec
- * change onto that branch if it has one, push, and merge — never pushing anything to the landing
- * branch itself (Decision 3). A real rebase conflict or an archive failure stop here; the caller
- * decides how to report either back to the ticket.
+ * change onto that branch if it has one, bring the pull request out of draft, push, and merge — never
+ * pushing anything to the landing branch itself (Decision 3). A real rebase conflict or an archive
+ * failure stop here; the caller decides how to report either back to the ticket.
  *
- * Required-checks handling (design.md Decision 6) is partial in this version: a still-pending check
- * is reported as `checks_pending` rather than awaited across a released lock and a supervisor sweep
- * — that bounded, lock-released wait is tracked as a follow-up, not yet built. A repository with no
- * CI workflows (VS-393) merges immediately, exactly as before VS-393; when the forge cannot say, the
- * sequence waits for `CI_NONE_GRACE_MS` and then merges anyway, so a landing never retries forever
- * on checks that will not come.
+ * Required-checks handling (design.md Decision 6): a still-pending check is reported as
+ * `checks_pending` rather than awaited across a released lock and a supervisor sweep — that bounded,
+ * lock-released wait is tracked as a follow-up, not yet built. VS-466: the sequence requires the
+ * resolved checks to be on the exact head it produces (a rolled-up `success` the forge reports for
+ * another commit is not a pass), and a repository the forge says has CI workflows never lands on an
+ * absent or all-skipped rollup. A repository with no CI workflows (VS-393) merges immediately; when
+ * the forge cannot say, the sequence waits for `CI_NONE_GRACE_MS` and then merges anyway, so a
+ * landing never retries forever on checks that will not come.
  */
 export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promise<ArchiveThenMergeOutcome> {
   const { clonePath, branch, landingBranch, changeName, forge, prUrl, method, requiresCi = false, scratch: scratchTarget } = opts;
@@ -228,6 +230,15 @@ export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promi
         archivedAs = archivedElsewhere;
       }
     }
+    // VS-466: bring the pull request out of draft *before* the push. A push made while the pull
+    // request is still a draft starts only a run whose every job the draft guard skips, which is the
+    // all-skipped rollup the gate used to read as a pass on the head that then landed. Out of draft
+    // first, the push's own run evaluates that head. A rebase/archive push made while the PR is a
+    // draft starts no run, so this transition is what begins one.
+    let changedDraft = false;
+    if (forge.markPullRequestReady) {
+      changedDraft = (await forge.markPullRequestReady(clonePath, prUrl)).changed;
+    }
     if (changed) {
       // The scratch worktree is detached (VS-363), so push its HEAD to the remote branch by explicit
       // refspec — never via a local branch, which git would refuse to check out while the worker's
@@ -236,14 +247,16 @@ export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promi
       const push = await git(['push', '--force-with-lease', 'origin', `HEAD:refs/heads/${branch}`], scratch.path, 120_000);
       if (!push.ok) throw new OcError('internal', `push of ${branch} failed: ${push.stderr.trim().slice(0, 300)}`, { branch });
     }
-    // VS-393: bring the ticket's draft pull request out of draft before reading its checks, so the
-    // single run the transition starts evaluates the head that will land. A rebase/archive push made
-    // while the PR is still a draft starts no run, so this is the only place a run begins.
-    let changedDraft = false;
-    if (forge.markPullRequestReady) {
-      changedDraft = (await forge.markPullRequestReady(clonePath, prUrl)).changed;
-    }
+    // VS-466: the exact head this landing produces — the scratch worktree's HEAD after any push, and
+    // the remote branch tip (fetched above) when nothing needed pushing.
+    const expectedHead = (await git(['rev-parse', 'HEAD'], scratch.path, 15_000)).stdout.trim() || null;
     const state = await forge.prState(clonePath, prUrl);
+    // A rollup the forge reports for any head other than the one this landing produces is evidence
+    // about a different commit, so it can never be a pass for this one: wait and re-read.
+    if (expectedHead && state.headSha && state.headSha !== expectedHead) {
+      noneSinceByPr.delete(prUrl);
+      return { kind: 'checks_pending' };
+    }
     if (state.ciState === 'pending') {
       noneSinceByPr.delete(prUrl);
       return { kind: 'checks_pending' };
@@ -255,14 +268,24 @@ export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promi
       // that cannot answer waits, but only for the bounded grace, so a repo we cannot classify still
       // lands instead of retrying forever on checks that will never exist.
       const hasWorkflows = await repoHasCiWorkflows(forge, clonePath);
-      const waiting = changed || changedDraft || noneSinceByPr.has(prUrl);
-      if (hasWorkflows !== false && waiting) {
-        const since = noneSinceByPr.get(prUrl) ?? Date.now();
-        noneSinceByPr.set(prUrl, since);
-        if (Date.now() - since < (opts.noCiGraceMs ?? CI_NONE_GRACE_MS)) return { kind: 'checks_pending' };
-        // Past the grace: stop waiting and merge as a no-CI project, with the caller's one report.
+      if (hasWorkflows === true) {
+        // VS-466: a repository with CI workflows never lands on an absent (or all-skipped) rollup.
+        // Wait for the run the transition above started; retry, never land, until it resolves.
         noneSinceByPr.delete(prUrl);
-        await opts.onNoCiTimeout?.();
+        return { kind: 'checks_pending' };
+      }
+      if (hasWorkflows === null) {
+        const waiting = changed || changedDraft || noneSinceByPr.has(prUrl);
+        if (waiting) {
+          const since = noneSinceByPr.get(prUrl) ?? Date.now();
+          noneSinceByPr.set(prUrl, since);
+          if (Date.now() - since < (opts.noCiGraceMs ?? CI_NONE_GRACE_MS)) return { kind: 'checks_pending' };
+          // Past the grace: stop waiting and merge as a no-CI project, with the caller's one report.
+          noneSinceByPr.delete(prUrl);
+          await opts.onNoCiTimeout?.();
+        } else {
+          noneSinceByPr.delete(prUrl);
+        }
       } else {
         noneSinceByPr.delete(prUrl);
       }

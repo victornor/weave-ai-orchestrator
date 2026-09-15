@@ -94,14 +94,43 @@ describe('mapping gh JSON to a pull request', () => {
     expect(pullRequestFromGh({ ...DRAFT, statusCheckRollup: rollup }).checks).toBe('pending');
   });
 
-  it('tallies the checks that passed out of those reported (VS-328)', () => {
+  // VS-466: the merge gate read an all-skipped draft run as a pass, so four landings reached main with
+  // no CI. These are the real rollups `gh pr view --json statusCheckRollup` returned for the two heads.
+  it('reads an all-skipped rollup as none, never a pass (VS-466)', () => {
+    const rollup = ['lint', 'typecheck', 'test-core', 'test-ui', 'test-core (shard ${{ matrix.shard }}/4)']
+      .map((name) => ({ name, workflowName: 'CI', status: 'COMPLETED', conclusion: 'SKIPPED' }));
+    // PR #380 (VS-446), head 3996ecd96e: five completed/skipped runs, one skipped workflow run.
+    expect(pullRequestFromGh({ ...DRAFT, statusCheckRollup: rollup }).checks).toBe('none');
+  });
+
+  it('accepts a rollup whose skipped duplicates sit beside a real success (VS-466)', () => {
+    // PR #377 (VS-445), head 37de6fcf58: each name appears twice, once skipped (the draft run) and
+    // once success (the run on the head that landed). The skipped copies must not reject it.
+    const real = ['lint', 'typecheck', 'test-ui', 'test-core'].map((name) => ({ name, status: 'COMPLETED', conclusion: 'SUCCESS' }));
+    const shards = [1, 2, 3, 4].map((n) => ({ name: `test-core (shard ${n}/4)`, status: 'COMPLETED', conclusion: 'SUCCESS' }));
+    const skipped = ['lint', 'typecheck', 'test-ui', 'test-core', 'test-core (shard ${{ matrix.shard }}/4)']
+      .map((name) => ({ name, status: 'COMPLETED', conclusion: 'SKIPPED' }));
+    expect(pullRequestFromGh({ ...DRAFT, statusCheckRollup: [...skipped, ...real, ...shards] }).checks).toBe('success');
+  });
+
+  it('does not read a cancelled, neutral or in-progress check as a pass (VS-466)', () => {
+    const pass = { name: 'lint', status: 'COMPLETED', conclusion: 'SUCCESS' };
+    for (const conclusion of ['CANCELLED', 'NEUTRAL', 'STALE']) {
+      const rollup = [pass, { name: 'typecheck', status: 'COMPLETED', conclusion }];
+      expect(pullRequestFromGh({ ...DRAFT, statusCheckRollup: rollup }).checks).toBe('pending');
+    }
+    expect(pullRequestFromGh({ ...DRAFT, statusCheckRollup: [pass, { name: 'typecheck', status: 'IN_PROGRESS' }] }).checks).toBe('pending');
+  });
+
+  it('tallies the checks that passed out of those reported (VS-328, VS-466)', () => {
     const rollup = [
       { name: 'a', status: 'COMPLETED', conclusion: 'SUCCESS' },
       { name: 'b', status: 'COMPLETED', conclusion: 'NEUTRAL' },
       { name: 'c', status: 'COMPLETED', conclusion: 'FAILURE' },
       { name: 'd', status: 'IN_PROGRESS' },
     ];
-    expect(checkTally(rollup)).toEqual({ passed: 2, total: 4 });
+    // VS-466: a neutral or skipped check is no longer counted as a pass; only a completed success is.
+    expect(checkTally(rollup)).toEqual({ passed: 1, total: 4 });
     expect(checkTally([])).toBeUndefined();
     expect(checkTally(null)).toBeUndefined();
   });
@@ -125,7 +154,8 @@ describe('mapping gh JSON to a pull request', () => {
     ]);
     expect(detail.checkRuns).toEqual([
       { name: 'ci / test', state: 'success', url: 'https://ci/1' },
-      { name: 'ci / lint', state: 'success', url: 'https://ci/2' },
+      // VS-466: a skipped check is no longer shown as a success.
+      { name: 'ci / lint', state: 'none', url: 'https://ci/2' },
     ]);
   });
 

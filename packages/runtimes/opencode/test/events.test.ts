@@ -87,3 +87,21 @@ describe('opencode command events (VS-328)', () => {
     expect(cmd.payload['tests']).toEqual({ passed: 28, total: 28 });
   });
 });
+
+describe('opencode compaction (VS-454)', () => {
+  // `opencode run --format json` never writes a compaction event: its only event kinds are
+  // tool_use / step_start / step_finish / text / reasoning / error, and its session.status is
+  // idle|retry|busy. A v2 `session.next.compaction.started` line is therefore not something the
+  // stream produces; if one ever did arrive, it must not be mistaken for a compaction event.
+  it('does not emit a compaction event for opencode', () => {
+    const p = createOpenCodeParser();
+    // The first frame carrying a sessionID announces the session; neither is a compaction event.
+    const types = [
+      ...p.handle(JSON.stringify({ type: 'session.next.compaction.started', sessionID: 's1' })),
+      ...p.handle(JSON.stringify({ type: 'session.compacted', sessionID: 's1' })),
+    ].map((e) => e.type);
+    expect(types).not.toContain('session.compaction.started');
+    expect(types).not.toContain('session.compaction.completed');
+    expect(types).toContain('runtime.raw');
+  });
+});

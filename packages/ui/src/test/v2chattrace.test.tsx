@@ -351,4 +351,17 @@ describe('the live trace reveal (VS-433)', () => {
     rerender(<ChatTrace events={[...baseline, arrival]} reveal />);
     expect(narrations()[1]).toHaveTextContent('Now the second file.');
   });
+
+  it('keeps a completed compaction as one marker row with the tokens (VS-454)', () => {
+    render(<ChatTrace events={[
+      event({ id: 'e1', seq: 1, type: 'assistant.text', payload: { text: 'Carrying on.' } }),
+      event({ id: 'e2', seq: 2, type: 'session.compaction.completed', payload: { trigger: 'auto', preTokens: 184_320, postTokens: 11_800 } }),
+    ]} />);
+    expect(document.querySelector('[data-trace-compaction]')).toHaveTextContent('Conversation compacted · 184.3k → 11.8k tok');
+  });
+
+  it('leaves a started compaction out of the finished trace (VS-454)', () => {
+    render(<ChatTrace events={[event({ id: 'e1', seq: 1, type: 'session.compaction.started', payload: {} })]} />);
+    expect(document.querySelector('[data-trace-compaction]')).toBeNull();
+  });
 });

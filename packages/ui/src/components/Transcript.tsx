@@ -204,6 +204,12 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
     );
   }
 
+  // VS-454: the compaction marker the shared transcript now carries. V1 is not being built out
+  // (captain, 2026-09-14), so it gets the same one line V2 shows, not a new treatment.
+  if (block.type === 'compaction') {
+    return <div className="ac-mono px-2.5 py-1.5 text-nano text-text-4">{block.text}</div>;
+  }
+
   const expandable = Boolean(block.diff) || Boolean(block.editPayload);
   // A file tool shows only the file name (VS-437); the whole path stays on the element as a title.
   // A command, a pattern or a url has no `targetPath` and renders exactly as it always did.

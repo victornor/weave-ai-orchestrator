@@ -326,3 +326,27 @@ describe('chatTranscript', () => {
     expect(chatTranscript(undefined)).toEqual([]);
   });
 });
+
+describe('compaction (VS-454)', () => {
+  it('renders a completed compaction as one marker row with the tokens it reported', () => {
+    reset();
+    const blocks = runEventsToTranscript([
+      ev('assistant.text', { text: 'Carrying on.' }),
+      ev('session.compaction.completed', { trigger: 'auto', preTokens: 184_320, postTokens: 11_800, droppedTokens: 172_520 }),
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(['text', 'compaction']);
+    expect(blocks[1]).toMatchObject({ kind: 'compaction', text: 'Conversation compacted · 184k → 11.8k tok', trigger: 'auto', preTokens: 184_320, postTokens: 11_800 });
+  });
+
+  it('omits tokens the runtime did not report, and keeps the one-line marker', () => {
+    reset();
+    const blocks = runEventsToTranscript([ev('session.compaction.completed', { trigger: 'manual' })]);
+    expect(blocks[0]).toMatchObject({ kind: 'compaction', text: 'Conversation compacted', trigger: 'manual', preTokens: null, postTokens: null });
+  });
+
+  it('does not put a started compaction in the finished transcript — that is the live state', () => {
+    reset();
+    const blocks = runEventsToTranscript([ev('session.compaction.started', {})]);
+    expect(blocks).toEqual([]);
+  });
+});

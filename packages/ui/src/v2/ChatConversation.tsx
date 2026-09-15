@@ -20,7 +20,7 @@ import { replyTargets } from '../lib/replyTargets';
 import { cx } from '../lib/cx';
 import { useRunEventStream } from '../api/runStream';
 import { ChatMessage } from './ChatMessage';
-import { ChatTrace, ChatTurnTrace } from './ChatTrace';
+import { ChatTrace, ChatTurnTrace, CompactionRow } from './ChatTrace';
 
 /** A finished turn is held on screen this long when no row replaces it (V1's `SETTLE_MS`). */
 export const LIVE_SETTLE_MS = 4000;
@@ -111,12 +111,28 @@ function LiveSection({
   runStreamStatus: { state: string };
   onRetry: () => void;
 }): React.ReactElement {
+  // VS-454: a compaction is under way when a start has arrived with no completion after it. The
+  // weaver goes quiet for tens of seconds here, so say so rather than leaving the live area reading
+  // "working" through the pause.
+  const compacting = useMemo(() => {
+    let started = false;
+    for (const e of liveEvents) {
+      if (e.type === 'session.compaction.started') started = true;
+      else if (e.type === 'session.compaction.completed') started = false;
+    }
+    return started;
+  }, [liveEvents]);
   return (
     <section aria-label={workingAriaLabel} className="flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <span className="size-1.5 flex-none rounded-pill bg-working" aria-hidden />
-        <span className="ac-mono text-nano text-text-3">{live ? 'working' : 'starting…'}</span>
-      </div>
+      {compacting ? (
+        // VS-454: the live compaction row, shared with the screenshot harness and tests.
+        <CompactionRow />
+      ) : (
+        <div className="flex items-center gap-2">
+          <span className="size-1.5 flex-none rounded-pill bg-working" aria-hidden />
+          <span className="ac-mono text-nano text-text-3">{live ? 'working' : 'starting…'}</span>
+        </div>
+      )}
       {live && (runStreamStatus.state === 'unreachable' || runStreamStatus.state === 'offline') ? (
         <p className="text-nano text-text-3">
           The live stream dropped.{' '}

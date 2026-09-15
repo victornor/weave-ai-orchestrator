@@ -191,12 +191,26 @@ export const RECORDED_RUN_PHASES: readonly RunPhase[] = ['prepare_home', 'prepar
  * behind it. Never `user_input.requested`, which is the agent asking for input, the opposite
  * direction.
  */
+/**
+ * Conversation compaction (VS-454): the runtime summarised the session's history and started a
+ * fresh context, which the weaver's chat otherwise shows only as a long silence and a context-meter
+ * drop. `session.compaction.started` is the live signal (payload `{ trigger? }`), shown while the
+ * pause is under way; `session.compaction.completed` is the boundary the finished trace keeps
+ * (payload `{ trigger?, preTokens?, postTokens?, droppedTokens? }`). A runtime that reports no
+ * signal emits neither, and a start with no completion simply means compaction was still running
+ * when the event window ended.
+ */
 export const RUN_EVENT_TYPES = [
-  'session.started', 'session.resumed', 'turn.started', 'assistant.text', 'assistant.thinking', 'tool.call', 'tool.result', 'tool.denied',
+  'session.started', 'session.resumed', 'session.compaction.started', 'session.compaction.completed',
+  'turn.started', 'assistant.text', 'assistant.thinking', 'tool.call', 'tool.result', 'tool.denied',
   'permission.requested', 'user_input.requested', 'plan.proposed', 'file.changed', 'command.executed', 'usage.delta', 'error', 'turn.completed',
   'runtime.raw', 'run.started', 'run.finalized', 'run.phase.timing', 'supervisor.action', 'human.input',
 ] as const;
 export type RunEventType = (typeof RUN_EVENT_TYPES)[number];
+
+/** Which compaction this is: `auto` at the window-fill threshold, `manual` when a human asked for it. */
+export const COMPACTION_TRIGGERS = ['auto', 'manual'] as const;
+export type CompactionTrigger = (typeof COMPACTION_TRIGGERS)[number];
 
 export const WORKTREE_STATUSES = ['active', 'dirty', 'landed', 'removed', 'orphaned'] as const;
 export type WorktreeStatus = (typeof WORKTREE_STATUSES)[number];

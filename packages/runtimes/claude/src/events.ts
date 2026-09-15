@@ -67,7 +67,16 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
   }
 
   function system(msg: Json, ts: string): RuntimeEvent[] {
-    if (str(msg['subtype']) !== 'init') return [raw(`system.${str(msg['subtype']) ?? 'unknown'}`, msg, ts)];
+    const subtype = str(msg['subtype']);
+    // VS-454: Claude Code's own compaction signals, read from the installed 2.1.270 bundle.
+    // `system`/`status` with `status: "compacting"` is emitted while compaction runs (the earlier
+    // signal, so the chat can show the pause); `system`/`compact_boundary` carries the
+    // `compact_metadata` (`trigger`, `pre_tokens`, `post_tokens`, …) once it finishes.
+    if (subtype === 'compact_boundary') return [compactionCompleted(msg, ts)];
+    if (subtype === 'status' && str(msg['status']) === 'compacting') {
+      return [{ ts, type: 'session.compaction.started', payload: {} }];
+    }
+    if (subtype !== 'init') return [raw(`system.${subtype ?? 'unknown'}`, msg, ts)];
     state.model = str(msg['model']) ?? state.model;
     sessionAnnounced = true;
     return [{
@@ -77,6 +86,24 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
         permissionMode: str(msg['permissionMode']), tools: msg['tools'], mcpServers: msg['mcp_servers'],
       },
     }];
+  }
+
+  /** The post-compaction boundary: `compact_metadata` in its wire snake_case, read defensively. */
+  function compactionCompleted(msg: Json, ts: string): RuntimeEvent {
+    const meta = obj(msg['compact_metadata']);
+    const trigger = str(meta?.['trigger']);
+    const pre = num(meta?.['pre_tokens']);
+    const post = num(meta?.['post_tokens']);
+    const dropped = num(meta?.['cumulative_dropped_tokens']);
+    return {
+      ts, type: 'session.compaction.completed',
+      payload: {
+        ...(trigger === 'auto' || trigger === 'manual' ? { trigger } : {}),
+        ...(pre != null ? { preTokens: pre } : {}),
+        ...(post != null ? { postTokens: post } : {}),
+        ...(dropped != null ? { droppedTokens: dropped } : {}),
+      },
+    };
   }
 
   function assistant(msg: Json, ts: string): RuntimeEvent[] {

@@ -1,6 +1,7 @@
 import type { ReportState, RunEvent, RunReport, UiStatus } from '@weave-ai/shared';
 import { extractReport } from '@weave-ai/shared';
 import type { EditPair } from '@weave-ai/render';
+import { tokens as fmtTokens } from './format';
 
 /** What an edit-type tool call carries, extracted from its `tool.call` input (VS-324): neither
  * `tool.result` nor `file.changed` carry this on any runtime — see design.md. */
@@ -15,7 +16,8 @@ export type TranscriptBlock =
   | { id: string; type: 'status'; text: string; status: 'needs-you' | 'blocked' | 'failed' | 'done' | 'working' }
   | { id: string; type: 'command'; command: string; exitCode: number | null; output: string | null }
   | { id: string; type: 'human'; text: string; delivery: 'mid_turn' | 'queued' }
-  | { id: string; type: 'report'; report: RunReport; text: string };
+  | { id: string; type: 'report'; report: RunReport; text: string }
+  | { id: string; type: 'compaction'; text: string; trigger: 'auto' | 'manual' | null; preTokens: number | null; postTokens: number | null };
 
 export type ToolBlock = Extract<TranscriptBlock, { type: 'tool' }>;
 
@@ -136,6 +138,16 @@ function elapsedMs(from: string, to: string): number | null {
   const b = Date.parse(to);
   if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return null;
   return b - a;
+}
+
+/** `Conversation compacted · 184k → 11.8k tok` (VS-454) — one line, tokens only when reported. */
+export function compactionLine(pre: number | null, post: number | null): string {
+  const before = pre !== null ? fmtTokens(pre) : null;
+  const after = post !== null ? fmtTokens(post) : null;
+  if (before && after) return `Conversation compacted · ${before} → ${after} tok`;
+  if (before) return `Conversation compacted · from ${before} tok`;
+  if (after) return `Conversation compacted · to ${after} tok`;
+  return 'Conversation compacted';
 }
 
 /**
@@ -296,6 +308,18 @@ export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBl
       }
       case 'human.input': {
         out.push({ id: e.id, type: 'human', text: str(p['text']), delivery: p['delivery'] === 'mid_turn' ? 'mid_turn' : 'queued' });
+        break;
+      }
+      case 'session.compaction.completed': {
+        // VS-454: the runtime compacted the session; keep the one-line marker so a later context
+        // drop is explained. A started with no completion is the live state, handled by the chat.
+        const pre = num(p['preTokens'] ?? p['pre_tokens']);
+        const post = num(p['postTokens'] ?? p['post_tokens']);
+        const trigger = str(p['trigger']);
+        out.push({
+          id: e.id, type: 'compaction', text: compactionLine(pre, post),
+          trigger: trigger === 'auto' || trigger === 'manual' ? trigger : null, preTokens: pre, postTokens: post,
+        });
         break;
       }
       default:

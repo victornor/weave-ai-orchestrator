@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Chat shows when the weaver's conversation is being compacted
+skip_specs: true

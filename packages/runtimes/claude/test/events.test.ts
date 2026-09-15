@@ -11,6 +11,12 @@ import { createClaudeParser } from '../src/events.js';
 // `turn-replayed-input` is the exception: constructed, not recorded — the credential rule (VS-99)
 // forbids launching the CLI to record a `--replay-user-messages` turn. Its `user` frames follow the
 // wire shape the installed binary's own help text and log strings document (see design.md).
+//
+// `turn-compaction` (VS-454) is likewise constructed: the credential rule forbids running the CLI to
+// record a real compaction. Its `system`/`status` and `system`/`compact_boundary` frames are the
+// snake_case wire shapes read out of the installed claude 2.1.270 bundle's own zod SDK-message
+// definitions (`subtype: "status"` with `status: "compacting"`, and `compact_metadata` with
+// `trigger` / `pre_tokens` / `post_tokens` / `cumulative_dropped_tokens`), not guessed.
 function fixture(name: string): string[] {
   const path = fileURLToPath(new URL(`../fixtures/${name}.jsonl`, import.meta.url));
   return readFileSync(path, 'utf8').split('\n').filter((l) => l.trim().length > 0);
@@ -103,6 +109,31 @@ describe('claude stream-json parser', () => {
     expect(evs.map((e) => e.type)).toEqual(['error', 'turn.completed']);
     expect(p.state.isError).toBe(true);
     expect(p.state.errorMessage).toBe('boom');
+  });
+
+  it('normalizes compaction: status/compacting opens it, compact_boundary closes it with its tokens (VS-454)', () => {
+    const { types, events } = run('turn-compaction');
+    const started = types.indexOf('session.compaction.started');
+    const completed = types.indexOf('session.compaction.completed');
+    expect(started).toBeGreaterThanOrEqual(0);
+    expect(completed).toBeGreaterThan(started);
+    const ev = events.find((e) => e.type === 'session.compaction.completed')!;
+    expect(ev.payload).toEqual({ trigger: 'auto', preTokens: 184_320, postTokens: 11_800, droppedTokens: 172_520 });
+  });
+
+  it('keeps a non-compacting system status as runtime.raw, never as a compaction event', () => {
+    const p = createClaudeParser();
+    const evs = p.handle(JSON.stringify({ type: 'system', subtype: 'status', status: 'requesting', session_id: 's1' }));
+    expect(evs.map((e) => e.type)).toEqual(['runtime.raw']);
+    expect(evs[0]!.payload['originalType']).toBe('system.status');
+  });
+
+  it('carries only the compact_metadata fields the runtime reported', () => {
+    const p = createClaudeParser();
+    const evs = p.handle(JSON.stringify({ type: 'system', subtype: 'compact_boundary', session_id: 's1', compact_metadata: { trigger: 'manual', pre_tokens: 9000 } }));
+    expect(evs).toHaveLength(1);
+    expect(evs[0]!.type).toBe('session.compaction.completed');
+    expect(evs[0]!.payload).toEqual({ trigger: 'manual', preTokens: 9000 });
   });
 
   it('a replayed user frame (--replay-user-messages echo) produces no spurious event and marks resultSeen', () => {

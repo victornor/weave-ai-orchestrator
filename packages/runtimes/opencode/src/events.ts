@@ -30,6 +30,14 @@ const EDIT_TOOLS = new Set(['edit', 'write', 'patch', 'multiedit']);
  * Verified against opencode 1.18.27: every line is `{type, timestamp, sessionID, part}`
  * with part kinds `step-start`, `text`, `tool`, `step-finish`; errors carry `error` instead.
  * OpenCode emits no terminal event, so `finish()` closes the turn.
+ *
+ * VS-454: OpenCode compacts sessions, but `run --format json` carries no signal for it. Its only
+ * serialized events are `tool_use` / `step_start` / `step_finish` / `text` / `reasoning` / `error`
+ * (read from the installed binary's run command), its `session.status` is `idle | retry | busy`
+ * (no compacting state), and the compaction events it does have — `session.compacted` and the v2
+ * `session.next.compaction.started` / `.ended` — are the bus/TUI protocol, never written by `run`.
+ * So this parser emits no `session.compaction.*` event; a compaction-shaped line falls through to
+ * `runtime.raw`, which is the honest record that something arrived we do not model.
  */
 export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: false }) {
   const state: OpenCodeParseState = { sessionId: null, finalText: null, usage: null, contextTokens: null, costUsd: null, isError: false, errorMessage: null };

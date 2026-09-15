@@ -16,7 +16,7 @@
 import { isHumanReplyToolEvent, type AuthorKind, type RunEvent } from '@weave-ai/shared';
 import { formatDuration, formatTokens, formatDiffStat, oneLine } from './format.js';
 import { redact } from './redact.js';
-import type { ErrorBlock, FileBlock, HumanInputBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock, TranscriptBlock, TranscriptOptions } from './types.js';
+import type { CompactionBlock, ErrorBlock, FileBlock, HumanInputBlock, PhaseBlock, StatusBlock, TextBlock, ToolBlock, TranscriptBlock, TranscriptOptions } from './types.js';
 
 type Payload = Record<string, unknown>;
 
@@ -382,6 +382,20 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
         break;
       }
 
+      case 'session.compaction.completed': {
+        // VS-454: the runtime compacted the session. Keep the one-line marker so a later context
+        // drop is explained. A `session.compaction.started` with no completion is the live state,
+        // which the UI renders while the turn is still running — not a finished-trace row.
+        const trigger = str(p, 'trigger');
+        const pre = num(p, 'preTokens', 'pre_tokens');
+        const post = num(p, 'postTokens', 'post_tokens');
+        push({
+          ...base(ev), kind: 'compaction', text: compactionLine(pre, post),
+          trigger: trigger === 'auto' || trigger === 'manual' ? trigger : null, preTokens: pre, postTokens: post,
+        } satisfies CompactionBlock);
+        break;
+      }
+
       case 'error': {
         const message = scrub(str(p, 'message', 'error', 'text')) ?? 'unknown error';
         push({
@@ -399,6 +413,16 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
 
   // A tool that never got a result still reads correctly: it is simply still pending.
   return blocks;
+}
+
+/** `Conversation compacted · 184k → 11.8k tok` (VS-454) — one line, tokens only when reported. */
+function compactionLine(pre: number | null, post: number | null): string {
+  const before = pre !== null ? formatTokens(pre) : null;
+  const after = post !== null ? formatTokens(post) : null;
+  if (before && after) return `Conversation compacted · ${before} → ${after} tok`;
+  if (before) return `Conversation compacted · from ${before} tok`;
+  if (after) return `Conversation compacted · to ${after} tok`;
+  return 'Conversation compacted';
 }
 
 function joinGap(prev: string, next: string): string {

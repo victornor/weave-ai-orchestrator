@@ -66,6 +66,11 @@ export interface StickToBottom {
   unread: boolean;
   /** Scroll to the bottom and resume following. */
   toBottom: () => void;
+  /**
+   * Stop following without moving the list, and mark it not at bottom so the button returns. For a
+   * deliberate jump away from the bottom (VS-447), which must not then be yanked back by the follow.
+   */
+  pause: () => void;
 }
 
 const same = (a: readonly unknown[], b: readonly unknown[]): boolean =>
@@ -322,5 +327,11 @@ export function useStickToBottom(
     scrollToBottom();
   }, [scrollToBottom]);
 
-  return { scrollRef: setEl, bottomRef, atBottom, unread, toBottom, following };
+  const pause = useCallback(() => {
+    following.current = false;
+    setAtBottom(false);
+    setUnread(false);
+  }, []);
+
+  return { scrollRef: setEl, bottomRef, atBottom, unread, toBottom, following, pause };
 }

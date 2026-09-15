@@ -501,6 +501,24 @@
   animation: v2-fade-in var(--v2-dur-base) var(--v2-ease-out) both;
 }
 
+/* The target of a jump to a message (VS-447): a soft accent wash that fades over a V2 duration,
+   over a static accent ring that stays put while the target is marked. Under reduced motion the
+   wash is instant and the ring is what remains, so the jump still lands somewhere visible. */
+.v2-jump-highlight {
+  border-radius: var(--r4);
+  box-shadow: 0 0 0 2px var(--accent-edge);
+  animation: v2-jump-wash var(--v2-dur-slow) var(--v2-ease-out) both;
+}
+
+@keyframes v2-jump-wash {
+  from {
+    background-color: var(--accent-tint);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
 @keyframes v2-fade-in {
   from {
     opacity: 0;

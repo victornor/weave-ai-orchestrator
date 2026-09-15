@@ -3,6 +3,11 @@
  * identifiers rewritten to clickable tags, its attachments as rows, and its metadata — project,
  * time, tokens, Reply. There is no avatar: the weaver is identified by position and metadata only
  * (HANDOFF §1, §5).
+ *
+ * It also carries the two ends of VS-447's navigation: a quiet "Jump to response" under an inbound
+ * message, and a quoted weaver reply that jumps back to the message it answers. Both call the one
+ * `onJumpTo` the conversation owns, so the scroll and highlight live in the list and this component
+ * stays shared — the Plan modal inherits the behaviour when VS-442 puts its conversation on it.
  */
 import { useMemo } from 'react';
 import type { ThreadMessage } from '@weave-ai/shared';
@@ -98,21 +103,52 @@ export interface ChatMessageProps {
   onReply?: () => void;
   /** Reveal the body with a fast streaming animation (VS-425). Only for a genuinely new reply. */
   reveal?: boolean;
+  /** The outbound messages that answer this inbound message (VS-447), oldest first. */
+  responseIds?: string[];
+  /** The inbound message a weaver reply answers, when that is resolvable (VS-447). */
+  jumpBackTo?: string | null;
+  /** Scroll to and highlight the named messages; absent outside the conversation list. */
+  onJumpTo?: (ids: string[]) => void;
+  /** Marked by a jump to this message, until its highlight clears (VS-447). */
+  highlighted?: boolean;
 }
 
-export function ChatMessage({ message, ws, spent, projectName, onTicket, onReply, reveal = false }: ChatMessageProps): React.ReactElement {
+export function ChatMessage({ message, ws, spent, projectName, onTicket, onReply, reveal = false, responseIds, jumpBackTo, onJumpTo, highlighted = false }: ChatMessageProps): React.ReactElement {
   const mine = message.direction === 'inbound';
   const body = useStreamReveal(message.body, reveal);
-  // A reply can answer more than one human message when they arrived batched (VS-449): the excerpt
+// A reply can answer more than one human message when they arrived batched (VS-449): the excerpt
   // is the newest target, and the rest are named by count.
+  const quote = message.replyToExcerpt;
   const moreReplies = Math.max(0, message.replyToMessageIds.length - 1);
+  const quoteBody = (
+    <>
+      <span className="line-clamp-2 block">{quote}</span>
+      {moreReplies > 0 ? <span className="ac-mono block text-nano text-text-4">+{moreReplies} more</span> : null}
+    </>
+  );
   return (
-    <div className={cx('flex flex-col gap-1', mine && 'items-end')} data-chat-message={message.direction}>
-      {message.replyToExcerpt ? (
-        <span className={cx('max-w-[80%] border-l-2 border-line-2 pl-2 text-micro text-text-3', mine ? 'text-right' : 'w-full max-w-full')}>
-          <span className="line-clamp-2 block">{message.replyToExcerpt}</span>
-          {moreReplies > 0 ? <span className="ac-mono block text-nano text-text-4">+{moreReplies} more</span> : null}
-        </span>
+    <div
+      className={cx('flex flex-col gap-1', mine && 'items-end', highlighted && 'v2-jump-highlight')}
+      data-chat-message={message.direction}
+      data-message-id={message.id}
+      data-jump-highlight={highlighted || undefined}
+      tabIndex={-1}
+    >
+      {quote ? (
+        jumpBackTo && onJumpTo ? (
+          <button
+            type="button"
+            aria-label="Jump to the message this replies to"
+            onClick={() => onJumpTo([jumpBackTo])}
+            className={cx('max-w-[80%] border-l-2 border-line-2 pl-2 text-left text-micro text-text-3 hover:text-text-2', mine ? 'text-right' : 'w-full max-w-full')}
+          >
+            {quoteBody}
+          </button>
+        ) : (
+          <span className={cx('max-w-[80%] border-l-2 border-line-2 pl-2 text-micro text-text-3', mine ? 'text-right' : 'w-full max-w-full')}>
+            {quoteBody}
+          </span>
+        )
       ) : null}
       <div
         className={cx(
@@ -126,6 +162,11 @@ export function ChatMessage({ message, ws, spent, projectName, onTicket, onReply
         <AttachmentRows ws={ws} threadId={message.threadId} parts={message.parts} />
       </div>
       <span className={cx('flex items-center gap-2 px-0.5', mine && 'justify-end')}>
+        {mine && onJumpTo && responseIds && responseIds.length > 0 ? (
+          <button type="button" onClick={() => onJumpTo(responseIds)} className="text-nano text-text-3 hover:text-text-1">
+            Jump to response
+          </button>
+        ) : null}
         {message.projectId && projectName ? <span className="v2-tag text-text-3">{projectName}</span> : null}
         <span className="ac-mono text-nano text-text-4">{clock(message.createdAt)}</span>
         {spent != null ? <span className="ac-mono text-nano text-text-4">· {tokens(spent)} tok</span> : null}

@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: A weaver reply links to every human message it answers, including several that arrived in one
+  batched turn, instead of recording no target at all
+skip_specs: true

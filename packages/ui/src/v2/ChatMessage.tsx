@@ -103,11 +103,15 @@ export interface ChatMessageProps {
 export function ChatMessage({ message, ws, spent, projectName, onTicket, onReply, reveal = false }: ChatMessageProps): React.ReactElement {
   const mine = message.direction === 'inbound';
   const body = useStreamReveal(message.body, reveal);
+  // A reply can answer more than one human message when they arrived batched (VS-449): the excerpt
+  // is the newest target, and the rest are named by count.
+  const moreReplies = Math.max(0, message.replyToMessageIds.length - 1);
   return (
     <div className={cx('flex flex-col gap-1', mine && 'items-end')} data-chat-message={message.direction}>
       {message.replyToExcerpt ? (
         <span className={cx('max-w-[80%] border-l-2 border-line-2 pl-2 text-micro text-text-3', mine ? 'text-right' : 'w-full max-w-full')}>
           <span className="line-clamp-2 block">{message.replyToExcerpt}</span>
+          {moreReplies > 0 ? <span className="ac-mono block text-nano text-text-4">+{moreReplies} more</span> : null}
         </span>
       ) : null}
       <div

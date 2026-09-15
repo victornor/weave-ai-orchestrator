@@ -87,6 +87,86 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     return r;
   }
 
+  /** One row per message a reply answers (VS-449), written beside the message in the same transaction. */
+  function linkReplies(messageId: string, targetIds: string[], createdAt: string): void {
+    for (const repliedToMessageId of targetIds) db.insert('thread_message_replies', { messageId, repliedToMessageId, createdAt });
+  }
+
+  /**
+   * Every message a page of replies answers, keyed by reply message id, oldest-first. One query for
+   * the whole page rather than one per message. A row with no link rows (a database written directly,
+   * not through `insertMessage`) falls back to its single `reply_to_message_id` in `withReplyTargets`.
+   */
+  function replyTargetsFor(messageIds: string[]): Map<string, string[]> {
+    const out = new Map<string, string[]>();
+    if (messageIds.length === 0) return out;
+    const rows = db.all<{ messageId: string; targetId: string }>(
+      `SELECT mr.message_id AS message_id, mr.replied_to_message_id AS target_id
+       FROM thread_message_replies mr
+       JOIN thread_messages t ON t.id = mr.replied_to_message_id
+       WHERE mr.message_id IN (${messageIds.map(() => '?').join(',')})
+       ORDER BY t.created_at ASC, t.rowid ASC`,
+      messageIds,
+    );
+    for (const r of rows) {
+      const list = out.get(r.messageId);
+      if (list) list.push(r.targetId);
+      else out.set(r.messageId, [r.targetId]);
+    }
+    return out;
+  }
+
+  /** A read's messages with their complete reply-target list (VS-449). */
+  function withReplyTargets(msgs: ThreadMessage[]): ThreadMessage[] {
+    const targets = replyTargetsFor(msgs.map((m) => m.id));
+    return msgs.map((m) => ({ ...m, replyToMessageIds: targets.get(m.id) ?? (m.replyToMessageId ? [m.replyToMessageId] : []) }));
+  }
+
+  /**
+   * The messages an outbound reply answers, oldest-first (VS-449). An explicit `replyToMessageId`
+   * (including `null`) is honoured exactly. Otherwise the turn's waking human messages are the
+   * candidates: those that exist in this thread and that no earlier reply of the same run has
+   * already linked. That last filter is what stops a second send in one turn re-quoting a message an
+   * earlier send already answered.
+   */
+  function resolveOutboundTargets(
+    threadId: string,
+    opts: { replyToMessageId?: string | null; defaultReplyToMessageIds?: string[] },
+    runId: string | null,
+  ): string[] {
+    if (opts.replyToMessageId !== undefined) return opts.replyToMessageId ? [opts.replyToMessageId] : [];
+    const candidates = [...new Set(opts.defaultReplyToMessageIds ?? [])];
+    if (candidates.length === 0) return [];
+    const inThread = new Map(
+      db
+        .all<{ id: string; createdAt: string }>(
+          `SELECT id, created_at FROM thread_messages WHERE thread_id = ? AND id IN (${candidates.map(() => '?').join(',')})`,
+          [threadId, ...candidates],
+        )
+        .map((r) => [r.id, r.createdAt]),
+    );
+    const linked = runId
+      ? new Set(
+          db
+            .all<{ targetId: string }>(
+              `SELECT DISTINCT mr.replied_to_message_id AS target_id
+               FROM thread_message_replies mr
+               JOIN thread_messages m ON m.id = mr.message_id
+               WHERE m.thread_id = ? AND m.run_id = ? AND mr.replied_to_message_id IN (${candidates.map(() => '?').join(',')})`,
+              [threadId, runId, ...candidates],
+            )
+            .map((r) => r.targetId),
+        )
+      : new Set<string>();
+    return candidates
+      .filter((id) => inThread.has(id) && !linked.has(id))
+      .sort((a, b) => {
+        const ta = inThread.get(a)!;
+        const tb = inThread.get(b)!;
+        return ta === tb ? (a < b ? -1 : a > b ? 1 : 0) : ta < tb ? -1 : 1;
+      });
+  }
+
   function get(id: string): ThreadRow {
     const r = db.get<Record<string, unknown>>(
       'SELECT t.* FROM channel_threads t JOIN channels c ON c.id = t.channel_id WHERE t.id = ? AND c.workspace_id = ?',
@@ -101,11 +181,12 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     direction: 'inbound' | 'outbound',
     actor: Actor,
     body: string,
-    opts: { parts?: unknown[]; runId?: string | null; externalMessageId?: string; deliveryStatus?: string; projectId?: string | null; replyToMessageId?: string | null; replyToExcerpt?: string | null; idempotencyKey?: string | null } = {},
+    opts: { parts?: unknown[]; runId?: string | null; externalMessageId?: string; deliveryStatus?: string; projectId?: string | null; replyToMessageId?: string | null; replyToMessageIds?: string[]; replyToExcerpt?: string | null; idempotencyKey?: string | null } = {},
   ): ThreadMessage {
+    const replyToMessageIds = opts.replyToMessageIds ?? (opts.replyToMessageId ? [opts.replyToMessageId] : []);
     const msg: ThreadMessage = {
       id: newId(), threadId, direction, authorKind: actor.kind, authorId: actor.id, runId: opts.runId ?? actor.runId ?? null,
-      projectId: opts.projectId ?? null, replyToMessageId: opts.replyToMessageId ?? null, replyToExcerpt: opts.replyToExcerpt ?? null,
+      projectId: opts.projectId ?? null, replyToMessageId: opts.replyToMessageId ?? null, replyToMessageIds, replyToExcerpt: opts.replyToExcerpt ?? null,
       body, parts: opts.parts ?? [], externalMessageId: opts.externalMessageId ?? null,
       deliveryStatus: opts.deliveryStatus ?? 'received', createdAt: nowIso(),
     };
@@ -115,6 +196,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       partsJson: msg.parts, externalMessageId: msg.externalMessageId, deliveryStatus: msg.deliveryStatus, createdAt: msg.createdAt,
       idempotencyKey: opts.idempotencyKey ?? null,
     });
+    linkReplies(msg.id, replyToMessageIds, msg.createdAt);
     // The single write path for both directions, so this is the one place a message needs indexing
     // (VS-320). `threadId` is already resolved to this workspace by every caller's own `get()`, so
     // `ws` — not a fresh lookup — is the row's workspace.
@@ -277,12 +359,14 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       const kind = kindOf(t.id);
       // Resolved before anything is written, same posture as inbound: an invalid or cross-thread
       // target is rejected rather than stored, and `repliedToMessage` cannot return a row from
-      // another thread by construction.
-      const repliedTo = opts.replyToMessageId ? repliedToMessage(t.id, opts.replyToMessageId) : null;
+      // another thread by construction. The single quote target is the newest one answered (VS-449).
+      const targetIds = resolveOutboundTargets(t.id, opts, opts.runId ?? null);
+      const repliedTo = targetIds.length ? repliedToMessage(t.id, targetIds[targetIds.length - 1]!) : null;
       return tx(db, () => {
         const msg = insertMessage(t.id, 'outbound', actor, body, {
           ...opts,
           replyToMessageId: repliedTo?.id ?? null,
+          replyToMessageIds: targetIds,
           replyToExcerpt: repliedTo ? excerpt(repliedTo.body) : null,
           deliveryStatus: kind === 'web' ? 'delivered' : 'pending',
         });
@@ -323,10 +407,9 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       if (opts.before) { sql += ' AND m.created_at < ?'; params.push(opts.before); }
       sql += ' ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?';
       params.push(Math.min(opts.limit ?? 50, 500));
-      return db
-        .all<ThreadMessage>(sql, params)
-        .map((m) => (m.replyToExcerpt === null ? m : { ...m, replyToExcerpt: excerpt(m.replyToExcerpt) }))
-        .reverse();
+      return withReplyTargets(
+        db.all<ThreadMessage>(sql, params).map((m) => (m.replyToExcerpt === null ? m : { ...m, replyToExcerpt: excerpt(m.replyToExcerpt) })),
+      ).reverse();
     },
 
     message(threadId, messageId) {
@@ -340,7 +423,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
         [messageId, threadId],
       );
       if (!r) throw new OcError('not_found', `message ${messageId} not found in thread ${threadId}`);
-      return r.replyToExcerpt === null ? r : { ...r, replyToExcerpt: excerpt(r.replyToExcerpt) };
+      return withReplyTargets([r.replyToExcerpt === null ? r : { ...r, replyToExcerpt: excerpt(r.replyToExcerpt) }])[0]!;
     },
 
     attachment(threadId, attachmentId) {
@@ -406,7 +489,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
          ORDER BY m.created_at ASC, m.rowid ASC LIMIT ?`,
         [t.id, target.createdAt, target.rowid, after],
       );
-      return [...beforeRows.reverse(), ...afterRows].map((m) => (m.replyToExcerpt === null ? m : { ...m, replyToExcerpt: excerpt(m.replyToExcerpt) }));
+      return withReplyTargets([...beforeRows.reverse(), ...afterRows].map((m) => (m.replyToExcerpt === null ? m : { ...m, replyToExcerpt: excerpt(m.replyToExcerpt) })));
     },
 
     primaryThread() {

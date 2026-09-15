@@ -138,6 +138,7 @@ function message(over: Partial<ThreadMessage> = {}): ThreadMessage {
     runId: null,
     projectId: null,
     replyToMessageId: null,
+    replyToMessageIds: [],
     replyToExcerpt: null,
     body: 'Hello',
     parts: [],
@@ -464,6 +465,28 @@ describe('the V2 Chat screen', () => {
     const meta = document.querySelector('[data-chat-message]') as HTMLElement;
     expect(meta.textContent).toMatch(/\d{2}:\d{2}/);
     expect(document.querySelector('[data-avatar]')).toBeNull();
+  });
+
+  it('shows the newest excerpt with a "+N more" marker when a reply answers several messages (VS-449)', async () => {
+    state.messages = [message({
+      id: 'm9', body: 'answering both', replyToMessageId: 'm2', replyToMessageIds: ['m1', 'm2'], replyToExcerpt: 'second question',
+    })];
+    render(<V2ChatPage />);
+    await screen.findByText('answering both');
+    const bubble = screen.getByText('answering both').closest('[data-chat-message="outbound"]') as HTMLElement;
+    expect(bubble).toHaveTextContent('second question');
+    expect(bubble).toHaveTextContent('+1 more');
+  });
+
+  it('shows no "+N more" marker when a reply answers one message (VS-449)', async () => {
+    state.messages = [message({
+      id: 'm9', body: 'answering one', replyToMessageId: 'm1', replyToMessageIds: ['m1'], replyToExcerpt: 'the question',
+    })];
+    render(<V2ChatPage />);
+    await screen.findByText('answering one');
+    const bubble = screen.getByText('answering one').closest('[data-chat-message="outbound"]') as HTMLElement;
+    expect(bubble).toHaveTextContent('the question');
+    expect(bubble.textContent).not.toContain('+1 more');
   });
 
   it('answers a decision in the pane through the shared answer mutation', async () => {

@@ -663,8 +663,12 @@ export interface ThreadsService {
   bindTicket(actor: Actor, threadId: string, ticketId: string | null): S.ChannelThread;
   /** `attachments` bytes are already validated (type/size) by the caller; `inbound` only stores and links them. Rejected with `validation` if the thread is ticket-bound (VS-133 — out of scope there). */
   inbound(actor: Actor, threadId: string, body: string, opts?: { externalMessageId?: string; parts?: unknown[]; projectId?: string | null; replyToMessageId?: string | null; idempotencyKey?: string; attachments?: Array<{ filename: string; mediaType: S.AttachmentMediaType; bytes: Buffer }> }): Promise<S.ThreadMessage>;  // stores + wakes; a repeated idempotencyKey on this thread returns the existing message
-  /** `attachments` (VS-273 — the weaver's reply path only) are already resolved and size-checked by the caller via `resolveOutboundAttachments`; `outbound` only stores and links them, the same posture `inbound` takes for its own attachments. */
-  outbound(actor: Actor, threadId: string, body: string, opts?: { parts?: unknown[]; runId?: string | null; replyToMessageId?: string | null; attachments?: Array<{ filename: string; mediaType: string; bytes: Buffer }> }): Promise<S.ThreadMessage>;  // reply target validated + excerpted like inbound
+  /**
+   * `attachments` (VS-273 — the weaver's reply path only) are already resolved and size-checked by the caller via `resolveOutboundAttachments`; `outbound` only stores and links them, the same posture `inbound` takes for its own attachments.
+   *
+   * `replyToMessageId` (VS-449) is honoured exactly when present — `null` means no target. When it is omitted, `defaultReplyToMessageIds` are the turn's waking human messages: the reply is linked to each one that exists in this thread and that no earlier reply of the same `runId` has linked. `replyToMessageId` ends up the newest of them, so `replyToExcerpt` quotes it.
+   */
+  outbound(actor: Actor, threadId: string, body: string, opts?: { parts?: unknown[]; runId?: string | null; replyToMessageId?: string | null; defaultReplyToMessageIds?: string[]; attachments?: Array<{ filename: string; mediaType: string; bytes: Buffer }> }): Promise<S.ThreadMessage>;
   messages(threadId: string, opts?: { before?: string; limit?: number }): S.ThreadMessage[];
   /** `not_found` when the message does not exist, or exists but under a different thread — the same response either way. Full stored body, regardless of whether the wake payload that referenced it was truncated (VS-242). */
   message(threadId: string, messageId: string): S.ThreadMessage;

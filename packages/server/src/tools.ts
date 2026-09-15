@@ -223,16 +223,21 @@ function originThreadId(ctx: ToolCtx): string | null {
 }
 
 /**
- * The message that woke this turn, when exactly one human message did — the default reply target for
- * `weave_human_send`. Flattened through `flattenWakes` (the same unpacking `buildTurnPrompt` uses for "why
- * you were woken"): several human messages arriving before a turn dispatches coalesce into one queued
- * wake with the rest folded into its payload's `bundle`, so counting raw wake rows would undercount them.
+ * Every human message that woke this turn, in wake order — the default reply targets for
+ * `weave_human_send` (VS-449). Flattened through `flattenWakes` (the same unpacking `buildTurnPrompt`
+ * uses for "why you were woken"): several human messages arriving before a turn dispatches coalesce
+ * into one queued wake with the rest folded into its payload's `bundle`, so counting raw wake rows
+ * would undercount them. `outbound` links the reply only to those no earlier reply in the turn has
+ * already answered, so a normal single-message turn behaves exactly as before.
  */
-function defaultReplyToMessageId(ctx: ToolCtx): string | null {
-  const humanMessages = flattenWakes(bundledWakes(ctx)).filter((w) => w.source === 'human_message');
-  if (humanMessages.length !== 1) return null;
-  const id = (humanMessages[0]!.payload as { messageId?: unknown } | null)?.messageId;
-  return typeof id === 'string' ? id : null;
+function defaultReplyToMessageIds(ctx: ToolCtx): string[] {
+  const ids = new Set<string>();
+  for (const w of flattenWakes(bundledWakes(ctx))) {
+    if (w.source !== 'human_message') continue;
+    const id = (w.payload as { messageId?: unknown } | null)?.messageId;
+    if (typeof id === 'string') ids.add(id);
+  }
+  return [...ids];
 }
 
 // ---------- input schemas ----------
@@ -896,15 +901,19 @@ export const TOOLS: ToolDef[] = [
     description: 'Send text to the human on the originating channel. This is the ONLY way your words reach them — plain assistant text is recorded as the run summary and never delivered. One decision per message; never batch unrelated asks. ' +
       'A single logical reply goes in one call, including long markdown with fences or tables; do not split across several sends. ' +
       'Titled links go in body as `[label](https://url)` and render as compact buttons in chat. ' +
-      'replyToMessageId marks this message as answering one specific earlier human message, shown in the chat as a compact quote: omit it to default to the message that woke this turn, when exactly one did; pass null explicitly to send with no target regardless (use this for anything unrelated to what woke the turn, e.g. relaying a landed ticket in the same turn as answering a question). An id naming no message of the thread, or one from another thread, is rejected. ' +
+      'replyToMessageId marks this message as answering one specific earlier human message, shown in the chat as a compact quote. Omit it to default to the human messages that woke this turn — every one no earlier reply in the turn has already answered, so several messages that arrived batched are all linked (the quote shows the newest, with a "+N more" marker). Pass null explicitly to send with no target regardless (use this for anything unrelated to what woke the turn, e.g. relaying a landed ticket in the same turn as answering a question). An id naming no message of the thread, or one from another thread, is rejected. ' +
       `attachments (up to ${ATTACHMENT_MAX_PER_MESSAGE}) hand the human a real file: { path } attaches one file as itself; { paths, zipName? } bundles several into one named zip (a sensible default name is used if you omit one). A path must resolve inside the workspace's knowledge/ tree, a project's clone, or a worker's own worktree — never a .git directory inside one, and never anything else, including the workspace's own state directory. A path outside that allowlist, or exceeding its size cap, fails the whole call before anything is sent; the error names the specific path.`,
     handler: async (ctx, i) => {
       const threadId = i.threadId ?? originThreadId(ctx);
-      const replyToMessageId = i.replyToMessageId === undefined ? defaultReplyToMessageId(ctx) : i.replyToMessageId;
+      // Omitted: link to the turn's waking human messages (VS-449). Explicit null or an id is passed
+      // through unchanged, so a relay stays unlinked and an explicit target stays exactly as given.
+      const replyTarget = i.replyToMessageId === undefined
+        ? { defaultReplyToMessageIds: defaultReplyToMessageIds(ctx) }
+        : { replyToMessageId: i.replyToMessageId };
       const attachments = i.attachments?.length
         ? resolveOutboundAttachments(ctx.ws.ctx, i.attachments as OutboundAttachmentInput[])
         : undefined;
-      if (threadId) return svc(ctx).threads.outbound(ctx.actor, threadId, i.body, { runId: ctx.claims.runId, replyToMessageId, attachments });
+      if (threadId) return svc(ctx).threads.outbound(ctx.actor, threadId, i.body, { runId: ctx.claims.runId, ...replyTarget, attachments });
       await svc(ctx).threads.notifyHuman(ctx.actor, { text: i.body, attachments });
       return { delivered: 'primary-thread' };
     },

@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Merge gate accepts skipped CI: PRs land with every check skipped on the
+  merged head — require a real successful CI run for the exact rebased head SHA"
+skip_specs: true

@@ -610,6 +610,81 @@ describe('archive-before-merge mechanics', () => {
       expect(onNoCiTimeout).not.toHaveBeenCalled();
     });
 
+    // VS-466: the gate used to read an all-skipped rollup as a pass. `rollupState` now reports an
+    // all-skipped head as `none`, and the gate refuses any absent rollup on a repository with CI.
+    it('rejects an all-skipped head on a CI repository even when nothing changed this attempt (VS-466)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const forge = fakeForge({
+        hasCiWorkflows: vi.fn(async () => true),
+        markPullRequestReady: vi.fn(async () => ({ changed: false })),
+        prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const })),
+      });
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge,
+        prUrl: 'https://example.com/pr/all-skipped', method: 'squash', requiresCi: true,
+      });
+      expect(outcome).toEqual({ kind: 'checks_pending' });
+      expect(forge.mergePr).not.toHaveBeenCalled();
+    });
+
+    it('rejects a success the forge reports for a head other than the one that will land (VS-466)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const forge = fakeForge({
+        prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'success' as const, headSha: '0'.repeat(40) })),
+      });
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge,
+        prUrl: 'https://example.com/pr/stale-head', method: 'squash', requiresCi: true,
+      });
+      expect(outcome).toEqual({ kind: 'checks_pending' });
+      expect(forge.mergePr).not.toHaveBeenCalled();
+    });
+
+    it('accepts a success on the exact head the landing produces (VS-466)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const forge = fakeForge({
+        prState: vi.fn(async () => ({
+          state: 'open' as const, ciState: 'success' as const,
+          headSha: (await git(['rev-parse', `refs/remotes/origin/${BRANCH}`], clone)).stdout.trim(),
+        })),
+      });
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, forge,
+        prUrl: 'https://example.com/pr/exact-head', method: 'squash', requiresCi: true,
+      });
+      expect(outcome).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+    });
+
+    it('brings the pull request out of draft before pushing the head that will land (VS-466)', async () => {
+      await seedGadgetChange(origin, 'add-gadget', GADGET_WHY);
+      await git(['pull', 'origin', 'main'], clone);
+      await pushBranchFromClone(BRANCH);
+
+      let remoteAtReady: string | null = null;
+      const ready = vi.fn(async () => {
+        remoteAtReady = (await git(['ls-remote', origin, BRANCH], clone)).stdout.trim().split('\t')[0] ?? null;
+        return { changed: true };
+      });
+      const forge = fakeForge({ markPullRequestReady: ready });
+
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: 'add-gadget', forge,
+        prUrl: 'https://example.com/pr/order', method: 'squash',
+      });
+      expect(outcome).toMatchObject({ kind: 'merged' });
+
+      await git(['fetch', 'origin'], clone);
+      const finalTip = (await git(['rev-parse', `refs/remotes/origin/${BRANCH}`], clone)).stdout.trim();
+      // The ready transition saw the pre-push tip: the archive commit was pushed only afterwards, so
+      // the one push of the sequence is a push to a pull request that is already out of draft.
+      expect(remoteAtReady).not.toBeNull();
+      expect(remoteAtReady).not.toBe(finalTip);
+      expect(ready).toHaveBeenCalledTimes(1);
+    });
+
     it('lands while the worker worktree holds the branch, leaving it untouched (VS-363)', async () => {
       const changeName = 'add-thing';
       const changeDir = join(origin, 'openspec', 'changes', changeName);

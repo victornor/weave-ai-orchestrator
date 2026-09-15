@@ -45,14 +45,29 @@ const VIEW_FIELDS = `${LIST_FIELDS},body,files,headRefOid`;
 /** `gh pr list` has no "updated since" filter, so the window is applied by the caller, not here. */
 const DEFAULT_LIST_LIMIT = 60;
 
-/** One check's own state, by the same precedence `rollupState` applies across all of them. */
-function checkState(c: GhCheck): ForgeCheckState {
+/**
+ * VS-466: what one check run or commit status actually says. `success` is a completed `SUCCESS` and
+ * nothing else — `SKIPPED`, `NEUTRAL`, `CANCELLED`, `STALE`, an unresolved status and a missing
+ * conclusion are all not passed. `skipped` is returned separately because `rollupState` ignores it:
+ * GitHub reports a draft run's skipped checks alongside the real run's checks for the same head
+ * (PR #377 had twelve contexts where PR #380 had five), so counting skipped as a pass would accept
+ * an all-skipped rollup and counting it as a failure would reject a genuinely green landing.
+ */
+function checkOutcome(c: GhCheck): ForgeCheckState | 'skipped' {
   const status = (c.status ?? '').toUpperCase();
-  if (status && status !== 'COMPLETED') return 'pending';
   const s = (c.conclusion ?? c.state ?? '').toUpperCase();
-  if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED'].includes(s)) return 'failure';
-  if (['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(s)) return 'success';
-  return 'pending';
+  if (['FAILURE', 'ERROR', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE'].includes(s)) return 'failure';
+  if (status && status !== 'COMPLETED') return 'pending';
+  if (s === 'SUCCESS') return 'success';
+  if (s === 'SKIPPED') return 'skipped';
+  if (['PENDING', 'QUEUED', 'IN_PROGRESS', 'EXPECTED', ''].includes(s)) return 'pending';
+  return 'none'; // NEUTRAL, CANCELLED, STALE: completed, but not a pass
+}
+
+/** One check's own state for the detail view; a skipped check shows as idle (`none`), never success. */
+function checkState(c: GhCheck): ForgeCheckState {
+  const o = checkOutcome(c);
+  return o === 'skipped' ? 'none' : o;
 }
 
 /**
@@ -144,16 +159,25 @@ export function pullRequestFromGh(doc: GhPr): ForgePullRequest { return toPullRe
   return { ...toPullRequest(doc), body: doc.body ?? '', files: (doc.files ?? []).map(toFile), checkRuns: (doc.statusCheckRollup ?? []).map(toCheck), headSha: doc.headRefOid ?? null };
 }
 
+/**
+ * VS-466: the rolled-up state of a pull request's checks. `success` requires a completed `SUCCESS`
+ * for every check a run reported; `SKIPPED` entries carry no signal and are ignored (see
+ * `checkOutcome`), so an all-skipped draft run reads `none`, not `success`. A `failure` anywhere
+ * wins; anything else unresolved (`pending`, `queued`, `neutral`, `cancelled`, `stale`, absent) is
+ * `pending` — never a pass. Empty after ignored checks, or no rollup at all, is `none`.
+ */
 function rollupState(rollup: GhCheck[] | null | undefined): ForgeCheckState {
   if (!rollup || rollup.length === 0) return 'none';
   let pending = false;
+  let real = 0;
   for (const c of rollup) {
-    const s = (c.conclusion ?? c.state ?? '').toUpperCase();
-    const status = (c.status ?? '').toUpperCase();
-    if (status && status !== 'COMPLETED') { pending = true; continue; }
-    if (['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED'].includes(s)) return 'failure';
-    if (['PENDING', 'QUEUED', 'IN_PROGRESS', 'EXPECTED', ''].includes(s)) pending = true;
+    const o = checkOutcome(c);
+    if (o === 'skipped') continue;
+    real += 1;
+    if (o === 'failure') return 'failure';
+    if (o !== 'success') pending = true;
   }
+  if (real === 0) return 'none';
   return pending ? 'pending' : 'success';
 }
 

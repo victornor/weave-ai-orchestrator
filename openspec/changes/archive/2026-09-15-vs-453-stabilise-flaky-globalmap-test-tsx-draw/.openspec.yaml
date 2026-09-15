@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Stabilise the flaky globalMap.test.tsx draw() wait on the lazy MapCanvas chunk under full-suite load"
+skip_specs: true

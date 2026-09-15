@@ -5,6 +5,7 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { Ref } from 'react';
 import type { KnowledgeGraph } from '../api/types';
+import { eventually } from './eventually';
 
 const fg = vi.hoisted(() => ({
   props: null as { graphData?: { nodes: unknown[] } } | null,
@@ -56,7 +57,9 @@ const { KnowledgeGraphPage } = await import('../v2/knowledge/KnowledgeGraphPage'
 describe('the V2 knowledge graph route', () => {
   it('renders the force graph with one node per page and its links', async () => {
     render(<KnowledgeGraphPage />);
-    expect(await screen.findByTestId('force-graph')).toBeInTheDocument();
+    // `KnowledgeGraphView` is a separate `lazy()` chunk; wait for its Suspense retry without a
+    // wall-clock deadline (see `eventually`).
+    await eventually(() => expect(screen.getByTestId('force-graph')).toBeInTheDocument());
     expect(fg.props?.graphData?.nodes).toHaveLength(2);
   });
 });

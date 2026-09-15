@@ -8,7 +8,7 @@ export interface LoadOptions {
   daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; stateDir?: string;
   /** VS-143: the daemon's own resolved config directory and whether it is isolated from the host. See `daemon-isolation`. */
   daemonConfigDir: string; isolated: boolean;
-  /** VS-385: the generated plugin-page stylesheet, computed once from `packages/ui/src/v2/v2.css` at daemon startup. */
+  /** VS-385: the generated plugin-page stylesheet, computed once from `packages/ui/src/index.css` at daemon startup. */
   v2ThemeCss: string;
 }
 export interface WorkspaceLoader {

@@ -21,7 +21,7 @@ import {
   ProjectsSection,
   SecuritySection,
   UpdatesSection,
-} from '../../routes/Settings';
+} from '../../settings/sections';
 
 function ScopeTab({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }): React.ReactElement {
   return (

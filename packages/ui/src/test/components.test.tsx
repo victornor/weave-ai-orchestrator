@@ -4,11 +4,8 @@ import { UI_STATUSES, NAMED_CARD_OPTION_KEYS } from '@weave-ai/shared';
 import type { Decision, WorkerModelOption } from '@weave-ai/shared';
 import { StatusGlyph, StatusBadge } from '../components/StatusGlyph';
 import { TicketCard } from '../components/TicketCard';
-import { WorkerCard } from '../components/WorkerCard';
 import { DecisionCard } from '../components/DecisionCard';
 import { DocumentPreview } from '../components/DocumentPreview';
-import { DispatchLabel } from '../components/DispatchLabel';
-import { ProjectTag, WorkerChip } from '../components/Chips';
 import { Composer } from '../components/Composer';
 import { BudgetMeter } from '../components/BudgetMeter';
 import { TOTPInput } from '../components/TOTPInput';
@@ -16,8 +13,7 @@ import { ConnectionBanner } from '../components/ConnectionBanner';
 import { EmptyState, ErrorState } from '../components/States';
 import { ApiError } from '../api/client';
 import { PlanPreview } from '../components/PlanPreview';
-import { MergeQueueBadge, MergeQueueStrip } from '../components/MergeQueue';
-import { agent, decision, ticket } from './factories';
+import { decision, ticket } from './factories';
 
 /**
  * VS-281: a card the weaver has reviewed. Since an unreviewed card withholds its approve action,
@@ -205,151 +201,9 @@ describe('TicketCard — worker model tier tag (VS-217)', () => {
   });
 });
 
-describe('WorkerCard', () => {
-  // VS-56: a paused worker says why, and offers the one action that puts it back to work.
-  it('names why a paused worker stopped and offers Resume', () => {
-    const resume = vi.fn();
-    render(
-      <WorkerCard
-        agent={agent({
-          status: 'paused',
-          pauseReason: 'rate_limit: waiting for a human',
-          pauseDetail: { family: 'provider_quota', code: 'rate_limit', message: 'limit resets in 2 hours', resetAt: null, runId: 'r1' },
-        })}
-        onResume={resume}
-      />,
-    );
-    expect(screen.getByText('provider_quota · limit resets in 2 hours')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
-    expect(resume).toHaveBeenCalledTimes(1);
-  });
 
-  // VS-201: the visible line stays the capped, ellipsis-marked preview; the tooltip carries the
-  // complete underlying message rather than repeating the same capped string.
-  it('carries the complete pause message in the tooltip behind the capped preview', () => {
-    const models = Array.from({ length: 60 }, (_, i) => `gpt-5.${i}-sol-high`).join(', ');
-    const longMessage = `Cannot use this model: grok-4-6. Available models: auto, ${models}`;
-    render(
-      <WorkerCard
-        agent={agent({
-          status: 'paused',
-          pauseDetail: { family: 'unknown', code: 'bad_model', message: longMessage, resetAt: null, runId: 'r1' },
-        })}
-      />,
-    );
-    const preview = screen.getByText(/^unknown ·/);
-    expect(preview.textContent).not.toContain('gpt-5.59-sol-high');
-    expect(preview.getAttribute('title')).toContain('gpt-5.59-sol-high');
-  });
 
-  it('renders a worker paused with only a free-text reason, and none for a running one', () => {
-    const { unmount } = render(<WorkerCard agent={agent({ status: 'paused', pauseReason: 'paused by operator' })} />);
-    expect(screen.getByText('paused by operator')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
-    unmount();
 
-    render(<WorkerCard agent={agent()} />);
-    expect(screen.queryByText(/provider_quota/)).not.toBeInTheDocument();
-  });
-
-  it('marks an interactive session, and nothing when it is not one (VS-101)', () => {
-    const { unmount } = render(<WorkerCard agent={agent()} interactive />);
-    expect(screen.getByText('interactive')).toBeInTheDocument();
-    unmount();
-
-    render(<WorkerCard agent={agent()} />);
-    expect(screen.queryByText('interactive')).not.toBeInTheDocument();
-  });
-
-  // VS-317: a worker waiting on its own scheduled wake says when and why — it is not idle.
-  it('shows the pending self-wake and nothing when there is none', () => {
-    const at = new Date(Date.now() + 20 * 60_000).toISOString();
-    const { unmount } = render(<WorkerCard agent={agent()} scheduledWake={{ at, reason: 'check the sweep' }} />);
-    expect(screen.getByText(/wakes in 20m · check the sweep/)).toBeInTheDocument();
-    unmount();
-
-    render(<WorkerCard agent={agent()} />);
-    expect(screen.queryByText(/wakes /)).not.toBeInTheDocument();
-  });
-
-  it('shows the last line and the worktree state', () => {
-    render(
-      <WorkerCard
-        agent={agent()}
-        projectLabel="web"
-        ticketIdentifier="ACME-42"
-        lastLine="running vitest — 38/41 passed"
-        worktree={{ status: 'active', dirty: true, ahead: 3, behind: 0 }}
-        usage={{ tokens: 18400, costCents: 41, estimated: true }}
-      />,
-    );
-    expect(screen.getByText('Frontend Engineer #7')).toBeInTheDocument();
-    expect(screen.getByText('running vitest — 38/41 passed')).toBeInTheDocument();
-    expect(screen.getByText('↑3 ↓0')).toBeInTheDocument();
-    expect(screen.getByText('18.4k tok')).toBeInTheDocument();
-    expect(screen.getByText('$0.41 est')).toBeInTheDocument();
-  });
-});
-
-describe('DispatchLabel', () => {
-  it('names the work and the state it is in', () => {
-    render(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="working" />);
-    expect(screen.getByText('ACME-42')).toBeInTheDocument();
-    expect(screen.getByText('Frontend Engineer #7')).toBeInTheDocument();
-    expect(screen.getByText('working')).toBeInTheDocument();
-  });
-
-  it('keeps reading truthfully once the work has ended', () => {
-    const { rerender } = render(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="done" />);
-    expect(screen.getByRole('button', { name: 'ACME-42: Frontend Engineer #7 — done' })).toBeInTheDocument();
-    rerender(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="failed" />);
-    expect(screen.getByRole('button', { name: 'ACME-42: Frontend Engineer #7 — failed' })).toBeInTheDocument();
-  });
-
-  it('is a way in', () => {
-    const onClick = vi.fn();
-    render(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="done" onClick={onClick} />);
-    fireEvent.click(screen.getByRole('button'));
-    expect(onClick).toHaveBeenCalledOnce();
-  });
-
-  it('colours the ticket identifier only when given a project colour', () => {
-    const { rerender } = render(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="working" projectColorVar="var(--project-1)" />);
-    const tinted = screen.getByRole('button').querySelector('[data-project-color]') as HTMLElement | null;
-    expect(tinted?.textContent).toBe('ACME-42');
-    expect(tinted?.style.color).toBe('var(--project-1)');
-    expect(screen.getByRole('button').querySelector('.rounded-full')).toBeNull();
-    rerender(<DispatchLabel identifier="ACME-42" name="Frontend Engineer #7" status="working" />);
-    expect(screen.getByRole('button').querySelector('[data-project-color]')).toBeNull();
-  });
-});
-
-describe('ProjectTag', () => {
-  it('colours the label when colorVar is given, in both active states, and none without it', () => {
-    const { rerender } = render(<ProjectTag label="Web" active={false} colorVar="var(--project-2)" />);
-    expect((screen.getByRole('radio').querySelector('[data-project-color]') as HTMLElement | null)?.style.color).toBe('var(--project-2)');
-    expect(screen.getByRole('radio').querySelector('.rounded-full')).toBeNull();
-    rerender(<ProjectTag label="Web" active colorVar="var(--project-2)" />);
-    expect((screen.getByRole('radio').querySelector('[data-project-color]') as HTMLElement | null)?.style.color).toBe('var(--project-2)');
-    expect(screen.getByRole('radio').querySelector('.rounded-full')).toBeNull();
-    rerender(<ProjectTag label="Auto" active={false} />);
-    expect(screen.getByRole('radio').querySelector('[data-project-color]')).toBeNull();
-    rerender(<ProjectTag label="Auto" active />);
-    expect(screen.getByRole('radio').querySelector('[data-project-color]')).toBeNull();
-  });
-});
-
-describe('WorkerChip', () => {
-  it('colours the worker name only when given a project colour', () => {
-    const { rerender } = render(<WorkerChip name="Frontend Engineer #7" status="working" projectColorVar="var(--project-3)" />);
-    const tinted = screen.getByRole('button').querySelector('[data-project-color]') as HTMLElement | null;
-    expect(tinted?.textContent).toBe('Frontend Engineer #7');
-    expect(tinted?.style.color).toBe('var(--project-3)');
-    expect(screen.getByRole('button').querySelector('.rounded-full')).toBeNull();
-    rerender(<WorkerChip name="Frontend Engineer #7" status="working" />);
-    expect(screen.getByRole('button').querySelector('[data-project-color]')).toBeNull();
-  });
-});
 
 const question = (over: Partial<Parameters<typeof decision>[0]> = {}): ReturnType<typeof decision> =>
   decision({
@@ -1799,52 +1653,4 @@ describe('the document a decision target points at (VS-224)', () => {
   });
 });
 
-describe('MergeQueueStrip', () => {
-  it('says how much is landing and how much is waiting', () => {
-    render(<MergeQueueStrip landing={1} waiting={2} onOpen={vi.fn()} />);
-    expect(screen.getByText('Merge queue')).toBeInTheDocument();
-    expect(screen.getByText('1 landing \u00b7 2 waiting')).toBeInTheDocument();
-  });
 
-  it('says nothing is landing when the queue is empty, rather than disappearing', () => {
-    render(<MergeQueueStrip landing={0} waiting={0} onOpen={vi.fn()} />);
-    expect(screen.getByText('Merge queue')).toBeInTheDocument();
-    expect(screen.getByText('nothing landing')).toBeInTheDocument();
-  });
-
-  it('opens the merge queue view', () => {
-    const onOpen = vi.fn();
-    render(<MergeQueueStrip landing={0} waiting={1} onOpen={onOpen} />);
-    fireEvent.click(screen.getByRole('button'));
-    expect(onOpen).toHaveBeenCalled();
-  });
-});
-
-describe('MergeQueueBadge', () => {
-  it('names the position of a waiting ticket', () => {
-    render(<MergeQueueBadge position={3} merging={false} />);
-    expect(screen.getByText('#3 in the merge queue')).toBeInTheDocument();
-  });
-
-  it('says the ticket is the one merging', () => {
-    render(<MergeQueueBadge position={null} merging />);
-    expect(screen.getByText('merging now')).toBeInTheDocument();
-  });
-
-  it('renders nothing for a ticket that is neither', () => {
-    const { container } = render(<MergeQueueBadge position={null} merging={false} />);
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('is not a control until it is given somewhere to go', () => {
-    render(<MergeQueueBadge position={3} merging={false} />);
-    expect(screen.queryByRole('button')).toBeNull();
-  });
-
-  it('opens the merge queue view when it has one', () => {
-    const onOpen = vi.fn();
-    render(<MergeQueueBadge position={3} merging={false} onOpen={onOpen} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open the merge queue' }));
-    expect(onOpen).toHaveBeenCalled();
-  });
-});

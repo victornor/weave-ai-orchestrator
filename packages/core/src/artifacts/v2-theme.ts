@@ -1,32 +1,32 @@
 /**
- * Generates a plugin page's stylesheet from `packages/ui/src/v2/v2.css`'s own real text (VS-385)
- * — never a hand-kept literal. `generateV2PluginCss` is a pure function: fed `v2.css`'s current
- * source, it returns the CSS backing the small, documented, visual-value-free vocabulary
- * (`WEAVE_PLUGIN_CLASS`, `data-theme`, `data-tone`) that `@weave-ai/plugin-sdk` publishes. A
- * restyle of `v2.css` changes this function's output the next time it runs — there is no copy to
+ * Generates a plugin page's stylesheet from `packages/ui/src/index.css`'s own real text (VS-385,
+ * VS-457) — never a hand-kept literal. `generateV2PluginCss` is a pure function: fed the app's
+ * single stylesheet, it returns the CSS backing the small, documented, visual-value-free vocabulary
+ * (`WEAVE_PLUGIN_CLASS`, `data-theme`, `data-tone`) that `@weave-ai/plugin-sdk` publishes. A restyle
+ * of the app's tokens changes this function's output the next time it runs — there is no copy to
  * fall out of sync.
  */
 import { WEAVE_PLUGIN_CLASS, WEAVE_PLUGIN_TABLE_CELL } from '@weave-ai/plugin-sdk';
 import { extractCssBlock, parseCssCustomProperties } from './parse.js';
 export { WEAVE_PLUGIN_CLASS, WEAVE_PLUGIN_TABLE_CELL };
 
-/** Marker substrings locating each block in `v2.css`/`index.css` — the drift test uses these too. */
+/** Marker substrings locating each block in `index.css` — the drift test uses these too. */
 export const V2_THEME_MARKERS = {
-  dark: ".v2-root {",
-  light: ".v2-root[data-theme='light'] {",
-  /** `index.css`'s plain, theme-independent `:root { ... }` block (space/radii/type/motion) — the
-   *  first `:root {` in that file, before the `@media (prefers-reduced-motion)` one further down. */
+  /** The dark token block, `:root,\n[data-theme='dark'] {`. */
+  dark: "[data-theme='dark'] {",
+  light: "[data-theme='light'] {",
+  /** The plain, theme-independent `:root { ... }` block (space/radii/type/motion) — the first
+   *  `:root {` in the file, before the `@media (prefers-reduced-motion)` one further down. */
   baseTokens: ':root {',
+  /** The base page chrome rule inside `@layer base` (background/color/font-family). */
+  baseChrome: 'body {',
 } as const;
 
 /**
  * Theme-independent type/scale custom properties `index.css`'s plain `:root` block defines. V2
- * never redefines these under `.v2-root` — it reuses them as-is (`.v2-root`'s own base rule reads
- * `font-family: var(--ff-ui)`, not a literal) — so a standalone plugin document needs them defined
- * explicitly: without this, `var(--ff-ui)` resolves to nothing and the browser falls back to its
- * default (serif) font, and every literal `border-radius` in the vocabulary's component recipes
- * already carries its own value, but a future recipe written against `var(--r*)` would need these
- * defined too.
+ * reuses them as-is (`.v2-root`'s own base rule reads `font-family: var(--ff-ui)`, not a literal),
+ * so a standalone plugin document needs them defined explicitly: without this, `var(--ff-ui)`
+ * resolves to nothing and the browser falls back to its default (serif) font.
  */
 export const V2_BASE_TOKEN_NAMES = [
   '--ff-ui', '--ff-mono',
@@ -34,7 +34,7 @@ export const V2_BASE_TOKEN_NAMES = [
   '--r4', '--r6', '--r8', '--r10',
 ] as const;
 
-/** Color/status/project custom properties `v2.css`'s `.v2-root`/`.v2-root[data-theme='light']` blocks define. */
+/** Color/status/project custom properties the dark/light token blocks define. */
 export const V2_THEME_TOKEN_NAMES = [
   '--bg-0', '--bg-1', '--bg-2', '--bg-3', '--bg-input', '--line-1', '--line-2', '--line-3',
   '--text-1', '--text-2', '--text-3', '--text-4', '--text-strong', '--text-soft', '--text-body', '--text-nav',
@@ -82,8 +82,7 @@ function topLevelRules(css: string): Array<{ selector: string; full: string }> {
  * accidentally picks up a hypothetical `.v2-card-foo`), concatenated in source order. This is how a
  * component recipe spread across several rules (`.v2-button`, `.v2-button:hover`,
  * `.v2-button[data-variant='primary']`, …) is pulled out as one unit, without requiring CSS
- * nesting — every V2 selector stays flat and starts with `.v2-`, per this file's own scoping rule
- * (`packages/ui/src/test/v2theme.test.ts`).
+ * nesting.
  */
 function extractRulesByPrefix(css: string, prefix: string): string {
   const boundary = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}($|[\\s:.[])`);
@@ -92,22 +91,19 @@ function extractRulesByPrefix(css: string, prefix: string): string {
   return rules.map((r) => r.full).join('\n');
 }
 
-/** Matches the anchor selectors `v2.css` authors for the link recipe (base and `:hover`). */
+/** Matches the anchor selectors `index.css` authors for the link recipe (base and `:hover`). */
 const LINK_SELECTOR = /a\.v2-link(:hover)?$/;
 
 /**
- * The prose-link recipe (VS-458), re-rooted for a standalone plugin document. `v2.css` scopes it to
- * `.v2-root a.v2-link`, which the class-prefix extractor cannot see; a plugin page also has no
- * `.v2-root` wrapper, so the generated form targets the bare `<a>` and the vocabulary's `link` class
- * together — `a, a.v2-link` and `a:hover, a.v2-link:hover` — keeping each source rule's own
- * declarations so a restyle of `v2.css`'s link rule reaches a plugin unchanged. The app's own
- * `.v2-root a.v2-link` rule is untouched (it is what keeps the settings `<button class="v2-link">`
- * elements unstyled as links).
+ * The prose-link recipe (VS-458), re-rooted for a standalone plugin document. The app scopes it to
+ * `a.v2-link`; a plugin page has no such guarantee, so the generated form targets the bare `<a>` and
+ * the vocabulary's `link` class together — `a, a.v2-link` and `a:hover, a.v2-link:hover` — keeping
+ * each source rule's own declarations so a restyle of the link rule reaches a plugin unchanged.
  */
 function linkRules(css: string): string {
   const matched = topLevelRules(stripComments(css)).filter((r) =>
     r.selector.split(',').some((part) => LINK_SELECTOR.test(part.trim())));
-  if (matched.length === 0) throw new Error('generateV2PluginCss: no a.v2-link rule found in v2.css');
+  if (matched.length === 0) throw new Error('generateV2PluginCss: no a.v2-link rule found in index.css');
   return matched
     .map((r) => {
       const part = r.selector.split(',').map((p) => p.trim()).find((p) => LINK_SELECTOR.test(p))!;
@@ -118,32 +114,29 @@ function linkRules(css: string): string {
 }
 
 /**
- * Builds a plugin page's stylesheet from `v2.css`'s and `index.css`'s real current text: the
- * theme-independent type/scale tokens (`--ff-*`/`--fs-*`/`--r*`) `v2.css` itself only references,
- * the dark/light token blocks (re-rooted for a standalone document, since a plugin page has no
- * `.v2-root` wrapper of its own), the plain base rule (page chrome — background/color/font), the
- * shared component classes verbatim (every rule belonging to each, not just its first), the link
- * recipe re-rooted at both a bare `<a>` and the `link` class (VS-458), and one generated
- * `[data-tone]` colour rule per status token (`.v2-tag` relies on a Tailwind colour utility class
- * for tone, which a plugin's static page has none of).
+ * Builds a plugin page's stylesheet from the app's single stylesheet's real current text: the
+ * theme-independent type/scale tokens (`--ff-*`/`--fs-*`/`--r*`), the dark/light token blocks
+ * (re-rooted for a standalone document), the plain base rule (page chrome), the shared component
+ * classes verbatim (every rule belonging to each, not just its first), the link recipe re-rooted at
+ * both a bare `<a>` and the `link` class (VS-458), and one generated `[data-tone]` colour rule per
+ * status token (`.v2-tag` relies on a Tailwind colour utility class for tone, which a plugin's
+ * static page has none of).
  */
-export function generateV2PluginCss(v2Css: string, indexCss: string): string {
-  const darkIdx = v2Css.indexOf(V2_THEME_MARKERS.dark);
+export function generateV2PluginCss(css: string): string {
+  const darkIdx = css.indexOf(V2_THEME_MARKERS.dark);
   if (darkIdx === -1) throw new Error('generateV2PluginCss: marker not found: ' + V2_THEME_MARKERS.dark);
-  const darkBlock = extractCssBlock(v2Css, V2_THEME_MARKERS.dark, darkIdx);
-  const lightBlock = extractCssBlock(v2Css, V2_THEME_MARKERS.light);
-  // v2.css's second bare `.v2-root {` (searched for past the first) is the plain base-chrome
-  // rule (background/color/font-family), not a theme block.
-  const baseBlock = extractCssBlock(v2Css, V2_THEME_MARKERS.dark, darkIdx + 1);
-  const baseTokensBlock = extractCssBlock(indexCss, V2_THEME_MARKERS.baseTokens);
+  const darkBlock = extractCssBlock(css, V2_THEME_MARKERS.dark, darkIdx);
+  const lightBlock = extractCssBlock(css, V2_THEME_MARKERS.light);
+  const baseBlock = extractCssBlock(css, V2_THEME_MARKERS.baseChrome);
+  const baseTokensBlock = extractCssBlock(css, V2_THEME_MARKERS.baseTokens);
 
   const components = COMPONENT_CLASS_PREFIXES
-    .map((prefix) => extractRulesByPrefix(v2Css, prefix))
+    .map((prefix) => extractRulesByPrefix(css, prefix))
     .join('\n\n');
 
-  // The link recipe is not a class-prefix recipe: its selector is `.v2-root a.v2-link`, so it is
-  // extracted and re-rooted separately (VS-458) — see linkRules.
-  const links = linkRules(v2Css);
+  // The link recipe is not a class-prefix recipe; its selector is `a.v2-link`, so it is extracted
+  // and re-rooted separately (VS-458) — see linkRules.
+  const links = linkRules(css);
 
   const tones = V2_STATUS_TONE_NAMES
     .map((tone) => `[data-tone='${tone}'] { color: var(--status-${tone}); }`)

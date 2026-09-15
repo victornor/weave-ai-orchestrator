@@ -19,7 +19,7 @@ import { projectLabel } from '@weave-ai/shared';
 import { filterTickets, foldBoard, liveWorkersByTicket, pausedWorkersByTicket, ticketBoardStatus } from '../../lib/board';
 import { lastLinesByAgent, recentLandings, knowledgeSections } from '../../lib/projectOverview';
 import { ago, statusText } from '../../lib/format';
-import { KIND_LABEL } from '../../routes/Changelog';
+import { KIND_LABEL } from '../../lib/changelog';
 import { cx } from '../../lib/cx';
 import { HistorySection } from './HistorySection';
 import { PullRequestsSection } from './PullRequestsSection';

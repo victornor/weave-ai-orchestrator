@@ -6,7 +6,7 @@ import { APPROVAL_OWNERS, DELIVERY_MODES, WorkspaceDefaultsSchema } from '@weave
 import { usePatchConfig, useWorkspaceSummary } from '../../../api/hooks';
 import type * as T from '../../../api/types';
 import { CommitStatus } from '../../../components/CommitStatus';
-import { KnowledgeBudgetsSection } from '../../../routes/Settings';
+import { KnowledgeBudgetsSection } from '../../../settings/sections';
 import { useCommittableField } from '../../../lib/commit-field';
 import { cx } from '../../../lib/cx';
 

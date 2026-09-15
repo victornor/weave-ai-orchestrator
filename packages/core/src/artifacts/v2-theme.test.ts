@@ -10,25 +10,25 @@ import { extractCssBlock, parseCssCustomProperties } from './parse.js';
 // without packages/core depending on packages/ui (scripts/guard-boundaries.mjs only inspects
 // `from '...'` import specifiers, not fs paths). This is also what `generateV2PluginCss` itself is
 // fed at daemon startup (VS-385 design.md Decision 3), just resolved repo-relative there instead.
-const V2_CSS = readFileSync(fileURLToPath(new URL('../../../ui/src/v2/v2.css', import.meta.url)), 'utf8');
-const INDEX_CSS = readFileSync(fileURLToPath(new URL('../../../ui/src/index.css', import.meta.url)), 'utf8');
+// VS-457 merged V1's stylesheet and V2's delta into this one file.
+const APP_CSS = readFileSync(fileURLToPath(new URL('../../../ui/src/index.css', import.meta.url)), 'utf8');
 
 describe('generateV2PluginCss (VS-385 design.md Decision 3) — no-divergence', () => {
-  const generated = generateV2PluginCss(V2_CSS, INDEX_CSS);
-  const appDark = parseCssCustomProperties(extractCssBlock(V2_CSS, V2_THEME_MARKERS.dark));
-  const appLight = parseCssCustomProperties(extractCssBlock(V2_CSS, V2_THEME_MARKERS.light));
-  const appBase = parseCssCustomProperties(extractCssBlock(INDEX_CSS, V2_THEME_MARKERS.baseTokens));
+  const generated = generateV2PluginCss(APP_CSS);
+  const appDark = parseCssCustomProperties(extractCssBlock(APP_CSS, V2_THEME_MARKERS.dark));
+  const appLight = parseCssCustomProperties(extractCssBlock(APP_CSS, V2_THEME_MARKERS.light));
+  const appBase = parseCssCustomProperties(extractCssBlock(APP_CSS, V2_THEME_MARKERS.baseTokens));
   const genDark = parseCssCustomProperties(extractCssBlock(generated, "[data-theme='dark'] {"));
   const genLight = parseCssCustomProperties(extractCssBlock(generated, "[data-theme='light'] {"));
   const genBase = parseCssCustomProperties(extractCssBlock(generated, ':root {'));
 
-  it('every token the generated stylesheet ships matches v2.css\'s dark value exactly', () => {
+  it('every token the generated stylesheet ships matches the app dark value exactly', () => {
     for (const name of V2_THEME_TOKEN_NAMES) {
       expect(genDark[name], `${name} (dark)`).toBe(appDark[name]);
     }
   });
 
-  it('every token the generated stylesheet ships matches v2.css\'s light value exactly', () => {
+  it('every token the generated stylesheet ships matches the app light value exactly', () => {
     for (const name of V2_THEME_TOKEN_NAMES) {
       expect(genLight[name], `${name} (light)`).toBe(appLight[name]);
     }
@@ -40,27 +40,27 @@ describe('generateV2PluginCss (VS-385 design.md Decision 3) — no-divergence', 
     }
   });
 
-  it('demonstrates the check actually discriminates: a mutated v2.css value produces different output', () => {
+  it('demonstrates the check actually discriminates: a mutated app value produces different output', () => {
     expect(appDark['--accent']).toBeTruthy();
-    const mutated = V2_CSS.replace(appDark['--accent'] as string, '#not-the-real-value');
-    expect(mutated).not.toBe(V2_CSS);
-    const mutatedGenerated = generateV2PluginCss(mutated, INDEX_CSS);
+    const mutated = APP_CSS.replace(appDark['--accent'] as string, '#not-the-real-value');
+    expect(mutated).not.toBe(APP_CSS);
+    const mutatedGenerated = generateV2PluginCss(mutated);
     const mutatedDark = parseCssCustomProperties(extractCssBlock(mutatedGenerated, "[data-theme='dark'] {"));
     expect(mutatedDark['--accent']).not.toBe(genDark['--accent']);
   });
 
   it('demonstrates the base-token check discriminates too: a mutated index.css value produces different output', () => {
     expect(appBase['--ff-ui']).toBeTruthy();
-    const mutated = INDEX_CSS.replace(appBase['--ff-ui'] as string, "'NotTheRealFont'");
-    expect(mutated).not.toBe(INDEX_CSS);
-    const mutatedGenerated = generateV2PluginCss(V2_CSS, mutated);
+    const mutated = APP_CSS.replace(appBase['--ff-ui'] as string, "'NotTheRealFont'");
+    expect(mutated).not.toBe(APP_CSS);
+    const mutatedGenerated = generateV2PluginCss(mutated);
     const mutatedBase = parseCssCustomProperties(extractCssBlock(mutatedGenerated, ':root {'));
     expect(mutatedBase['--ff-ui']).not.toBe(genBase['--ff-ui']);
   });
 });
 
 describe('generateV2PluginCss — completeness', () => {
-  const generated = generateV2PluginCss(V2_CSS, INDEX_CSS);
+  const generated = generateV2PluginCss(APP_CSS);
 
   it('every WEAVE_PLUGIN_CLASS value has at least one matching rule', () => {
     for (const className of Object.values(WEAVE_PLUGIN_CLASS)) {
@@ -74,7 +74,7 @@ describe('generateV2PluginCss — completeness', () => {
     }
   });
 
-  it('emits the link recipe at a bare <a> and the link class, carrying v2.css\'s own token (VS-458)', () => {
+  it('emits the link recipe at a bare <a> and the link class, carrying the app\'s own token (VS-458)', () => {
     expect(generated).toMatch(/a,\s*a\.v2-link\s*\{[^}]*color:\s*var\(--accent-link\)/);
     expect(generated).toMatch(/a:hover,\s*a\.v2-link:hover\s*\{[^}]*color:\s*var\(--accent-hover\)/);
   });
@@ -90,13 +90,13 @@ describe('generateV2PluginCss — completeness', () => {
   });
 
   it('fails if the link rule is missing entirely from the source (proves the link check bites)', () => {
-    const withoutLink = V2_CSS.replace(/a\.v2-link\b/g, 'a.v2-link-renamed');
-    expect(() => generateV2PluginCss(withoutLink, INDEX_CSS)).toThrow(/no a\.v2-link rule found/);
+    const withoutLink = APP_CSS.replace(/a\.v2-link\b/g, 'a.v2-link-renamed');
+    expect(() => generateV2PluginCss(withoutLink)).toThrow(/no a\.v2-link rule found/);
   });
 
   it('fails if a component class is missing entirely from the source (proves the completeness check bites)', () => {
-    const withoutTable = V2_CSS.replace(/\.v2-table\b/g, '.v2-table-renamed');
-    expect(() => generateV2PluginCss(withoutTable, INDEX_CSS)).toThrow(/no rule found for prefix: \.v2-table/);
+    const withoutTable = APP_CSS.replace(/\.v2-table\b/g, '.v2-table-renamed');
+    expect(() => generateV2PluginCss(withoutTable)).toThrow(/no rule found for prefix: \.v2-table/);
   });
 
   it('defines both [data-theme] roots and a plain base rule', () => {
@@ -107,7 +107,7 @@ describe('generateV2PluginCss — completeness', () => {
 
   it('sets a non-default font-family on the root, resolved through a token the same output defines', () => {
     const genBase = parseCssCustomProperties(extractCssBlock(generated, ':root {'));
-    const appBase = parseCssCustomProperties(extractCssBlock(INDEX_CSS, V2_THEME_MARKERS.baseTokens));
+    const appBase = parseCssCustomProperties(extractCssBlock(APP_CSS, V2_THEME_MARKERS.baseTokens));
     expect(genBase['--ff-ui']).toBeTruthy();
     expect(genBase['--ff-ui']).toBe(appBase['--ff-ui']);
     expect(genBase['--ff-ui']).not.toMatch(/^serif\b|,\s*serif\b/i);
@@ -121,12 +121,12 @@ describe('generateV2PluginCss — completeness', () => {
 });
 
 describe('generateV2PluginCss — VS-465 (plugin pages: section spacing and [hidden])', () => {
-  const generated = generateV2PluginCss(V2_CSS, INDEX_CSS);
+  const generated = generateV2PluginCss(APP_CSS);
 
   it('makes the standard hidden attribute win over the vocabulary\'s own display recipes', () => {
     expect(generated).toMatch(/\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/);
     // The vocabulary's own recipes (`.v2-form-row { display: flex }`, …) are extracted verbatim
-    // from v2.css and are never `!important`, so this rule wins the cascade on every one of them.
+    // from index.css and are never `!important`, so this rule wins the cascade on every one of them.
     expect(generated).not.toMatch(/\.v2-(?:form-row|button|input|card|table|tag)[^{}]*\{[^{}]*display:[^{};]*!important/);
   });
 
@@ -140,7 +140,7 @@ describe('generateV2PluginCss — VS-465 (plugin pages: section spacing and [hid
 });
 
 describe('generateV2PluginCss — VS-468 (a shrinking metadata cell, a row panel, grouped actions)', () => {
-  const generated = generateV2PluginCss(V2_CSS, INDEX_CSS);
+  const generated = generateV2PluginCss(APP_CSS);
 
   /** The declaration block of the rule whose selector text is `selector`, or a thrown error. */
   function ruleBody(selector: string): string {
@@ -183,7 +183,7 @@ describe('generateV2PluginCss — VS-468 (a shrinking metadata cell, a row panel
 });
 
 it('generateV2PluginCss output has no <script> tag and no non-data: external reference', () => {
-  const generated = generateV2PluginCss(V2_CSS, INDEX_CSS);
+  const generated = generateV2PluginCss(APP_CSS);
   expect(generated).not.toMatch(/<script/i);
   expect(generated).not.toMatch(/@import/i);
   expect(generated).not.toMatch(/url\(\s*['"]?(?!data:)/i);

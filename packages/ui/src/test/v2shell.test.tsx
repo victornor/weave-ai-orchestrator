@@ -477,13 +477,6 @@ describe('the rail update entry (VS-421)', () => {
   });
 });
 
-describe('the one-click way back to V1', () => {
-  it('links the rail footer to /', () => {
-    mountShell();
-    expect(screen.getByRole('link', { name: 'V1' })).toHaveAttribute('href', '/');
-  });
-});
-
 describe('live streams on global pages (VS-366, VS-369)', () => {
   it('opens exactly one stream per listed workspace on a global page', () => {
     state.path = '/needs';

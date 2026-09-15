@@ -60,7 +60,7 @@ vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: [] }),
 }));
 
-const { KnowledgeGraphView } = await import('../routes/KnowledgeGraph');
+const { KnowledgeGraphView } = await import('../v2/knowledge/KnowledgeGraphView');
 
 beforeEach(() => {
   state.graph = GRAPH;

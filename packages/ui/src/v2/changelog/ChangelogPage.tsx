@@ -16,7 +16,7 @@ import { EmptyState, ErrorState } from '../../components/States';
 import { A } from '../../app/link';
 import { useWs } from '../../api/context';
 import { cx } from '../../lib/cx';
-import { KIND_LABEL } from '../../routes/Changelog';
+import { KIND_LABEL } from '../../lib/changelog';
 import { V2Page } from '../V2Page';
 
 const DAY_FMT = new Intl.DateTimeFormat(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });

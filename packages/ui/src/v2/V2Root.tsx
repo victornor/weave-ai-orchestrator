@@ -10,7 +10,6 @@ import { HostRoutesProvider, V2_HOST_ROUTES } from '../app/host';
 import { useV2Theme, type V2ThemeState } from './theme';
 import { V2Shell } from './V2Shell';
 import { DictationSessionProvider } from './DictationSession';
-import './v2.css';
 
 const V2ThemeContext = createContext<V2ThemeState | null>(null);
 

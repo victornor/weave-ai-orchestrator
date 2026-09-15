@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CapabilityDetail, CapabilitySummary, SpecChangeDetail, SpecChangeSummary } from '../api/types';
+import { eventually } from './eventually';
 
 /** The archived change exactly as `GET /specs/:project/changes/:name` returns it (core `getChange`). */
 const ARCHIVED: SpecChangeDetail = {
@@ -146,8 +147,9 @@ describe('Knowledge — graph tab', () => {
 
     fireEvent.click(screen.getAllByRole('tab', { name: 'Graph' })[0]!);
 
-    // The lazy chunk resolves on the next microtask; the empty graph is what this mock draws.
-    expect(await screen.findByText('Nothing to draw yet.')).toBeInTheDocument();
+    // The graph renderer is a separate `lazy()` chunk; `findByText`'s one-second wall clock was the
+    // flake under a loaded suite (VS-446), so wait without a stopwatch.
+    await eventually(() => expect(screen.getByText('Nothing to draw yet.')).toBeInTheDocument());
   });
 });
 

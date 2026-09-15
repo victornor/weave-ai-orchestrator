@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Stabilise the flaky knowledge.test.tsx graph-tab case under full-suite load"
+skip_specs: true

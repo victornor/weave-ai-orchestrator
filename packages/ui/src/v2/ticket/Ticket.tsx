@@ -636,6 +636,7 @@ function ActivityPane({ ticket, worker, project }: { ticket: Ticket; worker: { i
           <DecisionCard
             decision={mergeDecision}
             ticketIdentifier={ticket.identifier}
+            delivery={ticket.delivery}
             projectSlug={project?.slug}
             projectLabel={project ? projectLabel(project) : null}
             ws={ws}

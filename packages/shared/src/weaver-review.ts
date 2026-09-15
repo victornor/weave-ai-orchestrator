@@ -4,9 +4,18 @@ import type { Decision } from './types.js';
 /** Cap on `weaverReviewNote` — the concern summary or the clean mark's reason (VS-223, VS-234) — so it fits a phone card. Longer argument is an `weave_ask`. */
 export const WEAVER_REVIEW_NOTE_MAX = 500;
 
+/** VS-481: cap on the optional `waitingOn` a review mark may carry — one short line on the card. */
+export const WEAVER_REVIEW_WAITING_ON_MAX = 120;
+
 export type WeaverReviewCopy = {
   line: string;
   note: string | null;
+  /**
+   * VS-481: what the weaver's mark says it is waiting on, when it said so — a line of its own on the
+   * card. Null when the mark carried none (or for the default `unseen` state). Purely informational:
+   * it gates nothing.
+   */
+  waitingOn: string | null;
   tone: 'unseen' | 'looked' | 'concerns' | 'after';
   /**
    * VS-266: true exactly when this decision's approving answer is currently refused under the
@@ -27,7 +36,7 @@ export type WeaverReviewCopy = {
 
 export type WeaverReviewFields = Pick<
   Decision,
-  'kind' | 'status' | 'weaverReviewStatus' | 'weaverReviewedAt' | 'weaverReviewNote' | 'answeredAt'
+  'kind' | 'status' | 'weaverReviewStatus' | 'weaverReviewedAt' | 'weaverReviewNote' | 'weaverReviewWaitingOn' | 'answeredAt'
 >;
 
 /** Plan, merge and action cards carry the state; every other kind returns null from `weaverReviewCopy`. */
@@ -54,7 +63,7 @@ export function weaverReviewCopy(d: WeaverReviewFields): WeaverReviewCopy | null
   const after = reviewIsAfterAnswer(d);
   if (reviewStatus === 'unseen') {
     return {
-      line: "Weaver hasn't reviewed yet", note: null, tone: 'unseen', held: false,
+      line: "Weaver hasn't reviewed yet", note: null, waitingOn: null, tone: 'unseen', held: false,
       // VS-281: only an open decision is still waiting on an answer at all — an answered or
       // superseded one has nothing left to hold.
       awaitsReview: d.status === 'open',
@@ -66,6 +75,7 @@ export function weaverReviewCopy(d: WeaverReviewFields): WeaverReviewCopy | null
     return {
       line: after ? 'Weaver reviewed after you answered — no concerns' : 'Weaver reviewed — no concerns',
       note: d.weaverReviewNote ?? null,
+      waitingOn: d.weaverReviewWaitingOn ?? null,
       tone: after ? 'after' : 'looked',
       held: false,
       awaitsReview: false,
@@ -74,6 +84,7 @@ export function weaverReviewCopy(d: WeaverReviewFields): WeaverReviewCopy | null
   return {
     line: after ? 'Weaver reviewed after you answered — has concerns' : 'Weaver reviewed — has concerns',
     note: d.weaverReviewNote ?? null,
+    waitingOn: d.weaverReviewWaitingOn ?? null,
     tone: 'concerns',
     // VS-266: only an open decision is still waiting on an answer at all — held is moot once it is
     // answered, superseded, withdrawn or expired.

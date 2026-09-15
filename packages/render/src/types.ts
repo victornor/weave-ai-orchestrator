@@ -163,6 +163,8 @@ export interface CardModel {
   held: boolean;
   /** VS-281: the weaver has not reviewed this open decision yet — the approving option is withheld and refused without a deliberate override. False for every other decision, including a `looked` or `concerns` one. */
   awaitsReview: boolean;
+  /** VS-481: what the weaver's review mark says it is waiting on, when it said so — a line of its own on the card. Null when the mark carried none. */
+  waitingOn: string | null;
 }
 
 // ---------------------------------------------------------------- tickets / workers

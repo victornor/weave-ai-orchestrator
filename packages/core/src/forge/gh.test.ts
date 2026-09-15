@@ -406,6 +406,31 @@ describe('prState', () => {
     expect(state.mergeState).toBeUndefined();
     expect(state.isDraft).toBe(false);
   });
+
+  it('names each reported check beside the rolled-up tally (VS-481)', async () => {
+    fakeGh(JSON.stringify({
+      state: 'OPEN',
+      statusCheckRollup: [
+        { name: 'build', status: 'COMPLETED', conclusion: 'SUCCESS' },
+        { name: 'lint', status: 'IN_PROGRESS' },
+        { name: 'typecheck', status: 'COMPLETED', conclusion: 'FAILURE' },
+      ],
+    }));
+    const state = await new GhForge().prState(home, 'https://github.com/acme/api/pull/77');
+    expect(state.ciState).toBe('failure');
+    expect(state.checks).toEqual({ passed: 1, total: 3 });
+    expect(state.checkDetails).toEqual([
+      { name: 'build', state: 'success', url: null },
+      { name: 'lint', state: 'pending', url: null },
+      { name: 'typecheck', state: 'failure', url: null },
+    ]);
+  });
+
+  it('reports no check detail when the forge reports no checks (VS-481)', async () => {
+    fakeGh(JSON.stringify({ state: 'OPEN' }));
+    const state = await new GhForge().prState(home, 'https://github.com/acme/api/pull/77');
+    expect(state.checkDetails).toEqual([]);
+  });
 });
 
 describe('repoInfo (VS-359)', () => {

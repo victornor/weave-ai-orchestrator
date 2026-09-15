@@ -28,6 +28,7 @@ import {
 import { workerPauseReason } from '@weave-ai/render';
 import { A } from '../app/link';
 import { DocumentPreview } from '../components/DocumentPreview';
+import { CiChip } from '../components/CiChip';
 import { Markdown } from '../components/Markdown';
 import { PlanPreview } from '../components/PlanPreview';
 import { useTicketFor, useTicketWorkProducts } from '../api/hooks';
@@ -63,6 +64,8 @@ export interface V2DecisionCardProps {
   /** Held for one animation while it leaves the list (VS-427's `useExitPresence`), so its removal
    *  animates out instead of vanishing; an answered card drops with `status: 'open'`. */
   exiting?: boolean;
+  /** VS-481: the ticket's delivery record, so a merge card can show its live CI chip. */
+  delivery?: Record<string, unknown> | null;
   className?: string;
 }
 
@@ -280,6 +283,7 @@ export function V2DecisionCard({
   onAnswer,
   narrow = false,
   exiting = false,
+  delivery,
   className,
 }: V2DecisionCardProps): React.ReactElement {
   const [watchOpen, setWatchOpen] = useState(false);
@@ -410,6 +414,10 @@ export function V2DecisionCard({
         {docTarget && decision.kind !== 'plan_approval' ? <DocumentPreview decision={decision} ws={ws ?? undefined} /> : null}
         {decision.kind === 'plan_approval' && !inert ? (plan ?? <PlanPreview decision={decision} ws={ws ?? undefined} />) : null}
 
+        {decision.kind === 'merge_approval' ? (
+          <CiChip delivery={delivery} className="mb-1.5" />
+        ) : null}
+
         {review ? (
           <div className="mb-1.5" data-weaver-review={reviewTone}>
             {reviewTone === 'concerns' ? (
@@ -423,6 +431,7 @@ export function V2DecisionCard({
               <p className="text-micro text-text-3">{review.line}</p>
             )}
             {objection ? <p className="mt-1 whitespace-pre-wrap text-meta text-text-1">{objection}</p> : null}
+            {review.waitingOn ? <p className="mt-1 text-micro text-text-3">Weaver: {review.waitingOn}</p> : null}
           </div>
         ) : null}
 

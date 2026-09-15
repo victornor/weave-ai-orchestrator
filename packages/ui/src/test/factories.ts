@@ -144,6 +144,7 @@ export function decision(over: Partial<Decision> = {}): Decision {
     weaverReviewNote: null,
     weaverReviewedByAgentId: null,
     weaverReviewedHeadSha: null,
+    weaverReviewWaitingOn: null,
     answerAuthorKind: null,
     relayedFromMessageId: null,
     ...over,

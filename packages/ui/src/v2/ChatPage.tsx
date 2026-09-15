@@ -204,6 +204,7 @@ function DecisionsPane({
                  askedBy={d.askedByAgentId}
                  askedByName={d.askedByAgentId ? agentNameById.get(d.askedByAgentId) ?? null : null}
                  ticketIdentifier={t?.identifier ?? d.ticketId}
+                 delivery={t?.delivery ?? null}
                 projectLabel={p ? projectLabel(p) : null}
                 projectSlug={p?.slug ?? null}
                 onAnswer={(a) => onAnswer(d.id, a)}
@@ -603,6 +604,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                 askedBy={d.askedByAgentId}
                 askedByName={d.askedByAgentId ? agentNameById.get(d.askedByAgentId) ?? null : null}
                 ticketIdentifier={ticket?.identifier ?? d.ticketId}
+                delivery={ticket?.delivery ?? null}
                 projectLabel={project ? projectLabel(project) : null}
                 projectSlug={project?.slug ?? null}
                 onAnswer={(a) => onAnswer(d.id, a)}

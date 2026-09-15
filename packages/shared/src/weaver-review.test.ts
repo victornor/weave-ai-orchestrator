@@ -20,6 +20,7 @@ function fields(
     weaverReviewStatus: 'unseen',
     weaverReviewedAt: null,
     weaverReviewNote: null,
+    weaverReviewWaitingOn: null,
     answeredAt: null,
     ...over,
   };
@@ -80,25 +81,25 @@ describe('weaverReviewCopy', () => {
 
   it('uses the exact unanswered and after-the-fact copy (VS-234)', () => {
     expect(weaverReviewCopy(fields('plan_approval'))).toEqual({
-      line: "Weaver hasn't reviewed yet", note: null, tone: 'unseen', held: false, awaitsReview: true,
+      line: "Weaver hasn't reviewed yet", note: null, waitingOn: null, tone: 'unseen', held: false, awaitsReview: true,
     });
     expect(weaverReviewCopy(fields('merge_approval', {
       weaverReviewStatus: 'looked', weaverReviewedAt: PRIOR, weaverReviewNote: 'migration matches the plan',
-    }))).toEqual({ line: 'Weaver reviewed — no concerns', note: 'migration matches the plan', tone: 'looked', held: false, awaitsReview: false });
+    }))).toEqual({ line: 'Weaver reviewed — no concerns', note: 'migration matches the plan', waitingOn: null, tone: 'looked', held: false, awaitsReview: false });
     expect(weaverReviewCopy(fields('action_approval', {
       weaverReviewStatus: 'looked', weaverReviewedAt: LATER, answeredAt: PRIOR, weaverReviewNote: 'diff is exactly the plan',
-    }))).toEqual({ line: 'Weaver reviewed after you answered — no concerns', note: 'diff is exactly the plan', tone: 'after', held: false, awaitsReview: false });
+    }))).toEqual({ line: 'Weaver reviewed after you answered — no concerns', note: 'diff is exactly the plan', waitingOn: null, tone: 'after', held: false, awaitsReview: false });
     expect(weaverReviewCopy(fields('plan_approval', {
       weaverReviewStatus: 'concerns', weaverReviewedAt: PRIOR,
       weaverReviewNote: 'split the migration',
     }))).toEqual({
-      line: 'Weaver reviewed — has concerns', note: 'split the migration', tone: 'concerns', held: true, awaitsReview: false,
+      line: 'Weaver reviewed — has concerns', note: 'split the migration', waitingOn: null, tone: 'concerns', held: true, awaitsReview: false,
     });
     expect(weaverReviewCopy(fields('merge_approval', {
       status: 'answered', weaverReviewStatus: 'concerns', weaverReviewedAt: LATER, answeredAt: PRIOR,
       weaverReviewNote: 'CI is red',
     }))).toEqual({
-      line: 'Weaver reviewed after you answered — has concerns', note: 'CI is red', tone: 'concerns', held: false, awaitsReview: false,
+      line: 'Weaver reviewed after you answered — has concerns', note: 'CI is red', waitingOn: null, tone: 'concerns', held: false, awaitsReview: false,
     });
   });
 
@@ -106,7 +107,34 @@ describe('weaverReviewCopy', () => {
     const copy = weaverReviewCopy(fields('plan_approval', {
       weaverReviewStatus: 'looked', weaverReviewedAt: PRIOR, weaverReviewNote: null,
     }));
-    expect(copy).toEqual({ line: 'Weaver reviewed — no concerns', note: null, tone: 'looked', held: false, awaitsReview: false });
+    expect(copy).toEqual({ line: 'Weaver reviewed — no concerns', note: null, waitingOn: null, tone: 'looked', held: false, awaitsReview: false });
+  });
+
+  describe('waitingOn (VS-481)', () => {
+    it('is surfaced for a looked mark that carried one', () => {
+      const copy = weaverReviewCopy(fields('merge_approval', {
+        weaverReviewStatus: 'looked', weaverReviewedAt: PRIOR, weaverReviewNote: 'nothing to object to',
+        weaverReviewWaitingOn: 'waiting for runner CI on 414b329d',
+      }));
+      expect(copy!.waitingOn).toBe('waiting for runner CI on 414b329d');
+      expect(copy!.held).toBe(false);
+    });
+
+    it('is surfaced for a concerns mark too, without changing the hold', () => {
+      const copy = weaverReviewCopy(fields('merge_approval', {
+        weaverReviewStatus: 'concerns', weaverReviewedAt: PRIOR, weaverReviewNote: 'CI is red',
+        weaverReviewWaitingOn: 'a fix from the worker',
+      }));
+      expect(copy!.waitingOn).toBe('a fix from the worker');
+      expect(copy!.held).toBe(true);
+    });
+
+    it('is null on the unseen default and when a mark carried none', () => {
+      expect(weaverReviewCopy(fields('plan_approval'))!.waitingOn).toBeNull();
+      expect(weaverReviewCopy(fields('plan_approval', {
+        weaverReviewStatus: 'looked', weaverReviewedAt: PRIOR, weaverReviewNote: 'clean',
+      }))!.waitingOn).toBeNull();
+    });
   });
 
   describe('awaitsReview (VS-281)', () => {

@@ -211,7 +211,7 @@ export interface DecisionsService {
    * unresolvable stores null. Async since VS-474: a `looked` mark releases the daemon's own YOLO
    * grant through `tickets.onReviewLooked()`, so the grant can happen on the mark.
    */
-  review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null }): Promise<S.Decision>;
+  review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null; waitingOn?: string | null }): Promise<S.Decision>;
   withdraw(actor: Actor, id: string, reason: string): S.Decision;
   /** Withdraws every still-open decision scoped to this ticket (e.g. once it reaches a terminal status). Returns the count closed. */
   withdrawForTicket(actor: Actor, ticketId: string, reason: string): number;

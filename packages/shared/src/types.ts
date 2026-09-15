@@ -140,6 +140,12 @@ export interface Decision {
   weaverReviewNote: string | null;
   weaverReviewedByAgentId: string | null;
   /**
+   * VS-481: what the weaver's review mark says it is waiting on (≤120 chars), when it said so — a
+   * line of its own on the card. Null when the mark carried none, a later mark replaced it, or the
+   * delivery head moved since the mark was made.
+   */
+  weaverReviewWaitingOn: string | null;
+  /**
    * VS-365: the delivery head (a pull request's head, else the ticket branch's head, else the project
    * clone's branch ref) the review mark was made against, recorded when a `merge_approval` is marked.
    * Null when no head could be resolved. A held merge approval whose head later differs from this

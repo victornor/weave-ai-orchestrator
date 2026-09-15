@@ -233,14 +233,20 @@ export class GhForge implements ForgeAdapter {
     return r.ok;
   }
 
-  async prState(cwd: string, url: string): Promise<{ state: 'open' | 'merged' | 'closed'; mergeCommit?: string; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number }; headSha?: string; mergeState?: ForgeMergeState; isDraft?: boolean }> {
+  async prState(cwd: string, url: string): Promise<{ state: 'open' | 'merged' | 'closed'; mergeCommit?: string; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number }; checkDetails?: ForgeCheck[]; headSha?: string; mergeState?: ForgeMergeState; isDraft?: boolean }> {
     const r = await sh('gh', ['pr', 'view', url, '--json', 'state,mergeCommit,statusCheckRollup,headRefOid,mergeStateStatus,isDraft'], { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
     if (!r.ok) throw new OcError('internal', `gh pr view failed: ${r.stderr.trim().slice(0, 300)}`, { url });
     let doc: GhPrView;
     try { doc = JSON.parse(r.stdout) as GhPrView; } catch { throw new OcError('internal', 'gh pr view returned invalid JSON', { url }); }
     const raw = (doc.state ?? 'OPEN').toUpperCase();
     const state = raw === 'MERGED' ? 'merged' : raw === 'CLOSED' ? 'closed' : 'open';
-    return { state, mergeCommit: doc.mergeCommit?.oid, ciState: rollupState(doc.statusCheckRollup), checks: checkTally(doc.statusCheckRollup), headSha: doc.headRefOid, mergeState: mergeStateOf(doc.mergeStateStatus), isDraft: doc.isDraft === true };
+    return {
+      state, mergeCommit: doc.mergeCommit?.oid, ciState: rollupState(doc.statusCheckRollup),
+      checks: checkTally(doc.statusCheckRollup),
+      // VS-481: the same rollup, by name, so a card can say which checks are pending or failed.
+      checkDetails: (doc.statusCheckRollup ?? []).map(toCheck),
+      headSha: doc.headRefOid, mergeState: mergeStateOf(doc.mergeStateStatus), isDraft: doc.isDraft === true,
+    };
   }
 
   async mergePr(cwd: string, url: string, method: string): Promise<{ mergeCommit?: string }> {

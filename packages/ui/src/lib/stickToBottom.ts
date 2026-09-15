@@ -40,6 +40,20 @@ const HUMAN_SCROLL_MS = 200;
 /** The keys a browser scrolls a focused list on; a typed character must not count as a gesture. */
 const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Spacebar']);
 
+/**
+ * Whether a key event landed somewhere the key edits text rather than scrolls. A scroll key in the
+ * composer moves the caret or types a space, so it must not arm the gesture that pauses the follow.
+ */
+function editsText(target: EventTarget | null): boolean {
+  const node = target as HTMLElement | null;
+  if (!node || typeof node.tagName !== 'string') return false;
+  if (node.tagName === 'INPUT' || node.tagName === 'TEXTAREA' || node.tagName === 'SELECT') return true;
+  if (node.isContentEditable === true) return true;
+  // Engines that do not derive `isContentEditable` (jsdom) still carry the host attribute.
+  const host = node.closest?.('[contenteditable]');
+  return host != null && host.getAttribute('contenteditable') !== 'false';
+}
+
 /** The older end of the list, for a caller that pages its history. */
 export interface OlderPages {
   /** False once the loaded history reaches the beginning: nothing more is asked for. */
@@ -202,7 +216,11 @@ export function useStickToBottom(
     const onTouchStart = (): void => { touching = true; markHuman(); };
     const onTouchMove = (): void => markHuman();
     const onTouchEnd = (): void => { touching = false; markHuman(); };
-    const onKeyDown = (e: KeyboardEvent): void => { if (SCROLL_KEYS.has(e.key)) markHuman(); };
+    // A scroll key reaches the scroller whatever has focus — the browser routes it to the nearest
+    // scrollable — so it is heard on `document`, not on `el`, and only skipped when it edits text
+    // (VS-460). The scroller-local listener only ever saw keys pressed inside the list, so an
+    // upward scroll from the body or a message control was mistaken for a gestureless reflow.
+    const onKeyDown = (e: KeyboardEvent): void => { if (SCROLL_KEYS.has(e.key) && !editsText(e.target)) markHuman(); };
     // A scrollbar drag starts on the scroller itself; a click on a message must not arm it.
     const onPointerDown = (e: PointerEvent): void => { if (e.target === el) { pointerDown = true; markHuman(); } };
     const onPointerUp = (): void => { if (!pointerDown) return; pointerDown = false; markHuman(); };
@@ -235,7 +253,7 @@ export function useStickToBottom(
     el.addEventListener('touchmove', onTouchMove, { passive: true });
     el.addEventListener('touchend', onTouchEnd, { passive: true });
     el.addEventListener('touchcancel', onTouchEnd, { passive: true });
-    el.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keydown', onKeyDown);
     el.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerUp);
@@ -246,7 +264,7 @@ export function useStickToBottom(
       el.removeEventListener('touchmove', onTouchMove);
       el.removeEventListener('touchend', onTouchEnd);
       el.removeEventListener('touchcancel', onTouchEnd);
-      el.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown);
       el.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerUp);

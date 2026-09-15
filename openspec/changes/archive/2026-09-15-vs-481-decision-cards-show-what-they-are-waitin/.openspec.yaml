@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Decision cards show what they are waiting for: live CI status on merge
+  approvals and a waitingOn line on the weaver's review mark"

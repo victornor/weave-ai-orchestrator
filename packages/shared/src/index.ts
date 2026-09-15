@@ -12,6 +12,7 @@ export * from './events.js';
 export * from './types.js';
 export * from './merge-queue.js';
 export * from './weaver-review.js';
+export * from './ci-status.js';
 export * from './decision-target.js';
 export * from './push.js';
 export * from './channels.js';

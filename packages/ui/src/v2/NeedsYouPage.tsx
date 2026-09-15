@@ -11,7 +11,7 @@
  * resets to whatever the new route names.
  */
 import { useMemo, useState } from 'react';
-import { projectLabel, type Decision, type DecisionAnswerInputs } from '@weave-ai/shared';
+import { projectLabel, type Decision, type DecisionAnswerInputs, type Ticket } from '@weave-ai/shared';
 import { useAnswerDecision, useDecisionsMany, useTicketsMany, useWeaverMany, useWorkersMany, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
 import { NetworkError } from '../api/client';
 import { enqueue } from '../lib/queue';
@@ -134,7 +134,7 @@ export function V2NeedsScreen(): React.ReactElement {
   }, [ids.join('\0'), workerQueries, weaverQueries]);
 
   const ticketsById = useMemo(() => {
-    const map = new Map<string, { identifier: string }>();
+    const map = new Map<string, Ticket>();
     for (const q of ticketQueries) for (const t of q.data ?? []) map.set(t.id, t);
     return map;
   }, [ticketQueries]);
@@ -260,6 +260,7 @@ export function V2NeedsScreen(): React.ReactElement {
                   decision={d}
                   exiting={e.exiting}
                   ticketIdentifier={ticket?.identifier ?? d.ticketId}
+                  delivery={ticket?.delivery ?? null}
                   projectLabel={project ? projectLabel(project) : null}
                   projectSlug={project?.slug ?? null}
                   ws={d.workspaceId}

@@ -6,11 +6,12 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { Decision } from '@weave-ai/shared';
-import { decision as makeDecision } from './factories';
+import { decision as makeDecision, ticket as makeTicket } from './factories';
 
 const state = vi.hoisted(() => ({
   path: '/needs',
   decisions: [] as Decision[],
+  tickets: [] as unknown[],
   workers: {} as Record<string, Array<{ id: string; name: string }>>,
 }));
 
@@ -42,7 +43,7 @@ vi.mock('../api/hooks', () => ({
   useIncidents: () => ({ data: { items: [], total: 0 } }),
   useDecisionsMany: (ids: readonly string[]) =>
     ids.map((id) => ({ data: state.decisions.filter((d) => d.workspaceId === id || d.workspaceId === `ulid-${id}`), isError: false, refetch: vi.fn() })),
-  useTicketsMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
+  useTicketsMany: (ids: readonly string[]) => ids.map(() => ({ data: state.tickets })),
   useAnswerDecision: () => ({ mutate: vi.fn(), isPending: false }),
   useTicketWorkProducts: () => ({ data: [], isLoading: false }),
   useTicketFor: () => ({ data: undefined }),
@@ -60,6 +61,7 @@ const { V2NeedsPage } = await import('../v2/NeedsYouPage');
 beforeEach(() => {
   state.path = '/needs';
   state.workers = {};
+  state.tickets = [];
   state.decisions = [
     makeDecision({ id: 'd1', workspaceId: 'ws1', title: 'Approve the plan for ACME-51', kind: 'plan_approval', options: [{ key: 'approve', label: 'Approve' }] }),
     makeDecision({ id: 'd2', workspaceId: 'ws2', title: 'Where should the theme preference live?', kind: 'question', options: [{ key: 'cookie', label: 'Cookie' }] }),
@@ -71,6 +73,17 @@ describe('the V2 Needs you screen', () => {
     render(<V2NeedsPage />);
     expect(screen.getByText('Approve the plan for ACME-51')).toBeInTheDocument();
     expect(screen.getByText('Where should the theme preference live?')).toBeInTheDocument();
+  });
+
+  it('shows a merge card\'s live CI chip from the ticket delivery (VS-481)', () => {
+    state.decisions = [makeDecision({ id: 'd1', workspaceId: 'ws1', kind: 'merge_approval', title: 'Merge ACME-42' })];
+    state.tickets = [makeTicket({
+      id: 'tk_1', workspaceId: 'ws1',
+      delivery: { prState: 'open', ciState: 'pending', prChecks: { passed: 2, total: 4 }, ciChecks: [{ name: 'lint', state: 'pending' }] },
+    })];
+    render(<V2NeedsPage />);
+    expect(screen.getByText('Waiting for CI · 2/4')).toBeInTheDocument();
+    expect(screen.getByText('lint')).toBeInTheDocument();
   });
 
   it('leads with scope filters and filters the list for real', () => {

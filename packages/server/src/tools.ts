@@ -13,7 +13,7 @@ import {
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES, ROADMAP_STATUSES, ROADMAP_BLOCK_STATUSES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
   ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS, ATTACHMENT_MAX_PER_MESSAGE,
-  PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS,
+  PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, WEAVER_REVIEW_WAITING_ON_MAX,
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock, type AgentKind,
 } from '@weave-ai/shared';
@@ -879,8 +879,9 @@ export const TOOLS: ToolDef[] = [
       decisionId: z.string().min(1),
       status: z.enum(['looked', 'concerns']),
       note: z.string().min(1),
+      waitingOn: z.string().max(WEAVER_REVIEW_WAITING_ON_MAX).nullish(),
     }),
-    description: 'Mark that you have reviewed a plan, merge or action approval. Both marks need a note shown on the card: concerns = what you object to; looked = the one or two sentences you would otherwise write in chat about why the work is clean. A concerns mark holds approval until a new plan revision (for a plan) or a new commit (for a merge) lands, so use it only when the work must change before approval — notes to apply while building go in a looked note. Do not mark at turn start or in a batch. A clean mark says the review found nothing to object to — it is not an endorsement and never your approval. Never use this to answer those decisions. On a merge approval the head you are reviewing is recorded, so a later push to the same card wakes you.',
+    description: 'Mark that you have reviewed a plan, merge or action approval. Both marks need a note shown on the card: concerns = what you object to; looked = the one or two sentences you would otherwise write in chat about why the work is clean. Optionally set waitingOn (≤120 chars) to say what the card is still waiting for — e.g. "waiting for runner CI on 414b329d" — so a card you have reviewed is not mistaken for one nobody looked at; a later mark replaces it and it clears when the merge head moves. A concerns mark holds approval until a new plan revision (for a plan) or a new commit (for a merge) lands, so use it only when the work must change before approval — notes to apply while building go in a looked note. Do not mark at turn start or in a batch. A clean mark says the review found nothing to object to — it is not an endorsement and never your approval. Never use this to answer those decisions. On a merge approval the head you are reviewing is recorded, so a later push to the same card wakes you.',
     handler: async (ctx, i) => {
       // VS-365: record the head this review is made against, so a commit pushed afterwards can
       // wake the weaver without a comment. VS-474: for a merge card that is the head the card will
@@ -888,7 +889,7 @@ export const TOOLS: ToolDef[] = [
       // own pull request — so the daemon's grant can require it was reviewed.
       const d = svc(ctx).decisions.get(i.decisionId);
       const reviewedHead = d.kind === 'merge_approval' && d.ticketId ? await svc(ctx).tickets.approvalDeliveryHead(d) : null;
-      return svc(ctx).decisions.review(ctx.actor, i.decisionId, { status: i.status, note: i.note, reviewedHead });
+      return svc(ctx).decisions.review(ctx.actor, i.decisionId, { status: i.status, note: i.note, waitingOn: i.waitingOn ?? null, reviewedHead });
     },
   },
   {

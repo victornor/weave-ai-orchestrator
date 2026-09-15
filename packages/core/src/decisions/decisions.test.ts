@@ -927,6 +927,33 @@ describe('decisions', () => {
       expect(noHead.weaverReviewedHeadSha).toBeNull();
     });
 
+    it('stores an optional waiting statement on the mark (VS-481)', async () => {
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Merge?' });
+      const marked = await decisions.review(conductor(), d.id, {
+        status: 'looked', note: 'nothing to object to', waitingOn: 'waiting for runner CI on 414b329d',
+      });
+      expect(marked.weaverReviewWaitingOn).toBe('waiting for runner CI on 414b329d');
+      expect(decisions.get(d.id).weaverReviewWaitingOn).toBe('waiting for runner CI on 414b329d');
+    });
+
+    it('clears the waiting statement on a later mark that omits it (VS-481)', async () => {
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Merge?' });
+      await decisions.review(conductor(), d.id, { status: 'concerns', note: 'needs a revision', waitingOn: 'a worker revision' });
+      const again = await decisions.review(conductor(), d.id, { status: 'looked', note: 'fixed now' });
+      expect(again.weaverReviewWaitingOn).toBeNull();
+    });
+
+    it('refuses a waiting statement longer than the cap and changes nothing (VS-481)', async () => {
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Merge?' });
+      await decisions.review(conductor(), d.id, { status: 'looked', note: 'clean', waitingOn: 'on CI' });
+      await expect(decisions.review(conductor(), d.id, { status: 'looked', note: 'clean', waitingOn: 'y'.repeat(121) }))
+        .rejects.toMatchObject({ code: 'validation' });
+      expect(decisions.get(d.id).weaverReviewWaitingOn).toBe('on CI');
+    });
+
     it('emits decision.updated with the full Decision and enqueues no wake', async () => {
       const t = ticket();
       const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });

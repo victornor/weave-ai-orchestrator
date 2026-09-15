@@ -1,5 +1,5 @@
 import { decisionRow, newId, nowIso, type Db } from '@weave-ai/db';
-import { carriesWeaverReview, OcError, TERMINAL_TICKET_STATUSES, WEAVER_REVIEW_KINDS, WEAVER_REVIEW_NOTE_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type RoleSpec, type TicketStatus } from '@weave-ai/shared';
+import { carriesWeaverReview, OcError, TERMINAL_TICKET_STATUSES, WEAVER_REVIEW_KINDS, WEAVER_REVIEW_NOTE_MAX, WEAVER_REVIEW_WAITING_ON_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type RoleSpec, type TicketStatus } from '@weave-ai/shared';
 import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -661,7 +661,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
    * auto-approve caller (the plan raise/repair/republish, the merge sweep, the archive raise) is
    * covered without its own review logic. A grant failure never fails the review write.
    */
-  async function review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null }): Promise<Decision> {
+  async function review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null; waitingOn?: string | null }): Promise<Decision> {
     const d = get(id);
     const cid = conductorId();
     if (actor.kind !== 'agent' || !actor.id || actor.id !== cid) {
@@ -689,11 +689,18 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       throw new OcError('validation', `review note is at most ${WEAVER_REVIEW_NOTE_MAX} characters`);
     }
     const note = trimmed;
+    // VS-481: an optional one-line statement of what the mark is waiting on (runner CI, a dependency).
+    // Informational only — it never gates or answers. An absent/blank value clears any previous one.
+    const waitingOn = (input.waitingOn ?? '').trim() || null;
+    if (waitingOn && waitingOn.length > WEAVER_REVIEW_WAITING_ON_MAX) {
+      throw new OcError('validation', `waiting on is at most ${WEAVER_REVIEW_WAITING_ON_MAX} characters`);
+    }
     const marked = tx(db, () => {
       db.update('decisions', d.id, {
         weaverReviewStatus: input.status,
         weaverReviewedAt: nowIso(),
         weaverReviewNote: note,
+        weaverReviewWaitingOn: waitingOn,
         weaverReviewedByAgentId: actor.id,
         // VS-365: the delivery head this review was made against, so a held merge approval whose head
         // later moves can wake the weaver. Null when the caller could not resolve one.

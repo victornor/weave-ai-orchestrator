@@ -449,13 +449,13 @@ describe('supervisor scheduled passes', () => {
     it('updates the check tally while the PR stays open, and refreshes the board (VS-328)', async () => {
       h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
       h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, transition: vi.fn(async () => ({})) } as never;
-      type PrState = { state: 'open' | 'merged' | 'closed'; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number } };
-      const prState = vi.fn(async (): Promise<PrState> => ({ state: 'open' as const, ciState: 'pending', checks: { passed: 1, total: 3 } }));
+      type PrState = { state: 'open' | 'merged' | 'closed'; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number }; checkDetails?: Array<{ name: string; state: 'pending' | 'success' | 'failure' | 'none'; url: string | null }>; headSha?: string };
+      const prState = vi.fn(async (): Promise<PrState> => ({ state: 'open' as const, ciState: 'pending', checks: { passed: 1, total: 3 }, checkDetails: [{ name: 'lint', state: 'pending', url: null }], headSha: 'sha-1' }));
       h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState, mergePr: async () => ({}) });
       const ticketId = seedPrTicket();
 
       await supervisor.tick();
-      expect(h.db.get<{ delivery: { prChecks: unknown; ciState: unknown } }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId])?.delivery).toMatchObject({ prChecks: { passed: 1, total: 3 }, ciState: 'pending' });
+      expect(h.db.get<{ delivery: { prChecks: unknown; ciState: unknown; ciChecks: unknown; prHead: unknown } }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId])?.delivery).toMatchObject({ prChecks: { passed: 1, total: 3 }, ciState: 'pending', ciChecks: [{ name: 'lint', state: 'pending', url: null }], prHead: 'sha-1' });
 
       // The PR is still open; only the checks moved. Reset the reconcile throttle and tick again.
       h.db.run("UPDATE meta SET value = '0' WHERE key = 'supervisor:reconcile_at'");
@@ -467,7 +467,7 @@ describe('supervisor scheduled passes', () => {
     });
 
     describe('merge-slot progress (VS-391)', () => {
-      type MergePrState = { state: 'open' | 'merged' | 'closed'; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number }; headSha?: string; mergeState?: 'clean' | 'blocked' | 'behind' | 'dirty'; isDraft?: boolean };
+      type MergePrState = { state: 'open' | 'merged' | 'closed'; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number }; checkDetails?: Array<{ name: string; state: 'pending' | 'success' | 'failure' | 'none'; url: string | null }>; headSha?: string; mergeState?: 'clean' | 'blocked' | 'behind' | 'dirty'; isDraft?: boolean };
       const resetMergePoll = (): void => { h.db.run("UPDATE meta SET value = '0' WHERE key = 'supervisor:merge_ci_at'"); };
       const wakesFor = (ticketId: string): Array<{ input: Record<string, unknown> }> =>
         wake.calls.filter((c) => {
@@ -512,8 +512,22 @@ describe('supervisor scheduled passes', () => {
         expect(wakesFor(ticketId)).toHaveLength(1);
       });
 
-      it('wakes the worker with the failure when the checks fail', async () => {
-        let ciState: 'pending' | 'failure' = 'pending';
+      it('records the named checks and the head on the delivery (VS-481)', async () => {
+        const prState = vi.fn(async (): Promise<MergePrState> => ({
+          state: 'open', ciState: 'pending', headSha: 'sha-9',
+          checks: { passed: 1, total: 2 },
+          checkDetails: [{ name: 'lint', state: 'pending', url: null }, { name: 'build', state: 'success', url: null }],
+        }));
+        setForge(prState);
+        const ticketId = seedMergingPr();
+
+        await supervisor.tick();
+
+        const delivery = h.db.get<{ delivery: { ciChecks: unknown; prHead: unknown; ciHead: unknown } }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId])?.delivery;
+        expect(delivery).toMatchObject({ ciChecks: [{ name: 'lint', state: 'pending', url: null }, { name: 'build', state: 'success', url: null }], prHead: 'sha-9', ciHead: 'sha-9' });
+      });
+
+      it('wakes the worker with the failure when the checks fail', async () => {        let ciState: 'pending' | 'failure' = 'pending';
         const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState }));
         setForge(prState);
         const ticketId = seedMergingPr();

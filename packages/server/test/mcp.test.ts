@@ -173,12 +173,22 @@ describe('MCP endpoint', () => {
     );
     const okRes = await conductor.client.callTool({
       name: 'weave_decision_review',
-      arguments: { decisionId: created.id, status: 'looked', note: 'plan matches the ticket' },
+      arguments: { decisionId: created.id, status: 'looked', note: 'plan matches the ticket', waitingOn: 'waiting for runner CI on 414b329d' },
     });
     const okPayload = JSON.parse((okRes.content as Array<{ text: string }>)[0]!.text);
     expect(okPayload.ok).toBe(true);
     expect(okPayload.data.weaverReviewStatus).toBe('looked');
     expect(okPayload.data.weaverReviewNote).toBe('plan matches the ticket');
+    expect(okPayload.data.weaverReviewWaitingOn).toBe('waiting for runner CI on 414b329d');
+
+    // A later mark with no waiting statement clears it (VS-481).
+    const clearedRes = await conductor.client.callTool({
+      name: 'weave_decision_review',
+      arguments: { decisionId: created.id, status: 'looked', note: 'still clean' },
+    });
+    const clearedPayload = JSON.parse((clearedRes.content as Array<{ text: string }>)[0]!.text);
+    expect(clearedPayload.ok).toBe(true);
+    expect(clearedPayload.data.weaverReviewWaitingOn).toBeNull();
     await conductor.client.close();
   });
 

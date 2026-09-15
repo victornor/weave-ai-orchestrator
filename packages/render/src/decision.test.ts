@@ -10,7 +10,7 @@ function decision(over: Partial<Decision> & { kind: DecisionKind }): Decision {
     options: [], inputs: [], recommendation: null, status: 'open', answerKey: null, answerText: null, answerInputs: null,
     answeredByKind: null, answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null,
     createdAt: '2026-09-04T11:56:00.000Z',
-    weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null, weaverReviewedHeadSha: null,
+    weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null, weaverReviewedHeadSha: null, weaverReviewWaitingOn: null,
     answerAuthorKind: null, relayedFromMessageId: null,
     ...over,
   } as Decision;
@@ -320,8 +320,27 @@ describe('decisionToCard', () => {
       expect(card.body).toContainEqual({ label: null, value: 'the migration contradicts itself', format: 'text' });
     });
 
-    it('marks the card held and adds the held sentence for an open concern (VS-266)', () => {
+    it('adds the waiting statement as its own body line (VS-481)', () => {
       const card = decisionToCard(decision({
+        kind: 'merge_approval', weaverReviewStatus: 'looked',
+        weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+        weaverReviewNote: 'nothing to object to',
+        weaverReviewWaitingOn: 'waiting for runner CI on 414b329d',
+      }), { now });
+      expect(card.waitingOn).toBe('waiting for runner CI on 414b329d');
+      expect(card.body).toContainEqual({ label: null, value: 'Weaver waiting on: waiting for runner CI on 414b329d', format: 'text' });
+    });
+
+    it('has no waiting line when the mark carried none (VS-481)', () => {
+      const card = decisionToCard(decision({
+        kind: 'merge_approval', weaverReviewStatus: 'looked',
+        weaverReviewedAt: '2026-09-11T03:01:00.000Z', weaverReviewNote: 'clean',
+      }), { now });
+      expect(card.waitingOn).toBeNull();
+      expect(card.body.some((l) => l.value.startsWith('Weaver waiting on:'))).toBe(false);
+    });
+
+    it('marks the card held and adds the held sentence for an open concern (VS-266)', () => {      const card = decisionToCard(decision({
         kind: 'plan_approval', status: 'open', weaverReviewStatus: 'concerns',
         weaverReviewedAt: '2026-09-11T03:01:00.000Z',
         weaverReviewNote: 'the migration contradicts itself',

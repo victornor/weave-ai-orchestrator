@@ -53,7 +53,7 @@ Workers may also call `weave_ticket_create` for **child tickets inside their own
 | `weave_worker_relaunch` | `id`, `note` |
 | `weave_worker_cancel` | `id`, `reason` — leaves the worktree; discarding unlanded work is a human decision |
 | `weave_decision_answer` | `id`, `{key?, text}` — only for decisions the weaver owns |
-| `weave_decision_review` | `decisionId`, `{status: 'looked'\|'concerns', note}` — mark that you have reviewed a plan, merge or action approval; the note (concern, or why it is clean) appears on the card. Workers cannot call this |
+| `weave_decision_review` | `decisionId`, `{status: 'looked'\|'concerns', note, waitingOn?}` — mark that you have reviewed a plan, merge or action approval; the note (concern, or why it is clean) appears on the card, and the optional `waitingOn` (≤120 chars) says what the card is still waiting on (e.g. runner CI). Workers cannot call this |
 | `weave_human_send` | `threadId?`, `body` — the only way the weaver's words reach the human |
 | `weave_briefing` | — |
 | `weave_project_list` | — |

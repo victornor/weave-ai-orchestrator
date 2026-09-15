@@ -100,6 +100,28 @@ describe('held review head', () => {
     ]);
   });
 
+  it('clears the waiting statement when the head moves (VS-481)', async () => {
+    const ticketId = makeTicket();
+    const decisionId = seedMerge(ticketId, { weaverReviewWaitingOn: 'waiting for runner CI on the reviewed head' });
+
+    const result = await tickets.noteHeldReviewHead(SYSTEM, ticketId, MOVED);
+
+    expect(result.woken).toBe(true);
+    // The review state and note stay; only the commit-bound waiting line is dropped.
+    expect(h.db.get('SELECT * FROM decisions WHERE id = ?', [decisionId])).toMatchObject({
+      weaverReviewStatus: 'concerns', weaverReviewNote: 'fix the crash', weaverReviewWaitingOn: null,
+    });
+  });
+
+  it('keeps the waiting statement while the head is unchanged (VS-481)', async () => {
+    const ticketId = makeTicket();
+    const decisionId = seedMerge(ticketId, { weaverReviewWaitingOn: 'waiting for runner CI' });
+
+    await tickets.noteHeldReviewHead(SYSTEM, ticketId, REVIEWED);
+
+    expect(h.db.get<{ w: string | null }>('SELECT weaver_review_waiting_on AS w FROM decisions WHERE id = ?', [decisionId])!.w).toBe('waiting for runner CI');
+  });
+
   it('does not wake for the head recorded at the review', async () => {
     const ticketId = makeTicket();
     seedMerge(ticketId);
@@ -137,8 +159,7 @@ describe('held review head', () => {
     });
   });
 
-  it('does not wake for a looked card whose head is unchanged', async () => {
-    const ticketId = makeTicket();
+  it('does not wake for a looked card whose head is unchanged', async () => {    const ticketId = makeTicket();
     seedMerge(ticketId, { weaverReviewStatus: 'looked', weaverReviewNote: 'clean' });
 
     expect((await tickets.noteHeldReviewHead(SYSTEM, ticketId, REVIEWED)).woken).toBe(false);

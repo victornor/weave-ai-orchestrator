@@ -917,12 +917,18 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       const stored = (ctx.db.get<{ delivery: Record<string, unknown> | null }>('SELECT delivery_json FROM tickets WHERE id = ?', [row.ticketId])?.delivery ?? {});
       const ciState = pr.ciState ?? null;
       const checks = pr.checks ?? null;
+      // VS-481: the rollup by name, and the head this ticket's pull request currently points at, so a
+      // merge card can name pending/failed checks and tell when its recorded CI is for another commit.
+      const checkDetails = pr.checkDetails ?? null;
+      const prHead = pr.headSha ?? null;
       const ciChanged = JSON.stringify(stored['ciState'] ?? null) !== JSON.stringify(ciState)
-        || JSON.stringify(stored['prChecks'] ?? null) !== JSON.stringify(checks);
+        || JSON.stringify(stored['prChecks'] ?? null) !== JSON.stringify(checks)
+        || JSON.stringify(stored['ciChecks'] ?? null) !== JSON.stringify(checkDetails)
+        || JSON.stringify(stored['prHead'] ?? null) !== JSON.stringify(prHead);
       if (stateChanged || ciChanged) {
         const now = nowIso();
         if (stateChanged) ctx.db.run('UPDATE ticket_work_products SET state = ?, updated_at = ? WHERE id = ?', [pr.state, now, row.wpId]);
-        ctx.db.update('tickets', row.ticketId, { deliveryJson: { ...stored, prUrl: row.url, prState: pr.state, ciState, prChecks: checks }, updatedAt: now });
+        ctx.db.update('tickets', row.ticketId, { deliveryJson: { ...stored, prUrl: row.url, prState: pr.state, ciState, ciHead: prHead ?? stored['ciHead'] ?? null, prChecks: checks, ciChecks: checkDetails, prHead }, updatedAt: now });
         if (stateChanged) ctx.events.emit('ticket.work_product', 'ticket', row.ticketId, { ticketId: row.ticketId, id: row.wpId, type: 'pull_request', url: row.url, state: pr.state });
         // What the board reads its delivery from is the tickets query, so a checks-only change still needs this.
         if (ciChanged) ctx.events.emit('ticket.updated', 'ticket', row.ticketId, { ticketId: row.ticketId });
@@ -1037,11 +1043,13 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       const stored = row.delivery ?? {};
       const ciState = pr.ciState ?? null;
       const checks = pr.checks ?? null;
+      const checkDetails = pr.checkDetails ?? null;
       const head = pr.headSha ?? (typeof stored['ciHead'] === 'string' ? stored['ciHead'] : null);
       const mergeState = pr.mergeState ?? null;
       const draft = pr.isDraft === true;
       const ciChanged = JSON.stringify(stored['ciState'] ?? null) !== JSON.stringify(ciState)
         || JSON.stringify(stored['prChecks'] ?? null) !== JSON.stringify(checks)
+        || JSON.stringify(stored['ciChecks'] ?? null) !== JSON.stringify(checkDetails)
         || JSON.stringify(stored['ciHead'] ?? null) !== JSON.stringify(head);
       const mergeStateChanged = (stored['mergeState'] ?? null) !== mergeState;
       const stateChanged = (stored['prState'] ?? null) !== pr.state;
@@ -1052,6 +1060,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         ctx.db.update('tickets', row.id, {
           deliveryJson: {
             ...stored, prUrl: row.url, prState: pr.state, ciState, ciStateAt, ciHead: head, prChecks: checks,
+            ciChecks: checkDetails, prHead: head,
             mergeState, mergeStateHead: mergeState ? head : null, isDraft: draft,
           },
           updatedAt: now,

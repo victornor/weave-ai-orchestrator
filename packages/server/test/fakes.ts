@@ -58,7 +58,7 @@ export function decision(over: Partial<Decision> = {}): Decision {
     title: 'CSS variables or Tailwind?', context: 'Dark mode needs a token strategy.', options: [{ key: 'vars', label: 'CSS variables', recommended: true }, { key: 'tw', label: 'Tailwind' }],
     inputs: [], allowFreeText: true, recommendation: 'CSS variables', status: 'open', answerKey: null, answerText: null, answerInputs: null, answeredByKind: null,
     answeredById: null, answeredAt: null, expiresAt: null, target: null, correlationKey: null, createdAt: '2026-09-01T00:00:00.000Z',
-    weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null, weaverReviewedHeadSha: null,
+    weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedByAgentId: null, weaverReviewedHeadSha: null, weaverReviewWaitingOn: null,
     answerAuthorKind: null, relayedFromMessageId: null,
     ...over,
   };
@@ -252,7 +252,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
         decisions.set(id, d);
         return d;
       },
-      review: (_actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null }) => {
+      review: (_actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null; waitingOn?: string | null }) => {
         const cur = decisions.get(id);
         if (!cur) throw new OcError('not_found', `decision ${id} not found`);
         const d = {
@@ -264,6 +264,8 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
           weaverReviewedByAgentId: _actor.id,
           // VS-365: the head the review was made against, when the caller resolved one.
           weaverReviewedHeadSha: input.reviewedHead ?? null,
+          // VS-481: an optional waiting statement; a later mark with none clears it.
+          weaverReviewWaitingOn: (input.waitingOn ?? '').trim() || null,
         };
         decisions.set(id, d);
         return d;

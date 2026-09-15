@@ -620,6 +620,57 @@ describe('DecisionCard', () => {
       expect(review.querySelectorAll('p')).toHaveLength(1);
     });
 
+    it('renders the review waiting statement as its own line (VS-481)', () => {
+      render(
+        <DecisionCard
+          decision={decision({
+            kind: 'merge_approval',
+            weaverReviewStatus: 'looked',
+            weaverReviewedAt: '2026-09-11T03:01:00.000Z',
+            weaverReviewNote: 'nothing to object to',
+            weaverReviewWaitingOn: 'waiting for runner CI on 414b329d',
+          })}
+          onAnswer={() => undefined}
+        />,
+      );
+      expect(screen.getByText('Weaver: waiting for runner CI on 414b329d')).toBeInTheDocument();
+    });
+
+    it('shows the CI chip from the ticket delivery on a merge card (VS-481)', () => {
+      render(
+        <DecisionCard
+          decision={decision({ kind: 'merge_approval' })}
+          delivery={{ prState: 'open', ciState: 'pending', prChecks: { passed: 2, total: 4 }, ciChecks: [{ name: 'lint', state: 'pending' }] }}
+          onAnswer={() => undefined}
+        />,
+      );
+      expect(screen.getByText('Waiting for CI · 2/4')).toBeInTheDocument();
+      expect(screen.getByText('lint')).toBeInTheDocument();
+    });
+
+    it('shows no CI chip on a plan card even with a delivery (VS-481)', () => {
+      render(
+        <DecisionCard
+          decision={decision({ kind: 'plan_approval' })}
+          delivery={{ prState: 'open', ciState: 'success', prChecks: { passed: 2, total: 2 } }}
+          onAnswer={() => undefined}
+        />,
+      );
+      expect(screen.queryByText('CI passed')).toBeNull();
+    });
+
+    it('compares CI against prHead, not the reviewed head (VS-481 review)', () => {
+      render(
+        <DecisionCard
+          decision={decision({ kind: 'merge_approval', weaverReviewStatus: 'looked', weaverReviewedAt: '2026-09-11T03:01:00.000Z', weaverReviewNote: 'read it', weaverReviewedHeadSha: 'reviewed-head' })}
+          delivery={{ prState: 'open', ciState: 'success', prChecks: { passed: 2, total: 2 }, ciHead: 'current-head', prHead: 'current-head' }}
+          onAnswer={() => undefined}
+        />,
+      );
+      expect(screen.getByText('CI passed')).toBeInTheDocument();
+      expect(screen.queryByText('CI on an older commit')).toBeNull();
+    });
+
     it('approving a reviewed card is immediate and sends the same key as an unseen one (VS-234)', () => {
       const onAnswer = vi.fn();
       render(

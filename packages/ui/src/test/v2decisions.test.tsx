@@ -355,6 +355,95 @@ describe('artifacts and the narrow variant', () => {
   });
 });
 
+describe('the merge card CI chip (VS-481)', () => {
+  const render = (delivery: Record<string, unknown> | null) =>
+    renderCard({ decision: makeDecision({ kind: 'merge_approval' }), ticketIdentifier: 'ACME-42', delivery });
+
+  it('waits with the tally and names the pending checks', () => {
+    render({
+      prState: 'open', ciState: 'pending', prChecks: { passed: 2, total: 4 },
+      ciChecks: [{ name: 'lint', state: 'pending' }, { name: 'test', state: 'pending' }],
+    });
+    expect(screen.getByText('Waiting for CI · 2/4')).toBeInTheDocument();
+    expect(screen.getByText('lint, test')).toBeInTheDocument();
+  });
+
+  it('says passed only when the rollup succeeded', () => {
+    render({ prState: 'open', ciState: 'success', prChecks: { passed: 3, total: 3 } });
+    expect(screen.getByText('CI passed')).toBeInTheDocument();
+  });
+
+  it('names the failed check', () => {
+    render({
+      prState: 'open', ciState: 'failure', prChecks: { passed: 2, total: 3 },
+      ciChecks: [{ name: 'lint', state: 'failure' }],
+    });
+    expect(screen.getByText('CI failed · lint')).toBeInTheDocument();
+  });
+
+  it('says skipped plainly and never reads as a pass', () => {
+    render({ prState: 'open', ciState: 'none', prChecks: { passed: 0, total: 5 } });
+    expect(screen.getByText('CI skipped')).toBeInTheDocument();
+    expect(screen.queryByText('CI passed')).toBeNull();
+  });
+
+  it('marks a recorded rollup for another commit as an older commit', () => {
+    renderCard({
+      decision: makeDecision({ kind: 'merge_approval', weaverReviewStatus: 'looked', weaverReviewNote: 'read it' }),
+      ticketIdentifier: 'ACME-42',
+      delivery: { prState: 'open', ciState: 'success', prChecks: { passed: 3, total: 3 }, ciHead: 'old-head', prHead: 'new-head' },
+    });
+    expect(screen.getByText('CI on an older commit')).toBeInTheDocument();
+    expect(screen.queryByText('CI passed')).toBeNull();
+  });
+
+  it('compares against prHead, not the reviewed head, so a green current commit reads as passed (VS-481 review)', () => {
+    renderCard({
+      decision: makeDecision({
+        kind: 'merge_approval', weaverReviewStatus: 'looked', weaverReviewNote: 'read it',
+        weaverReviewedHeadSha: 'reviewed-head',
+      }),
+      ticketIdentifier: 'ACME-42',
+      // The worker pushed after the review: the reviewed head is stale but CI is green on the current one.
+      delivery: { prState: 'open', ciState: 'success', prChecks: { passed: 3, total: 3 }, ciHead: 'current-head', prHead: 'current-head' },
+    });
+    expect(screen.getByText('CI passed')).toBeInTheDocument();
+    expect(screen.queryByText('CI on an older commit')).toBeNull();
+  });
+
+  it('shows no chip without recorded checks', () => {
+    render({ prState: 'open' });
+    expect(document.querySelector('[data-ci-chip]')).toBeNull();
+  });
+
+  it('shows the chip on an unreviewed card too, beside the unseen line', () => {
+    render({ prState: 'open', ciState: 'pending', prChecks: { passed: 1, total: 4 } });
+    expect(screen.getByText("Weaver hasn't reviewed yet")).toBeInTheDocument();
+    expect(screen.getByText('Waiting for CI · 1/4')).toBeInTheDocument();
+  });
+});
+
+describe('the weaver waiting statement on the card (VS-481)', () => {
+  it('renders the waiting line as its own line', () => {
+    renderCard({
+      decision: makeDecision({
+        kind: 'merge_approval', weaverReviewStatus: 'looked', weaverReviewNote: 'nothing to object to',
+        weaverReviewWaitingOn: 'waiting for runner CI on 414b329d',
+      }),
+      ticketIdentifier: 'ACME-42',
+    });
+    expect(screen.getByText('Weaver: waiting for runner CI on 414b329d')).toBeInTheDocument();
+  });
+
+  it('renders no waiting line when the mark carried none', () => {
+    renderCard({
+      decision: makeDecision({ kind: 'merge_approval', weaverReviewStatus: 'looked', weaverReviewNote: 'clean' }),
+      ticketIdentifier: 'ACME-42',
+    });
+    expect(screen.queryByText(/^Weaver: /)).toBeNull();
+  });
+});
+
 describe('the approve call to action (VS-418)', () => {
   it('fills the Approve button and greens a clean review when approval is ready', () => {
     renderCard({

@@ -3,6 +3,7 @@ import { NAMED_CARD_OPTION_KEYS, weaverReviewCopy, documentTarget } from '@weave
 import type { Decision, DecisionAnswerInputs, DecisionInput, UiStatus } from '@weave-ai/shared';
 import { A } from '../app/link';
 import { Button } from './Button';
+import { CiChip } from './CiChip';
 import { Composer } from './Composer';
 import { DocumentPreview } from './DocumentPreview';
 import { HandoverCommand } from './HandoverCommand';
@@ -45,6 +46,8 @@ export interface DecisionCardProps {
   ticketSummary?: string | null;
   /** VS-146: tighter padding and button chrome. Chat only; Needs you stays at the default. */
   compact?: boolean;
+  /** VS-481: the ticket's delivery record, so a merge card can show its live CI chip. */
+  delivery?: Record<string, unknown> | null;
   onAnswer: (answer: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string }) => void;
   className?: string;
 }
@@ -102,6 +105,8 @@ export function ConductorReviewLine({ decision }: { decision: Decision }): React
     <div className="mb-2" data-weaver-review={copy.tone}>
       <p className={cx('text-micro', copy.tone === 'concerns' ? 'font-medium' : null, toneClass)}>{copy.line}</p>
       {copy.note ? <p className="mt-1 whitespace-pre-wrap text-meta text-text-1">{copy.note}</p> : null}
+      {/* VS-481: what the review is waiting on, in the weaver's own words. */}
+      {copy.waitingOn ? <p className="mt-1 text-micro text-text-3">Weaver: {copy.waitingOn}</p> : null}
       {/* VS-266: in addition to the concern line and note, not a replacement for either. */}
       {copy.held ? <p className="mt-1 text-micro font-medium text-blocked">Approval is held until this is revised, or you override it.</p> : null}
       {/* VS-281: the unreviewed hold, distinct from the concern hold above. */}
@@ -288,7 +293,7 @@ const CONTEXT_PREVIEW_CHARS = 500;
  * primary action sits bottom-left inside a 44 px thumb band. A decision that has
  * been answered renders the same card as an inert record of what was decided.
  */
-export function DecisionCard({ decision, ticketIdentifier, projectLabel, projectSlug, ws, askedBy, asker, busy, queued, plan, autoApproving, onHide, ticketFiledByConductor, ticketSummary, compact, onAnswer, className }: DecisionCardProps): React.ReactElement {
+export function DecisionCard({ decision, ticketIdentifier, projectLabel, projectSlug, ws, askedBy, asker, busy, queued, plan, autoApproving, onHide, ticketFiledByConductor, ticketSummary, compact, delivery, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
   const [overriding, setOverriding] = useState(false);
   const [confirm, setConfirm] = useState('');
@@ -436,6 +441,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectLabel, project
         {/* merge approval — CI and diff stats */}
         {decision.kind === 'merge_approval' ? (
           <div className={cx('ac-mono flex flex-wrap items-center gap-3.5 text-micro', section)}>
+            <CiChip delivery={delivery} />
             {target.ci ? (
               <span className={cx('flex items-center gap-1.5', target.ci.passed === target.ci.total ? 'text-done' : 'text-working')}>
                 <span className="size-2 rounded-pill bg-current" />

@@ -42,7 +42,7 @@ export interface ForgePullRequestDetail extends ForgePullRequest { body: string;
 export interface ForgeAdapter {
   readonly id: string;
   detect(cwd: string): Promise<boolean>;
-  prState(cwd: string, url: string): Promise<{ state: 'open' | 'merged' | 'closed'; mergeCommit?: string; ciState?: ForgeCheckState; /** VS-328: the checks that passed out of those reported, when the forge reports any. */ checks?: { passed: number; total: number }; /** VS-365: the pull request's current head commit, when the forge reports one. */ headSha?: string; /** VS-391: whether the pull request can merge as it stands, when the forge reports it. */ mergeState?: ForgeMergeState; /** VS-391: whether the pull request is a draft, when the forge reports it. A draft's absent checks are not "resolved". */ isDraft?: boolean }>;
+  prState(cwd: string, url: string): Promise<{ state: 'open' | 'merged' | 'closed'; mergeCommit?: string; ciState?: ForgeCheckState; /** VS-328: the checks that passed out of those reported, when the forge reports any. */ checks?: { passed: number; total: number }; /** VS-481: each reported check by name and state, so a card can name what is pending or failed. */ checkDetails?: ForgeCheck[]; /** VS-365: the pull request's current head commit, when the forge reports one. */ headSha?: string; /** VS-391: whether the pull request can merge as it stands, when the forge reports it. */ mergeState?: ForgeMergeState; /** VS-391: whether the pull request is a draft, when the forge reports it. A draft's absent checks are not "resolved". */ isDraft?: boolean }>;
   mergePr(cwd: string, url: string, method: string): Promise<{ mergeCommit?: string }>;
   /**
    * Optional (VS-97): the repository's pull requests, most recently updated first, open and closed

@@ -1251,8 +1251,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     async noteHeldReviewHead(actor, id, head) {
       const t = get(id);
       try {
-        const held = db.get<{ id: string; title: string; reviewedHead: string | null; reviewStatus: string; target: Record<string, unknown> | null }>(
-          "SELECT id, title, weaver_reviewed_head_sha AS reviewedHead, weaver_review_status AS reviewStatus, target_json FROM decisions WHERE ticket_id = ? AND kind = 'merge_approval' AND status = 'open' AND weaver_review_status IN ('concerns','looked') ORDER BY created_at DESC LIMIT 1",
+        const held = db.get<{ id: string; title: string; reviewedHead: string | null; reviewStatus: string; target: Record<string, unknown> | null; waitingOn: string | null }>(
+          "SELECT id, title, weaver_reviewed_head_sha AS reviewedHead, weaver_review_status AS reviewStatus, weaver_review_waiting_on AS waitingOn, target_json FROM decisions WHERE ticket_id = ? AND kind = 'merge_approval' AND status = 'open' AND weaver_review_status IN ('concerns','looked') ORDER BY created_at DESC LIMIT 1",
           [t.id],
         );
         if (!held) return { woken: false };
@@ -1266,6 +1266,16 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           return { woken: false, decisionId: held.id };
         }
         if (sameGitSha(held.reviewedHead, current)) return { woken: false, decisionId: held.id };
+        // VS-481: a waiting statement belongs to the commit the review was made against, so it does not
+        // survive a push. Cleared here, on the same head-move check that wakes the weaver, for a
+        // `looked` card as well as a held one.
+        if (held.waitingOn !== null) {
+          db.update('decisions', held.id, { weaverReviewWaitingOn: null });
+          // Best-effort event so a rendered card drops the line without a reload; the clear above is
+          // what matters, so a harness without the decisions service must not fail the wake path.
+          try { ctx.events.emit('decision.updated', 'decision', held.id, deps().decisions.get(held.id)); }
+          catch { /* no decisions service (a tickets-only harness): the row is already cleared */ }
+        }
         const cid = conductorId();
         if (!cid) return { woken: false, decisionId: held.id };
         const key = `held-review:${held.id}:${current}`;

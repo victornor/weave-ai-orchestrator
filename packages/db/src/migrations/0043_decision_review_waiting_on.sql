@@ -1,0 +1,13 @@
+-- VS-481. One column on `decisions`:
+--
+-- `weaver_review_waiting_on` — what the weaver's review mark says it is waiting on before the card
+-- can be answered (≤120 chars), e.g. "waiting for runner CI on 414b329d". Set by
+-- `weave_decision_review` for both `looked` and `concerns`; a later mark replaces it (absent clears
+-- it), and it is cleared when the merge card's delivery head moves away from the head the review was
+-- recorded against. Informational only: it never gates or answers anything.
+--
+-- Nullable, with no default: pre-migration rows and marks that carried no waiting statement read
+-- null, exactly as before.
+--
+-- ALTER TABLE, not a rebuild: nothing here touches a CHECK, the same recipe as 0025/0037.
+ALTER TABLE decisions ADD COLUMN weaver_review_waiting_on TEXT;

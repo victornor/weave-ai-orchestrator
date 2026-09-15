@@ -8,7 +8,7 @@
 /**
  * The text between the first `{` after `marker` and its matching `}`, brace-depth aware.
  * `fromIndex` searches for `marker` starting at that offset, for a CSS source where the same
- * marker text appears more than once (e.g. `v2.css`'s two `.v2-root {` blocks).
+ * marker text appears more than once, so a unique marker must be chosen.
  */
 export function extractCssBlock(css: string, marker: string, fromIndex = 0): string {
   const markerIndex = css.indexOf(marker, fromIndex);

@@ -587,17 +587,14 @@ function dirs(): { skillsDir: string; templatesDir: string; v2ThemeCss: string }
   return {
     skillsDir: process.env.AC_SKILLS_DIR ?? join(repo, 'skills'),
     templatesDir: process.env.AC_TEMPLATES_DIR ?? join(repo, 'templates'),
-    v2ThemeCss: cachedV2ThemeCss(
-      join(repo, 'packages', 'ui', 'src', 'v2', 'v2.css'),
-      join(repo, 'packages', 'ui', 'src', 'index.css'),
-    ),
+    v2ThemeCss: cachedV2ThemeCss(join(repo, 'packages', 'ui', 'src', 'index.css')),
   };
 }
 
 /**
- * A minimal, always-safe stylesheet a plugin page falls back to if `v2.css` is unexpectedly
- * missing from this release's checkout (VS-385) — enough that a page using the vocabulary still
- * reads, never a crash and never a fully unstyled page.
+ * A minimal, always-safe stylesheet a plugin page falls back to if the app's stylesheet is
+ * unexpectedly missing from this release's checkout (VS-385) — enough that a page using the
+ * vocabulary still reads, never a crash and never a fully unstyled page.
  */
 const V2_THEME_CSS_FALLBACK =
   ":root, [data-theme='dark'] { color-scheme: dark; --bg-0: #08090b; --bg-1: #101114; --text-1: #e9eaec; --line-1: #1c1e22; --accent: #3d4148; --accent-on: #fff; }\n" +
@@ -607,13 +604,13 @@ const V2_THEME_CSS_FALLBACK =
 
 let v2ThemeCssCache: string | undefined;
 
-/** Reads `v2.css` and `index.css` and generates the plugin stylesheet once per process, caching the result. */
-function cachedV2ThemeCss(v2CssPath: string, indexCssPath: string): string {
+/** Reads the app's single stylesheet and generates the plugin stylesheet once per process, caching the result. */
+function cachedV2ThemeCss(indexCssPath: string): string {
   if (v2ThemeCssCache !== undefined) return v2ThemeCssCache;
   try {
-    v2ThemeCssCache = generateV2PluginCss(readFileSync(v2CssPath, 'utf8'), readFileSync(indexCssPath, 'utf8'));
+    v2ThemeCssCache = generateV2PluginCss(readFileSync(indexCssPath, 'utf8'));
   } catch (e) {
-    log.warn({ err: e, path: v2CssPath }, 'v2.css/index.css unreadable; plugin pages fall back to a minimal stylesheet');
+    log.warn({ err: e, path: indexCssPath }, 'index.css unreadable; plugin pages fall back to a minimal stylesheet');
     v2ThemeCssCache = V2_THEME_CSS_FALLBACK;
   }
   return v2ThemeCssCache;

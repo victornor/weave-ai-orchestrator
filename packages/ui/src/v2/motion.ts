@@ -1,7 +1,7 @@
 /**
  * V2 motion helpers (VS-427).
  *
- * The CSS side of the polish pass lives in `v2.css` (the `--v2-dur-*`/`--v2-ease*` tokens and the
+ * The CSS side of the polish pass lives in `index.css` (the `--v2-dur-*`/`--v2-ease*` tokens and the
  * `.v2-anim-*` classes). This module is the one piece of motion that CSS cannot express on its own:
  * holding a removed list item mounted for one animation so it can animate out instead of vanishing.
  */
@@ -21,7 +21,7 @@ export interface PresenceEntry<T> {
  * The removal is detected in a layout effect, so the held item is committed before the browser
  * paints the shorter list — there is no frame where it is missing and then back.
  *
- * The default duration is the base motion token's value; `v2.css` cannot be read from here, so the
+ * The default duration is the base motion token's value; `index.css` cannot be read from here, so the
  * two are kept in step by hand (`--v2-dur-base: 180ms`).
  */
 export function useExitPresence<T>(items: readonly T[], keyOf: (item: T) => string, exitMs = 180): PresenceEntry<T>[] {

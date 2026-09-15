@@ -25,9 +25,8 @@ interface DomDocument {
 declare const document: DomDocument;
 declare const window: { getComputedStyle(el: DomElement): { display: string; marginTop: string } };
 
-const V2_CSS = readFileSync(resolve(process.cwd(), 'packages/ui/src/v2/v2.css'), 'utf8');
-const INDEX_CSS = readFileSync(resolve(process.cwd(), 'packages/ui/src/index.css'), 'utf8');
-const GENERATED = generateV2PluginCss(V2_CSS, INDEX_CSS);
+const APP_CSS = readFileSync(resolve(process.cwd(), 'packages/ui/src/index.css'), 'utf8');
+const GENERATED = generateV2PluginCss(APP_CSS);
 
 /** Applies the generated stylesheet to a fresh document body. */
 function render(html: string): void {

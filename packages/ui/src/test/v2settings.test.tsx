@@ -61,7 +61,7 @@ vi.mock('../api/hooks', () => ({
   usePatchConfig: () => ({ mutate: () => undefined, mutateAsync: async () => undefined }),
 }));
 
-vi.mock('../routes/Settings', () => ({
+vi.mock('../settings/sections', () => ({
   UpdatesSection: () => <div>updates-body</div>,
   SecuritySection: () => <div>security-body</div>,
   HostToolsSection: () => <div>host-tools-body</div>,

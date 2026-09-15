@@ -52,91 +52,91 @@ export const ARTIFACT_KIT_CSS = `/* --------------------------------------------
 [data-theme='dark'] {
   color-scheme: dark;
 
-  --bg-0: #08090b;
-  --bg-1: #101114;
-  --bg-2: #16181c;
-  --bg-3: #1e2126;
-  --bg-input: #0c0d10;
-  --line-1: #1c1e22;
-  --line-2: #282b31;
-  --line-3: #383c44;
+  --bg-0: #050506;
+  --bg-1: #0b0b0d;
+  --bg-2: #101012;
+  --bg-3: #17171a;
+  --bg-input: #08080a;
+  --line-1: #17171a;
+  --line-2: #222226;
+  --line-3: #313137;
 
   --text-1: #e9eaec;
   --text-2: #9ca1aa;
-  --text-3: #6b7078;
-  --text-4: #4e535b;
+  --text-3: #868c95;
+  --text-4: #868c95;
   --text-strong: #f2f3f5;
   --text-soft: #c6cad1;
   --text-body: #d8dbe0;
-  --text-nav: #5a5f67;
+  --text-nav: #7c828b;
 
-  --accent: #5e6ad2;
-  --accent-link: #7c87f0;
-  --accent-hover: #9aa3f5;
-  --accent-on: #ffffff;
-  --accent-tint: rgb(94 106 210 / 0.12);
-  --accent-tint-strong: rgb(94 106 210 / 0.18);
-  --accent-edge: rgb(94 106 210 / 0.35);
-  --focus-ring: rgb(94 106 210 / 0.16);
+  --accent: #3d4148;
+  --accent-link: #c6cad1;
+  --accent-hover: #c6cad1;
+  --accent-on: #fff;
+  --accent-tint: rgb(61 65 72 / 0.13);
+  --accent-tint-strong: rgb(61 65 72 / 0.18);
+  --accent-edge: rgb(61 65 72 / 0.34);
+  --focus-ring: rgb(61 65 72 / 0.18);
 
   --status-idle: #8a8f98;
   --status-working: #e9a23b;
   --status-stalled: #c98a2e;
   --status-blocked: #ff6b4a;
   --status-needs-you: #7c87f0;
-  --status-merging: #a472f5;
-  --status-done: #3fb950;
+  --status-merging: #8a8f98;
+  --status-done: #7c828b;
   --status-failed: #e5484d;
-  --status-paused: #6b7078;
+  --status-paused: #8a8f98;
 
   --overlay: rgb(0 0 0 / 0.62);
   --elev-sheet: 0 16px 48px rgb(0 0 0 / 0.6);
-  --elev-float: 0 4px 16px rgb(94 106 210 / 0.4);
+  --elev-float: 0 4px 16px rgb(61 65 72 / 0.4);
 }
 
 [data-theme='light'] {
   color-scheme: light;
 
   --bg-0: #f7f8f9;
-  --bg-1: #ffffff;
+  --bg-1: #fff;
   --bg-2: #f2f3f5;
   --bg-3: #eaecef;
-  --bg-input: #ffffff;
+  --bg-input: #fff;
   --line-1: #e6e8eb;
   --line-2: #d3d6db;
   --line-3: #c7cad0;
 
   --text-1: #16181c;
-  --text-2: #61656c;
-  --text-3: #8a8f98;
-  --text-4: #b4b8bf;
+  --text-2: #565a61;
+  --text-3: #676c74;
+  --text-4: #676c74;
   --text-strong: #0c0d10;
   --text-soft: #3d4148;
   --text-body: #24272c;
-  --text-nav: #b4b8bf;
+  --text-nav: #676c74;
 
-  --accent: #4a55c4;
-  --accent-link: #4a55c4;
-  --accent-hover: #3b45a8;
-  --accent-on: #ffffff;
-  --accent-tint: rgb(74 85 196 / 0.09);
-  --accent-tint-strong: rgb(74 85 196 / 0.14);
-  --accent-edge: rgb(74 85 196 / 0.35);
-  --focus-ring: rgb(74 85 196 / 0.18);
+  --accent: #3d4148;
+  --accent-link: #3d4148;
+  --accent-hover: #3d4148;
+  --accent-on: #fff;
+  --accent-tint: rgb(61 65 72 / 0.09);
+  --accent-tint-strong: rgb(61 65 72 / 0.18);
+  --accent-edge: rgb(61 65 72 / 0.34);
+  --focus-ring: rgb(61 65 72 / 0.18);
 
   --status-idle: #6b7078;
-  --status-working: #b8791f;
+  --status-working: #8a5e14;
   --status-stalled: #96631a;
-  --status-blocked: #d2401e;
+  --status-blocked: #c93a17;
   --status-needs-you: #4a55c4;
-  --status-merging: #7a45d0;
-  --status-done: #1f8a34;
+  --status-merging: #4e535b;
+  --status-done: #565a61;
   --status-failed: #c22b31;
-  --status-paused: #8a8f98;
+  --status-paused: #6b7078;
 
   --overlay: rgb(16 24 32 / 0.28);
   --elev-sheet: 0 16px 48px rgb(16 24 32 / 0.18);
-  --elev-float: 0 4px 16px rgb(74 85 196 / 0.3);
+  --elev-float: 0 4px 16px rgb(61 65 72 / 0.3);
 }
 
 :root {

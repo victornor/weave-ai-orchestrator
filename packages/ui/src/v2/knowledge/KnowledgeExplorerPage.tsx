@@ -7,7 +7,7 @@
 import { lazy, Suspense } from 'react';
 import { useSearchParams } from '../../app/link';
 
-const KnowledgeExplorer = lazy(async () => ({ default: (await import('../../routes/KnowledgeExplorer')).KnowledgeExplorer }));
+const KnowledgeExplorer = lazy(async () => ({ default: (await import('./KnowledgeExplorerView')).KnowledgeExplorer }));
 
 export function KnowledgeExplorerPage(): React.ReactElement {
   const url = useSearchParams();

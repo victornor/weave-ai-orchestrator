@@ -7,11 +7,11 @@
 import { lazy, Suspense, useState } from 'react';
 import { useProjects } from '../../api/hooks';
 import { useSearchParams } from '../../app/link';
-import { DocPanel, KnowledgeDocPanel, refFromPath, type DocRef } from '../../routes/KnowledgeDocs';
+import { DocPanel, KnowledgeDocPanel, refFromPath, type DocRef } from './panels';
 
 // The only route that needs the force-layout engine and the canvas renderer; loading it on demand
 // keeps `react-force-graph-2d` and `d3-force` out of every other V2 page's chunk.
-const KnowledgeGraphView = lazy(async () => ({ default: (await import('../../routes/KnowledgeGraph')).KnowledgeGraphView }));
+const KnowledgeGraphView = lazy(async () => ({ default: (await import('./KnowledgeGraphView')).KnowledgeGraphView }));
 
 interface HubOpen { scope: string; project?: string }
 

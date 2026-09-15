@@ -28,8 +28,8 @@ vi.mock('../api/runStream', () => ({ useRunEventStream: () => ({ events: [], sta
 const { V2DecisionCard } = await import('../v2/DecisionCard');
 const { decision } = await import('./factories');
 
-const css = readFileSync(resolve(process.cwd(), 'src/v2/v2.css'), 'utf8');
-const indexCss = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8');
+const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8');
+const indexCss = css;
 
 /** The declaration block that starts at `marker`, up to its next closing brace. */
 function blockAt(marker: string): string {
@@ -43,7 +43,7 @@ function token(block: string, name: string): string | undefined {
 }
 
 describe('the V2 motion tokens', () => {
-  const root = blockAt('.v2-root {\n  /* Dark');
+  const root = blockAt("[data-theme='dark'] {");
 
   it('declares the fast/base/slow durations on the V2 root', () => {
     expect(token(root, '--v2-dur-fast')).toBe('120ms');
@@ -67,7 +67,8 @@ describe('the V2 motion tokens', () => {
   });
 
   it('turns the animations instant under prefers-reduced-motion', () => {
-    const reduced = blockAt('@media (prefers-reduced-motion: reduce)');
+    const at = css.indexOf('--v2-dur-fast: 0ms');
+    const reduced = css.slice(css.lastIndexOf('@media (prefers-reduced-motion: reduce)', at), at + 80);
     // The block zeroes the V2 durations (the global `index.css` rule is the second, document-wide
     // backstop asserted below).
     expect(reduced).toContain('--v2-dur-fast: 0ms');

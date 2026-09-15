@@ -1,7 +1,7 @@
 /**
  * VS-385, design.md's drift guard: captain's binding requirement is that `@weave-ai/plugin-sdk`
  * carries the vocabulary's *names* only, never a visual value — the daemon generates and pushes the
- * real CSS, so a plugin automatically inherits a restyled `v2.css` with no SDK republish. This test
+ * real CSS, so a plugin automatically inherits a restyled `index.css` with no SDK republish. This test
  * is the completeness half of that guard for the SDK package itself (`v2-theme.test.ts` in
  * `@weave-ai/core` covers the generated-stylesheet half): nothing in `WEAVE_PLUGIN_CLASS` or
  * `WEAVE_PLUGIN_CLIENT_JS` may be a colour, spacing, radius or font-size value.

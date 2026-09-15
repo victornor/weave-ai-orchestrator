@@ -5,7 +5,7 @@
  *
  * The specs list moved to its own tab (see `KnowledgeSpecs.tsx`), so this page no longer mixes it in.
  * Reads every fact through V1's `api/hooks` and reuses V1's leaf viewers (`KnowledgeDocPanel`,
- * `DocsPanel`); the chrome is built from the V2 classes in `v2.css` and the Tailwind token utilities,
+ * `DocsPanel`); the chrome is built from the V2 classes in `index.css` and the Tailwind token utilities,
  * which resolve against the Mono tokens under `.v2-root`.
  */
 import { useMemo, useState } from 'react';
@@ -26,7 +26,7 @@ import { ago } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { projectColorVar } from '../../lib/projectColor';
 import { projectLabelFor } from '../../lib/projectName';
-import { DocsPanel, KnowledgeDocPanel, type DocRef } from '../../routes/KnowledgeDocs';
+import { DocsPanel, KnowledgeDocPanel, type DocRef } from './panels';
 import { useProjectScope } from './KnowledgeFrame';
 import { Empty, Skeleton } from './KnowledgeParts';
 

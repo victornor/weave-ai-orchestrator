@@ -59,8 +59,8 @@ vi.mock('../api/hooks', () => ({
   useTicketDocumentRevisions: () => ({ data: [] }),
 }));
 
-const { KnowledgeExplorer } = await import('../routes/KnowledgeExplorer');
-const { KnowledgeDocPanel } = await import('../routes/KnowledgeDocs');
+const { KnowledgeExplorer } = await import('../v2/knowledge/KnowledgeExplorerView');
+const { KnowledgeDocPanel } = await import('../v2/knowledge/panels');
 const { HostRoutesProvider, V2_HOST_ROUTES } = await import('../app/host');
 
 /** Render with `matchMedia` forced to a narrow viewport, restoring it afterwards. */

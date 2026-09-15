@@ -249,9 +249,6 @@ function RailFooter({
   return (
     <div className="mt-auto flex flex-none items-center gap-2 p-2.5">
       <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{username}</span>
-      <A to="/" className="flex-none text-nano text-text-3 hover:text-text-1">
-        V1
-      </A>
       <ThemeSwitch theme={theme} onTheme={onTheme} variant="expanded" />
     </div>
   );

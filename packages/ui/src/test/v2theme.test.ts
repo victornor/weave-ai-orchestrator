@@ -1,10 +1,12 @@
-/** The V2 theme: the Mono contrast rule in the token sheet, and the choice's own storage key. */
+/** The V2 theme: the Mono palette that is now the only palette, and the theme choice's storage key. */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { readV2Theme, writeV2Theme } from '../v2/theme';
 
-const css = readFileSync(resolve(process.cwd(), 'src/v2/v2.css'), 'utf8');
+// VS-457: V1's stylesheet and V2's delta were merged into one file, and V2's Mono values are the
+// only defaults now — there is no `.v2-root` token scope left to read.
+const css = readFileSync(resolve(process.cwd(), 'src/index.css'), 'utf8');
 
 /** The declaration block that starts at `selector`, up to its closing brace. */
 function block(selector: string): string {
@@ -19,7 +21,7 @@ function token(selector: string, name: string): string | undefined {
 
 describe('the Mono token set', () => {
   it('collapses --text-4 into --text-3 in both themes (HANDOFF §2)', () => {
-    for (const selector of ['.v2-root {\n  /* Dark', ".v2-root[data-theme='light']"]) {
+    for (const selector of ['[data-theme=\'dark\']', "[data-theme='light']"]) {
       const three = token(selector, '--text-3');
       const four = token(selector, '--text-4');
       expect(three).toBeDefined();
@@ -28,27 +30,17 @@ describe('the Mono token set', () => {
   });
 
   it('keeps the near-black dark ground the design names', () => {
-    expect(token('.v2-root {\n  /* Dark', '--bg-0')).toBe('#050506');
-    expect(token('.v2-root {\n  /* Dark', '--bg-1')).toBe('#0b0b0d');
-    expect(token('.v2-root {\n  /* Dark', '--bg-2')).toBe('#101012');
+    expect(token("[data-theme='dark']", '--bg-0')).toBe('#050506');
+    expect(token("[data-theme='dark']", '--bg-1')).toBe('#0b0b0d');
+    expect(token("[data-theme='dark']", '--bg-2')).toBe('#101012');
   });
 
-  it('scopes every selector to the V2 root, so nothing can leak into V1', () => {
-    const selectors = css
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/@keyframes[\s\S]*?}\s*}/g, '')
-      .match(/[^{}]+\{/g)
-      ?.map((s) => s.slice(0, -1).trim())
-      // `@media`/`@keyframes` preludes are at-rules, not selectors; the blocks they guard are still
-      // scanned on their own (VS-427 added the reduced-motion `@media`).
-      .filter((s) => s.length > 0 && !s.startsWith('@') && !s.startsWith('from') && !s.startsWith('to'));
-    expect(selectors?.length).toBeGreaterThan(0);
-    for (const selector of selectors ?? []) {
-      for (const part of selector.split(',')) {
-        // `.v2-root …` for token/utility scoping, `.v2-*` for the V2 primitives; V1 has neither.
-        expect(part.trim().startsWith('.v2-')).toBe(true);
-      }
-    }
+  it('drops the `.v2-root` token scope now that V1 is gone', () => {
+    const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    // No selector still roots a rule at `.v2-root`; the class itself may remain on elements for
+    // non-CSS reasons (Toast mirrors it, `flip.ts` reads it), but it scopes nothing.
+    expect(withoutComments).not.toMatch(/^\s*\.v2-root\b/m);
+    expect(withoutComments).not.toMatch(/\.v2-root[ .:[]/);
   });
 });
 
@@ -68,8 +60,8 @@ describe('the V2 theme choice', () => {
  * stops a later edit falling back to them (VS-343 review).
  */
 describe('the Mono palette', () => {
-  const dark = '.v2-root {\n  /* Dark';
-  const light = ".v2-root[data-theme='light']";
+  const dark = "[data-theme='dark'] {";
+  const light = "[data-theme='light'] {";
 
   it('keeps the accent and the link greyscale in both themes', () => {
     expect(token(dark, '--accent')).toBe('#3d4148');
@@ -131,4 +123,3 @@ describe('the Mono palette', () => {
     expect(token(light, '--status-blocked')).toBe('#c93a17');
   });
 });
-

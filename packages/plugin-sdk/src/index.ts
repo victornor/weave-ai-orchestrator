@@ -158,7 +158,7 @@ export interface PluginHost {
   kitCss(): string;
   /**
    * The generated stylesheet backing `WEAVE_PLUGIN_CLASS` (VS-385) — V2's real Mono tokens (both
-   * themes) plus the vocabulary's component classes, produced from `packages/ui/src/v2/v2.css`'s
+   * themes) plus the vocabulary's component classes, produced from `packages/ui/src/index.css`'s
    * own current text, never a literal this package carries. A plugin rarely needs to call this
    * directly: the bridge already pushes the same string to the page and the client applies it
    * automatically. It exists only for an optional server-rendered first paint, to avoid a flash of
@@ -184,7 +184,7 @@ export function definePlugin(p: WeaveAIPlugin): WeaveAIPlugin { return p; }
  * and the bridge's `stylesheet` push), so restyling the app never requires a plugin rebuild or a new
  * `@weave-ai/plugin-sdk` version. Changing this object's own shape is the only thing that does.
  * `section`/`badge` are the app's own real classes (`.v2-card`/`.v2-tag`); the other five are shared
- * classes added to `packages/ui/src/v2/v2.css` alongside real screens that use them. `link` is the
+ * classes added to `packages/ui/src/index.css` alongside real screens that use them. `link` is the
  * anchor role (VS-458): the generated stylesheet also styles a bare `<a>` in a plugin page, so a
  * plugin that writes a plain link is styled too. `rowPanel` (VS-468) is the class for a panel that
  * expands under a `.v2-table` row: place it as a direct child of the table, after the row, and lay

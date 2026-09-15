@@ -19,7 +19,7 @@ import {
   useWorkspaceProjects,
   useWorkspaces,
 } from '../../api/hooks';
-import { dueLabel, scheduleLabel } from '../../routes/GlobalScheduled';
+import { dueLabel, scheduleLabel } from '../../lib/schedule';
 import { projectColorVar } from '../../lib/projectColor';
 import { cents } from '../../lib/format';
 import { cx } from '../../lib/cx';

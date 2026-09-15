@@ -26,7 +26,7 @@ import {
   StepRow,
   writeResume,
   type StepView,
-} from '../routes/Onboarding';
+} from '../lib/onboarding';
 
 const TOTAL = 5;
 

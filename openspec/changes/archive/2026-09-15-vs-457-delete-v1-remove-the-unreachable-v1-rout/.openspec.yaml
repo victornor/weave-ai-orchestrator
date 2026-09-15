@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Delete V1: remove the unreachable V1 route tree and app shell, hoist the
+  pieces V2 reuses into shared modules, and merge index.css and v2.css into one
+  stylesheet"

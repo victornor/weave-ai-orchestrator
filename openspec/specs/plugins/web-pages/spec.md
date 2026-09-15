@@ -13,9 +13,9 @@ CSS of its own.
 
 The plugin page SHALL be rendered inside an iframe sandboxed without `allow-same-origin`, and served
 with a content-security-policy that blocks outbound network requests from the page itself
-(`connect-src 'none'`), regardless of what the plugin's own HTML contains, on both the V1 and V2
-routes. The page's origin SHALL therefore never carry the viewer's session cookie and SHALL NOT be
-able to call any API route directly.
+(`connect-src 'none'`), regardless of what the plugin's own HTML contains. The page's origin SHALL
+therefore never carry the viewer's session cookie and SHALL NOT be able to call any API route
+directly.
 
 #### Scenario: The page cannot read the session cookie
 
@@ -29,18 +29,16 @@ able to call any API route directly.
 
 #### Scenario: The page is rendered inside a sandboxed iframe
 
-- **WHEN** either the V1 or the V2 plugin page route is visited
+- **WHEN** the plugin page route is visited
 - **THEN** the page's content is rendered inside an iframe with a `sandbox` attribute that omits
   `allow-same-origin`
 
 ### Requirement: A postMessage bridge proxies a plugin page's requests, scoped to its own routes
 
-Both the V1 and V2 host pages hosting a plugin's iframe SHALL provide a message-based bridge that:
-accepts a request only from that iframe's own `contentWindow`; performs it, authenticated as the
-viewer's session, only against that plugin's own route prefix (`/api/w/:ws/plugins/<pluginId>/...`);
-and rejects a request whose path would resolve outside that prefix. Both bridges SHALL apply the
-same path-resolution rule, so a request accepted or rejected by one is accepted or rejected
-identically by the other.
+The host page hosting a plugin's iframe SHALL provide a message-based bridge that: accepts a request
+only from that iframe's own `contentWindow`; performs it, authenticated as the viewer's session,
+only against that plugin's own route prefix (`/api/w/:ws/plugins/<pluginId>/...`); and rejects a
+request whose path would resolve outside that prefix.
 
 #### Scenario: A same-plugin request succeeds through the bridge
 
@@ -66,9 +64,9 @@ identically by the other.
 
 ### Requirement: A plugin page receives only its own plugin's live events
 
-The bridge, on both the V1 and V2 routes, SHALL forward to a subscribed plugin page only
-`plugin.event` frames whose payload identifies that same plugin, using the workspace's existing
-event connection rather than opening a new one per page.
+The bridge SHALL forward to a subscribed plugin page only `plugin.event` frames whose payload
+identifies that same plugin, using the workspace's existing event connection rather than opening a
+new one per page.
 
 #### Scenario: A matching event reaches the page
 
@@ -104,15 +102,16 @@ package's own version with respect to styling.
 ### Requirement: The stylesheet behind the vocabulary is generated from V2's own CSS and served live by the running daemon
 
 The concrete CSS implementing the vocabulary SHALL be produced by the running daemon from
-`packages/ui/src/v2/v2.css`'s own current content, never hand-authored as a separate literal and
-never bundled into the published `@weave-ai/plugin-sdk` package. Restyling `packages/ui/src/v2/
-v2.css` and shipping a new daemon release SHALL change what every already-installed plugin page
-renders, with no change to the plugin's own code and no new `@weave-ai/plugin-sdk` version.
+`packages/ui/src/index.css`'s own current content, never hand-authored as a separate literal and
+never bundled into the published `@weave-ai/plugin-sdk` package. Restyling
+`packages/ui/src/index.css` and shipping a new daemon release SHALL change what every
+already-installed plugin page renders, with no change to the plugin's own code and no new
+`@weave-ai/plugin-sdk` version.
 
 #### Scenario: The generated stylesheet reflects the app's real tokens
 
 - **WHEN** the daemon generates the plugin stylesheet
-- **THEN** its token values are identical to `packages/ui/src/v2/v2.css`'s own dark and light token
+- **THEN** its token values are identical to `packages/ui/src/index.css`'s own dark and light token
   blocks
 
 #### Scenario: Every vocabulary item has a rule
@@ -122,7 +121,7 @@ renders, with no change to the plugin's own code and no new `@weave-ai/plugin-sd
 
 #### Scenario: A V2 restyle reaches plugins with no plugin change
 
-- **WHEN** `packages/ui/src/v2/v2.css`'s token values change and the daemon is restarted on a build
+- **WHEN** `packages/ui/src/index.css`'s token values change and the daemon is restarted on a build
   that includes the change
 - **THEN** a plugin page already installed, unmodified and unrepublished, renders with the new values
 
@@ -193,7 +192,7 @@ exported cell-role constant rather than spelling its attribute value itself.
 
 The daemon-generated plugin stylesheet SHALL style prose links — a bare `<a>` and the vocabulary's
 `link` class — and the table's `actions` cell role, in both dark and light, derived from
-`packages/ui/src/v2/v2.css`'s own current rules so a V2 restyle reaches an already-installed plugin
+`packages/ui/src/index.css`'s own current rules so a restyle reaches an already-installed plugin
 with no plugin change. A plugin page has no `.v2-root` wrapper, so the emitted link rule SHALL NOT
 depend on one.
 

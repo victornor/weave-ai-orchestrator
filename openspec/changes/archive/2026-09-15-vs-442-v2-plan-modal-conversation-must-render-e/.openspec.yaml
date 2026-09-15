@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-15
+goal: 'The V2 Plan modal conversation renders exactly like the weaver chat:
+  markdown messages, a per-turn "Planner did N tool calls" summary, and the live
+  working trace, through one shared conversation view'
+skip_specs: true

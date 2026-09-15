@@ -338,8 +338,8 @@ export function usePlan(projectId: string | null | undefined, planId: string | n
   });
 }
 
-/** Opens the Plan modal: resumes the project's `drafting` plan if one exists, else starts a fresh one (and its planner) immediately. */
-export function useStartOrResumePlan(): UseMutationResult<{ plan: Plan; agent: { id: string; status: string } }, Error, { projectId: string; title?: string }> {
+/** Opens the Plan modal: resumes the project's `drafting` plan if one exists, else starts a fresh one (and its planner) immediately. The planner's `runtimeId` is returned so the modal can resolve its model's context window for the turn summary (VS-442). */
+export function useStartOrResumePlan(): UseMutationResult<{ plan: Plan; agent: { id: string; status: string; runtimeId: string } }, Error, { projectId: string; title?: string }> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({

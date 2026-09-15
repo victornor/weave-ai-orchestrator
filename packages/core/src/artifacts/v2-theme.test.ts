@@ -120,6 +120,25 @@ describe('generateV2PluginCss — completeness', () => {
   });
 });
 
+describe('generateV2PluginCss — VS-465 (plugin pages: section spacing and [hidden])', () => {
+  const generated = generateV2PluginCss(V2_CSS, INDEX_CSS);
+
+  it('makes the standard hidden attribute win over the vocabulary\'s own display recipes', () => {
+    expect(generated).toMatch(/\[hidden\]\s*\{\s*display:\s*none\s*!important;?\s*\}/);
+    // The vocabulary's own recipes (`.v2-form-row { display: flex }`, …) are extracted verbatim
+    // from v2.css and are never `!important`, so this rule wins the cascade on every one of them.
+    expect(generated).not.toMatch(/\.v2-(?:form-row|button|input|card|table|tag)[^{}]*\{[^{}]*display:[^{};]*!important/);
+  });
+
+  it('gives adjacent top-level sections the design\'s own spacing token, not a literal', () => {
+    expect(generated).toMatch(/body\s*>\s*\*\s*\+\s*\*\s*\{\s*margin-top:\s*var\(--space-6\)\s*;?\s*\}/);
+    // The rule only works because the generated base-token `:root` defines the token it names.
+    const genBase = parseCssCustomProperties(extractCssBlock(generated, ':root {'));
+    expect(genBase['--space-6']).toMatch(/^[\d.]+rem$/);
+    expect(genBase['--space-6']).not.toBe('0rem');
+  });
+});
+
 it('generateV2PluginCss output has no <script> tag and no non-data: external reference', () => {
   const generated = generateV2PluginCss(V2_CSS, INDEX_CSS);
   expect(generated).not.toMatch(/<script/i);

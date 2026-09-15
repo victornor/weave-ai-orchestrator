@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Plugin styling: adjacent .v2-card / .v2-table blocks sit flush with no
+  spacing, and the HTML hidden attribute loses to the vocabulary's display
+  rules"
+skip_specs: true

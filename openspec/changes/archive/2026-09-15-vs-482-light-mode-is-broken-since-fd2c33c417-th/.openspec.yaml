@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Light mode is broken since fd2c33c417: the background renders black and
+  sidebar icons are wrong — restore the light theme exactly as it was before V1
+  was deleted"

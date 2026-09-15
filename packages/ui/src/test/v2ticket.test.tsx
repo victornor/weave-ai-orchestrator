@@ -338,6 +338,48 @@ describe('V2 ticket held decisions and action errors', () => {
   });
 });
 
+describe('V2 ticket page waiting on the weaver (VS-469)', () => {
+  const reviewTag = (): HTMLElement | null => document.querySelector('[data-v2-awaits-review]');
+  const unseenMerge = (over: Partial<Decision> = {}): Decision =>
+    decision({ id: 'd_merge', ticketId: 'tk_42', kind: 'merge_approval', status: 'open', owner: 'human', weaverReviewStatus: 'unseen', ...over });
+
+  it('says an in_review ticket with an unseen merge approval waits on the weaver', () => {
+    state.ticket = ticket({ id: 'tk_42', identifier: 'ACME-42', title: 'Dark mode', status: 'in_review' });
+    state.decisions = [unseenMerge()];
+    renderScreen();
+    expect(reviewTag()).toBeTruthy();
+    expect(reviewTag()!.textContent).toMatch(/Waiting on the weaver.s review/);
+  });
+
+  it('says the same for a proposed ticket with an unseen plan approval', () => {
+    state.ticket = ticket({ id: 'tk_42', identifier: 'ACME-42', title: 'Dark mode', status: 'proposed' });
+    state.decisions = [unseenMerge({ kind: 'plan_approval' })];
+    renderScreen();
+    expect(reviewTag()).toBeTruthy();
+  });
+
+  it('drops the waiting state once the weaver has looked', () => {
+    state.ticket = ticket({ id: 'tk_42', identifier: 'ACME-42', title: 'Dark mode', status: 'in_review' });
+    state.decisions = [unseenMerge({ weaverReviewStatus: 'looked', weaverReviewNote: 'read it, clean' })];
+    renderScreen();
+    expect(reviewTag()).toBeNull();
+  });
+
+  it('shows no waiting state once the approval has been answered', () => {
+    state.ticket = ticket({ id: 'tk_42', identifier: 'ACME-42', title: 'Dark mode', status: 'in_review' });
+    state.decisions = [unseenMerge({ status: 'answered' })];
+    renderScreen();
+    expect(reviewTag()).toBeNull();
+  });
+
+  it('shows no waiting state on a ticket that is not waiting on an approval', () => {
+    state.ticket = ticket({ id: 'tk_42', identifier: 'ACME-42', title: 'Dark mode', status: 'in_progress' });
+    state.decisions = [unseenMerge()];
+    renderScreen();
+    expect(reviewTag()).toBeNull();
+  });
+});
+
 describe('V2 ticket live status (VS-368)', () => {
   const liveWorker = (over: Partial<Agent> & { activity?: unknown; tests?: unknown } = {}): Agent =>
     Object.assign(agent({ id: 'a1', ticketId: 'tk_42', status: 'running', name: 'Backend Engineer #7' }), over);

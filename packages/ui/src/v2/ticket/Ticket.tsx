@@ -6,7 +6,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import { isActiveRun, openspecArchive, projectLabel, ticketUiStatus, type Project, type Run, type Ticket } from '@weave-ai/shared';
+import { isActiveRun, openspecArchive, projectLabel, ticketUiStatus, carriesWeaverReview, type Project, type Run, type Ticket } from '@weave-ai/shared';
 import { workerPauseDetail } from '@weave-ai/render';
 import { A, useGo, useSearchParams } from '../../app/link';
 import { useWs } from '../../api/context';
@@ -175,6 +175,17 @@ function TicketHeader({
   liveLine: LiveActivityLineModel | null;
 }): React.ReactElement {
   const { ticket, project, worker } = detail;
+  const decisions = useDecisions({ status: 'open', owner: 'human' });
+  // VS-469: an `in_review`/`proposed` ticket whose live open approval is still unseen is waiting on
+  // the weaver, not on the human — say so in the header rather than only showing the ticket status.
+  const awaitsReview = useMemo(() => {
+    if (ticket.status !== 'in_review' && ticket.status !== 'proposed') return false;
+    return (decisions.data ?? []).some(
+      (d) => d.status === 'open' && carriesWeaverReview(d.kind)
+        && (d.ticketId === ticket.id || d.ticketId === ticket.identifier)
+        && (d.weaverReviewStatus ?? 'unseen') === 'unseen',
+    );
+  }, [decisions.data, ticket.id, ticket.identifier, ticket.status]);
   return (
     <header className="flex-none border-b border-line-1 px-4 py-3 md:px-5" data-v2-ticket-header>
       <div className="mb-1.5 flex flex-wrap items-center gap-2">
@@ -185,6 +196,7 @@ function TicketHeader({
           {statusText(ticket.status)}
         </span>
         {ticket.interactiveSession ? <Badge tone="accent">interactive</Badge> : null}
+        {awaitsReview ? <span className="v2-tag text-text-3" data-v2-awaits-review>Waiting on the weaver&rsquo;s review</span> : null}
         <div className="flex-1" />
         <RetryAction ticket={ticket} worker={worker} />
         <AutoMergeToggle ticket={ticket} />

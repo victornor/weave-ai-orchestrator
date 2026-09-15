@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
 import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, SELF_WAKE_STALL_GRACE_MS, type Agent, type KnowledgeScope, type Run, type Ticket } from '@weave-ai/shared';
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
+import { formatAge } from '@weave-ai/render';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
@@ -62,8 +63,26 @@ const SCRATCH_SWEEP_EVERY_MS = 15 * 60_000;
  * GitHub's authenticated rate limit.
  */
 const MERGE_POLL_EVERY_MS = 30_000;
+/**
+ * VS-469: how long a review-carrying approval may stay `unseen` before the weaver is reminded, and the
+ * growing wait between reminders. The first fires once the card is older than `FIRST`; the second
+ * `SECOND` (the first plus 30 min); every later one a further `EVERY` (60 min). The stage a card is at
+ * is derived from its age, so the scan keeps no per-decision state: the wake's own idempotency key
+ * `review-reminder:<decisionId>:<stage>` is what stops a repeated scan from stacking reminders.
+ */
+const REVIEW_REMINDER_FIRST_MS = 10 * 60_000;
+const REVIEW_REMINDER_SECOND_MS = 40 * 60_000;
+const REVIEW_REMINDER_EVERY_MS = 60 * 60_000;
 
 const SYSTEM: Actor = { kind: 'system', id: null };
+
+/** The backoff stage a card of `ageMs` is due a reminder at, or null before the first one is due. */
+function reviewReminderStage(ageMs: number): number | null {
+  if (ageMs < REVIEW_REMINDER_FIRST_MS) return null;
+  if (ageMs < REVIEW_REMINDER_SECOND_MS) return 0;
+  if (ageMs < REVIEW_REMINDER_SECOND_MS + REVIEW_REMINDER_EVERY_MS) return 1;
+  return 2 + Math.floor((ageMs - REVIEW_REMINDER_SECOND_MS - REVIEW_REMINDER_EVERY_MS) / REVIEW_REMINDER_EVERY_MS);
+}
 
 /**
  * The queue order for tickets waiting on a worker: highest priority first (`TICKET_PRIORITIES`
@@ -82,6 +101,8 @@ const DIGEST_EVENT_TYPES = new Set(['ticket.created', 'project.added', 'ticket.s
  */
 const DIGEST_SUMMARY_ENTRY_CHARS = 400;
 const DIGEST_SUMMARY_TOTAL_CHARS = 1600;
+/** VS-469: cap on the digest's list of approvals still awaiting review, like the event entries themselves. */
+const DIGEST_PENDING_REVIEW_LIMIT = 10;
 
 /**
  * Hard-bound a stored report summary to `max` characters, including a visible truncation marker.
@@ -488,6 +509,56 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     });
   }
 
+  interface UnreviewedApprovalRow { id: string; kind: string; ticketId: string | null; identifier: string | null; title: string; createdAt: string }
+
+  /**
+   * VS-469: a review-carrying approval that stays `unseen` re-wakes the weaver until it is reviewed or
+   * closed. The card is woken for the weaver once at creation, and nothing else ever re-raises it, so
+   * a weaver that believes it marked the card (as VOFM-77's did, without calling the tool) leaves it
+   * stuck: excluded from the human's Needs-you count, unapprovable without an override, and invisible
+   * to every later digest. This scan is the missing reader.
+   *
+   * Only `weaver_review_status = 'unseen'` on an `open`, human-owned review-carrying decision
+   * qualifies — a mark, an answer, a supersede, a withdrawal or an expiry removes the row, so the
+   * reminders stop by construction. The stage is derived from the card's age, and the wake key is
+   * per (decision, stage), so Gate 0 dedupes a repeated scan and a reminder that arrives while the
+   * weaver already has a queued wake coalesces into it (carrying `decisionId` in the bundle) rather
+   * than stacking. The wake is an ordinary system wake: the dispatcher's run cap applies to it as to
+   * any other, so it never starts a turn beyond the allowed concurrency.
+   */
+  function reviewReminderScan(): void {
+    let conductor: Agent;
+    try { conductor = deps().workers.conductor(); } catch { return; }
+    const now = Date.now();
+    const rows = ctx.db.all<UnreviewedApprovalRow>(
+      `SELECT d.id AS id, d.kind AS kind, d.ticket_id AS ticketId, t.identifier AS identifier, d.title AS title, d.created_at AS createdAt
+         FROM decisions d LEFT JOIN tickets t ON t.id = d.ticket_id
+        WHERE d.workspace_id = ? AND d.status = 'open' AND d.owner = 'human'
+          AND d.weaver_review_status = 'unseen'
+          AND d.kind IN ('plan_approval','merge_approval','action_approval')
+          AND d.created_at <= ?
+        ORDER BY d.created_at`,
+      [ctx.workspaceId, new Date(now - REVIEW_REMINDER_FIRST_MS).toISOString()],
+    );
+    for (const d of rows) {
+      const ageMs = now - Date.parse(d.createdAt);
+      const stage = reviewReminderStage(ageMs);
+      if (stage === null) continue;
+      const scope = d.identifier ? `${d.identifier} ` : '';
+      const kind = d.kind.replace('_approval', '');
+      try {
+        deps().wake.enqueue(conductor.id, {
+          source: 'system',
+          reason: `approval card not reviewed for ${formatAge(d.createdAt)}: ${scope}${kind} "${d.title}"`,
+          payload: { kind: 'review_reminder', decisionId: d.id, ticketId: d.ticketId, decisionKind: d.kind, ageMs },
+          idempotencyKey: `review-reminder:${d.id}:${stage}`,
+          requestedBy: SYSTEM,
+        });
+        log.info({ decisionId: d.id, kind: d.kind, stage, ageMs }, 'reminded the weaver of an unreviewed approval');
+      } catch (e) { log.warn({ decisionId: d.id, err: String(e) }, 'review reminder wake failed'); }
+    }
+  }
+
   interface StalledAgentRow { id: string; ticketId: string; lastRunAt: string; identifier: string }
 
   /**
@@ -577,6 +648,26 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     return { summaryOmitted: 'no_report' };
   }
 
+  interface PendingReviewEntry { decisionId: string; kind: string; ticketIdentifier: string | null; title: string; ageMs: number }
+
+  /**
+   * VS-469: the open human-owned approvals whose review state is still `unseen` — the cards a weaver
+   * that believed it reviewed them would otherwise lose track of. Shared by the digest's explicit
+   * "not reviewed" list, bounded so the payload cannot grow without bound.
+   */
+  function pendingReviewEntries(): PendingReviewEntry[] {
+    const now = Date.now();
+    return ctx.db.all<{ id: string; kind: string; identifier: string | null; title: string; createdAt: string }>(
+      `SELECT d.id AS id, d.kind AS kind, t.identifier AS identifier, d.title AS title, d.created_at AS createdAt
+         FROM decisions d LEFT JOIN tickets t ON t.id = d.ticket_id
+        WHERE d.workspace_id = ? AND d.status = 'open' AND d.owner = 'human'
+          AND d.weaver_review_status = 'unseen'
+          AND d.kind IN ('plan_approval','merge_approval','action_approval')
+        ORDER BY d.created_at LIMIT ?`,
+      [ctx.workspaceId, DIGEST_PENDING_REVIEW_LIMIT],
+    ).map((d) => ({ decisionId: d.id, kind: d.kind, ticketIdentifier: d.identifier, title: d.title, ageMs: now - Date.parse(d.createdAt) }));
+  }
+
   function conductorDigest(): void {
     const interval = (ctx.config.defaults.weaverDigestIntervalSec ?? 120) * 1000;
     if (Date.now() - lastDigestAt < interval) return;
@@ -633,10 +724,20 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       }
       entries.push(entry);
     }
+    // VS-469: an open approval the weaver never marked is not ordinary open work — it is waiting on
+    // the weaver, and a weaver that has lost track of it reads it as already reviewed. Name every
+    // such card on the digest itself, bounded, and in the wake reason so it is read without opening
+    // the payload.
+    const pendingReview = pendingReviewEntries();
+    const reviewNote = pendingReview.length
+      ? ` — ${pendingReview.length} approval card${pendingReview.length === 1 ? '' : 's'} still not reviewed: `
+        + pendingReview.slice(0, 3).map((p) => `${p.ticketIdentifier ?? 'workspace'} ${p.kind.replace('_approval', '')} ${formatAge(new Date(Date.now() - p.ageMs).toISOString())}`).join(', ')
+        + (pendingReview.length > 3 ? `, +${pendingReview.length - 3} more` : '')
+      : '';
     try {
       deps().wake.enqueue(conductor.id, {
-        source: 'system', reason: 'digest',
-        payload: { since: lastSeq, events: entries },
+        source: 'system', reason: `digest${reviewNote}`,
+        payload: { since: lastSeq, events: entries, ...(pendingReview.length ? { pendingReview } : {}) },
         requestedBy: { kind: 'system', id: null },
       });
     } catch (e) { log.warn({ err: String(e) }, 'digest wake failed'); }
@@ -1217,6 +1318,8 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
           try { deps().decisions.sweepTerminalTickets(SYSTEM, TERMINAL_DECISION_GRACE_MS); }
           catch (e) { log.error({ err: String(e) }, 'stale terminal-decision sweep failed'); }
           try { stalledWorkerScan(); } catch (e) { log.error({ err: String(e) }, 'stalled worker scan failed'); }
+          // VS-469: re-wake the weaver for an approval it left unreviewed past the first threshold.
+          try { reviewReminderScan(); } catch (e) { log.error({ err: String(e) }, 'review reminder scan failed'); }
         }
         try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }
         try { deps().routines.fireDue(); } catch { /* routines service unavailable */ }

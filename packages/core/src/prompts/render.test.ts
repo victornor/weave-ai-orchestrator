@@ -590,6 +590,21 @@ describe('prompt rendering', () => {
     expect(prompt).toMatch(/- d2 \[merge_approval, owner human, TST-42 approved, \d+[smhdw]\] Merge TST-42\?/);
   });
 
+  it('marks an open approval the weaver has not reviewed, and only that one (VS-469)', async () => {
+    const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
+    h.db.insert('decisions', {
+      id: 'd9', workspaceId: h.workspaceId, ticketId, kind: 'merge_approval', owner: 'human', title: 'Merge TST-42?',
+      context: '', optionsJson: [], allowFreeText: 1, status: 'open', createdAt: nowIso(),
+    });
+    h.db.insert('decisions', {
+      id: 'd10', workspaceId: h.workspaceId, ticketId, kind: 'merge_approval', owner: 'human', title: 'Merge TST-43?',
+      context: '', optionsJson: [], allowFreeText: 1, status: 'open', weaverReviewStatus: 'looked', createdAt: nowIso(),
+    });
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [{ id: 'w7', source: 'system', reason: 'digest', payload: {} } as never], {});
+    expect(prompt).toMatch(/- d9 \[merge_approval, owner human, TST-42 [a-z]+, \d+[smhdw]\] Merge TST-42\? — NOT REVIEWED/);
+    expect(prompt).not.toMatch(/- d10 .*— NOT REVIEWED/);
+  });
+
   it('shows the age of a ticketless open decision without a ticket segment (VS-306)', async () => {
     const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
     h.db.insert('decisions', {

@@ -7,6 +7,7 @@ import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createSupervisor } from './index.js';
 import { createKnowledgeService } from '../knowledge/service.js';
 import { createDecisionsService } from '../decisions/service.js';
+import { createWakeService } from '../wake/index.js';
 import { runState } from '../runs/active.js';
 import type { Supervisor } from '../api.js';
 
@@ -1702,5 +1703,180 @@ describe('supervisor silence watchdog (VS-461)', () => {
     const agent = h.db.get<{ status: string; pauseReason: string | null }>('SELECT status, pause_reason FROM agents WHERE id = ?', [workerId])!;
     expect(agent.status).toBe('paused');
     expect(agent.pauseReason).toContain('repeated_provider_no_progress');
+  });
+
+  describe('review reminders (VS-469)', () => {
+    const minutesAgo = (m: number): string => new Date(Date.now() - m * 60_000).toISOString();
+    const seedApproval = (over: Record<string, unknown> = {}): string => {
+      const id = newId();
+      h.db.insert('decisions', {
+        id, workspaceId: h.workspaceId, ticketId: null, kind: 'merge_approval', owner: 'human',
+        title: 'Merge TST-1?', context: '', optionsJson: [], allowFreeText: 1, status: 'open',
+        createdAt: nowIso(), ...over,
+      });
+      return id;
+    };
+    const reminders = (): Array<{ agentId: string; input: Record<string, unknown> }> =>
+      wake.calls.filter((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'review_reminder');
+    const reminderKeys = (): Array<string | undefined> =>
+      reminders().map((c) => (c.input as { idempotencyKey?: string }).idempotencyKey);
+
+    it('wakes the weaver for a human-owned approval unseen past the first threshold', async () => {
+      const ticketId = seedTicket(h, { status: 'in_review' });
+      const id = seedApproval({ ticketId, createdAt: minutesAgo(11) });
+      await supervisor.tick();
+      const sent = reminders();
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.agentId).toBe(h.conductorId);
+      expect((sent[0]!.input as { reason: string }).reason).toContain('TST-1');
+      expect((sent[0]!.input as { reason: string }).reason).toContain('merge');
+      expect((sent[0]!.input as { payload: { decisionId: string } }).payload.decisionId).toBe(id);
+      // An ordinary system wake: no forced dispatch and no future scheduling, so the run limit holds.
+      expect((sent[0]!.input as { source: string }).source).toBe('system');
+      expect((sent[0]!.input as { notBefore?: unknown }).notBefore).toBeUndefined();
+      expect(reminderKeys()).toEqual([`review-reminder:${id}:0`]);
+    });
+
+    it('does not remind for a card still inside the first threshold', async () => {
+      seedApproval({ createdAt: minutesAgo(5) });
+      await supervisor.tick();
+      expect(reminders()).toHaveLength(0);
+    });
+
+    it('does not remind for a card already marked looked', async () => {
+      seedApproval({ createdAt: minutesAgo(11), weaverReviewStatus: 'looked' });
+      await supervisor.tick();
+      expect(reminders()).toHaveLength(0);
+    });
+
+    it('does not remind for a weaver-owned approval', async () => {
+      seedApproval({ createdAt: minutesAgo(11), owner: 'weaver' });
+      await supervisor.tick();
+      expect(reminders()).toHaveLength(0);
+    });
+
+    it('does not remind for a kind that carries no review', async () => {
+      seedApproval({ createdAt: minutesAgo(11), kind: 'question' });
+      await supervisor.tick();
+      expect(reminders()).toHaveLength(0);
+    });
+
+    it('uses a per-stage key so the same stage cannot stack duplicate wakes', async () => {
+      h.services.wake = createWakeService(h.ctx, h.deps) as never;
+      seedApproval({ createdAt: minutesAgo(11) });
+      await supervisor.tick();
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(Date.now() + 61_000));
+      await supervisor.tick();
+      vi.useRealTimers();
+      const rows = h.db.all<{ status: string }>("SELECT status FROM wakeups WHERE idempotency_key LIKE 'review-reminder:%'");
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.status).toBe('queued');
+    });
+
+    it('moves to the next stage as the card waits longer', async () => {
+      const fresh = seedApproval({ createdAt: minutesAgo(11) });
+      const stale = seedApproval({ createdAt: minutesAgo(41) });
+      await supervisor.tick();
+      const keys = reminderKeys();
+      expect(keys).toContain(`review-reminder:${fresh}:0`);
+      expect(keys).toContain(`review-reminder:${stale}:1`);
+    });
+
+    it('keeps the decision id when a reminder coalesces into a queued weaver wake', async () => {
+      h.services.wake = createWakeService(h.ctx, h.deps) as never;
+      const id = seedApproval({ createdAt: minutesAgo(11) });
+      // A weaver wake is already queued (e.g. a digest); the reminder must ride it, not be dropped.
+      h.db.insert('wakeups', {
+        id: newId(), workspaceId: h.workspaceId, agentId: h.conductorId, source: 'system', reason: 'digest',
+        payloadJson: {}, status: 'queued', createdAt: nowIso(),
+      });
+      await supervisor.tick();
+      const target = h.db.get<{ payload: { bundle?: Array<{ payload?: { decisionId?: string } }> } }>(
+        "SELECT payload_json FROM wakeups WHERE agent_id = ? AND reason = 'digest' AND status = 'queued'",
+        [h.conductorId],
+      );
+      expect(target!.payload.bundle?.some((e) => e.payload?.decisionId === id)).toBe(true);
+    });
+
+    it('stops reminding once the weaver marks the card looked', async () => {
+      const decisions = createDecisionsService(h.ctx, h.deps);
+      h.services.decisions = decisions as never;
+      const id = seedApproval({ createdAt: minutesAgo(11) });
+      await supervisor.tick();
+      expect(reminders()).toHaveLength(1);
+      decisions.review({ kind: 'agent', id: h.conductorId }, id, { status: 'looked', note: 'read the diff, clean' });
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(Date.now() + 61_000));
+      await supervisor.tick();
+      vi.useRealTimers();
+      expect(reminders()).toHaveLength(1);
+    });
+
+    it('carries the unreviewed card in the digest and names it in the reason', async () => {
+      const ticketId = seedTicket(h, { status: 'in_review' });
+      const id = seedApproval({ ticketId, createdAt: nowIso() });
+      h.ctx.events.emit('decision.created', 'decision', id, { kind: 'merge_approval', owner: 'human', askedByAgentId: 'w1' });
+      await supervisor.tick();
+      const digest = wake.calls.find((c) => (c.input as { reason: string }).reason.startsWith('digest'));
+      expect(digest).toBeTruthy();
+      const payload = (digest!.input as { payload: { pendingReview: Array<{ decisionId: string; ticketIdentifier: string | null }> } }).payload;
+      expect(payload.pendingReview.map((p) => p.decisionId)).toContain(id);
+      expect(payload.pendingReview.find((p) => p.decisionId === id)!.ticketIdentifier).toBe('TST-1');
+      expect((digest!.input as { reason: string }).reason).toContain('not reviewed');
+      expect((digest!.input as { reason: string }).reason).toContain('TST-1');
+    });
+
+    it('does not list a reviewed card in the digest not-reviewed list', async () => {
+      const ticketId = seedTicket(h, { status: 'in_review' });
+      const id = seedApproval({ ticketId, createdAt: nowIso(), weaverReviewStatus: 'looked' });
+      h.ctx.events.emit('decision.created', 'decision', id, { kind: 'merge_approval', owner: 'human', askedByAgentId: 'w1' });
+      await supervisor.tick();
+      const digest = wake.calls.find((c) => (c.input as { reason: string }).reason.startsWith('digest'));
+      expect(digest).toBeTruthy();
+      const pending = (digest!.input as { payload: { pendingReview?: unknown[] } }).payload.pendingReview ?? [];
+      expect(pending).toHaveLength(0);
+      expect((digest!.input as { reason: string }).reason).not.toContain('not reviewed');
+    });
+
+    it('reproduces the VOFM-77 shape end to end with the real wake and review services', async () => {
+      h.services.wake = createWakeService(h.ctx, h.deps) as never;
+      const decisions = createDecisionsService(h.ctx, h.deps);
+      h.services.decisions = decisions as never;
+      const ticketId = seedTicket(h, { status: 'in_review' });
+      const workerId = h.addWorker(ticketId);
+      // A worker raises the merge approval; the weaver is woken at creation (VS-361) and its turn
+      // ends without ever calling the review. VOFM-77's summary said "marked looked" here.
+      const approval = decisions.create({ kind: 'agent', id: workerId }, {
+        ticketId, kind: 'merge_approval', title: 'Merge TST-1?', askedByAgentId: workerId,
+      });
+      // The weaver's run fired and ended without reviewing, so its creation wake is done.
+      h.db.run("UPDATE wakeups SET status = 'completed' WHERE idempotency_key = ?", [`decision-review:${approval.id}`]);
+      const stage0 = (): Array<{ status: string }> => h.db.all<{ status: string }>('SELECT status FROM wakeups WHERE idempotency_key = ?', [`review-reminder:${approval.id}:0`]);
+      expect(stage0()).toHaveLength(0);
+
+      // Three hours on, still unseen.
+      h.db.update('decisions', approval.id, { createdAt: minutesAgo(11) });
+      await supervisor.tick();
+      expect(decisions.get(approval.id).weaverReviewStatus).toBe('unseen');
+      expect(stage0()).toHaveLength(1);
+      expect(stage0()[0]!.status).toBe('queued');
+
+      // The digest names the card as not reviewed, and the API state still reads unseen.
+      const digest = h.db.get<{ payload: { pendingReview?: Array<{ decisionId: string }> } }>(
+        "SELECT payload_json FROM wakeups WHERE agent_id = ? AND source = 'system' AND reason LIKE 'digest%' ORDER BY created_at DESC LIMIT 1",
+        [h.conductorId],
+      );
+      expect(digest!.payload.pendingReview?.map((p) => p.decisionId)).toContain(approval.id);
+
+      // The weaver actually reviews it; the reminders stop and the card is countable again.
+      decisions.review({ kind: 'agent', id: h.conductorId }, approval.id, { status: 'looked', note: 'read the diff, clean' });
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date(Date.now() + 61_000));
+      await supervisor.tick();
+      vi.useRealTimers();
+      expect(stage0()).toHaveLength(1);
+      expect(decisions.get(approval.id).weaverReviewStatus).toBe('looked');
+    });
   });
 });

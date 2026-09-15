@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Measure where a landing's time goes and cut the redundant merge-step work so
+  the merge queue lands more than one PR every ~12 minutes
+skip_specs: true

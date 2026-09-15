@@ -137,18 +137,26 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
         // existing order. A worker is resuming when its latest run was recorded `interrupted` by
         // `engine.finalize` with the shutdown code; `COALESCE` keeps that NULL (no run at all) out of
         // the ranking so never-run workers are not pushed last.
+        // VS-464: a merge slot holds a whole project's queue, so an admitted merge must not wait behind
+        // an ordinary development turn for a free run slot. `merge_rank` lifts an agent carrying a
+        // queued `merge_approved` wake — the admission wake or the CI-resolved wake — above workers
+        // with a more recent `last_run_at`; the 6-run cap still bounds concurrency, this only decides
+        // who takes the next slot that frees. Everything else keeps the existing fairness order.
         const candidates = ctx.db.all<Agent>(
           `SELECT a.*,
                   COALESCE((SELECT CASE WHEN r.status = 'interrupted' AND r.error_code = 'interrupted_by_shutdown'
                                          THEN 1 ELSE 0 END
                               FROM runs r WHERE r.agent_id = a.id
-                             ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1), 0) AS resume_rank
+                             ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1), 0) AS resume_rank,
+                  COALESCE((SELECT MAX(CASE WHEN w.source = 'merge_approved' THEN 1 ELSE 0 END)
+                              FROM wakeups w WHERE w.agent_id = a.id AND w.status = 'queued'
+                                AND (w.not_before IS NULL OR w.not_before <= ?)), 0) AS merge_rank
              FROM agents a WHERE a.workspace_id = ? AND a.status IN (${IDLE_AGENT_STATUSES.map(() => '?').join(',')})
              AND a.runtime_id NOT IN (SELECT runtime_id FROM runtime_credentials WHERE workspace_id = ? AND needs_login = 1)
              AND (a.kind != 'worker' OR a.role_id IS NULL OR EXISTS (SELECT 1 FROM roles r WHERE r.id = a.role_id AND r.status = 'active'))
              AND EXISTS (SELECT 1 FROM wakeups w WHERE w.agent_id = a.id AND w.status = 'queued' AND (w.not_before IS NULL OR w.not_before <= ?))
-           ORDER BY a.kind = 'weaver' DESC, resume_rank DESC, a.last_run_at IS NULL DESC, a.last_run_at`,
-          [ctx.workspaceId, ...IDLE_AGENT_STATUSES, ctx.workspaceId, now],
+           ORDER BY a.kind = 'weaver' DESC, merge_rank DESC, resume_rank DESC, a.last_run_at IS NULL DESC, a.last_run_at`,
+          [now, ctx.workspaceId, ...IDLE_AGENT_STATUSES, ctx.workspaceId, now],
         );
         for (const agent of candidates) {
           if (state.active.size >= max) break;

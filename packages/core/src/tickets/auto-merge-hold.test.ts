@@ -4,6 +4,7 @@
  * reason and pull request head it is waiting on and comments only when that changes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync } from 'node:fs';
 import type { Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createTicketsService } from './service.js';
@@ -41,6 +42,8 @@ describe('auto-merge waiting comments (VS-472)', () => {
     decisions = createDecisionsService(h.ctx, h.deps);
     h.services.tickets = tickets;
     h.services.decisions = decisions;
+    // VS-474: the grant hold resolves the PR head through the project clone, so it must exist.
+    mkdirSync(h.db.get<{ clonePath: string }>('SELECT clone_path FROM projects WHERE id = ?', [h.projectId])!.clonePath, { recursive: true });
     setPolicies({ yolo: true });
   });
   afterEach(() => h.cleanup());
@@ -127,6 +130,10 @@ describe('auto-merge waiting comments (VS-472)', () => {
     await deliver(t);
     await tickets.autoMergeSweep();
     expect(waiting(t.id, CI_RED)).toHaveLength(1);
+
+    // VS-474: the daemon's grant is held until the weaver reviews; mark it looked at the current head.
+    const merge = only(t.id, 'merge_approval')!;
+    await decisions.review({ kind: 'agent', id: h.conductorId, runId: 'run-conductor' }, merge.id, { status: 'looked', note: 'the diff is clean', reviewedHead: headSha! });
 
     // CI goes green: the sweep advances and drops the recorded hold.
     ciState = 'success';

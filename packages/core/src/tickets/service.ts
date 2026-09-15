@@ -1,7 +1,7 @@
 import { newId, nowIso, ticketRow, type Db } from '@weave-ai/db';
 import {
   OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, landingBranchOf, yoloEnabled, isWorkerOptionConfigured,
-  type CommentKind, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
+  type CommentKind, type Decision, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
 } from '@weave-ai/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
 import type { Agent, Project } from '@weave-ai/shared';
@@ -729,17 +729,12 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     });
 
     // Post-transition side effects (decisions and wakes; both are idempotent-ish and coalesce).
-    let autoApproved = false;
     if (to === 'proposed' && t.kind === 'change') {
       if (approvalOwner(next) === 'none') return transition(actor, t.id, { to: 'approved', note: 'plan auto-approved by policy' });
-      const planApproval = raisePlanApproval(actor, next);
-      // The plan is ready the moment the decision exists — `validateForProposed` has already run —
-      // so under YOLO it is answered here rather than waiting for a click. `applyPlanApproval`
-      // transitions the ticket to `approved` and wakes the worker, exactly as a human answer does.
-      if (yolo(next)) {
-        await autoApprove(next, planApproval.id);
-        autoApproved = true;
-      }
+      // VS-474: the plan approval is raised and left open and unseen. Under YOLO the daemon no longer
+      // answers it here: it grants only after the weaver marks the card looked at, through
+      // `onReviewLooked` on the mark, so the review cannot be skipped.
+      raisePlanApproval(actor, next);
     }
     if (to === 'in_review' && !next.autoMerge && !opts.quiet) {
       const wp = db.get<{ url: string | null; title: string | null }>('SELECT url, title FROM ticket_work_products WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1', [t.id]);
@@ -777,7 +772,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     if (TERMINAL.has(to)) propagateTerminal(next, actor);
     // The queue, or an auto-approval that moved the ticket on, wrote to the row after it was read,
     // so the caller gets the ticket as it now stands rather than as it was mid-transition.
-    return queued || autoApproved ? get(t.id) : next;
+    return queued ? get(t.id) : next;
   }
 
   // ---------- service ----------
@@ -856,6 +851,44 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       log.warn({ err: String(e), ticketId: t.id }, 'delivery head resolution failed');
     }
     return null;
+  }
+
+  /** The `archive` target a merge card carries when it lands an archive-backfill pull request (VS-389). */
+  function archiveTargetOf(target: Record<string, unknown> | null | undefined): { prUrl: string } | null {
+    const raw = target?.['archive'];
+    if (!raw || typeof raw !== 'object') return null;
+    const prUrl = (raw as Record<string, unknown>)['prUrl'];
+    return typeof prUrl === 'string' && prUrl ? { prUrl } : null;
+  }
+
+  /**
+   * VS-474: the head a merge card is about to land — the archive pull request's own head for an
+   * archive-backfill card, otherwise the ticket's delivery head. The review mark records this and the
+   * grant hold compares against it, so a YOLO merge can never land a head the weaver did not review.
+   * The archive case matters: the finished ticket's `deliveryHead` is its original pull request, not
+   * the archive pull request the card exists to land.
+   */
+  async function resolveApprovalHead(ticketId: string | null, target: Record<string, unknown> | null | undefined): Promise<string | null> {
+    const archive = archiveTargetOf(target);
+    if (archive) {
+      const t = ticketId ? get(ticketId) : null;
+      const p = t ? project(t.projectId) : null;
+      const forge = ctx.registries.forges.get('github');
+      if (!p || !forge) return null;
+      const state = await forge.prState(p.clonePath, archive.prUrl).catch(() => null);
+      return state?.headSha ?? null;
+    }
+    return ticketId ? resolveDeliveryHead(get(ticketId)) : null;
+  }
+
+  /** The pull request a merge card is about to land, named in the re-review wake (VS-474). */
+  function approvalPrUrl(ticketId: string, target: Record<string, unknown> | null | undefined): string | null {
+    const archive = archiveTargetOf(target);
+    if (archive) return archive.prUrl;
+    return db.get<{ url: string }>(
+      "SELECT url FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' AND url IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+      [ticketId],
+    )?.url ?? null;
   }
 
   const service: TicketsService = {
@@ -1159,27 +1192,77 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     },
 
     /**
-     * VS-365: a fix pushed to a merge card the weaver holds under concerns must wake the weaver by
-     * itself — a comment was the only wake before this. When the ticket has an open `merge_approval`
-     * marked **looked at, with concerns** and its delivery head differs from the head recorded at
-     * review, wake the weaver once per new head. `head` defaults to `deliveryHead(ticketId)`; a
-     * decision with no recorded head is baselined without waking. Notification only: no review state
-     * is touched, and the wake is idempotent under `held-review:<decisionId>:<sha>`.
+     * VS-474: the head a given approval will land — the archive pull request's head for an
+     * archive-backfill card, otherwise the ticket's delivery head. The review mark records it and
+     * the daemon's grant hold compares against it.
+     */
+    approvalDeliveryHead(d) {
+      return resolveApprovalHead(d.ticketId, d.target);
+    },
+
+    /**
+     * VS-474: under YOLO, grant a card the weaver has just marked **looked at**. Called from
+     * `decisions.review()` on the mark, so the grant is prompt and the "YOLO grants only after
+     * review" invariant lives at the single mark path rather than at each auto-approve caller. A plan
+     * approval is granted at once; an archive-backfill merge is granted at once (it has no sweep of
+     * its own); an ordinary merge is left to `autoMergeSweep`, which owns the CI-readiness gate.
+     * Never throws: a grant failure must not fail the review write.
+     */
+    async onReviewLooked(decisionId) {
+      let d: Decision;
+      try {
+        d = deps().decisions.get(decisionId);
+      } catch {
+        return;
+      }
+      if (d.status !== 'open' || (d.kind !== 'plan_approval' && d.kind !== 'merge_approval')) return;
+      if ((d.weaverReviewStatus ?? 'unseen') !== 'looked') return;
+      const t = d.ticketId ? find(d.ticketId) : null;
+      if (!t || !yolo(t)) return;
+      const archive = archiveTargetOf(d.target);
+      // An ordinary merge is granted by the sweep once the checks pass; only plans and archive-backfill
+      // merges have no sweep to grant them.
+      if (d.kind === 'merge_approval' && !archive) return;
+      try {
+        await autoApprove(t, d.id);
+      } catch (e) {
+        if (archive && e instanceof OcError && e.code === 'revision_pending') {
+          // An archive card has no sweep, so a head that moved between the mark and the grant must be
+          // surfaced here or it would sit silently held with no comment.
+          recordAutoMergeHold(t, 'auto-merge is waiting: the weaver has not reviewed the current head yet', await resolveApprovalHead(d.ticketId, d.target));
+          return;
+        }
+        log.warn({ err: String(e), decisionId }, 'granting a reviewed YOLO approval failed');
+      }
+    },
+
+    /**
+     * VS-365 / VS-474: a commit pushed to a merge card the weaver reviewed must wake it to re-review
+     * by itself — a comment was the only signal before this. When the ticket has an open
+     * `merge_approval` marked **looked at** (VS-474: a YOLO grant is now held on a head mismatch) or
+     * **looked at, with concerns**, and the head the card will land differs from the head recorded at
+     * review, wake the weaver once per new head, naming the pull request and the old and new heads.
+     * `head` defaults to the approval's own head (the archive pull request for an archive card). A
+     * concerns card with no recorded head is baselined without waking; a looked card with no recorded
+     * head is left alone, since overwriting its recorded head would authorise a head nobody reviewed.
+     * Notification only: no review state is touched, and the wake is idempotent under
+     * `held-review:<decisionId>:<sha>`.
      */
     async noteHeldReviewHead(actor, id, head) {
       const t = get(id);
       try {
-        const held = db.get<{ id: string; title: string; reviewedHead: string | null }>(
-          "SELECT id, title, weaver_reviewed_head_sha AS reviewedHead FROM decisions WHERE ticket_id = ? AND kind = 'merge_approval' AND status = 'open' AND weaver_review_status = 'concerns' ORDER BY created_at DESC LIMIT 1",
+        const held = db.get<{ id: string; title: string; reviewedHead: string | null; reviewStatus: string; target: Record<string, unknown> | null }>(
+          "SELECT id, title, weaver_reviewed_head_sha AS reviewedHead, weaver_review_status AS reviewStatus, target_json FROM decisions WHERE ticket_id = ? AND kind = 'merge_approval' AND status = 'open' AND weaver_review_status IN ('concerns','looked') ORDER BY created_at DESC LIMIT 1",
           [t.id],
         );
         if (!held) return { woken: false };
-        const current = head === undefined ? await resolveDeliveryHead(t) : head;
+        const current = head === undefined ? await resolveApprovalHead(t.id, held.target) : head;
         if (!current) return { woken: false, decisionId: held.id };
         if (held.reviewedHead === null) {
-          // The mark could not resolve a head: the first head seen afterwards is the baseline, so a
-          // card held at upgrade time does not wake on a head that has not moved.
-          db.update('decisions', held.id, { weaverReviewedHeadSha: current });
+          // A `concerns` card with no recorded head (marked before VS-365) is baselined, so it does not
+          // wake on a head that has not moved. A `looked` card is never baselined: overwriting its
+          // recorded head would make the head-match hold grant a head that was never reviewed.
+          if (held.reviewStatus === 'concerns') db.update('decisions', held.id, { weaverReviewedHeadSha: current });
           return { woken: false, decisionId: held.id };
         }
         if (sameGitSha(held.reviewedHead, current)) return { woken: false, decisionId: held.id };
@@ -1193,11 +1276,15 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         if (live && ['queued', 'claimed', 'coalesced', 'completed'].includes(live.status)) {
           return { woken: false, decisionId: held.id, headSha: current };
         }
+        const prUrl = approvalPrUrl(t.id, held.target);
+        const reason = held.reviewStatus === 'concerns'
+          ? `${t.identifier}: the merge review moved to ${current.slice(0, 12)} since your concerns on "${held.title}"`
+          : `${t.identifier}: reviewed head ${held.reviewedHead.slice(0, 12)}, now ${current.slice(0, 12)} — re-review${prUrl ? ` ${prUrl}` : ''}`;
         wake(
           cid,
           'system',
-          `${t.identifier}: the merge review moved to ${current.slice(0, 12)} since your concerns on "${held.title}"`,
-          { ticketId: t.id, decisionId: held.id, headSha: current },
+          reason,
+          { ticketId: t.id, decisionId: held.id, headSha: current, reviewedHeadSha: held.reviewedHead, reviewStatus: held.reviewStatus, ...(prUrl ? { prUrl } : {}) },
           actor,
           key,
         );
@@ -1601,7 +1688,18 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           // VS-266: a YOLO ticket's merge approval can be held by a weaver concern exactly like a
           // human-owned one — surfaced on the ticket the same way the CI-red wait is, rather than
           // only a log line, so the human sees why auto-merge stalled here.
-          if (e instanceof OcError && e.code === 'revision_pending') { recordAutoMergeHold(t, 'auto-merge is waiting: the weaver has concerns', prHead ?? await resolveDeliveryHead(t)); continue; }
+          if (e instanceof OcError && e.code === 'revision_pending') {
+            // VS-474: the daemon's own grant is now held in three cases — an unreviewed card, a card
+            // whose reviewed head has moved, and a weaver concern. Name the one that applies.
+            const details = (e.details ?? {}) as { weaverReviewStatus?: string; weaverReviewHeadMismatch?: boolean };
+            const reason = details.weaverReviewHeadMismatch
+              ? 'auto-merge is waiting: the weaver has not reviewed the current head yet'
+              : details.weaverReviewStatus === 'concerns'
+                ? 'auto-merge is waiting: the weaver has concerns'
+                : 'auto-merge is waiting: the weaver has not reviewed it yet';
+            recordAutoMergeHold(t, reason, prHead ?? await resolveDeliveryHead(t));
+            continue;
+          }
           log.warn({ ticket: t.identifier, err: String(e) }, 'auto-merge advance failed');
         }
       }
@@ -1684,7 +1782,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         target: { archive: { changeName: a.changeName, branch: a.branch, prUrl: a.prUrl, number: a.number ?? null } },
         attachToTerminal: true,
       });
-      if (yolo(t)) await autoApprove(t, d.id);
+      // VS-474: the archive card is left open and unseen; under YOLO it is granted only after the
+      // weaver marks it looked at, through `onReviewLooked`.
       return { raised: true, decisionId: d.id };
     },
 
@@ -1757,9 +1856,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           repaired.push({ id: t.id, identifier: t.identifier, kind: 'plan_approval' });
           continue;
         }
-        const planApproval = raisePlanApproval(SYSTEM, t, { context: `${planApprovalContext(t)} (Re-raised: the previous approval was lost.)` });
-        // Same as the original creation at the `proposed` transition: YOLO answers it immediately.
-        if (yolo(t)) await autoApprove(t, planApproval.id);
+        raisePlanApproval(SYSTEM, t, { context: `${planApprovalContext(t)} (Re-raised: the previous approval was lost.)` });
+        // VS-474: under YOLO the repaired card is left open and unseen; it is granted only once the
+        // weaver marks it looked at, never here at raise time.
         repaired.push({ id: t.id, identifier: t.identifier, kind: 'plan_approval' });
       }
 
@@ -1844,10 +1943,11 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           return w;
         });
         if (!written) return { republished: false, reason: 'no longer proposed' } as const;
-        const fresh = raisePlanApproval(actor, t, {
+        // VS-474: the fresh card is raised and left open and unseen; under YOLO it is granted only
+        // after the weaver marks it looked at, through `onReviewLooked`.
+        raisePlanApproval(actor, t, {
           context: `${planApprovalContext(t)} The worker revised the plan while the ticket was still proposed; this is revision ${written.revision}.`,
         });
-        if (yolo(t)) await autoApprove(t, fresh.id);
         systemComment(t.id, `a revised plan was published as revision ${written.revision}; the previous approval is superseded and a fresh one is open.`, actor);
         return { republished: true, reason: 'republished' } as const;
       } catch (e) {

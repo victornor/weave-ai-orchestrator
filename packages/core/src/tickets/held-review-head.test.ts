@@ -110,14 +110,51 @@ describe('held review head', () => {
     expect(heldKeys()).toHaveLength(0);
   });
 
-  it('does not wake for a looked mark or an unreviewed card', async () => {
-    const looked = makeTicket();
-    seedMerge(looked, { weaverReviewStatus: 'looked', weaverReviewNote: 'clean' });
-    expect((await tickets.noteHeldReviewHead(SYSTEM, looked, MOVED)).woken).toBe(false);
-
+  it('does not wake for an unreviewed card', async () => {
     const unseen = tickets.create({ kind: 'system', id: null }, { kind: 'change', title: 'Unreviewed', projectId: h.projectId });
     seedMerge(unseen.id, { weaverReviewStatus: 'unseen', weaverReviewedAt: null, weaverReviewNote: null, weaverReviewedHeadSha: null });
     expect((await tickets.noteHeldReviewHead(SYSTEM, unseen.id, MOVED)).woken).toBe(false);
+    expect(heldKeys()).toHaveLength(0);
+  });
+
+  it('wakes the weaver to re-review a looked card whose head moved (VS-474)', async () => {
+    const ticketId = makeTicket();
+    const decisionId = seedMerge(ticketId, { weaverReviewStatus: 'looked', weaverReviewNote: 'clean' });
+
+    const result = await tickets.noteHeldReviewHead(SYSTEM, ticketId, MOVED);
+
+    expect(result).toEqual({ woken: true, decisionId, headSha: MOVED });
+    expect(heldKeys()).toEqual([`held-review:${decisionId}:${MOVED}`]);
+    const wake = heldWakes()[0]!;
+    expect(wake.reason).toContain('TST-1');
+    expect(wake.reason).toContain(REVIEWED.slice(0, 12));
+    expect(wake.reason).toContain(MOVED.slice(0, 12));
+    expect(wake.reason).toContain('re-review');
+    expect(wake.payloadJson).toContain(decisionId);
+    // Notification only: the looked mark and its reviewed head are untouched, so the grant stays held.
+    expect(h.db.get('SELECT * FROM decisions WHERE id = ?', [decisionId])).toMatchObject({
+      status: 'open', weaverReviewStatus: 'looked', weaverReviewedHeadSha: REVIEWED,
+    });
+  });
+
+  it('does not wake for a looked card whose head is unchanged', async () => {
+    const ticketId = makeTicket();
+    seedMerge(ticketId, { weaverReviewStatus: 'looked', weaverReviewNote: 'clean' });
+
+    expect((await tickets.noteHeldReviewHead(SYSTEM, ticketId, REVIEWED)).woken).toBe(false);
+    expect(heldKeys()).toHaveLength(0);
+  });
+
+  it('never baselines a looked card with no recorded head (VS-474)', async () => {
+    const ticketId = makeTicket();
+    const decisionId = seedMerge(ticketId, { weaverReviewStatus: 'looked', weaverReviewNote: 'clean', weaverReviewedHeadSha: null });
+
+    const result = await tickets.noteHeldReviewHead(SYSTEM, ticketId, MOVED);
+
+    expect(result).toEqual({ woken: false, decisionId });
+    // Baselining would record a head that was never reviewed, defeating the head-match hold.
+    expect(h.db.get('SELECT weaver_reviewed_head_sha AS h FROM decisions WHERE id = ?', [decisionId])!.h).toBeNull();
+    expect(heldKeys()).toHaveLength(0);
   });
 
   it('does not wake for a plan approval marked concerns', async () => {

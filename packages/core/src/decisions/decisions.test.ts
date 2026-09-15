@@ -844,106 +844,86 @@ describe('decisions', () => {
     it('lets the conductor mark looked and concerns on plan, merge and action, open or answered', async () => {
       const t = ticket();
       const openPlan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
-      const looked = decisions.review(conductor(), openPlan.id, { status: 'looked', note: '  plan matches the ticket  ' });
+      const looked = await decisions.review(conductor(), openPlan.id, { status: 'looked', note: '  plan matches the ticket  ' });
       expect(looked.weaverReviewStatus).toBe('looked');
       expect(looked.weaverReviewedAt).toBeTruthy();
       expect(looked.weaverReviewNote).toBe('plan matches the ticket');
       expect(looked.weaverReviewedByAgentId).toBe(h.conductorId);
 
       const merge = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Merge', correlationKey: `merge:${t.id}` });
-      const concerns = decisions.review(conductor(), merge.id, { status: 'concerns', note: '  CI is red  ' });
+      const concerns = await decisions.review(conductor(), merge.id, { status: 'concerns', note: '  CI is red  ' });
       expect(concerns.weaverReviewStatus).toBe('concerns');
       expect(concerns.weaverReviewNote).toBe('CI is red');
 
       const action = decisions.create(AGENT, { ticketId: t.id, kind: 'action_approval', title: 'Action', correlationKey: `action:${t.id}` });
-      markLooked(action.id, 'ran the action steps');
+      await markLooked(action.id, 'ran the action steps');
       await decisions.answer(HUMAN, action.id, { key: 'approve' });
-      const after = decisions.review(conductor(), action.id, { status: 'looked', note: 'ran the action steps' });
+      const after = await decisions.review(conductor(), action.id, { status: 'looked', note: 'ran the action steps' });
       expect(after.weaverReviewStatus).toBe('looked');
       expect(after.status).toBe('answered');
     });
 
-    it('refuses a clean mark without a note, exactly as it refuses a noteless concern (VS-234)', () => {
+    it('refuses a clean mark without a note, exactly as it refuses a noteless concern (VS-234)', async () => {
       const t = ticket();
       const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
-      expect(() => decisions.review(conductor(), d.id, { status: 'looked' })).toThrow(/looked requires a note/);
-      expect(() => decisions.review(conductor(), d.id, { status: 'looked', note: '   ' })).toThrow(/looked requires a note/);
-      expect(() => decisions.review(conductor(), d.id, { status: 'looked', note: 'x'.repeat(501) })).toThrow(/500/);
+      await expect(decisions.review(conductor(), d.id, { status: 'looked' })).rejects.toThrow(/looked requires a note/);
+      await expect(decisions.review(conductor(), d.id, { status: 'looked', note: '   ' })).rejects.toThrow(/looked requires a note/);
+      await expect(decisions.review(conductor(), d.id, { status: 'looked', note: 'x'.repeat(501) })).rejects.toThrow(/500/);
       expect(decisions.get(d.id).weaverReviewStatus).toBe('unseen');
       expect(decisions.get(d.id).weaverReviewNote).toBeNull();
     });
 
-    it('refuses concerns without a note and a note over 500 characters', () => {
+    it('refuses concerns without a note and a note over 500 characters', async () => {
       const t = ticket();
       const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
-      expect(() => decisions.review(conductor(), d.id, { status: 'concerns' })).toThrow(/requires a note/);
-      expect(() => decisions.review(conductor(), d.id, { status: 'concerns', note: '   ' })).toThrow(/requires a note/);
-      expect(() => decisions.review(conductor(), d.id, { status: 'concerns', note: 'x'.repeat(501) })).toThrow(/500/);
+      await expect(decisions.review(conductor(), d.id, { status: 'concerns' })).rejects.toThrow(/requires a note/);
+      await expect(decisions.review(conductor(), d.id, { status: 'concerns', note: '   ' })).rejects.toThrow(/requires a note/);
+      await expect(decisions.review(conductor(), d.id, { status: 'concerns', note: 'x'.repeat(501) })).rejects.toThrow(/500/);
       expect(decisions.get(d.id).weaverReviewStatus).toBe('unseen');
     });
 
-    it('refuses a worker actor and leaves the row unchanged', () => {
+    it('refuses a worker actor and leaves the row unchanged', async () => {
       const t = ticket();
       const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
-      try {
-        decisions.review(AGENT, d.id, { status: 'looked' });
-        expect.unreachable('worker must be forbidden');
-      } catch (e) {
-        expect(e).toMatchObject({ code: 'forbidden' });
-      }
+      await expect(decisions.review(AGENT, d.id, { status: 'looked' })).rejects.toMatchObject({ code: 'forbidden' });
       expect(decisions.get(d.id).weaverReviewStatus).toBe('unseen');
-      try {
-        decisions.review(HUMAN, d.id, { status: 'looked' });
-        expect.unreachable('human must be forbidden');
-      } catch (e) {
-        expect(e).toMatchObject({ code: 'forbidden' });
-      }
+      await expect(decisions.review(HUMAN, d.id, { status: 'looked' })).rejects.toMatchObject({ code: 'forbidden' });
     });
 
     it('refuses excluded kinds and terminal statuses', async () => {
       const t = ticket();
       const q = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'Q?' });
-      try {
-        decisions.review(conductor(), q.id, { status: 'looked' });
-        expect.unreachable('question must be validation');
-      } catch (e) {
-        expect(e).toMatchObject({ code: 'validation' });
-      }
+      await expect(decisions.review(conductor(), q.id, { status: 'looked' })).rejects.toMatchObject({ code: 'validation' });
 
       const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan', correlationKey: `plan2:${t.id}` });
       decisions.withdraw(HUMAN, plan.id, 'never mind');
-      try {
-        decisions.review(conductor(), plan.id, { status: 'looked' });
-        expect.unreachable('withdrawn must be wrong_status');
-      } catch (e) {
-        expect(e).toMatchObject({ code: 'wrong_status', details: { status: 'withdrawn' } });
-      }
+      await expect(decisions.review(conductor(), plan.id, { status: 'looked' })).rejects.toMatchObject({ code: 'wrong_status', details: { status: 'withdrawn' } });
     });
 
-    it('a clean mark replaces a previous concern note and each mark sets a fresh reviewedAt (VS-234)', () => {
+    it('a clean mark replaces a previous concern note and each mark sets a fresh reviewedAt (VS-234)', async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date('2026-09-11T03:00:00.000Z'));
       const t = ticket();
       const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
-      const first = decisions.review(conductor(), d.id, { status: 'concerns', note: 'split the migration' });
+      const first = await decisions.review(conductor(), d.id, { status: 'concerns', note: 'split the migration' });
       expect(first.weaverReviewNote).toBe('split the migration');
       vi.setSystemTime(new Date('2026-09-11T03:00:01.000Z'));
-      const second = decisions.review(conductor(), d.id, { status: 'looked', note: 'migration was split, all clear now' });
+      const second = await decisions.review(conductor(), d.id, { status: 'looked', note: 'migration was split, all clear now' });
       expect(second.weaverReviewStatus).toBe('looked');
       expect(second.weaverReviewNote).toBe('migration was split, all clear now');
       expect(second.weaverReviewedAt! > first.weaverReviewedAt!).toBe(true);
       vi.useRealTimers();
     });
 
-    it('records the delivery head the review was made against, and null without one (VS-365)', () => {
+    it('records the delivery head the review was made against, and null without one (VS-365)', async () => {
       const t = ticket();
       const d = decisions.create(AGENT, { ticketId: t.id, kind: 'merge_approval', title: 'Merge?' });
       const head = 'deadbeef'.repeat(5);
-      const withHead = decisions.review(conductor(), d.id, { status: 'concerns', note: 'the retry loop can hang', reviewedHead: head });
+      const withHead = await decisions.review(conductor(), d.id, { status: 'concerns', note: 'the retry loop can hang', reviewedHead: head });
       expect(withHead.weaverReviewedHeadSha).toBe(head);
       expect(decisions.get(d.id).weaverReviewedHeadSha).toBe(head);
 
-      const noHead = decisions.review(conductor(), d.id, { status: 'looked', note: 'all clear now' });
+      const noHead = await decisions.review(conductor(), d.id, { status: 'looked', note: 'all clear now' });
       expect(noHead.weaverReviewedHeadSha).toBeNull();
     });
 
@@ -951,7 +931,7 @@ describe('decisions', () => {
       const t = ticket();
       const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
       const before = wake.calls.length;
-      const marked = decisions.review(conductor(), d.id, { status: 'looked', note: 'plan covers the scope' });
+      const marked = await decisions.review(conductor(), d.id, { status: 'looked', note: 'plan covers the scope' });
       await new Promise((r) => setImmediate(r));
       expect(h.events.some((e) => e.type === 'decision.updated' && (e.payload as { id: string }).id === marked.id)).toBe(true);
       const ev = h.events.find((e) => e.type === 'decision.updated')!;
@@ -990,7 +970,7 @@ describe('decisions', () => {
         ticketId: t2.id, kind: 'merge_approval', title: 'Merge?', askedByAgentId: worker2,
         options: [{ key: 'approve', label: 'Approve' }, { key: 'changes', label: 'Changes' }],
       });
-      const flagged = decisions.review(conductor(), merge.id, { status: 'concerns', note: 'screenshot is cropped' });
+      const flagged = await decisions.review(conductor(), merge.id, { status: 'concerns', note: 'screenshot is cropped' });
       expect(flagged.weaverReviewStatus).toBe('concerns');
       // VS-266: a concern holds the approving answer — overriding it is required to still take this path.
       await decisions.answer(HUMAN, merge.id, { key: 'approve', overrideHold: true, overrideReason: 'merging anyway, the screenshot is unrelated' });
@@ -1213,10 +1193,17 @@ describe('decisions', () => {
       expect(tickets.get(t2.id).status).toBe('approved');
     });
 
-    it('does not hold the system actor on an unseen card, so YOLO still grants', async () => {
+    it('holds the system actor on an unseen card too, so YOLO never skips the review (VS-474)', async () => {
       const t = ticket();
       h.db.update('tickets', t.id, { status: 'proposed' });
       const plan = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'Plan' });
+      // VS-474 replaced VS-281's system-actor exemption: the daemon's own grant is held while the card
+      // is unseen, exactly like a human's, so a YOLO approval cannot land before the weaver reviews it.
+      await expect(decisions.answer(SYSTEM, plan.id, { key: 'approve', text: 'Auto-approved by YOLO mode' }))
+        .rejects.toMatchObject({ code: 'revision_pending', details: { weaverReviewStatus: 'unseen' } });
+      expect(tickets.get(t.id).status).toBe('proposed');
+
+      await markLooked(plan.id, 'plan is sound');
       await decisions.answer(SYSTEM, plan.id, { key: 'approve', text: 'Auto-approved by YOLO mode' });
       expect(tickets.get(t.id).status).toBe('approved');
 
@@ -1226,8 +1213,9 @@ describe('decisions', () => {
         ticketId: t2.id, kind: 'merge_approval', title: 'Merge?',
         options: [{ key: 'approve', label: 'Approve merge' }, { key: 'changes', label: 'Request changes' }],
       });
-      await decisions.answer(SYSTEM, merge.id, { key: 'approve', text: 'Auto-approved by YOLO mode' });
-      expect(tickets.get(t2.id).status).toBe('merging');
+      await expect(decisions.answer(SYSTEM, merge.id, { key: 'approve', text: 'Auto-approved by YOLO mode' }))
+        .rejects.toMatchObject({ code: 'revision_pending' });
+      expect(tickets.get(t2.id).status).toBe('in_review');
     });
 
     it('never refuses a non-approving answer, for unseen, looked and concerns', async () => {

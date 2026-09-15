@@ -52,11 +52,27 @@ export interface TicketsService {
    */
   deliveryHead(ticketId: string): Promise<string | null>;
   /**
-   * VS-365: when the ticket has an open `merge_approval` the weaver marked **looked at, with
-   * concerns** and its delivery head differs from the head recorded at review, wake the weaver once
-   * per new head (idempotency key `held-review:<decisionId>:<sha>`). `head` defaults to
-   * `deliveryHead(ticketId)`. A decision with no recorded head is baselined without waking. Never
-   * throws; leaves every review state untouched.
+   * VS-474: the head the given approval is about to land — the archive pull request's own head for an
+   * archive-backfill merge card, otherwise the ticket's delivery head. The review mark records it and
+   * the daemon's grant hold compares against it, so a YOLO merge can never land a head the weaver did
+   * not review. Null when nothing resolves.
+   */
+  approvalDeliveryHead(decision: S.Decision): Promise<string | null>;
+  /**
+   * VS-474: under YOLO, grant a card the weaver has just marked **looked at** — called by
+   * `decisions.review()` on the mark, so the grant is prompt and the invariant lives at the single
+   * mark path. A plan approval and an archive-backfill merge are granted at once; an ordinary merge
+   * is left to `autoMergeSweep`, which owns the CI-readiness gate. Never throws.
+   */
+  onReviewLooked(decisionId: string): Promise<void>;
+  /**
+   * VS-365 / VS-474: when the ticket has an open `merge_approval` the weaver marked **looked at** (a
+   * YOLO grant is held on a head mismatch) or **looked at, with concerns**, and the head the card will
+   * land differs from the head recorded at review, wake the weaver once per new head (idempotency key
+   * `held-review:<decisionId>:<sha>`), naming the pull request and the old and new heads. `head`
+   * defaults to the approval's own head. A concerns card with no recorded head is baselined without
+   * waking; a looked card with no recorded head is left alone. Never throws; leaves every review state
+   * untouched.
    */
   noteHeldReviewHead(actor: Actor, ticketId: string, head?: string | null): Promise<{ woken: boolean; decisionId?: string; headSha?: string }>;
   /** The most recent worker to have held this ticket, even after it retired — `ticket.workerId` is
@@ -189,12 +205,13 @@ export interface DecisionsService {
    */
   answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean; inputs?: S.DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string; relayFromMessageId?: string }): Promise<S.Decision>;
   /**
-   * Asserted conductor review of a plan/merge/action card (VS-223). Does not wake anyone and does
-   * not affect `answer()`. Actor must be the workspace conductor. `reviewedHead` (VS-365) is the
-   * delivery head the mark was made against, recorded so a held `merge_approval` whose head later
-   * moves can wake the weaver once per new head; omitted or unresolvable stores null.
+   * Asserted conductor review of a plan/merge/action card (VS-223). Actor must be the workspace
+   * conductor. `reviewedHead` (VS-365) is the head the mark was made against, recorded so a held
+   * `merge_approval` whose head later moves can wake the weaver once per new head; omitted or
+   * unresolvable stores null. Async since VS-474: a `looked` mark releases the daemon's own YOLO
+   * grant through `tickets.onReviewLooked()`, so the grant can happen on the mark.
    */
-  review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null }): S.Decision;
+  review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null }): Promise<S.Decision>;
   withdraw(actor: Actor, id: string, reason: string): S.Decision;
   /** Withdraws every still-open decision scoped to this ticket (e.g. once it reaches a terminal status). Returns the count closed. */
   withdrawForTicket(actor: Actor, ticketId: string, reason: string): number;

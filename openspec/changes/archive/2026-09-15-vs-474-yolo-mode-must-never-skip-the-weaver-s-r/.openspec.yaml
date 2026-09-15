@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "YOLO mode must never skip the weaver's review: hold the daemon's
+  automatic plan and merge approval until the weaver has marked the card"

@@ -3,6 +3,7 @@
  * and real decisions, because the point of the mode is what ends up in the `decisions` table.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync } from 'node:fs';
 import { newId, nowIso } from '@weave-ai/db';
 import type { Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
@@ -19,11 +20,13 @@ describe('YOLO mode', () => {
   let decisions: DecisionsService;
   let wake: ReturnType<typeof fakeWake>;
   let ciState: 'pending' | 'success' | 'failure' | 'none';
+  let headSha: string;
 
   beforeEach(() => {
     h = makeHarness();
     wake = fakeWake();
     ciState = 'success';
+    headSha = 'a'.repeat(40);
     h.services.wake = wake as never;
     h.services.knowledge = { appendDecision: vi.fn() } as never;
     h.services.roles = { activate: vi.fn(async () => ({ id: 'role' })), get: vi.fn(() => ({ projectId: h.projectId, name: 'Backend' })) } as never;
@@ -34,11 +37,13 @@ describe('YOLO mode', () => {
       validateForProposed: vi.fn(async () => ({ ok: true as const, plan: '# Plan\n\n## Proposal\nbody' })),
       archiveAfterMerge: vi.fn(async () => ({ archivedAs: null, skipped: null })),
     } as never;
-    h.ctx.registries.forges.set('github', { prState: async () => ({ state: 'open' as const, ciState }) } as never);
+    h.ctx.registries.forges.set('github', { prState: async () => ({ state: 'open' as const, ciState, headSha }) } as never);
     tickets = createTicketsService(h.ctx, h.deps);
     decisions = createDecisionsService(h.ctx, h.deps);
     h.services.tickets = tickets;
     h.services.decisions = decisions;
+    // VS-474: the grant hold resolves the PR head through the project clone, so it must exist.
+    mkdirSync(h.db.get<{ clonePath: string }>('SELECT clone_path FROM projects WHERE id = ?', [h.projectId])!.clonePath, { recursive: true });
     // VS-382: the mode is a per-project setting with no workspace default, so the harness turns it on
     // for the ticket's own project rather than mutating config.
     setPolicies({ yolo: true });
@@ -83,19 +88,32 @@ describe('YOLO mode', () => {
   const only = (ticketId: string, kind: string) =>
     decisions.list({ ticketId }).filter((d) => d.kind === kind)[0];
 
+  const conductor = (): Actor => ({ kind: 'agent', id: h.conductorId, runId: 'run-conductor' });
+
+  /** VS-474: release the daemon's grant for a card by marking it looked at the current head. */
+  const markLooked = async (decisionId: string, note = 'the work is clean', head: string | null = headSha): Promise<void> => {
+    await decisions.review(conductor(), decisionId, { status: 'looked', note, reviewedHead: head });
+  };
+
   describe('plan approvals', () => {
-    it('answers the plan approval as the system and moves the ticket on', async () => {
+    it('leaves the plan approval open and unseen until the weaver looks, then grants it as the system', async () => {
       const t = change();
       const workerId = h.addWorker(t.id);
       const next = await propose(t);
 
-      expect(next.status).toBe('approved');
+      // VS-474: no grant at raise time — the card is the weaver's to review.
+      expect(next.status).toBe('proposed');
+      const open = only(t.id, 'plan_approval');
+      expect(open?.status).toBe('open');
+      expect(open?.weaverReviewStatus).toBe('unseen');
+
+      await markLooked(open!.id, 'the plan covers the ticket');
       const d = only(t.id, 'plan_approval');
+      expect(tickets.get(t.id).status).toBe('approved');
       expect(d?.status).toBe('answered');
       expect(d?.answerKey).toBe('approve');
       expect(d?.answeredByKind).toBe('system');
       expect(d?.answerText).toContain('YOLO mode');
-      expect(d?.weaverReviewStatus).toBe('unseen');
       expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'ticket_assigned')).toBe(true);
     });
 
@@ -130,12 +148,20 @@ describe('YOLO mode', () => {
   });
 
   describe('merge approvals', () => {
-    it('answers the merge approval as the system once the PR checks are green', async () => {
+    it('holds the merge approval while unseen, and grants it as the system once looked and green', async () => {
       const t = change();
       h.addWorker(t.id);
       await deliver(t);
-      expect(only(t.id, 'merge_approval')?.status).toBe('open');
+      const merge = only(t.id, 'merge_approval')!;
+      expect(merge.status).toBe('open');
+      expect(merge.weaverReviewStatus).toBe('unseen');
 
+      // VS-474: green checks are not enough while the card is unreviewed.
+      expect(await tickets.autoMergeSweep()).toBe(0);
+      expect(tickets.get(t.id).status).toBe('in_review');
+      expect(tickets.comments(t.id).some((c) => c.body === 'auto-merge is waiting: the weaver has not reviewed it yet')).toBe(true);
+
+      await markLooked(merge.id, 'the diff is clean');
       expect(await tickets.autoMergeSweep()).toBe(1);
 
       const d = only(t.id, 'merge_approval');
@@ -145,6 +171,50 @@ describe('YOLO mode', () => {
       const after = tickets.get(t.id);
       expect(after.status).toBe('merging');
       expect(after.mergeQueuedAt).not.toBeNull();
+    });
+
+    it('holds a looked merge whose head moved, and grants after a fresh look at the new head', async () => {
+      const t = change();
+      h.addWorker(t.id);
+      await deliver(t);
+      const merge = only(t.id, 'merge_approval')!;
+      await markLooked(merge.id, 'the diff is clean', headSha);
+
+      headSha = 'b'.repeat(40);
+      expect(await tickets.autoMergeSweep()).toBe(0);
+      expect(tickets.get(t.id).status).toBe('in_review');
+      expect(tickets.comments(t.id).some((c) => c.body === 'auto-merge is waiting: the weaver has not reviewed the current head yet')).toBe(true);
+
+      // VS-474: the pushed head wakes the weaver to re-review, not just a comment on the ticket.
+      const before = wake.calls.length;
+      expect((await tickets.noteHeldReviewHead(conductor(), t.id)).woken).toBe(true);
+      const reReview = wake.calls.slice(before).filter((c) => c.agentId === h.conductorId);
+      expect(reReview).toHaveLength(1);
+      expect(String(reReview[0]!.input.reason)).toContain(headSha.slice(0, 12));
+
+      await markLooked(merge.id, 're-read at the new head', headSha);
+      expect(await tickets.autoMergeSweep()).toBe(1);
+      expect(tickets.get(t.id).status).toBe('merging');
+    });
+
+    it('reproduces 2026-09-15: a never-reviewed merge card stays unlanded across five sweeps, then lands after the look', async () => {
+      const t = change();
+      h.addWorker(t.id);
+      await deliver(t);
+      const merge = only(t.id, 'merge_approval')!;
+
+      // Five sweeps (~15 s apart in the supervisor) must all hold: this is the ticket the four
+      // auto-granted landings of 2026-09-15 went through unreviewed.
+      for (let i = 0; i < 5; i++) expect(await tickets.autoMergeSweep()).toBe(0);
+      expect(tickets.get(t.id).status).toBe('in_review');
+      expect(only(t.id, 'merge_approval')?.status).toBe('open');
+      // The waiting comment is recorded once per reason, not once per sweep (VS-472).
+      expect(tickets.comments(t.id).filter((c) => c.body === 'auto-merge is waiting: the weaver has not reviewed it yet')).toHaveLength(1);
+
+      await markLooked(merge.id, 'read the diff, no concerns');
+      expect(await tickets.autoMergeSweep()).toBe(1);
+      expect(tickets.get(t.id).status).toBe('merging');
+      expect(only(t.id, 'merge_approval')).toMatchObject({ status: 'answered', answeredByKind: 'system' });
     });
 
     it('leaves the approval open while the checks are still running', async () => {
@@ -188,6 +258,8 @@ describe('YOLO mode', () => {
       const t = change();
       h.addWorker(t.id);
       await deliver(t);
+      // VS-474: the mode still waits for the review, even when checks are not required.
+      await markLooked(only(t.id, 'merge_approval')!.id, 'the diff is clean');
 
       expect(await tickets.autoMergeSweep()).toBe(1);
       expect(only(t.id, 'merge_approval')?.status).toBe('answered');
@@ -208,6 +280,8 @@ describe('YOLO mode', () => {
       const t = change();
       h.addWorker(t.id);
       await propose(t);
+      // VS-474: the plan is granted only after the review.
+      await markLooked(only(t.id, 'plan_approval')!.id, 'the plan is sound');
       expect(tickets.get(t.id).status).toBe('approved');
 
       setPolicies({ yolo: false });
@@ -271,7 +345,10 @@ describe('YOLO mode', () => {
       setPolicies({ yolo: true }, web);
 
       const mine = change({ projectId: web, assigneeRoleId: null });
-      expect((await propose(mine)).status).toBe('approved');
+      expect((await propose(mine)).status).toBe('proposed');
+      // VS-474: the review is what releases the daemon's grant.
+      await markLooked(only(mine.id, 'plan_approval')!.id, 'the plan is sound');
+      expect(tickets.get(mine.id).status).toBe('approved');
 
       const theirs = change({ title: 'Other work' });
       expect((await propose(theirs)).status).toBe('proposed');

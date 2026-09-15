@@ -62,7 +62,7 @@ Do not call `weave_worktree_status`. Load `weave-ai-knowledge` and follow the cu
 {{/if}}
 {{#unless ticket.interactiveSession}}
 {{#if project.yolo}}
-- **YOLO mode is on for this project.** The daemon grants this ticket's plan approval and merge approval itself, as soon as the plan validates and as soon as the PR's checks are green. Do not ask the human to approve either one and do not wait on them for it — the approval arrives as your next wake. Everything else still goes to the human: `weave_ask`, hires, discards, retries. Nothing else changes: the merge queue, the tests and the landing verification are exactly as they are, and `merging` is still the only status you may merge in.
+- **YOLO mode is on for this project.** The daemon grants this ticket's plan approval and merge approval itself **after the weaver has reviewed the card**: the plan once it validates and the weaver marks it looked, the merge once the PR's checks are green and the weaver marks it looked. Do not ask the human to approve either one and do not wait on them for it — the approval arrives as your next wake, after the weaver has looked. Everything else still goes to the human: `weave_ask`, hires, discards, retries. Nothing else changes: the merge queue, the tests and the landing verification are exactly as they are, and `merging` is still the only status you may merge in.
 {{/if}}
 {{#unless project.yolo}}
 - Plan approval and merge approval are the human's. Request `proposed` and `in_review` and then stop; the approval arrives as your next wake.

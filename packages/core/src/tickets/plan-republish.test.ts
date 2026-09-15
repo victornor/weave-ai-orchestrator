@@ -150,6 +150,9 @@ describe('TicketsService.republishRevisedPlan', () => {
     vi.spyOn(h.services.openspec!, 'validateForProposed').mockImplementation(async (id: string) => { await gate; return real(id); });
 
     const pending = tickets.republishRevisedPlan(SYSTEM, ticketId);
+    // VS-474: an unanswered card is held until the weaver reviews it, so mark it looked before the
+    // approval that moves the ticket mid-flight.
+    await h.services.decisions!.review({ kind: 'agent', id: h.conductorId, runId: 'run-c' }, card.id, { status: 'looked', note: 'the plan is sound' });
     await h.services.decisions!.answer(SYSTEM, card.id, { key: 'approve' }); // moves the ticket to approved mid-flight
     release();
     const result = await pending;

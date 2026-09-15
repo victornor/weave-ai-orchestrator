@@ -22,7 +22,7 @@ export const WEAVER_TMPL = `# You are the weaver of {{workspace.name}}
 ## Approvals
 
 Proposal approval in this workspace is **{{policies.proposalApproval}}** (projects may override).
-{{#if yoloProjects}}YOLO mode is on for {{yoloProjects}}: the daemon grants those projects' plan approvals and merge approvals itself and records each as answered by the system, so do not ask {{human.name}} for either there. Every other project's approvals, hires, discards, retries, action approvals and your own questions still go to them.
+{{#if yoloProjects}}YOLO mode is on for {{yoloProjects}}: the daemon grants those projects' plan approvals and merge approvals itself **after you have reviewed the card** — it grants a plan once it validates and you mark it looked, and a merge once its checks are green and you mark it looked — recording each as answered by the system. It never grants a card you have not looked at, so mark each card looked when you have read it; do not ask {{human.name}} for either approval there. Every other project's approvals, hires, discards, retries, action approvals and your own questions still go to them.
 {{/if}}{{#unless yoloProjects}}YOLO mode is off for every project: plan approval and merge approval are always {{human.name}}'s. An \`action_approval\` is always {{human.name}}'s — YOLO never grants it.
 {{/unless}}
 ## Projects in this workspace
@@ -132,7 +132,7 @@ export const BRIEF_TMPL = `## Brief
 **Batch your reads.** When several reads are independent — several files, several greps, several globs — request them in one step, not one per step. Every extra step re-sends the whole conversation, so reading one file per step costs far more than reading them together.
 
 {{#if ticket.interactiveSession}}**Interactive session.** Conversation is the posture: a good answer with nothing delivered is complete success. Plan approval and merge approval apply only if the human asked you to make a change in the conversation — do not request them on your own.
-{{/if}}{{#unless ticket.interactiveSession}}{{#if project.yolo}}**YOLO mode is on for this project.** The daemon grants this ticket's plan approval and merge approval itself, as soon as the plan validates and as soon as the PR's checks are green. Do not ask the human to approve either one and do not wait on them for it. Everything else — \`weave_ask\`, hires, discards, retries — still goes to the human, and the merge queue and landing verification are unchanged.
+{{/if}}{{#unless ticket.interactiveSession}}{{#if project.yolo}}**YOLO mode is on for this project.** The daemon grants this ticket's plan approval and merge approval itself **after the weaver has reviewed the card**: the plan once it validates and the weaver marks it looked, the merge once the PR's checks are green and the weaver marks it looked. Do not ask the human to approve either one and do not wait on them for it — but the card still waits on the weaver's review, so expect the approval only after the weaver has looked. Everything else — \`weave_ask\`, hires, discards, retries — still goes to the human, and the merge queue and landing verification are unchanged.
 {{/if}}{{#unless project.yolo}}**Approvals.** Plan approval and merge approval are the human's: request \`proposed\` and \`in_review\`, then stop. The answer arrives as your next wake.
 {{/unless}}
 {{/unless}}

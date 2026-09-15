@@ -377,6 +377,10 @@ describe('prompt rendering', () => {
     const first = await promptAt(0);
     expect(first).toContain('post exactly one `weave_ticket_comment`');
     expect(first).toContain("wait for the human's first message");
+    // VS-462: the opening turn's tool list is narrowed to the ticket read/comment tools, and the
+    // prompt must say so — no skill load, no repository read or search, no command.
+    expect(first).toContain('do not load a skill');
+    expect(first).toContain('do not read or search the repository');
     expect(first).not.toContain('do the phase your ticket status asks for');
 
     for (const n of [1, 2]) {

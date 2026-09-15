@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
 import {
   AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents, OcError, landingBranchOf,
-  isWorkerOptionConfigured, MCP_SERVER_NAME, PLANNER_TOOLS,
+  isWorkerOptionConfigured, MCP_SERVER_NAME, PLANNER_TOOLS, FIRST_TURN_TOOLS,
   type Agent, type AgentKind, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
   type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
 } from '@weave-ai/shared';
@@ -23,12 +23,13 @@ import { effectiveModels, modelSettingFor, modelsFor } from '../models/resolve.j
 import { runTokenSecret, signRunToken } from './runtoken.js';
 
 /**
- * An interactive session's agent's first turn (VS-101): read the ticket and its context, post one
- * comment, nothing else. Enforced by the runtime's own `--allowedTools`, not by prompt wording —
- * `weave_ticket_comment` is included because the requirement is not silence, it is stating what the
- * agent understands and is ready to do.
+ * An interactive session's agent's first turn (VS-101, VS-462): read the ticket and its comments,
+ * post one comment, nothing else. These are the MCP tool names; `weave_ticket_comment` is included
+ * because the requirement is not silence, it is stating what the agent understands and is ready to
+ * do. Passed to the runtime's own allowlist where it has one, and enforced at the MCP boundary from
+ * the run token's `firstTurn` claim where it does not.
  */
-export const FIRST_TURN_ALLOWLIST = ['weave_inbox', 'weave_ticket_get', 'weave_ticket_comments', 'weave_ticket_comment', 'weave_ticket_document_get', 'weave_worktree_status', 'Read', 'Grep', 'Glob'];
+export const FIRST_TURN_ALLOWLIST: string[] = [...FIRST_TURN_TOOLS];
 
 /**
  * A planning agent's entire turn (VS-398): read-only, enforced by the runtime's own `--allowedTools`
@@ -81,11 +82,12 @@ function boundPayload(payload: unknown): Record<string, unknown> {
 // ---------- run token ----------
 
 /** Mint the run's MCP bearer token (PLAN §9.1); the claim shape lives in runtoken.ts. */
-export async function mintRunToken(ctx: WorkspaceContext, claims: { agentId: string; runId: string; ticketId: string | null; planId: string | null; kind: AgentKind; projectId: string | null; roleId: string | null }): Promise<string> {
+export async function mintRunToken(ctx: WorkspaceContext, claims: { agentId: string; runId: string; ticketId: string | null; planId: string | null; kind: AgentKind; projectId: string | null; roleId: string | null; firstTurn?: boolean }): Promise<string> {
   return signRunToken(runTokenSecret(ctx.db), {
     workspaceId: ctx.workspaceId, runId: claims.runId, agentId: claims.agentId,
     agentKind: claims.kind,
     projectId: claims.projectId, ticketId: claims.ticketId, planId: claims.planId, roleId: claims.roleId,
+    firstTurn: claims.firstTurn ?? false,
   });
 }
 
@@ -386,8 +388,15 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       return text;
     });
 
+    // An interactive session's very first turn (VS-101, VS-462) is held to reading its ticket and
+    // posting one comment — a ceiling under the role's own permission, never a widening of it: a
+    // role that already denies one of these tools still denies it. Computed here because the run
+    // token carries it (the MCP server scopes the run's `weave_*` tools off it) and the turn's
+    // permission below uses it.
+    const isFirstInteractiveTurn = Boolean(ticket?.interactiveSession) && agent.turnCount === 0;
+
     // 4. run token + MCP config + env
-    const token = await mintRunToken(ctx, { agentId: agent.id, runId, ticketId: agent.ticketId, planId: agent.planId, kind: agent.kind, projectId: agent.projectId, roleId: agent.roleId });
+    const token = await mintRunToken(ctx, { agentId: agent.id, runId, ticketId: agent.ticketId, planId: agent.planId, kind: agent.kind, projectId: agent.projectId, roleId: agent.roleId, firstTurn: isFirstInteractiveTurn });
     const mcpServers: Record<string, McpServerConfig> = {
       [MCP_SERVER_NAME]: { type: 'http', url: `${ctx.loopbackUrl.replace(/\/$/, '')}/mcp/runs/${runId}`, headers: { Authorization: `Bearer ${token}` } },
     };
@@ -423,10 +432,6 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     }
 
     const permission = (role?.permission ?? {}) as { mode?: PermissionMode; allowed?: string[]; denied?: string[] };
-    // An interactive session's very first turn (VS-101) is held to reading its ticket and posting
-    // one comment — a ceiling under the role's own permission, never a widening of it: a role that
-    // already denies one of these tools still denies it.
-    const isFirstInteractiveTurn = Boolean(ticket?.interactiveSession) && agent.turnCount === 0;
     // VS-317: a worker's turn denies the runtime's own scheduling tools, whose timer dies with the
     // turn, so it must use `weave_schedule_wakeup` instead. Declared by the adapter; the role's own
     // denials and the weaver's turn are untouched.
@@ -476,6 +481,9 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
         mode: agent.kind === 'weaver' ? 'bypass' : agent.kind === 'planner' ? 'restricted' : (permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto'),
         allowedTools,
         deniedTools,
+        // VS-462: a runtime with its own tool switch (opencode) disables everything outside this
+        // list on the opening turn; a runtime with none still cannot reach past it via MCP.
+        ...(isFirstInteractiveTurn ? { firstTurn: true } : {}),
       },
       model: setting.model ?? null,
       effort: setting.effort ?? null,

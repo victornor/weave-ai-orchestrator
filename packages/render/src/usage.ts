@@ -241,6 +241,38 @@ export function contextTokens(usage: { contextTokens?: number | null } | null | 
 }
 
 /**
+ * VS-462: a turn whose **first** API request re-sends this many tokens uncached or more is flagged —
+ * the provider cache was missed and the whole conversation went over the wire fresh, which is the
+ * dominant cost of a long turn and, in an interactive session, of the turn that resumes one.
+ */
+export const FIRST_REQUEST_MISS_THRESHOLD = 50_000;
+
+/**
+ * The first request of a turn, split into what the provider read fresh and what it read from its
+ * prompt cache. `missed` is true past `FIRST_REQUEST_MISS_THRESHOLD` fresh tokens. Null when the
+ * runtime reported no per-request figure — nothing to show, never a zeroed bar.
+ */
+export interface FirstRequestView {
+  freshTokens: number;
+  cachedTokens: number;
+  /** `74k fresh · 2k cached` — the line a run page or inspect shows. */
+  label: string;
+  missed: boolean;
+}
+
+export function firstRequest(input: { firstRequest?: { freshTokens: number; cachedTokens: number } | null } | null | undefined): FirstRequestView | null {
+  const fr = input?.firstRequest;
+  if (!fr || typeof fr.freshTokens !== 'number' || !Number.isFinite(fr.freshTokens)) return null;
+  const cachedTokens = n(fr.cachedTokens);
+  return {
+    freshTokens: fr.freshTokens,
+    cachedTokens,
+    label: `${formatTokens(fr.freshTokens)} fresh · ${formatTokens(cachedTokens)} cached`,
+    missed: fr.freshTokens >= FIRST_REQUEST_MISS_THRESHOLD,
+  };
+}
+
+/**
  * How full the conductor's context is: the last turn's context size as a fraction of the model's
  * window, and how far that is towards the point the runtime compacts at.
  *

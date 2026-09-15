@@ -68,6 +68,7 @@ Do not call `weave_worktree_status`. Load `weave-ai-knowledge` and follow the cu
 - Plan approval and merge approval are the human's. Request `proposed` and `in_review` and then stop; the approval arrives as your next wake.
 {{/unless}}
 {{/unless}}
+- **Batch your reads.** When several reads are independent — several files, several greps, several globs — request them in one step, not one per step. Every extra step re-sends the whole conversation, so reading one file per step costs far more than reading them together.
 - Report phase changes only, with `weave_report`. `paused` = a known external wait that clears itself. `blocked` = you need help.
 - Hit the same obstacle twice → `blocked` with a routable path, then end the turn.
 - A product choice, a destructive action, or scope beyond the agreed contract → `weave_ask` with options and a recommendation, then end the turn.

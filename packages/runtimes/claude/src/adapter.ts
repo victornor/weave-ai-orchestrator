@@ -202,7 +202,7 @@ export const adapter: RuntimeAdapter = {
       finalText: st.finalText,
       ...(structured !== undefined ? { structured } : {}),
       ...(st.usage
-        ? { usage: { ...st.usage, ...(st.contextTokens != null ? { contextTokens: st.contextTokens } : {}), basis: 'per_turn' as const } }
+        ? { usage: { ...st.usage, ...(st.contextTokens != null ? { contextTokens: st.contextTokens } : {}), ...(st.firstRequest ? { firstRequest: st.firstRequest } : {}), basis: 'per_turn' as const } }
         : {}),
       ...(st.costUsd != null ? { cost: { usd: st.costUsd, status: 'reported' as const } } : {}),
       ...(st.model ? { model: st.model } : {}),

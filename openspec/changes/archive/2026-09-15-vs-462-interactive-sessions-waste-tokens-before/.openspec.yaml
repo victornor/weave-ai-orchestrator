@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-09-15
+goal: Cut the tokens an interactive session wastes before and between the human's
+  messages — a cheap opening turn, batched tool calls, and a visible first-request
+  cache split
+skip_specs: true

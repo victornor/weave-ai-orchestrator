@@ -425,9 +425,12 @@ describe('run engine', () => {
       runtime.queue.push({ structured: { state: 'working', summary: 'stated understanding', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
       await runOnce();
 
+      // VS-462: the ticket's read tools and the one comment tool, and nothing that could read the
+      // repository, run a command, or move the ticket.
       expect(runtime.inputs[0]!.permission.allowedTools).toEqual([
-        'weave_inbox', 'weave_ticket_get', 'weave_ticket_comments', 'weave_ticket_comment', 'weave_ticket_document_get', 'weave_worktree_status', 'Read', 'Grep', 'Glob',
+        'weave_inbox', 'weave_ticket_get', 'weave_ticket_comments', 'weave_ticket_comment', 'weave_ticket_document_get',
       ]);
+      expect(runtime.inputs[0]!.permission.firstTurn).toBe(true);
     });
 
     it('lifts the restriction from the second turn on', async () => {
@@ -443,6 +446,7 @@ describe('run engine', () => {
 
       expect(runtime.inputs).toHaveLength(2);
       expect(runtime.inputs[1]!.permission.allowedTools).toBeUndefined();
+      expect(runtime.inputs[1]!.permission.firstTurn).toBeUndefined();
     });
 
     it('does not restrict an ordinary (non-session) ticket\'s first turn', async () => {

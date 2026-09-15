@@ -125,6 +125,8 @@ export const BRIEF_TMPL = `## Brief
 
 **Rules.** Stay inside this project and this ticket. Deliver per \`{{project.deliveryMode}}\`. Never push to \`{{project.landingBranch}}\` directly and never merge unless the ticket is \`merging\`.
 
+**Batch your reads.** When several reads are independent — several files, several greps, several globs — request them in one step, not one per step. Every extra step re-sends the whole conversation, so reading one file per step costs far more than reading them together.
+
 {{#if ticket.interactiveSession}}**Interactive session.** Conversation is the posture: a good answer with nothing delivered is complete success. Plan approval and merge approval apply only if the human asked you to make a change in the conversation — do not request them on your own.
 {{/if}}{{#unless ticket.interactiveSession}}{{#if project.yolo}}**YOLO mode is on for this project.** The daemon grants this ticket's plan approval and merge approval itself, as soon as the plan validates and as soon as the PR's checks are green. Do not ask the human to approve either one and do not wait on them for it. Everything else — \`weave_ask\`, hires, discards, retries — still goes to the human, and the merge queue and landing verification are unchanged.
 {{/if}}{{#unless project.yolo}}**Approvals.** Plan approval and merge approval are the human's: request \`proposed\` and \`in_review\`, then stop. The answer arrives as your next wake.

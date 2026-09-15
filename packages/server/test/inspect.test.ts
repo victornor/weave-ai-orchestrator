@@ -230,6 +230,22 @@ describe('weave_run_inspect — the worker and the transcript', () => {
     expect(body).not.toContain('ghp_abcdefghijklmnopqrstuvwxyz0123');
     expect(body).toContain('[redacted]');
   });
+
+  it('surfaces the first request fresh/cached split and flags a cache miss (VS-462)', async () => {
+    harness = makeHarness();
+    seed(harness, [], run({
+      usage: {
+        inputTokens: 166_415, outputTokens: 9_500, cachedInputTokens: 2_127_744, contextTokens: 145_000, basis: 'per_turn',
+        firstRequest: { freshTokens: 74_076, cachedTokens: 1_664 },
+      },
+    }));
+
+    const d = (await call(harness, 'weave_run_inspect', { ref: 'run_1' })).data as Record<string, unknown>;
+    const runView = d['run'] as Record<string, unknown>;
+
+    expect(runView['firstRequest']).toEqual({ freshTokens: 74_076, cachedTokens: 1_664, label: '74.1k fresh · 1.7k cached', missed: true });
+    expect((runView['usage'] as Record<string, unknown>)['firstRequest']).toEqual({ freshTokens: 74_076, cachedTokens: 1_664 });
+  });
 });
 
 describe('weave_run_inspect — the cursor', () => {

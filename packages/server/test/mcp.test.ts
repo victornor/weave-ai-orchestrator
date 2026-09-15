@@ -47,6 +47,25 @@ describe('MCP endpoint', () => {
     await client.close();
   });
 
+  it('scopes an interactive opening turn to the first-turn tools (VS-462)', async () => {
+    const { client } = await connect({ ...WORKER, firstTurn: true });
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    expect([...names].sort()).toEqual(['weave_inbox', 'weave_ticket_comment', 'weave_ticket_comments', 'weave_ticket_document_get', 'weave_ticket_get']);
+    expect(names).not.toContain('weave_worktree_status');
+    expect(names).not.toContain('weave_ticket_transition');
+
+    // The hold is a fact of the token, not prompt wording: a direct call is refused.
+    const refused = await client.callTool({ name: 'weave_worktree_status', arguments: {} });
+    const refusedPayload = JSON.parse((refused.content as Array<{ text: string }>)[0]!.text);
+    expect(refusedPayload.ok).toBe(false);
+    expect(refusedPayload.error.code).toBe('forbidden');
+
+    // Reading the ticket and commenting still work.
+    const got = await client.callTool({ name: 'weave_ticket_get', arguments: { id: 'ACME-42' } });
+    expect(JSON.parse((got.content as Array<{ text: string }>)[0]!.text).ok).toBe(true);
+    await client.close();
+  });
+
   it('exposes the conductor toolset for a conductor run token', async () => {
     const { client } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null });
     const names = (await client.listTools()).tools.map((t) => t.name);

@@ -11,6 +11,13 @@ export interface OpenCodeBuiltCommand extends BuiltCommand {
 
 function str(v: unknown): string | null { return typeof v === 'string' && v.length > 0 ? v : null; }
 
+/**
+ * VS-462: OpenCode's own built-in tools (docs: Tools). OpenCode ignores an `allowedTools` list, so
+ * an interactive session's opening turn disables all of them through the config's `tools` switch
+ * and leaves only the MCP control-plane tools — read the ticket and post one comment, nothing else.
+ */
+export const OPENCODE_NATIVE_TOOLS = ['bash', 'edit', 'write', 'read', 'grep', 'glob', 'lsp', 'apply_patch', 'skill', 'todowrite', 'webfetch', 'websearch', 'question', 'task'] as const;
+
 /** `.opencode/opencode.json` — the only place OpenCode reads MCP servers from (no CLI flag). */
 export function opencodeConfig(mcpServers: Record<string, McpServerConfig>, base: Record<string, unknown> = {}): string {
   const mcp: Record<string, unknown> = {};
@@ -46,8 +53,14 @@ export function buildArgs(input: TurnInput): OpenCodeBuiltCommand {
   if (Array.isArray(extra)) for (const a of extra) if (typeof a === 'string') args.push(a);
 
   const files: Array<{ path: string; content: string }> = [];
-  if (Object.keys(input.mcpServers ?? {}).length > 0) {
-    files.push({ path: join(input.cwd, CONFIG_RELATIVE_PATH), content: opencodeConfig(input.mcpServers) });
+  const base: Record<string, unknown> = {};
+  if (input.permission.firstTurn) {
+    const tools: Record<string, boolean> = {};
+    for (const name of OPENCODE_NATIVE_TOOLS) tools[name] = false;
+    base['tools'] = tools;
+  }
+  if (Object.keys(input.mcpServers ?? {}).length > 0 || Object.keys(base).length > 0) {
+    files.push({ path: join(input.cwd, CONFIG_RELATIVE_PATH), content: opencodeConfig(input.mcpServers, base) });
   }
 
   const env: Record<string, string> = { ...input.env };

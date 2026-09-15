@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: V2 chat always lands at the bottom on send, and only a real upward scroll
+  pauses following
+skip_specs: true

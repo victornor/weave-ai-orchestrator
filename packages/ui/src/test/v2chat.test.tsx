@@ -557,6 +557,43 @@ describe('the V2 Chat screen', () => {
     await waitFor(() => expect(document.querySelectorAll('[data-v2-dispatch-chip]')[0]!.textContent).toContain('idle'));
   });
 
+  it('returns to the bottom and follows the reply when a message is sent from a scrolled-up view (VS-451)', async () => {
+    state.messages = [message({ id: 'm1', body: 'History line' })];
+    const { container, rerender } = render(<V2ChatPage />);
+    await screen.findByText('History line');
+
+    // jsdom has no layout: stage the scroller's geometry so a scroll-up can be observed at all.
+    const el = container.querySelector('[data-v2-chat-scroll]') as HTMLElement;
+    let top = 0;
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => 1000 });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => 300 });
+    Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = Math.max(0, Math.min(v, 700)); } });
+
+    // At the bottom first, so an upward move is recognisable (jsdom fires no scroll event for the
+    // follow's own programmatic `scrollTop`), then a wheel scroll up: the follow pauses.
+    top = 700;
+    fireEvent.scroll(el);
+    fireEvent.wheel(el, { deltaY: -120 });
+    top = 100;
+    fireEvent.scroll(el);
+    expect(screen.getByRole('button', { name: /Scroll to bottom/ })).toBeInTheDocument();
+
+    // Sending returns to the bottom and resumes following...
+    fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'hello there' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(state.post).toHaveBeenCalled());
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Scroll to bottom/ })).toBeNull());
+
+    // ...so the weaver's reply is followed rather than landing behind a paused follow.
+    state.messages = [
+      state.messages[0]!,
+      message({ id: 'm2', body: 'A reply after the send', createdAt: '2026-09-13T09:00:05.000Z' }),
+    ];
+    rerender(<V2ChatPage />);
+    await screen.findByText('A reply after the send');
+    expect(screen.queryByRole('button', { name: /Scroll to bottom/ })).toBeNull();
+  });
+
   it('streams a new weaver reply in, but never re-animates what was already on screen (VS-425)', async () => {
     state.messages = [message({ id: 'm1', body: 'History line', createdAt: '2026-09-13T09:00:00.000Z' })];
     const { rerender } = render(<V2ChatPage />);

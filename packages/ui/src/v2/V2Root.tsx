@@ -9,6 +9,7 @@ import { WorkspaceProvider } from '../api/context';
 import { HostRoutesProvider, V2_HOST_ROUTES } from '../app/host';
 import { useV2Theme, type V2ThemeState } from './theme';
 import { V2Shell } from './V2Shell';
+import { DictationSessionProvider } from './DictationSession';
 import './v2.css';
 
 const V2ThemeContext = createContext<V2ThemeState | null>(null);
@@ -36,7 +37,12 @@ export function V2Root(): React.ReactElement {
 /** The chrome for every signed-in V2 page. `/login` is a sibling, so it renders without it. */
 export function V2ShellLayout(): React.ReactElement {
   const { theme, setTheme } = useV2ThemeState();
-  return <V2Shell theme={theme} onTheme={setTheme} />;
+  // The dictation session sits above the shell so it survives navigating between pages (VS-450).
+  return (
+    <DictationSessionProvider>
+      <V2Shell theme={theme} onTheme={setTheme} />
+    </DictationSessionProvider>
+  );
 }
 
 export function V2Workspace(): React.ReactElement {

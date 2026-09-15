@@ -256,6 +256,7 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
                 placeholder="Talk through the plan…"
                 ariaLabel="Message the planner"
                 disabled={!plan.data}
+                sharedDictation={false}
                 queuedReason={
                   conn.state === 'offline' || conn.state === 'unreachable'
                     ? 'Offline — your message is queued'

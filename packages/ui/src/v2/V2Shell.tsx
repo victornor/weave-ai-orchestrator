@@ -28,6 +28,7 @@ import {
   type V2Scope,
 } from './nav';
 import { useV2Counts, useV2WorkspaceName, type V2Counts } from './V2Page';
+import { useDictationSession } from './DictationSession';
 import { readRailCollapsed, writeRailCollapsed } from './prefs';
 import { updateEntry, updateEntryLabel, type UpdateEntry } from '../lib/upgrade';
 import type { V2Theme } from './theme';
@@ -460,6 +461,9 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
   const username = me.data?.operator.username ? `${me.data.operator.username} · weave` : 'weave';
   const [collapsed, setCollapsed] = useState(readRailCollapsed);
   const [moreOpen, setMoreOpen] = useState(false);
+  // The floating dictation bar is fixed, so the routed page reserves room for it (VS-450): content
+  // scrolls clear of the bar instead of under it, on top of the phone tab bar's own clearance.
+  const barVisible = useDictationSession()?.barVisible ?? false;
 
   const toggleCollapse = (): void => {
     setCollapsed((cur) => {
@@ -564,7 +568,13 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
       )}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div key={routeSection(path)} className="v2-anim-route flex min-h-0 flex-1 flex-col pb-14 md:pb-0">
+        <div
+          key={routeSection(path)}
+          className={cx(
+            'v2-anim-route flex min-h-0 flex-1 flex-col',
+            barVisible ? 'pb-[8.5rem] md:pb-20' : 'pb-14 md:pb-0',
+          )}
+        >
           <Outlet />
         </div>
       </div>

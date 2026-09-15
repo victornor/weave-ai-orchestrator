@@ -2,23 +2,28 @@
  * The V2 chat composer (web-v2/chat-composer).
  *
  * Three identical controls — attach, dictate, send — on the raised surface with 6px corners, a
- * project scope selector above them, and the kept V1 behaviours: dictation (through the shared
- * `useDictation` hook, metered by `VoiceMeter` in V2's accent), attachments through picker/paste/drag,
- * and a search affordance. The draft itself is owned by the screen (`lib/drafts`), so this component
- * is controlled.
+ * project scope selector above them, and the kept V1 behaviours: dictation through the shared
+ * `useDictationController`, metered by `VoiceMeter` in V2's accent, attachments through
+ * picker/paste/drag, and a search affordance. The draft itself is owned by the screen
+ * (`lib/drafts`), so this component is controlled.
+ *
+ * VS-450: when a `DictationSessionProvider` is above it and this composer is the chat the session
+ * belongs to, the dictation state comes from that shared session, so a dictation survives navigating
+ * away and back. A composer that opts out (the Plan modal) or has no provider (V1, tests) keeps its
+ * own local session exactly as before.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Project } from '@weave-ai/shared';
 import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYPES } from '@weave-ai/shared';
 import { projectLabel } from '@weave-ai/shared';
-import { useDictation, isDictationTooShort } from '../lib/dictation';
+import { useDictationController, type DictationController } from '../lib/dictationController';
 import { useDictationHotkey } from '../lib/dictationHotkey';
-import { useDictationAutoSend } from '../lib/dictationAutoSend';
 import { dictationHint } from '../lib/dictationHint';
 import { projectColorVar } from '../lib/projectColor';
-import { REVEAL_MS, REVEAL_STEP_MS, revealedCount, usePrefersReducedMotion } from '../lib/streamReveal';
+import { usePrefersReducedMotion } from '../lib/streamReveal';
 import { VoiceMeter } from '../components/VoiceMeter';
 import { TranscribingIndicator } from '../components/TranscribingIndicator';
+import { useDictationSession, type ComposerRegistration, type DictationSessionValue, type DictationTarget } from './DictationSession';
 import { cx } from '../lib/cx';
 
 const ACCEPTED = [...ATTACHMENT_IMAGE_TYPES, ...ATTACHMENT_TEXT_TYPES] as readonly string[];
@@ -88,31 +93,46 @@ export interface ChatComposerProps {
   disabled?: boolean;
   queuedReason?: string | null;
   queuedCount?: number;
+  /** The workspace and thread this composer belongs to; required to join the shared dictation session (VS-450). */
+  dictationTarget?: DictationTarget | null;
+  /** False to keep a local dictation session — the Plan modal does this (VS-450). */
+  sharedDictation?: boolean;
 }
 
-export function ChatComposer({
-  projects,
-  projectId,
-  onChangeProject,
-  value,
-  onChange,
-  replyToExcerpt,
-  replyToMessageId = null,
-  onDismissReply,
-  onSubmit,
-  onOpenSearch,
-  onOpenPlan,
-  showScope = true,
-  placeholder = 'Message the weaver…',
-  ariaLabel = 'Message the weaver',
-  hotkey = true,
-  disabled,
-  queuedReason,
-  queuedCount = 0,
-}: ChatComposerProps): React.ReactElement {
+export function ChatComposer(props: ChatComposerProps): React.ReactElement {
+  const session = useDictationSession();
+  const shared = session && props.sharedDictation !== false ? session : null;
+  return <ChatComposerBody {...props} shared={shared} />;
+}
+
+function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: DictationSessionValue | null }): React.ReactElement {
+  const {
+    projects,
+    projectId,
+    onChangeProject,
+    value,
+    onChange,
+    replyToExcerpt,
+    replyToMessageId = null,
+    onDismissReply,
+    onSubmit,
+    onOpenSearch,
+    onOpenPlan,
+    showScope = true,
+    placeholder = 'Message the weaver…',
+    ariaLabel = 'Message the weaver',
+    hotkey = true,
+    disabled,
+    queuedReason,
+    queuedCount = 0,
+    dictationTarget = null,
+  } = props;
+
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<File[]>([]);
+  const filesRef = useRef<File[]>([]);
+  filesRef.current = files;
   const [attachError, setAttachError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
@@ -120,151 +140,59 @@ export function ChatComposer({
   const [dragActive, setDragActive] = useState(false);
   const dragDepth = useRef(0);
   const [freeText, setFreeText] = useState(false);
-  const [pendingNotice, setPendingNotice] = useState<string | null>(null);
-  const [pendingSend, setPendingSend] = useState(false);
-  const pendingSendRef = useRef(false);
-  const base = useRef('');
-  /** Set by the dictation callback; consumed by the layout effect so an insert scrolls to its end. */
-  const dictated = useRef(false);
-  /**
-   * VS-439: a session whose transcript is five words or fewer is discarded instead of inserted.
-   * `discarded` is the shared decision (also read by the queued send so a short result never
-   * submits), `sessionTranscript` is the whole transcript the hook last handed over, and
-   * `sessionRan` marks a session in flight so the settle effect only acts on a real attempt.
-   */
-  const discarded = useRef(false);
-  const sessionTranscript = useRef('');
-  const sessionRan = useRef(false);
-  const listeningRef = useRef(false);
+  const [unavailableNotice, setUnavailableNotice] = useState<string | null>(null);
   const reducedMotion = usePrefersReducedMotion();
-  /**
-   * A dictated insert reveals over a few frames (VS-425): the draft is committed in full at once, so
-   * a queued send still gets the last words, while the textarea shows a growing prefix of it. `null`
-   * when nothing is revealing.
-   */
-  const [reveal, setReveal] = useState<{ prefix: string; piece: string; shown: number } | null>(null);
-  const revealTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches;
 
-  const stopReveal = useCallback((): void => {
-    if (revealTimer.current !== null) clearInterval(revealTimer.current);
-    revealTimer.current = null;
-    setReveal(null);
-  }, []);
-  useEffect(() => stopReveal, [stopReveal]);
+  const doSubmitRef = useRef<(text: string) => void>(() => undefined);
+  const local = useDictationController({
+    value,
+    writeValue: onChange,
+    submit: (text) => doSubmitRef.current(text),
+    canSubmit: () => !disabled && !submittingRef.current,
+    hasFiles: () => filesRef.current.length > 0,
+  });
+  const ctl: DictationController = shared ?? local;
+
+  // Whether the shared session is live in *this* composer. A local session always is; a shared one
+  // only when it targets this thread, so a session running in another thread cannot paint its
+  // transcript here.
+  const isSessionTarget =
+    shared !== null &&
+    shared.target !== null &&
+    dictationTarget !== null &&
+    shared.target.ws === dictationTarget.ws &&
+    shared.target.threadId === dictationTarget.threadId;
+  const sessionHere = shared ? isSessionTarget : true;
+  const reveal = sessionHere ? ctl.reveal : null;
+  const dictation = ctl.dictation;
+
+  // The shared chord (VS-432): only a local composer binds it here — the provider owns it when the
+  // session is shared.
+  useDictationHotkey({
+    enabled: !isTouch && hotkey && !disabled && shared === null,
+    listening: dictation.listening,
+    start: ctl.start,
+    stop: ctl.stop,
+  });
+
+  // Register as the place a shared hotkey-started session belongs, and as the submit path that can
+  // carry attachments. The getter reads `regRef` so the registration object stays current without
+  // re-subscribing on every render.
+  const regRef = useRef<ComposerRegistration | null>(null);
+  const registerComposer = shared?.registerComposer;
+  useEffect(() => {
+    if (!registerComposer) return;
+    return registerComposer(() => regRef.current);
+  }, [registerComposer]);
+  const setHotkeyAllowed = shared?.setHotkeyAllowed;
+  useEffect(() => {
+    if (!setHotkeyAllowed) return;
+    setHotkeyAllowed(hotkey && !disabled);
+  }, [setHotkeyAllowed, hotkey, disabled]);
 
   /** What the textarea shows: the committed draft, or a growing prefix of a revealing dictated insert. */
   const displayed = reveal ? `${reveal.prefix}${reveal.piece.slice(0, reveal.shown)}` : value;
-
-  // A send (which clears the draft) or any other change to the committed draft ends the reveal: the
-  // textarea must never stay pinned to the text that was streaming in once the draft it belonged to
-  // has moved on, or typing would write that stale text back (VS-425).
-  useEffect(() => {
-    if (reveal && value !== `${reveal.prefix}${reveal.piece}`) stopReveal();
-  }, [value, reveal, stopReveal]);
-
-  const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches;
-  // Opt-in, per browser (VS-435): a session that ends sends the settled draft, through the same
-  // queued path the send arrow uses.
-  const autoSend = useDictationAutoSend();
-
-  const dictation = useDictation((transcript, final) => {
-    const piece = transcript.trim();
-    sessionTranscript.current = transcript;
-    // A short result is never a deliberate message (VS-439). The decision is taken over the whole
-    // session transcript and applied when the session ends, so interim words still show while
-    // talking and a mid-sentence Android restatement (marked final by the recognizer) cannot wipe
-    // the box.
-    discarded.current = piece.length > 0 && isDictationTooShort(transcript);
-    if (!piece) return;
-    const joiner = base.current && !base.current.endsWith(' ') ? ' ' : '';
-    const full = `${base.current}${joiner}${piece}`;
-    // The session has already been stopped and this is its outcome: put the draft back as it was
-    // before the mic opened, taking every interim word with it, and never animate it in.
-    if (final && !listeningRef.current && discarded.current) {
-      stopReveal();
-      onChange(base.current);
-      return;
-    }
-    // Commit the whole draft immediately: the reveal is display only, so a send queued while
-    // dictating submits every last word (VS-416), not the prefix on screen mid-animation.
-    onChange(full);
-    if (!final || reducedMotion || typeof setInterval !== 'function' || discarded.current) {
-      stopReveal();
-      return;
-    }
-    stopReveal();
-    const prefix = `${base.current}${joiner}`;
-    let step = 0;
-    const total = Math.max(1, Math.ceil(REVEAL_MS / REVEAL_STEP_MS));
-    dictated.current = true;
-    setReveal({ prefix, piece, shown: 0 });
-    revealTimer.current = setInterval(() => {
-      step += 1;
-      dictated.current = true;
-      if (step >= total) {
-        // The reveal is over: drop it, so `displayed` follows the committed draft from here on.
-        if (revealTimer.current !== null) clearInterval(revealTimer.current);
-        revealTimer.current = null;
-        setReveal(null);
-      } else {
-        setReveal({ prefix, piece, shown: revealedCount(piece.length, step * REVEAL_STEP_MS, REVEAL_MS) });
-      }
-    }, REVEAL_STEP_MS);
-  });
-
-  listeningRef.current = dictation.listening;
-
-  const startMic = useCallback(() => {
-    base.current = value;
-    // Assume too short until the transcript proves otherwise: a session that produces no words at
-    // all is discarded too (VS-439).
-    discarded.current = true;
-    sessionTranscript.current = '';
-    sessionRan.current = true;
-    dictation.start();
-  }, [dictation, value]);
-
-  // Every way a session ends — the hotkey's release or toggle-off, and the mic button — routes
-  // through here. With the setting on, it arms the existing queued send before stopping, so the
-  // transcript goes out through the same path as a queued arrow press. `send()` keeps the raw
-  // `dictation.stop` so a manual send is never armed twice (VS-435).
-  const stopDictation = useCallback(() => {
-    if (autoSend && !disabled && !submittingRef.current && !pendingSendRef.current) {
-      pendingSendRef.current = true;
-      setPendingSend(true);
-    }
-    dictation.stop();
-  }, [autoSend, disabled, dictation]);
-
-  // The shared dictation chord: a quick press toggles, a hold is push-to-talk (VS-432). A touch
-  // device, a disabled composer, or one that has handed the hotkey to a modal (VS-428) does not
-  // claim it.
-  useDictationHotkey({
-    enabled: !isTouch && hotkey && !disabled,
-    listening: dictation.listening,
-    start: startMic,
-    stop: stopDictation,
-  });
-
-  // Grow to fit, then scroll inside. Measuring collapses the box and throws the scroll position
-  // away, so it is put back: at the end when the insert came from dictation or the caret is already
-  // there, otherwise where the browser left it. A dictated insert also moves the caret to the end,
-  // which is what "the newest text is visible" means for a long transcript (VS-416). While
-  // listening there is no textarea — the flag survives until it returns, so the remount scrolls.
-  // The reveal shifts the textarea's value a frame at a time, so this runs on the displayed text,
-  // not the committed draft, and follows the animation to its end.
-  useLayoutEffect(() => {
-    const el = ta.current;
-    if (!el) return;
-    const fromDictation = dictated.current;
-    dictated.current = false;
-    const atEnd = fromDictation || (el.selectionStart === el.value.length && el.selectionEnd === el.value.length);
-    const prev = el.scrollTop;
-    el.style.height = 'auto';
-    el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_PX)}px`;
-    if (fromDictation) el.setSelectionRange(el.value.length, el.value.length);
-    el.scrollTop = atEnd ? el.scrollHeight : prev;
-  }, [displayed, dictation.listening, dictation.transcribing]);
 
   const addFiles = useCallback((incoming: File[]): void => {
     const accepted = incoming.filter((f) => ACCEPTED.includes(f.type));
@@ -293,61 +221,33 @@ export function ChatComposer({
         setSubmitting(false);
       });
   }, [disabled, files, onSubmit, projectId, replyToMessageId]);
+  doSubmitRef.current = doSubmit;
 
-  const send = useCallback((): void => {
-    if (disabled || submittingRef.current) return;
-    setPendingNotice(null);
-    // Send means "finish the dictation and send it". The transcript lands only after `stop()` —
-    // synchronously-late for Web Speech, as a daemon response for Voxtype — so the send queues and
-    // the effect below submits once the attempt has settled, with whatever text landed. A second
-    // press while queued is a no-op, and an empty result submits nothing (V1's pendingSend, VS-282).
-    if (dictation.listening || dictation.transcribing) {
-      if (pendingSendRef.current) return;
-      pendingSendRef.current = true;
-      setPendingSend(true);
-      if (dictation.listening) dictation.stop();
-      return;
-    }
-    const t = value.trim();
-    if (!t && files.length === 0) return;
-    doSubmit(t);
-  }, [disabled, value, files, dictation, doSubmit]);
+  // Keep the provider's view of this composer current: its target, whether it may answer the chord,
+  // what it has staged, and where a queued send should go.
+  regRef.current = shared && dictationTarget
+    ? { target: dictationTarget, hotkeyAllowed: hotkey && !disabled, disabled: Boolean(disabled), stagedFiles: files.length, submit: doSubmit }
+    : null;
 
-  // A session's outcome of five words or fewer never lands (VS-439): once the attempt settles, put
-  // the draft back exactly as it was before the mic opened — taking every interim word shown while
-  // talking with it. The dictation callback has already set `discarded`; this effect is declared
-  // before the queued send below, so the two run in the same commit in that order.
-  useEffect(() => {
-    if (!dictation.settled || !sessionRan.current) return;
-    sessionRan.current = false;
-    if (!isDictationTooShort(sessionTranscript.current)) return;
-    stopReveal();
-    onChange(base.current);
-  }, [dictation.settled, onChange, stopReveal]);
-
-  // A queued send submits when the attempt settles; reading `value` here — not a value captured at
-  // press time — keeps the transcript that landed (VS-282). A failed or empty transcript submits
-  // nothing, so an empty body is never sent mid-dictation (VS-416). A discarded short result
-  // (VS-439) clears the queued/auto-armed state instead of sending the pre-dictation draft.
-  useEffect(() => {
-    if (!pendingSend || !dictation.settled) return;
-    pendingSendRef.current = false;
-    setPendingSend(false);
-    // An auto-armed send (VS-435) must go out only while the composer can still send: if it was
-    // disabled or is already submitting, drop it rather than submit behind the human's back.
-    if (disabled || submittingRef.current) return;
-    if (dictation.error) return;
-    if (discarded.current) {
-      setPendingNotice('That dictation was too short to insert, so nothing was sent.');
-      return;
-    }
-    const t = value.trim();
-    if (!t && files.length === 0) {
-      setPendingNotice('Nothing was recognized, so nothing was sent.');
-      return;
-    }
-    doSubmit(t);
-  }, [pendingSend, dictation.settled, dictation.error, disabled, value, files.length, doSubmit]);
+  // Grow to fit, then scroll inside. Measuring collapses the box and throws the scroll position
+  // away, so it is put back: at the end when the insert came from dictation or the caret is already
+  // there, otherwise where the browser left it. A dictated insert also moves the caret to the end,
+  // which is what "the newest text is visible" means for a long transcript (VS-416). While
+  // listening there is no textarea — the flag survives until it returns, so the remount scrolls.
+  // The reveal shifts the textarea's value a frame at a time, so this runs on the displayed text,
+  // not the committed draft, and follows the animation to its end.
+  useLayoutEffect(() => {
+    const el = ta.current;
+    if (!el) return;
+    const fromDictation = ctl.dictated.current;
+    ctl.dictated.current = false;
+    const atEnd = fromDictation || (el.selectionStart === el.value.length && el.selectionEnd === el.value.length);
+    const prev = el.scrollTop;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, MAX_INPUT_PX)}px`;
+    if (fromDictation) el.setSelectionRange(el.value.length, el.value.length);
+    el.scrollTop = atEnd ? el.scrollHeight : prev;
+  }, [displayed, dictation.listening, dictation.transcribing, ctl.dictated]);
 
   const onPaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
     const pasted = Array.from(e.clipboardData?.items ?? [])
@@ -358,6 +258,9 @@ export function ChatComposer({
     e.preventDefault();
     addFiles(pasted);
   }, [addFiles]);
+
+  const send = ctl.requestSend;
+  const pendingSend = ctl.pendingSend;
 
   const siblings = projects.map((p) => p.id);
 
@@ -374,7 +277,7 @@ export function ChatComposer({
       <div className="flex items-center gap-1.5 overflow-x-auto">
         {onOpenSearch ? (
           <button type="button" onClick={onOpenSearch} aria-label="Search this conversation" className="v2-tag flex-none text-text-3 hover:text-text-1">
-            ⌕ Search
+             Search
           </button>
         ) : null}
         {onOpenPlan ? (
@@ -439,7 +342,7 @@ export function ChatComposer({
         onDrop={(e) => { if (!dragHasFiles(e.dataTransfer)) return; e.preventDefault(); dragDepth.current = 0; setDragActive(false); addFiles(Array.from(e.dataTransfer.files)); }}
         className={cx('flex items-end gap-2 rounded-r4 border bg-bg-input px-2.5 py-1.5', dragActive || dictation.listening || dictation.transcribing ? 'border-accent' : 'border-line-2')}
       >
-        {dictation.listening ? (
+        {sessionHere && dictation.listening ? (
           <div data-testid="v2-composer-listening" className="flex min-w-0 flex-1 items-center gap-2.5 py-1">
             {dictation.metered ? (
               <VoiceMeter analyser={dictation.analyser} active className="h-6 min-w-0 flex-1" />
@@ -453,7 +356,7 @@ export function ChatComposer({
               {Math.floor(dictation.elapsed / 60)}:{String(dictation.elapsed % 60).padStart(2, '0')}
             </span>
           </div>
-        ) : dictation.transcribing ? (
+        ) : sessionHere && dictation.transcribing ? (
           // The mic is closed and the transcript is on its way (VS-441). Keeping this in the same
           // slot as the listening meter means the box never flashes empty between the two.
           <div data-testid="v2-composer-transcribing" className="flex min-w-0 flex-1 items-center py-1">
@@ -467,7 +370,7 @@ export function ChatComposer({
             disabled={disabled || submitting}
             placeholder={placeholder}
             aria-label={ariaLabel}
-            onChange={(e) => { stopReveal(); onChange(e.target.value); }}
+            onChange={(e) => onChange(e.target.value)}
             onPaste={onPaste}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !isTouch) { e.preventDefault(); send(); } }}
             className="max-h-[12rem] flex-1 resize-none overflow-y-auto bg-transparent py-1 text-body text-text-1 outline-none placeholder:text-text-4 focus-visible:[box-shadow:none]"
@@ -490,7 +393,7 @@ export function ChatComposer({
           className={cx(BUTTON, dictation.listening && 'border-accent text-accent-link')}
           aria-label={dictation.mode === 'unavailable' ? 'Dictation unavailable' : dictation.listening ? 'Stop dictation' : 'Dictate'}
           aria-pressed={dictation.listening}
-          onClick={() => { if (dictation.listening) stopDictation(); else if (dictation.mode === 'unavailable') { setFreeText(true); setPendingNotice('Dictation is unavailable: this browser has no Web Speech API and the daemon has no transcription provider.'); } else startMic(); }}
+          onClick={() => { if (dictation.listening) ctl.stop(); else if (dictation.mode === 'unavailable') { setFreeText(true); setUnavailableNotice('Dictation is unavailable: this browser has no Web Speech API and the daemon has no transcription provider.'); } else { setUnavailableNotice(null); ctl.start(); } }}
         >
           {dictation.listening ? <StopIcon /> : <MicIcon slashed={dictation.mode === 'unavailable'} />}
         </button>
@@ -510,7 +413,7 @@ export function ChatComposer({
       </div>
 
       {dictation.error ? <p role="alert" className="rounded-r4 border border-blocked/35 px-3 py-2 text-micro text-text-1">{dictation.error}</p> : null}
-      {pendingNotice && !dictation.error ? <p role="status" className="rounded-r4 border border-line-1 px-3 py-2 text-micro text-text-3">{pendingNotice}</p> : null}
+      {(ctl.pendingNotice ?? unavailableNotice) && !dictation.error ? <p role="status" className="rounded-r4 border border-line-1 px-3 py-2 text-micro text-text-3">{ctl.pendingNotice ?? unavailableNotice}</p> : null}
       {freeText && dictation.error ? (
         <p className="text-micro text-text-3">Type instead, or set a provider in Settings → Dictation.</p>
       ) : null}

@@ -20,6 +20,12 @@ const state = vi.hoisted(() => ({
   update: null as UpdateStatus | null,
   upgrade: null as Upgrade | null,
   fanIn: [] as string[][],
+  barVisible: false,
+}));
+
+// The dictation session lives above the shell (VS-450); the shell only reads whether the bar is up.
+vi.mock('../v2/DictationSession', () => ({
+  useDictationSession: () => (state.barVisible ? { barVisible: true } : null),
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -85,6 +91,7 @@ beforeEach(() => {
   state.update = null;
   state.upgrade = null;
   state.fanIn = [];
+  state.barVisible = false;
   onTheme.mockClear();
   localStorage.clear();
 });
@@ -122,6 +129,24 @@ describe('the V2 rail', () => {
       .filter((a) => a.getAttribute('aria-current') === 'page');
     expect(current).toHaveLength(1);
     expect(current[0]).toHaveAttribute('href', '/w/acme/needs');
+  });
+});
+
+describe('the floating dictation bar clearance (VS-450)', () => {
+  const routeClass = (view: ReturnType<typeof mountShell>): string => {
+    const route = view.container.querySelector('.v2-anim-route');
+    return route ? route.className : '';
+  };
+
+  it('reserves room for the bar on top of the phone tab bar clearance while it is visible', () => {
+    const view = mountShell();
+    expect(routeClass(view)).toMatch(/\bpb-14\b/);
+    expect(routeClass(view)).not.toMatch(/pb-\[8\.5rem\]/);
+
+    state.barVisible = true;
+    view.rerender(<V2Shell theme="dark" onTheme={onTheme} />);
+    expect(routeClass(view)).toMatch(/pb-\[8\.5rem\]/);
+    expect(routeClass(view)).toMatch(/md:pb-20/);
   });
 });
 

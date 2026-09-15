@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { KnowledgeDocSummary } from '../api/types';
+import { eventually } from './eventually';
 
 const state = vi.hoisted(() => ({ docs: [] as KnowledgeDocSummary[], hubs: [] as Array<Record<string, unknown>> }));
 
@@ -67,10 +68,12 @@ describe('the V2 knowledge explorer route', () => {
         </KnowledgeScreen>
       </HostRoutesProvider>,
     );
-    expect(await screen.findByText('PROJECT.md')).toBeInTheDocument();
+    // `KnowledgeExplorer` is a separate `lazy()` chunk; wait for its Suspense retry without a
+    // wall-clock deadline (see `eventually`).
+    await eventually(() => expect(screen.getByText('PROJECT.md')).toBeInTheDocument());
     expect(screen.getByText('Theming decisions')).toBeInTheDocument();
     // The pane defaults to the project's PROJECT.md hub, whose body is `# api`.
-    expect(await screen.findByRole('heading', { name: 'api' })).toBeInTheDocument();
+    await eventually(() => expect(screen.getByRole('heading', { name: 'api' })).toBeInTheDocument());
     // The explorer fills the frame and scrolls its own panes, so the page body must not scroll too.
     const body = container.querySelector('[data-v2-page-body]') as HTMLElement;
     expect(body.getAttribute('data-v2-page-body')).toBe('fill');
@@ -85,7 +88,8 @@ describe('the V2 knowledge explorer route', () => {
         </KnowledgeScreen>
       </HostRoutesProvider>,
     );
-    fireEvent.click(await screen.findByText('Theming decisions'));
+    await eventually(() => expect(screen.getByText('Theming decisions')).toBeInTheDocument());
+    fireEvent.click(screen.getByText('Theming decisions'));
     const call = linkState.go.mock.calls.at(-1);
     expect(call?.[0]).toBe('/v2/w/$ws/knowledge/explorer');
     expect(call?.[1]).toMatchObject({ replace: true, search: { project: 'p1', doc: 'project:theming' } });

@@ -1,0 +1,8 @@
+# Tasks
+
+- [x] 1. Reproduce under the concurrent stress (3 UI suites × 3 rounds): **1/9** runs failed this file with `Unable to find a label with the text of: Instance map`; the passing runs' `globalMap` durations ranged 886–3036 ms against the 1000 ms cap.
+- [x] 2. `packages/ui/src/test/globalMap.test.tsx`: `draw()` and the phone "Canvas" switch wait for the lazy `MapCanvas` chunk with the shared `eventually` instead of `findByLabelText('Instance map')`; the phone test's `findByText('neighbours')` wait was the same chunk and is converted too.
+- [x] 3. Sweep the remaining UI `lazy(...)` chunk waits: `v2knowledgegraph.test.tsx` (`findByTestId('force-graph')`) and `v2knowledgeexplorer.test.tsx` (`findByText('PROJECT.md')`, `findByRole('heading', {name:'api'})`, `findByText('Theming decisions')`), plus `knowledge.test.tsx` already done by VS-446. No other test renders a `lazy()` route.
+- [x] 4. Renamed `packages/ui/src/test/dictation.test.tsx`'s local `eventually` to `settleMicrotasks` (microtask drain inside `act`) and documented its difference from the shared `eventually`, which yields the event loop for a Suspense retry.
+- [x] 5. Prove it: `globalMap.test.tsx` alone 20× → 20/20; the full UI suite 10× → 10/10; the 3 × 3 concurrent stress 9× → **globalMap 0/9 failing** (durations 1208–3374 ms, several past the old cap, all green).
+- [x] 6. Evidence and checks: `pnpm lint` clean; `pnpm typecheck` exit 0; `pnpm test` both blocks green (core 228 passed | 1 skipped, 3506 passed | 1 skipped; ui 171 passed, 2523 passed), pasted on the ticket.

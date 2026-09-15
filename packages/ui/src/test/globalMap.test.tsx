@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Role, Ticket } from '@weave-ai/shared';
 import type { WorkerListItem, WorkspaceProjectsState } from '../api/hooks';
 import { agent, project, ticket } from './factories';
+import { eventually } from './eventually';
 
 const go = vi.fn();
 const state = vi.hoisted(() => ({
@@ -93,7 +94,10 @@ beforeEach(() => {
 
 async function draw(): Promise<HTMLElement> {
   const { container } = render(<GlobalMapRoute />);
-  await screen.findByLabelText('Instance map');
+  // `MapCanvas` is a separate `lazy()` chunk; `findByLabelText` watched for it against a real-timer
+  // one-second deadline, which the Suspense retry passed under load (VS-453), so wait without a
+  // stopwatch.
+  await eventually(() => expect(screen.getByLabelText('Instance map')).toBeInTheDocument());
   return container;
 }
 
@@ -191,10 +195,10 @@ describe('GlobalMapRoute', () => {
   it('defaults to the neighbour list on a phone', async () => {
     ready({ phone: true });
     render(<GlobalMapRoute />);
-    expect(await screen.findByText('neighbours')).toBeInTheDocument();
+    await eventually(() => expect(screen.getByText('neighbours')).toBeInTheDocument());
     expect(screen.queryByLabelText('Instance map')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Canvas' }));
-    expect(await screen.findByLabelText('Instance map')).toBeInTheDocument();
+    await eventually(() => expect(screen.getByLabelText('Instance map')).toBeInTheDocument());
   });
 
   it('settles without animation frames when reduced motion is on', async () => {

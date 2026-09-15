@@ -12,7 +12,7 @@ import { DICTATION_HOLD_MS } from '../lib/dictationHotkey';
 import { writeDictationAutoSend } from '../lib/dictationAutoSend';
 
 /**
- * Wait for a condition without ever reading the wall clock.
+ * Wait for a condition that settles on the microtask queue, without ever reading the wall clock.
  *
  * Every await on the upload path — the `/api/health` probe, `getUserMedia`, `POST /api/transcribe`
  * and the body it returns — settles on a microtask. `waitFor` watches for that on a real timer, so
@@ -21,8 +21,12 @@ import { writeDictationAutoSend } from '../lib/dictationAutoSend';
  * queue inside `act` flushes those continuations and the render they cause, so the bound is
  * microtask turns, not seconds, and CPU load cannot make it late. The last call re-runs the
  * assertion so a condition that never becomes true still reports its own failure.
+ *
+ * This drains microtasks only. It cannot resolve a React `lazy()` chunk, whose Suspense retry is a
+ * macrotask and spins this loop at 100% CPU (VS-446). For a lazy-chunk wait, use the shared
+ * `eventually` in `./eventually`, which yields the event loop between attempts.
  */
-async function eventually(assertion: () => void, turns = 500): Promise<void> {
+async function settleMicrotasks(assertion: () => void, turns = 500): Promise<void> {
   for (let i = 0; i < turns; i++) {
     try {
       assertion();
@@ -528,12 +532,12 @@ describe('dictation — voxtype upload', () => {
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     expect(screen.getByTestId('mode')).toHaveTextContent('upload');
     fireEvent.click(screen.getByText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByText('Stop dictation'));
-    await eventually(() => expect(posts.length).toBe(1));
+    await settleMicrotasks(() => expect(posts.length).toBe(1));
     const file = posts[0]!.get('audio') as File;
     expect(file.name).toBe('dictation.wav');
-    await eventually(() => expect(screen.getByLabelText('out')).toHaveValue('hello host'));
+    await settleMicrotasks(() => expect(screen.getByLabelText('out')).toHaveValue('hello host'));
   });
 
   it('surfaces a message instead of silence when Voxtype returns no words', async () => {
@@ -544,9 +548,9 @@ describe('dictation — voxtype upload', () => {
     getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     fireEvent.click(screen.getByText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByText('Stop dictation'));
-    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
+    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
     expect(screen.getByLabelText('out')).toHaveValue('');
   });
 
@@ -558,9 +562,9 @@ describe('dictation — voxtype upload', () => {
     getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     fireEvent.click(screen.getByText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByText('Stop dictation'));
-    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
   });
 
   it('sets transcribing from stop() until the response settles, on every outcome (VS-195)', async () => {
@@ -578,12 +582,12 @@ describe('dictation — voxtype upload', () => {
       getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
       const { unmount } = render(<VoxtypeHarness backend="voxtype" serverConfigured />);
       fireEvent.click(screen.getByText('Dictate'));
-      await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+      await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
       fireEvent.click(screen.getByText('Stop dictation'));
       expect(screen.getByTestId('transcribing')).toHaveTextContent('true'); // outcome.name
 
       settle!(outcome.response);
-      await eventually(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
+      await settleMicrotasks(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
       unmount();
       getUserMedia.mockReset();
     }
@@ -597,10 +601,10 @@ describe('dictation — voxtype upload', () => {
     getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     fireEvent.click(screen.getByText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByText('Stop dictation'));
     expect(screen.getByTestId('transcribing')).toHaveTextContent('true');
-    await eventually(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
+    await settleMicrotasks(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
     expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/);
   });
 
@@ -639,12 +643,12 @@ describe('dictation — voxtype upload', () => {
     getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     fireEvent.click(screen.getByText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     expect(screen.getByTestId('settled')).toHaveTextContent('false');
     fireEvent.click(screen.getByText('Stop dictation'));
     expect(screen.getByTestId('settled')).toHaveTextContent('false');
     settle!({ ok: true, status: 200, json: async () => ({ text: 'hi' }) });
-    await eventually(() => expect(screen.getByTestId('settled')).toHaveTextContent('true'));
+    await settleMicrotasks(() => expect(screen.getByTestId('settled')).toHaveTextContent('true'));
     expect(screen.getByLabelText('out')).toHaveValue('hi');
   });
 
@@ -657,7 +661,7 @@ describe('dictation — voxtype upload', () => {
     getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
     render(<VoxtypeHarness backend="voxtype" serverConfigured />);
     fireEvent.click(screen.getByText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByText('Stop dictation'));
     expect(screen.getByTestId('transcribing')).toHaveTextContent('true');
 
@@ -666,7 +670,7 @@ describe('dictation — voxtype upload', () => {
     expect(getUserMedia).not.toHaveBeenCalled();
 
     settle!({ ok: true, status: 200, json: async () => ({ text: 'done' }) });
-    await eventually(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
+    await settleMicrotasks(() => expect(screen.getByTestId('transcribing')).toHaveTextContent('false'));
   });
 });
 
@@ -696,7 +700,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     render(<Composer onSubmit={() => undefined} placeholder="Message…" allowAttachments />);
     // The backend is resolved from an async /api/health probe; wait for it to land on upload mode
     // before touching the mic, the way a real page load would.
-    await eventually(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+    await settleMicrotasks(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
   }
 
   it('locks the composer the moment recording starts, and unlocks with the transcript on success', async () => {
@@ -704,7 +708,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     await renderUpload();
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
 
     expect(screen.getByLabelText('Message…')).toBeDisabled();
     expect(screen.getByLabelText('Attach a file')).toBeDisabled();
@@ -721,7 +725,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     expect(screen.getByLabelText('Message…')).toBeDisabled();
     expect(screen.getByLabelText('Transcribing')).toBeDisabled();
 
-    await eventually(() => expect(screen.getByLabelText('Message…')).toHaveValue('ship it to the release train'));
+    await settleMicrotasks(() => expect(screen.getByLabelText('Message…')).toHaveValue('ship it to the release train'));
     expect(screen.getByLabelText('Message…')).not.toBeDisabled();
     expect(screen.getByLabelText('Attach a file')).not.toBeDisabled();
     expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
@@ -736,10 +740,10 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     await renderUpload();
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
-    await eventually(() => expect(screen.getByLabelText('Message…')).not.toBeDisabled());
+    await settleMicrotasks(() => expect(screen.getByLabelText('Message…')).not.toBeDisabled());
     expect(screen.getByLabelText('Message…')).toHaveValue('');
     expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/);
@@ -750,10 +754,10 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     await renderUpload();
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
-    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
     expect(screen.getByLabelText('Message…')).not.toBeDisabled();
     expect(screen.getByLabelText('Attach a file')).not.toBeDisabled();
     expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument();
@@ -765,7 +769,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     await renderUpload();
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
     expect(screen.getByLabelText('Transcribing')).toBeDisabled();
 
@@ -773,7 +777,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     expect(getUserMedia).toHaveBeenCalledTimes(1); // no second recording started
 
     settle!({ ok: true, status: 200, json: async () => ({ text: 'done' }) });
-    await eventually(() => expect(screen.getByLabelText('Message…')).not.toBeDisabled());
+    await settleMicrotasks(() => expect(screen.getByLabelText('Message…')).not.toBeDisabled());
   });
 
   it('never hides the listening caption behind a viewport breakpoint', async () => {
@@ -781,7 +785,7 @@ describe('dictation — composer lock while non-streaming (VS-195)', () => {
     await renderUpload();
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
 
     const caption = screen.getByText(/transcribed once you stop/i);
     expect(caption.className).not.toMatch(/\bhidden\b/);
@@ -840,7 +844,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     render(<Composer onSubmit={onSubmit} placeholder="Message…" allowAttachments />);
     // `Dictate` only exists once the async /api/health probe has landed on upload mode; in these
     // tests there is no SpeechRecognition, so its presence pins the backend.
-    await eventually(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+    await settleMicrotasks(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
   }
 
   it('pressing send while recording stops it and submits the transcript once it lands', async () => {
@@ -849,7 +853,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     // The textarea and attach lock stay; only send is exempt (VS-282).
     expect(screen.getByLabelText('Message…')).toBeDisabled();
     expect(screen.getByLabelText('Attach a file')).toBeDisabled();
@@ -857,7 +861,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
 
     fireEvent.click(screen.getByLabelText('Send'));
 
-    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('ship it to the release train', undefined, expect.any(String));
     expect(screen.getByLabelText('Message…')).toHaveValue('');
   });
@@ -869,7 +873,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
     expect(screen.getByText('Transcribing…')).toBeInTheDocument();
     getUserMedia.mockClear();
@@ -879,7 +883,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     expect(screen.getByText(/Waiting for the transcript/)).toBeInTheDocument();
 
     d.settle(ok('late words from the host here'));
-    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('late words from the host here', undefined, expect.any(String));
     expect(getUserMedia).not.toHaveBeenCalled(); // no second recording was started
   });
@@ -906,11 +910,11 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
       fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
       fireEvent.keyUp(window, { key: ' ', code: 'Space' });
 
-      await eventually(() => expect(posts.length).toBe(1));
+      await settleMicrotasks(() => expect(posts.length).toBe(1));
       expect(getUserMedia).toHaveBeenCalledTimes(1);
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       // Let the attempt settle before the next focused control.
-      await eventually(() => expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument());
+      await settleMicrotasks(() => expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument());
     }
   });
 
@@ -920,7 +924,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     await renderUpload(() => undefined);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
     expect(screen.getByText('Transcribing…')).toBeInTheDocument();
     getUserMedia.mockClear();
@@ -932,7 +936,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     expect(screen.getByText('Transcribing…')).toBeInTheDocument();
 
     d.settle(ok('late words'));
-    await eventually(() => expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument());
+    await settleMicrotasks(() => expect(screen.queryByText('Transcribing…')).not.toBeInTheDocument());
   });
 
   it('submits the transcript, not the pre-press text, when the two differ', async () => {
@@ -943,11 +947,11 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
 
     fireEvent.change(screen.getByLabelText('Message…'), { target: { value: 'typed first' } });
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Send'));
     d.settle(ok('spoken words that then arrived here'));
 
-    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     const submitted = onSubmit.mock.calls[0]![0] as string;
     expect(submitted).toContain('spoken words');
     expect(submitted).toBe('typed first spoken words that then arrived here');
@@ -959,10 +963,10 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Send'));
 
-    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Message…')).not.toBeDisabled();
     expect(screen.queryByText(/Waiting for the transcript/)).not.toBeInTheDocument();
@@ -974,10 +978,10 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Send'));
 
-    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
+    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByLabelText('Message…')).not.toBeDisabled();
     expect(screen.queryByText(/Waiting for the transcript/)).not.toBeInTheDocument();
@@ -990,7 +994,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Send'));
     // The queued control is disabled, so a second press is a no-op; the mic is already stopped by
     // the send and disabled while transcribing, so it cannot submit a second time either.
@@ -999,7 +1003,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     expect(screen.getByLabelText('Transcribing')).toBeDisabled();
 
     d.settle(ok('once and then again here now'));
-    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('once and then again here now', undefined, expect.any(String));
   });
 
@@ -1007,14 +1011,14 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     w.webkitSpeechRecognition = FakeRecognition;
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     render(<Composer onSubmit={onSubmit} placeholder="Message…" allowAttachments />);
-    await eventually(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+    await settleMicrotasks(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
 
     fireEvent.click(screen.getByLabelText('Dictate'));
     const rec = FakeRecognition.last!;
     act(() => rec.onresult!(said(['live words', true])));
 
     fireEvent.click(screen.getByLabelText('Send'));
-    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('live words', undefined, expect.any(String));
     expect(screen.queryByText(/Waiting for the transcript/)).not.toBeInTheDocument();
   });
@@ -1060,7 +1064,7 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
 
   async function renderUpload(onSubmit: (text: string, files?: File[], idempotencyKey?: string) => void | Promise<void>): Promise<void> {
     render(<Composer onSubmit={onSubmit} placeholder="Message…" allowAttachments />);
-    await eventually(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+    await settleMicrotasks(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
   }
 
   it('sends nothing when the setting is off, even after a session ends', () => {
@@ -1152,7 +1156,7 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
 
     fireEvent.change(screen.getByLabelText('Message…'), { target: { value: 'typed first' } });
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
     // Nothing yet: the transcript has not landed, and the queued cue is showing.
@@ -1160,7 +1164,7 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     expect(screen.getByLabelText('Send queued')).toBeInTheDocument();
 
     d.settle(ok('spoken words that will be sent now'));
-    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('typed first spoken words that will be sent now', undefined, expect.any(String));
   });
 
@@ -1171,10 +1175,10 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
-    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
+    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -1185,10 +1189,10 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
-    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
@@ -1200,7 +1204,7 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
     const queued = screen.getByLabelText('Send queued');
@@ -1208,7 +1212,7 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     fireEvent.click(queued);
 
     d.settle(ok('once and then again here now'));
-    await eventually(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith('once and then again here now', undefined, expect.any(String));
   });
 
@@ -1218,10 +1222,10 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
-    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
+    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
     expect(screen.getByRole('alert')).not.toHaveTextContent(/too short/);
     expect(onSubmit).not.toHaveBeenCalled();
   });
@@ -1253,7 +1257,7 @@ describe('dictation — discarding a transcript of five words or fewer (VS-439)'
 
   async function renderUpload(onSubmit: (text: string, files?: File[], idempotencyKey?: string) => void | Promise<void>): Promise<void> {
     render(<Composer onSubmit={onSubmit} placeholder="Message…" allowAttachments />);
-    await eventually(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
+    await settleMicrotasks(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
   }
 
   it('discards a five-word speech outcome and puts the draft back, removing the interim words', () => {
@@ -1294,12 +1298,12 @@ describe('dictation — discarding a transcript of five words or fewer (VS-439)'
     fireEvent.change(box, { target: { value: 'typed first' } });
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Send'));
 
     // There is no live transcript on the upload path, so the draft reads `typed first` throughout —
     // the notice (and the queued state clearing) is what says the response has been handled.
-    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/too short/));
+    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/too short/));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('Send queued')).not.toBeInTheDocument();
     expect(box).toHaveValue('typed first');
@@ -1312,10 +1316,10 @@ describe('dictation — discarding a transcript of five words or fewer (VS-439)'
     await renderUpload(onSubmit);
 
     fireEvent.click(screen.getByLabelText('Dictate'));
-    await eventually(() => expect(getUserMedia).toHaveBeenCalled());
+    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
-    await eventually(() => expect(screen.getByRole('alert')).toHaveTextContent(/too short/));
+    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/too short/));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 });

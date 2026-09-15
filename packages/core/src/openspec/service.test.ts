@@ -7,11 +7,12 @@ import type { ProjectsService, TicketsService } from '../api.js';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { git } from '../util/git.js';
 import { writeFakeOpenspec, type FakeCase } from './fakeBin.js';
-import { createOpenSpecService } from './index.js';
+import { createOpenSpecService, canonicalJson } from './index.js';
 
 let h: TestHarness | null = null;
 const previousBin = process.env.AC_OPENSPEC_BIN;
 afterEach(() => {
+  vi.restoreAllMocks();
   h?.cleanup(); h = null;
   if (previousBin === undefined) delete process.env.AC_OPENSPEC_BIN; else process.env.AC_OPENSPEC_BIN = previousBin;
 });
@@ -75,6 +76,54 @@ describe('OpenSpecService.statusFor', () => {
     const row = harness.db.get<{ openspecState: unknown }>('SELECT openspec_state_json FROM tickets WHERE id = ?', [ticketId]);
     expect(row?.openspecState).toEqual(status);
     expect(harness.events.some((e) => e.type === 'ticket.updated' && e.entityId === ticketId)).toBe(true);
+  });
+
+  // VS-470: the ticket-detail read calls statusFor, and its `ticket.updated` invalidates that same
+  // read's query — so an unconditional write+emit is a self-sustaining loop. Two identical checks
+  // must be one write and one emit; a real change must produce the second.
+  it('writes and emits once for two identical checks, and again only when the state changes', async () => {
+    const { harness, ticketId, clone } = setup(READY_CASES);
+    mkdirSync(join(clone, 'openspec', 'changes', CHANGE), { recursive: true });
+    const updates = vi.spyOn(harness.ctx.db, 'update');
+    const emits = () => harness.events.filter((e) => e.type === 'ticket.updated' && e.entityId === ticketId).length;
+
+    const svc = createOpenSpecService(harness.ctx, harness.deps);
+    await svc.statusFor(ticketId);
+    await svc.statusFor(ticketId);
+    expect(updates).toHaveBeenCalledTimes(1);
+    expect(emits()).toBe(1);
+
+    process.env.AC_OPENSPEC_BIN = writeFakeOpenspec(join(harness.root, 'fake-openspec-2'), [
+      READY_CASES[0]!,
+      { match: ['list'], json: { changes: [{ name: CHANGE, completedTasks: 3, totalTasks: 4, status: 'in-progress' }] } },
+      { match: ['instructions', 'apply'], json: { state: 'ready', progress: { completed: 3, total: 4 }, tasks: [], contextFiles: [] } },
+      READY_CASES[3]!,
+    ]).path;
+    const changed = await svc.statusFor(ticketId);
+    expect(changed.tasks).toEqual({ total: 4, complete: 3 });
+    expect(updates).toHaveBeenCalledTimes(2);
+    expect(emits()).toBe(2);
+  });
+
+  it('treats a stored status that differs only in key order as unchanged', async () => {
+    const { harness, ticketId, clone } = setup(READY_CASES);
+    mkdirSync(join(clone, 'openspec', 'changes', CHANGE), { recursive: true });
+    mkdirSync(join(clone, 'openspec', 'changes', 'archive', `2026-09-01-${CHANGE}`), { recursive: true });
+    // The same status `statusFor` computes, serialised with every object's keys in a different order.
+    const stored = `{"archived":true,"validation":{"issues":[],"ok":true},"applyState":"ready","tasks":{"complete":2,"total":4},"artifacts":[{"status":"done","id":"proposal"},{"status":"done","id":"tasks"}],"planningComplete":true,"changeName":${JSON.stringify(CHANGE)}}`;
+    harness.db.run('UPDATE tickets SET openspec_state_json = ? WHERE id = ?', [stored, ticketId]);
+    const updates = vi.spyOn(harness.ctx.db, 'update');
+
+    const status = await createOpenSpecService(harness.ctx, harness.deps).statusFor(ticketId);
+    expect(status.tasks).toEqual({ total: 4, complete: 2 });
+    expect(updates).not.toHaveBeenCalled();
+    expect(harness.events.filter((e) => e.type === 'ticket.updated' && e.entityId === ticketId)).toHaveLength(0);
+  });
+
+  it('canonicalJson ignores object key order but keeps array order (VS-470)', () => {
+    expect(canonicalJson({ a: 1, b: { c: 2, d: 3 } })).toBe(canonicalJson({ b: { d: 3, c: 2 }, a: 1 }));
+    expect(canonicalJson([{ a: 1, b: 2 }])).toBe(canonicalJson([{ b: 2, a: 1 }]));
+    expect(canonicalJson([1, 2])).not.toBe(canonicalJson([2, 1]));
   });
 
   it('runs in the worker worktree when the ticket has a live worker', async () => {

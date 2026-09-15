@@ -46,6 +46,22 @@ export function zeroStatus(changeName: string): OpenSpecStatus {
   return { changeName, planningComplete: false, artifacts: [], tasks: null, applyState: null, validation: null, archived: false };
 }
 
+/**
+ * JSON with object keys sorted recursively, so two statuses that differ only in key order compare
+ * equal. OpenSpec's own JSON output does not guarantee key order between invocations, and the stored
+ * status is round-tripped through SQLite; a plain `JSON.stringify` comparison would read a spurious
+ * change on every check and re-emit forever (VS-470). Array order is kept, because it is semantic.
+ */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const body = Object.keys(obj).sort().map((k) => `${JSON.stringify(k)}:${canonicalJson(obj[k])}`).join(',');
+    return `{${body}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
 export const archivedDirFor = cli.archivedDirFor;
 
 /**
@@ -123,6 +139,11 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
         validation: { ok: validation.ok, issues: validation.issues },
         archived: archivedDirFor(project.clonePath, changeName) !== null,
       };
+      // VS-470: a read that changes nothing must write nothing and emit nothing. The ticket-detail read
+      // is the only caller, and `ticket.updated` invalidates that same read's query — so an unconditional
+      // emit is a self-sustaining loop (read → statusFor → emit → invalidate → read). Same state, same
+      // output; only a real change writes the row, bumps `updatedAt` and notifies subscribers.
+      if (canonicalJson(ticket.openspecState ?? null) === canonicalJson(status)) return status;
       ctx.db.update('tickets', ticket.id, { openspecStateJson: status, updatedAt: nowIso() });
       ctx.events.emit('ticket.updated', 'ticket', ticket.id, { openspecState: status });
       return status;

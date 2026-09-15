@@ -5,8 +5,13 @@
  * one workspace can surface in another. `sessionStorage`, not `localStorage` — a draft is for this
  * tab and this sitting, so it survives a reload and a walk around the app but does not wait on a
  * shared device for whoever opens the browser next.
+ *
+ * The store is reactive (VS-450): a write from one component is published to every other component
+ * bound to the same key, so the shell-level dictation session can write into a thread's draft while
+ * the chat is unmounted and have a mounted composer follow it. The public `draftKey`/`readDraft`/
+ * `writeDraft`/`useDraft` shape is unchanged, so V1's composers are untouched.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 export interface Draft {
   text: string;
@@ -37,11 +42,9 @@ function isEmpty(d: Draft): boolean {
   return !d.text && !d.replyToId && d.projectId === undefined;
 }
 
-export function readDraft(key: string | null): Draft {
-  if (!key) return EMPTY;
+function parse(raw: string | null): Draft {
+  if (!raw) return EMPTY;
   try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) return EMPTY;
     const parsed = JSON.parse(raw) as Partial<Draft>;
     return { ...parsed, text: typeof parsed.text === 'string' ? parsed.text : '' };
   } catch {
@@ -50,34 +53,96 @@ export function readDraft(key: string | null): Draft {
   }
 }
 
-export function writeDraft(key: string | null, draft: Draft): void {
+function readRaw(key: string | null): string | null {
+  if (!key) return null;
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The last raw value read for a key and the draft parsed from it. `getSnapshot` must return the
+ * same reference while the underlying entry has not changed, or `useSyncExternalStore` re-renders
+ * forever; caching by the raw string gives that.
+ */
+const cache = new Map<string, { raw: string | null; draft: Draft }>();
+const listeners = new Map<string, Set<() => void>>();
+
+function snapshot(key: string | null): Draft {
+  if (!key) return EMPTY;
+  const raw = readRaw(key);
+  const held = cache.get(key);
+  if (held && held.raw === raw) return held.draft;
+  const draft = parse(raw);
+  cache.set(key, { raw, draft });
+  return draft;
+}
+
+function emit(key: string): void {
+  for (const fn of listeners.get(key) ?? []) fn();
+}
+
+function subscribe(key: string | null, fn: () => void): () => void {
+  if (!key) return () => undefined;
+  let set = listeners.get(key);
+  if (!set) {
+    set = new Set();
+    listeners.set(key, set);
+  }
+  set.add(fn);
+  return () => {
+    set.delete(fn);
+    if (!set.size) listeners.delete(key);
+  };
+}
+
+/**
+ * Replace the whole draft at `key` and publish it. An empty draft removes the entry. The
+ * dictation session writes its transcript here while the chat may be unmounted (VS-450).
+ */
+export function setDraft(key: string | null, draft: Draft): void {
   if (!key) return;
   try {
     if (isEmpty(draft)) sessionStorage.removeItem(key);
     else sessionStorage.setItem(key, JSON.stringify(draft));
   } catch {
-    /* private mode */
+    /* private mode: the draft holds for this session only */
   }
+  cache.delete(key);
+  emit(key);
+}
+
+/** Merge into the draft and publish it to every listener. */
+export function patchDraft(key: string | null, p: Partial<Draft>): void {
+  if (!key) return;
+  setDraft(key, { ...snapshot(key), ...p });
+}
+
+/** Drop the whole draft, meta included. */
+export function clearDraft(key: string | null): void {
+  setDraft(key, EMPTY);
+}
+
+export function readDraft(key: string | null): Draft {
+  return parse(readRaw(key));
+}
+
+export function writeDraft(key: string | null, draft: Draft): void {
+  setDraft(key, draft);
 }
 
 /**
- * The draft for one conversation. `key` may be null while the thread is still loading; the draft is
- * re-read when it changes, so switching thread or workspace never carries the previous one over.
+ * The draft for one conversation, kept in sync with every other reader and writer of the same key.
+ * `key` may be null while the thread is still loading; the snapshot is re-read when it changes, so
+ * switching thread or workspace never carries the previous one over.
  */
 export function useDraft(key: string | null): DraftHandle {
-  const [held, setHeld] = useState<{ key: string | null; draft: Draft }>(() => ({ key, draft: readDraft(key) }));
-  // A render-phase update, so the draft of the thread being left is never painted under the new one.
-  if (held.key !== key) setHeld({ key, draft: readDraft(key) });
-  const draft = held.key === key ? held.draft : readDraft(key);
-
-  // Written on every change rather than on unmount: a tab closed or reloaded mid-sentence has no
-  // unmount to run a cleanup in.
-  useEffect(() => {
-    if (held.key === key) writeDraft(key, held.draft);
-  }, [key, held]);
-
-  const patch = useCallback((p: Partial<Draft>) => setHeld((cur) => ({ key: cur.key, draft: { ...cur.draft, ...p } })), []);
-  const clear = useCallback(() => setHeld((cur) => ({ key: cur.key, draft: EMPTY })), []);
-
+  const sub = useCallback((fn: () => void) => subscribe(key, fn), [key]);
+  const get = useCallback(() => snapshot(key), [key]);
+  const draft = useSyncExternalStore(sub, get, get);
+  const patch = useCallback((p: Partial<Draft>) => patchDraft(key, p), [key]);
+  const clear = useCallback(() => clearDraft(key), [key]);
   return { draft, patch, clear };
 }

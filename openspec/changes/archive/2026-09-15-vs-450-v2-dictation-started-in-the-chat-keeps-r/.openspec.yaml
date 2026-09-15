@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+skip_specs: true
+goal: "V2: dictation started in the chat keeps running across page navigation,
+  with a floating dictation bar (meter, stop, send to the weaver) on every page"

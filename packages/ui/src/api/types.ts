@@ -634,6 +634,8 @@ export interface ProjectPullRequestDetail extends ProjectPullRequest {
   body: string;
   files: Array<{ path: string; additions: number; deletions: number }>;
   checkRuns: Array<{ name: string; state: PullRequestChecks; url: string | null }>;
+  /** The pull request's current head commit (VS-452), or null when the forge reports none. */
+  headSha: string | null;
 }
 
 /** `available: false` is a settled statement about the project, never a failed request. */

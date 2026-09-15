@@ -400,3 +400,39 @@ describe('the approve call to action (VS-418)', () => {
     expect(approve).not.toHaveAttribute('data-variant');
   });
 });
+
+describe('the merge card\'s Review changes control (VS-452)', () => {
+  const mergePr = (): void => {
+    state.products = [workProduct({ type: 'pull_request', url: 'https://github.com/acme/api/pull/42', externalId: null })];
+  };
+
+  it('opens the change explorer for the pull request the ticket delivered', () => {
+    mergePr();
+    renderCard({ decision: makeDecision({ kind: 'merge_approval' }), ticketIdentifier: 'ACME-42', projectSlug: 'api' });
+    const link = screen.getByRole('link', { name: 'Review changes' });
+    expect(link).toHaveAttribute('href', '/v2/w/ws1/p/api/changes/42');
+  });
+
+  it('falls back to the decision\'s own project id when no slug was supplied', () => {
+    mergePr();
+    renderCard({ decision: makeDecision({ kind: 'merge_approval', projectId: 'proj_9' }), ticketIdentifier: 'ACME-42' });
+    expect(screen.getByRole('link', { name: 'Review changes' })).toHaveAttribute('href', '/v2/w/ws1/p/proj_9/changes/42');
+  });
+
+  it('is absent when the ticket has no pull request work product', () => {
+    renderCard({ decision: makeDecision({ kind: 'merge_approval' }), ticketIdentifier: 'ACME-42', projectSlug: 'api' });
+    expect(screen.queryByRole('link', { name: 'Review changes' })).toBeNull();
+  });
+
+  it('is absent when neither a slug nor a project id is known', () => {
+    mergePr();
+    renderCard({ decision: makeDecision({ kind: 'merge_approval', projectId: null }), ticketIdentifier: 'ACME-42' });
+    expect(screen.queryByRole('link', { name: 'Review changes' })).toBeNull();
+  });
+
+  it('is offered only on a merge card', () => {
+    mergePr();
+    renderCard({ decision: makeDecision({ kind: 'plan_approval' }), ticketIdentifier: 'ACME-42', projectSlug: 'api' });
+    expect(screen.queryByRole('link', { name: 'Review changes' })).toBeNull();
+  });
+});

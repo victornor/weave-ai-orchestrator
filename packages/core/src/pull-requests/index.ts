@@ -264,7 +264,7 @@ export function createPullRequestsService(ctx: WorkspaceContext, deps: () => Cor
     if (!detail) return { projectId: p.id, available: true, reason: null, message: null, stale, pullRequest: null };
 
     const decorated = decorate(detail, joinTickets(p, [detail]), joinQueue(p.id));
-    const full: ProjectPullRequestDetail = { ...decorated, body: detail.body, files: detail.files, checkRuns: detail.checkRuns };
+    const full: ProjectPullRequestDetail = { ...decorated, body: detail.body, files: detail.files, checkRuns: detail.checkRuns, headSha: detail.headSha };
     return { projectId: p.id, available: true, reason: null, message: null, stale, pullRequest: full };
   }
 

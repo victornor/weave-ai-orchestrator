@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: V2 merge approval cards open a read-only change explorer for the pull request,
+  a file tree of added/removed/modified files with +N/–N and a whole-file diff view
+skip_specs: true

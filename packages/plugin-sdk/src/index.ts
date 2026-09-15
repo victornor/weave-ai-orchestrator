@@ -38,7 +38,7 @@ export interface ForgePullRequest {
   mergeCommit: string | null;
 }
 /** One pull request read in full: its description, what it changes, and each check by name. */
-export interface ForgePullRequestDetail extends ForgePullRequest { body: string; files: ForgeChangedFile[]; checkRuns: ForgeCheck[] }
+export interface ForgePullRequestDetail extends ForgePullRequest { body: string; files: ForgeChangedFile[]; checkRuns: ForgeCheck[]; /** The pull request's current head commit (VS-452), or null when the forge reports none. */ headSha: string | null }
 export interface ForgeAdapter {
   readonly id: string;
   detect(cwd: string): Promise<boolean>;

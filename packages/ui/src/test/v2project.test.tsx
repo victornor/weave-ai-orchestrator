@@ -190,7 +190,7 @@ describe('the V2 project overview', () => {
     state.prDetail = {
       number: 7, title: 'Dark mode', checks: 'success', state: 'open', isDraft: false, updatedAt: '2026-09-10T00:00:00.000Z', author: 'victor',
       headRefName: 'ac/dark', baseRefName: 'main', ticket: null, changeName: null, reviewDecision: null, queue: null, url: 'https://example.invalid/pr/7',
-      body: 'Adds dark mode', files: [{ path: 'src/a.ts', status: 'modified', additions: 2, deletions: 1, binary: false, tooLarge: false, previousPath: null }], checkRuns: [],
+      body: 'Adds dark mode', files: [{ path: 'src/a.ts', status: 'modified', additions: 2, deletions: 1, binary: false, tooLarge: false, previousPath: null }], checkRuns: [], headSha: null,
     };
     render(<V2ProjectScreen />);
     fireEvent.click(screen.getByRole('button', { name: /Pull request #7: Dark mode/ }));

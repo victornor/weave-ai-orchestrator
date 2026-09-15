@@ -46,7 +46,7 @@ function fakeForge(list: ForgePullRequest[], opts: { detect?: boolean; throwOnLi
     },
     pullRequest: async (_cwd: string, number: number): Promise<ForgePullRequestDetail | null> => {
       const found = f.list.find((p) => p.number === number);
-      return found ? { ...found, body: `body of ${number}`, files: [{ path: 'a.ts', additions: 3, deletions: 1 }], checkRuns: [{ name: 'ci', state: 'success', url: null }] } : null;
+      return found ? { ...found, body: `body of ${number}`, files: [{ path: 'a.ts', additions: 3, deletions: 1 }], checkRuns: [{ name: 'ci', state: 'success', url: null }], headSha: 'abc123' } : null;
     },
   };
   return f;
@@ -312,7 +312,7 @@ describe('project pull requests', () => {
 
       const out = await service.get(h.projectId, 3);
       expect(out.pullRequest).toMatchObject({
-        number: 3, body: 'body of 3', changeName: 'tst-1-change',
+        number: 3, body: 'body of 3', changeName: 'tst-1-change', headSha: 'abc123',
         files: [{ path: 'a.ts', additions: 3, deletions: 1 }],
         checkRuns: [{ name: 'ci', state: 'success', url: null }],
       });

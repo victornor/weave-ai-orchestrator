@@ -47,6 +47,7 @@ const MERGED = {
     { name: 'lint', workflowName: 'ci', status: 'COMPLETED', conclusion: 'SKIPPED', detailsUrl: 'https://ci/2' },
   ],
   reviewDecision: 'APPROVED', mergeCommit: { oid: '6707e61abcdef' },
+  headRefOid: 'abc123def456',
 };
 
 /** An open draft whose only check is a legacy commit status, and which nobody has reviewed. */
@@ -117,6 +118,7 @@ describe('mapping gh JSON to a pull request', () => {
       files: [{ path: 'packages/ui/src/routes/project/ProjectOverview.tsx', additions: 120, deletions: 4 }, { path: 'README.md', additions: 1, deletions: 1 }],
     });
     expect(detail.body).toContain('Because.');
+    expect(detail.headSha).toBe('abc123def456');
     expect(detail.files).toEqual([
       { path: 'packages/ui/src/routes/project/ProjectOverview.tsx', additions: 120, deletions: 4 },
       { path: 'README.md', additions: 1, deletions: 1 },
@@ -163,8 +165,9 @@ describe('pullRequest', () => {
   it('reads one pull request in full', async () => {
     fakeGh(JSON.stringify({ ...MERGED, body: 'hello', files: [{ path: 'a.ts', additions: 2, deletions: 1 }] }));
     const detail = await new GhForge().pullRequest(home, 77);
-    expect(detail).toMatchObject({ number: 77, body: 'hello' });
+    expect(detail).toMatchObject({ number: 77, body: 'hello', headSha: 'abc123def456' });
     expect(detail?.files).toEqual([{ path: 'a.ts', additions: 2, deletions: 1 }]);
+    expect(args()).toContain('headRefOid');
   });
 
   it('answers null for a number the repository does not have', async () => {

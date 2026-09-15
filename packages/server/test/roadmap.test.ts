@@ -98,3 +98,59 @@ describe('roadmap HTTP (VS-397)', () => {
     expect(theirsBody.items[0]!.title).toBe('Theirs');
   });
 });
+
+describe('roadmap blocks HTTP (VS-478)', () => {
+  it('creates, lists and patches a project\u2019s blocks with their items', async () => {
+    harness = makeHarness();
+    seedProjects(harness);
+    const app = createApp(harness.deps);
+    const actor = { kind: 'human', id: 'victor' } as const;
+
+    const created = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/${PROJECT}/roadmap/blocks`, {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ title: 'UI polish' }),
+    }));
+    expect(created.status).toBe(201);
+    const block = await created.json() as { id: string; status: string; reportedStatus: string };
+    expect(block).toMatchObject({ status: 'open', reportedStatus: 'open' });
+
+    harness.runtime.services.roadmap.addItem(actor, { blockId: block.id, title: 'Tidy the button', kind: 'task', priority: 'high' });
+
+    const listed = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/${PROJECT}/roadmap/blocks`, { headers: authed() }));
+    const body = await listed.json() as { blocks: Array<{ id: string; items: RoadmapItem[] }> };
+    expect(body.blocks).toHaveLength(1);
+    expect(body.blocks[0]!.items.map((i) => i.title)).toEqual(['Tidy the button']);
+    expect(body.blocks[0]!.items[0]).toMatchObject({ kind: 'task', priority: 'high' });
+
+    const patched = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/${PROJECT}/roadmap/blocks/${block.id}`, {
+      method: 'PATCH', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ title: 'UI polish v2', position: 0 }),
+    }));
+    expect(patched.status).toBe(200);
+    expect(await patched.json()).toMatchObject({ title: 'UI polish v2' });
+  });
+
+  it('never reaches another project\u2019s block by id, and round-trips the item fields', async () => {
+    harness = makeHarness();
+    seedProjects(harness);
+    const app = createApp(harness.deps);
+    const actor = { kind: 'human', id: 'victor' } as const;
+    const created = await app.fetch(new Request('http://127.0.0.1/api/w/ws1/projects/proj2/roadmap/blocks', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ title: 'Theirs' }),
+    }));
+    const theirs = await created.json() as { id: string };
+
+    const patch = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/${PROJECT}/roadmap/blocks/${theirs.id}`, {
+      method: 'PATCH', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ title: 'Hijacked' }),
+    }));
+    expect(patch.status).toBe(404);
+
+    const itemRes = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/${PROJECT}/roadmap`, {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ title: 'Loose' }),
+    }));
+    const item = await itemRes.json() as RoadmapItem;
+    const itemPatch = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/${PROJECT}/roadmap/${item.id}`, {
+      method: 'PATCH', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ description: 'body', kind: 'task', priority: 'high' }),
+    }));
+    expect(itemPatch.status).toBe(200);
+    expect(await itemPatch.json()).toMatchObject({ description: 'body', kind: 'task', priority: 'high' });
+  });
+});

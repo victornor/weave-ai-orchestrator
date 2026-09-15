@@ -142,3 +142,148 @@ describe('roadmap (VS-397)', () => {
     expect(mine.every((e) => e.entityId === item.id)).toBe(true);
   });
 });
+
+describe('roadmap blocks (VS-478)', () => {
+  let h: TestHarness;
+  let roadmap: RoadmapService;
+  const OTHER = 'p-other';
+
+  beforeEach(() => {
+    h = makeHarness();
+    h.ctx.db.insert('projects', {
+      id: OTHER, workspaceId: h.workspaceId, slug: 'other', name: 'Other', gitUrl: 'git@example.com:acme/other.git',
+      defaultBranch: 'main', clonePath: '/tmp/other', maxWorkers: 4, worktreeProvider: 'git', openspecEnabled: 1,
+      policiesJson: {}, status: 'ready', createdAt: 't0', updatedAt: 't0',
+    });
+    h.services.projects = {
+      get: (id: string) => {
+        if (id === h.projectId || id === h.projectSlug) return { id: h.projectId };
+        if (id === OTHER || id === 'other') return { id: OTHER };
+        throw new OcError('not_found', `project ${id} not found`);
+      },
+      list: () => [],
+    } as never;
+    h.services.roles = {
+      get: (id: string) => {
+        if (id === h.roleId) return { id, projectId: h.projectId };
+        if (id === 'r-other') return { id, projectId: OTHER };
+        throw new OcError('not_found', `role ${id} not found`);
+      },
+    } as never;
+    // A real role row in the other project, so the `roadmap_items.role_id` foreign key holds.
+    h.ctx.db.insert('roles', {
+      id: 'r-other', workspaceId: h.workspaceId, projectId: OTHER, slug: 'other-role', name: 'Other', charterSummary: 'x',
+      scopeText: 'x', sessionPolicy: 'per_ticket', maxWorkers: 1, status: 'active', specRevision: 1, createdBy: 'weaver', createdAt: 't0', updatedAt: 't0',
+    });
+    // Ticket reads go through the db so a test can move a ticket between statuses; the rows are real
+    // so the `roadmap_items.ticket_id` foreign key holds.
+    h.services.tickets = {
+      get: (id: string) => {
+        const row = h.ctx.db.get<{ id: string; projectId: string; status: string }>('SELECT id, project_id, status FROM tickets WHERE id = ?', [id]);
+        if (!row) throw new OcError('not_found', `ticket ${id} not found`);
+        return { id: row.id, projectId: row.projectId, status: row.status };
+      },
+    } as never;
+    roadmap = createRoadmapService(h.ctx, h.deps);
+    h.services.roadmap = roadmap;
+  });
+  afterEach(() => h.cleanup());
+
+  const seedTicket = (id: string, projectId: string, status = 'todo') =>
+    h.ctx.db.insert('tickets', {
+      id, workspaceId: h.workspaceId, projectId, number: Number(id.replace(/\D/g, '')) || 1, identifier: `TST-${id}`,
+      kind: 'change', title: id, status, createdByKind: 'human', createdAt: 't0', updatedAt: 't0',
+    });
+
+  const block = (title = 'UI polish', projectId = h.projectId) => roadmap.createBlock(HUMAN, projectId, { title });
+
+  it('creates blocks in order, reorders densely, and derives no status before it starts', () => {
+    const b1 = block('UI polish');
+    const b2 = block('Docs');
+    expect(b1.status).toBe('open');
+    expect(b1.reportedStatus).toBe('open');
+    expect(b1.startedAt).toBeNull();
+    expect([b1.position, b2.position]).toEqual([0, 1]);
+    roadmap.updateBlock(HUMAN, b2.id, { position: 0 });
+    expect(roadmap.listBlocks(h.projectId).map((b) => b.title)).toEqual(['Docs', 'UI polish']);
+    expect(roadmap.listBlocks(h.projectId).map((b) => b.position)).toEqual([0, 1]);
+    expect(() => roadmap.createBlock(HUMAN, h.projectId, { title: '  ' })).toThrow(/title is required/);
+  });
+
+  it('adds ordered pending tickets, merges two and moves one between blocks', () => {
+    const b1 = block();
+    const b2 = block('Second');
+    const a = roadmap.addItem(HUMAN, { blockId: b1.id, title: 'A', description: 'A body', kind: 'task', priority: 'high', roleId: h.roleId });
+    const b = roadmap.addItem(HUMAN, { blockId: b1.id, title: 'B', description: 'B body' });
+    const c = roadmap.addItem(HUMAN, { blockId: b1.id, title: 'C', description: 'C body' });
+    expect(a.kind).toBe('task');
+    expect(a.priority).toBe('high');
+    expect(a.roleId).toBe(h.roleId);
+    expect(a.status).toBe('planned');
+
+    roadmap.mergeItems(HUMAN, [a.id, b.id]);
+    expect(roadmap.listBlocks(h.projectId).find((x) => x.id === b1.id)!.items.map((i) => i.title)).toEqual(['A', 'C']);
+    expect(roadmap.get(a.id).description).toContain('A body');
+    expect(roadmap.get(a.id).description).toContain('### Merged: B');
+    expect(roadmap.merges(a.id).map((m) => m.sourceTitle)).toEqual(['B']);
+
+    roadmap.updateItem(HUMAN, c.id, { blockId: b2.id });
+    expect(roadmap.listBlocks(h.projectId).find((x) => x.id === b1.id)!.items.map((i) => i.title)).toEqual(['A']);
+    expect(roadmap.listBlocks(h.projectId).find((x) => x.id === b2.id)!.items.map((i) => i.title)).toEqual(['C']);
+    expect(roadmap.updateItem(HUMAN, c.id, { blockId: null }).blockId).toBeNull();
+    expect(roadmap.listBlocks(h.projectId).find((x) => x.id === b2.id)!.items).toHaveLength(0);
+  });
+
+  it('refuses bad kinds, foreign blocks and roles, and unsafe merges', () => {
+    const b1 = block();
+    const b2 = block('Second', OTHER);
+    const a = roadmap.addItem(HUMAN, { blockId: b1.id, title: 'A' });
+    const c = roadmap.addItem(HUMAN, { blockId: b1.id, title: 'C' });
+    expect(() => roadmap.addItem(HUMAN, { blockId: b1.id, title: 'x', kind: 'nope' as never })).toThrow(/kind must be/);
+    expect(() => roadmap.addItem(HUMAN, { blockId: b1.id, title: 'x', priority: 'huge' as never })).toThrow(/priority must be/);
+    expect(() => roadmap.addItem(HUMAN, { blockId: 'ghost', title: 'x' })).toThrow(OcError);
+    expect(() => roadmap.addItem(HUMAN, { blockId: b1.id, title: 'x', roleId: 'r-other' })).toThrow(/not in this project/);
+    expect(() => roadmap.updateItem(HUMAN, a.id, { blockId: b2.id })).toThrow(/not in this project/);
+    expect(() => roadmap.mergeItems(HUMAN, [a.id])).toThrow(/at least two/);
+    const foreign = roadmap.addItem(HUMAN, { blockId: b2.id, title: 'F' });
+    expect(() => roadmap.mergeItems(HUMAN, [a.id, foreign.id])).toThrow(/one project/);
+    seedTicket('t-1', h.projectId);
+    roadmap.updateItem(HUMAN, c.id, { ticketId: 't-1' });
+    expect(() => roadmap.mergeItems(HUMAN, [a.id, c.id])).toThrow(/already linked/);
+  });
+
+  it('starts a block into filing-ready drafts, then reports started and done from its tickets', () => {
+    const b = block();
+    const i1 = roadmap.addItem(HUMAN, { blockId: b.id, title: 'One', description: 'd1', kind: 'change', priority: 'medium', roleId: h.roleId });
+    const i2 = roadmap.addItem(HUMAN, { blockId: b.id, title: 'Two', description: 'd2' });
+    const started = roadmap.startBlock(HUMAN, b.id);
+    expect(started.block.status).toBe('started');
+    expect(started.block.startedAt).not.toBeNull();
+    expect(started.drafts).toEqual([
+      { itemId: i1.id, title: 'One', description: 'd1', kind: 'change', priority: 'medium', roleId: h.roleId },
+      { itemId: i2.id, title: 'Two', description: 'd2', kind: 'change', priority: 'medium', roleId: null },
+    ]);
+
+    seedTicket('t-1', h.projectId, 'in_progress');
+    seedTicket('t-2', h.projectId, 'done');
+    roadmap.updateItem(HUMAN, i1.id, { ticketId: 't-1' });
+    roadmap.updateItem(HUMAN, i2.id, { ticketId: 't-2' });
+    expect(roadmap.getBlock(b.id).reportedStatus).toBe('started');
+    // A second start returns only what is still unfiled, so a partial filing retries cleanly.
+    expect(roadmap.startBlock(HUMAN, b.id).drafts).toEqual([]);
+    h.ctx.db.run("UPDATE tickets SET status = 'done' WHERE id = 't-1'");
+    expect(roadmap.getBlock(b.id).reportedStatus).toBe('done');
+    roadmap.updateBlock(HUMAN, b.id, { status: 'dropped' });
+    expect(() => roadmap.startBlock(HUMAN, b.id)).toThrow(/dropped/);
+  });
+
+  it('emits block events with the project id', async () => {
+    const b = block();
+    roadmap.updateBlock(HUMAN, b.id, { notes: 'n' });
+    roadmap.startBlock(HUMAN, b.id);
+    await Promise.resolve();
+    const mine = h.events.filter((e) => e.type.startsWith('roadmap.block.'));
+    expect(mine.map((e) => e.type)).toEqual(['roadmap.block.created', 'roadmap.block.updated', 'roadmap.block.updated']);
+    expect(mine.every((e) => (e.payload as { projectId: string }).projectId === h.projectId)).toBe(true);
+  });
+});

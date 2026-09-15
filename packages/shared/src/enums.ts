@@ -156,6 +156,30 @@ export const ROUTINE_MIN_INTERVAL_MINUTES = 15;
 export const ROADMAP_STATUSES = ['idea', 'planned', 'dropped'] as const;
 export type RoadmapStatus = (typeof ROADMAP_STATUSES)[number];
 
+/**
+ * A roadmap block's stored lifecycle (VS-478). `done` is deliberately absent: it is derived from the
+ * block's links (see `roadmapBlockStatus`), never written, so it cannot drift from the tickets.
+ */
+export const ROADMAP_BLOCK_STATUSES = ['open', 'started', 'dropped'] as const;
+export type RoadmapBlockStoredStatus = (typeof ROADMAP_BLOCK_STATUSES)[number];
+/** What a block reports, stored status plus the derived `done` (VS-478). */
+export const REPORTED_ROADMAP_BLOCK_STATUSES = ['open', 'started', 'done', 'dropped'] as const;
+export type RoadmapBlockStatus = (typeof REPORTED_ROADMAP_BLOCK_STATUSES)[number];
+
+/**
+ * The status a block reports (VS-478). A `started` block whose every item is linked to a ticket that
+ * is terminal is `done`; an item with no link, or a non-terminal ticket, keeps it `started`. Every
+ * other stored status is reported unchanged (a dropped or still-open block never becomes done).
+ */
+export function roadmapBlockStatus(
+  stored: RoadmapBlockStoredStatus,
+  linkedTicketStatuses: ReadonlyArray<TicketStatus | null | undefined>,
+): RoadmapBlockStatus {
+  if (stored !== 'started') return stored;
+  if (linkedTicketStatuses.length === 0) return 'started';
+  return linkedTicketStatuses.every((s) => s != null && TERMINAL_TICKET_STATUSES.includes(s)) ? 'done' : 'started';
+}
+
 export const WAKE_STATUSES = ['queued', 'claimed', 'coalesced', 'skipped', 'completed', 'failed', 'cancelled'] as const;
 export type WakeStatus = (typeof WAKE_STATUSES)[number];
 

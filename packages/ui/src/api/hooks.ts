@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanSummary } from '@weave-ai/shared';
+import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, RoadmapBlock, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanSummary } from '@weave-ai/shared';
 import { dayKey } from '@weave-ai/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -274,6 +274,16 @@ export function useRoadmap(projectId: string | null | undefined, wsOverride?: st
   return useQuery({
     queryKey: qk.roadmap(ws, projectId ?? ''),
     queryFn: () => api.ws<{ items?: RoadmapItem[] } | RoadmapItem[]>(ws, `/projects/${projectId}/roadmap`).then((r) => listOf<RoadmapItem>(r, 'items')),
+    enabled: Boolean(projectId),
+  });
+}
+
+/** A project's roadmap blocks, each with its pending tickets, in order (VS-478). */
+export function useRoadmapBlocks(projectId: string | null | undefined, wsOverride?: string): UseQueryResult<RoadmapBlock[]> {
+  const ws = useHookWs(wsOverride);
+  return useQuery({
+    queryKey: qk.roadmapBlocks(ws, projectId ?? ''),
+    queryFn: () => api.ws<{ blocks?: RoadmapBlock[] } | RoadmapBlock[]>(ws, `/projects/${projectId}/roadmap/blocks`).then((r) => listOf<RoadmapBlock>(r, 'blocks')),
     enabled: Boolean(projectId),
   });
 }

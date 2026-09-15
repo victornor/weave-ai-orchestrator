@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RoadmapItem, ToolResult } from '@weave-ai/shared';
-import { runTool, type ToolCtx } from '../src/tools.js';
+import { TOOLS, runTool, type ToolCtx } from '../src/tools.js';
 import type { RunTokenClaims } from '../src/runtoken.js';
 import { makeHarness, ticket, type Harness } from './fakes.js';
 
@@ -124,5 +124,87 @@ describe('the weave_roadmap_* tools (VS-397)', () => {
 
     const listed = await call(h, 'weave_roadmap_list', { projectId: 'proj1' });
     expect(items(h, listed).map((i) => i.title)).toEqual(['Dark mode']);
+  });
+});
+
+describe('the roadmap block and pending-ticket tools (VS-478)', () => {
+  it('creates a block, bundles three pending tickets and moves one between blocks', async () => {
+    const h = makeHarness(); harness = h; seed(h);
+    const made = await call(h, 'weave_roadmap_block_create', { projectId: 'proj1', title: 'UI polish' });
+    expect(made.ok).toBe(true);
+    if (!made.ok) return;
+    const b1 = (made.data as { id: string }).id;
+    const made2 = await call(h, 'weave_roadmap_block_create', { projectId: 'proj1', title: 'Docs' });
+    const b2 = (made2 as { ok: true; data: { id: string } }).data.id;
+
+    const a = (await call(h, 'weave_roadmap_item_add', { blockId: b1, title: 'A', description: 'a', kind: 'task', priority: 'high' })) as { ok: true; data: { id: string } };
+    const b = (await call(h, 'weave_roadmap_item_add', { blockId: b1, title: 'B' })) as { ok: true; data: { id: string } };
+    const c = (await call(h, 'weave_roadmap_item_add', { blockId: b1, title: 'C' })) as { ok: true; data: { id: string } };
+    expect(a.ok && b.ok && c.ok).toBe(true);
+
+    const merged = await call(h, 'weave_roadmap_item_merge', { itemIds: [a.data.id, b.data.id] });
+    expect(merged.ok).toBe(true);
+    if (merged.ok) expect((merged.data as { description: string }).description).toContain('### Merged: B');
+
+    const moved = await call(h, 'weave_roadmap_item_update', { itemId: c.data.id, blockId: b2 });
+    expect(moved.ok).toBe(true);
+    if (moved.ok) expect((moved.data as { blockId: string }).blockId).toBe(b2);
+
+    const listed = await call(h, 'weave_roadmap_block_list', { projectId: 'proj1' });
+    expect(listed.ok).toBe(true);
+    if (!listed.ok) return;
+    const blocks = (listed.data as { blocks: Array<{ id: string; items: RoadmapItem[] }> }).blocks;
+    expect(blocks.find((x) => x.id === b1)!.items.map((i) => i.title)).toEqual(['A']);
+    expect(blocks.find((x) => x.id === b2)!.items.map((i) => i.title)).toEqual(['C']);
+  });
+
+  it('starts a block into filing-ready drafts and links each created ticket', async () => {
+    const h = makeHarness(); harness = h; seed(h);
+    const made = await call(h, 'weave_roadmap_block_create', { projectId: 'proj1', title: 'UI polish' });
+    const b1 = (made as { ok: true; data: { id: string } }).data.id;
+    const i1 = (await call(h, 'weave_roadmap_item_add', { blockId: b1, title: 'One', description: 'd1', kind: 'change', priority: 'high' })) as { ok: true; data: { id: string } };
+
+    const started = await call(h, 'weave_roadmap_block_start', { blockId: b1 });
+    expect(started.ok).toBe(true);
+    if (!started.ok) return;
+    const data = started.data as { block: { status: string }; drafts: Array<{ itemId: string; title: string; description: string; kind: string; priority: string }> };
+    expect(data.block.status).toBe('started');
+    expect(data.drafts).toEqual([{ itemId: i1.data.id, title: 'One', description: 'd1', kind: 'change', priority: 'high', roleId: null }]);
+
+    const linked = await call(h, 'weave_roadmap_item_update', { itemId: i1.data.id, ticketId: 'tk_1' });
+    expect(linked.ok).toBe(true);
+    if (linked.ok) expect((linked.data as { ticketId: string }).ticketId).toBe('tk_1');
+    // A second start has nothing left to file.
+    const again = await call(h, 'weave_roadmap_block_start', { blockId: b1 });
+    if (again.ok) expect((again.data as { drafts: unknown[] }).drafts).toHaveLength(0);
+  });
+
+  it('refuses every block and pending-ticket write to a worker', async () => {
+    const h = makeHarness(); harness = h; seed(h);
+    const made = await call(h, 'weave_roadmap_block_create', { projectId: 'proj1', title: 'UI polish' });
+    const b1 = (made as { ok: true; data: { id: string } }).data.id;
+    const item = (await call(h, 'weave_roadmap_item_add', { blockId: b1, title: 'A' })) as { ok: true; data: { id: string } };
+
+    for (const [name, input] of [
+      ['weave_roadmap_block_create', { projectId: 'proj1', title: 'Sneaky' }],
+      ['weave_roadmap_block_list', { projectId: 'proj1' }],
+      ['weave_roadmap_block_update', { blockId: b1, title: 'Hijacked' }],
+      ['weave_roadmap_block_start', { blockId: b1 }],
+      ['weave_roadmap_item_add', { blockId: b1, title: 'Sneaky' }],
+      ['weave_roadmap_item_update', { itemId: item.data.id, title: 'Hijacked' }],
+      ['weave_roadmap_item_merge', { itemIds: [item.data.id, 'ghost'] }],
+    ] as const) {
+      const res = await call(h, name, input, WORKER);
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error.code).toBe('forbidden');
+    }
+  });
+
+  it('states the bundling intent in the tool descriptions', () => {
+    const byName = new Map(TOOLS.map((t) => [t.name, t.description]));
+    expect(byName.get('weave_roadmap_block_create')).toMatch(/bundle|one ticket/);
+    expect(byName.get('weave_roadmap_block_start')).toMatch(/weave_ticket_create/);
+    expect(byName.get('weave_roadmap_block_start')).toMatch(/bundl/);
+    expect(byName.get('weave_roadmap_item_merge')).toMatch(/bundle|one worker/);
   });
 });

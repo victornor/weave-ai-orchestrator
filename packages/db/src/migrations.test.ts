@@ -1331,16 +1331,18 @@ describe('migrations', () => {
 
     it('creates the table with its columns, index and foreign keys', () => {
       const db = openDb(join(dir, 'roadmap.sqlite'));
+      // The five VS-478 pending-ticket columns append to the right of the VS-397 ones (ALTER TABLE).
       expect(db.all<{ name: string }>('PRAGMA table_info(roadmap_items)').map((c) => c.name)).toEqual([
         'id', 'project_id', 'title', 'notes', 'position', 'status', 'ticket_id',
         'created_by_kind', 'created_by_id', 'created_at', 'updated_at',
+        'block_id', 'description', 'kind', 'priority', 'role_id',
       ]);
       expect(db.all<{ name: string }>('PRAGMA index_list(roadmap_items)').map((i) => i.name))
         .toContain('roadmap_items_project_position');
       expect(db.all<{ from: string; table: string }>('PRAGMA foreign_key_list(roadmap_items)').map((f) => `${f.from}->${f.table}`).sort())
-        .toEqual(['project_id->projects', 'ticket_id->tickets']);
+        .toEqual(['block_id->roadmap_blocks', 'project_id->projects', 'role_id->roles', 'ticket_id->tickets']);
       expect(db.all<{ from: string; onDelete: string }>('PRAGMA foreign_key_list(roadmap_items)').map((f) => `${f.from}:${f.onDelete}`).sort())
-        .toEqual(['project_id:CASCADE', 'ticket_id:SET NULL']);
+        .toEqual(['block_id:SET NULL', 'project_id:CASCADE', 'role_id:SET NULL', 'ticket_id:SET NULL']);
       db.close();
     });
 
@@ -1374,6 +1376,94 @@ describe('migrations', () => {
       db.run("DELETE FROM projects WHERE id = 'p1'");
       expect(db.all('SELECT id FROM roadmap_items')).toHaveLength(0);
       expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+      db.close();
+    });
+  });
+
+  describe('0043_roadmap_blocks (VS-478)', () => {
+    function seedProject(db: Db, id: string): void {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at)
+         VALUES (?, 'w1', ?, 'API', 'git@e:a/b.git', 'main', '/tmp/p', 4, 'git', 1, '{}', 'ready', 't0', 't0')`, [id, id]);
+    }
+    const insertBlock = (db: Db, id: string, projectId: string, over: Record<string, unknown> = {}) =>
+      db.insert('roadmap_blocks', {
+        id, projectId, title: 'UI polish', notes: '', position: 0, status: 'open', startedAt: null,
+        createdByKind: 'weaver', createdById: null, createdAt: 't0', updatedAt: 't0', ...over,
+      });
+    const insertItem = (db: Db, id: string, projectId: string, over: Record<string, unknown> = {}) =>
+      db.insert('roadmap_items', {
+        id, projectId, blockId: null, title: 'Tidy the button', notes: '', description: '', kind: 'change',
+        priority: 'medium', roleId: null, position: 0, status: 'planned', createdByKind: 'weaver',
+        createdById: null, createdAt: 't0', updatedAt: 't0', ...over,
+      });
+
+    it('creates the block and merge tables with their columns, indexes and foreign keys', () => {
+      const db = openDb(join(dir, 'blocks.sqlite'));
+      expect(db.all<{ name: string }>('PRAGMA table_info(roadmap_blocks)').map((c) => c.name)).toEqual([
+        'id', 'project_id', 'title', 'notes', 'position', 'status', 'started_at',
+        'created_by_kind', 'created_by_id', 'created_at', 'updated_at',
+      ]);
+      expect(db.all<{ name: string }>('PRAGMA index_list(roadmap_blocks)').map((i) => i.name))
+        .toContain('roadmap_blocks_project_position');
+      expect(db.all<{ from: string; onDelete: string }>('PRAGMA foreign_key_list(roadmap_blocks)').map((f) => `${f.from}:${f.onDelete}`).sort())
+        .toEqual(['project_id:CASCADE']);
+      expect(db.all<{ name: string }>('PRAGMA table_info(roadmap_item_merges)').map((c) => c.name)).toEqual([
+        'id', 'item_id', 'source_item_id', 'source_title', 'source_description',
+        'merged_by_kind', 'merged_by_id', 'merged_at',
+      ]);
+      expect(db.all<{ from: string; onDelete: string }>('PRAGMA foreign_key_list(roadmap_item_merges)').map((f) => `${f.from}:${f.onDelete}`).sort())
+        .toEqual(['item_id:CASCADE']);
+      db.close();
+    });
+
+    it('keeps a pre-0043 item unchanged and gives it the pending-ticket defaults', () => {
+      const path = join(dir, 'blocks-backfill.sqlite');
+      const before = openDbAsOf(path, '0042_thread_message_replies.sql');
+      seedProject(before, 'p1');
+      before.run(
+        `INSERT INTO roadmap_items (id, project_id, title, notes, position, status, created_by_kind, created_at, updated_at)
+         VALUES ('legacy', 'p1', 'Old idea', '## notes', 0, 'planned', 'human', 't0', 't0')`);
+      before.close();
+
+      const db = openDb(path);
+      expect(db.get('SELECT * FROM roadmap_items WHERE id = ?', ['legacy'])).toMatchObject({
+        id: 'legacy', title: 'Old idea', notes: '## notes', position: 0, status: 'planned',
+        blockId: null, description: '', kind: 'change', priority: 'medium', roleId: null,
+      });
+      db.close();
+    });
+
+    it('cascades blocks on a hard project delete and returns items to loose when a block goes', () => {
+      const db = openDb(join(dir, 'blocks-cascade.sqlite'));
+      seedProject(db, 'p1');
+      insertBlock(db, 'b1', 'p1');
+      insertItem(db, 'i1', 'p1', { blockId: 'b1' });
+      // Deleting a block leaves its pending tickets as loose items, never orphaned or deleted.
+      db.run("DELETE FROM roadmap_blocks WHERE id = 'b1'");
+      expect(db.get<{ blockId: string | null }>('SELECT block_id FROM roadmap_items WHERE id = ?', ['i1'])!.blockId).toBeNull();
+      insertBlock(db, 'b2', 'p1');
+      db.run("DELETE FROM projects WHERE id = 'p1'");
+      expect(db.all('SELECT id FROM roadmap_blocks')).toHaveLength(0);
+      expect(db.all('SELECT id FROM roadmap_items')).toHaveLength(0);
+      expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+      db.close();
+    });
+
+    it('keeps a merge record after the merged item is gone and deletes it with the survivor', () => {
+      const db = openDb(join(dir, 'merge-records.sqlite'));
+      seedProject(db, 'p1');
+      insertItem(db, 'survivor', 'p1');
+      db.insert('roadmap_item_merges', {
+        id: 'm1', itemId: 'survivor', sourceItemId: 'gone', sourceTitle: 'Old', sourceDescription: 'body',
+        mergedByKind: 'weaver', mergedById: null, mergedAt: 't0',
+      });
+      expect(db.get<{ sourceTitle: string }>('SELECT source_title FROM roadmap_item_merges WHERE id = ?', ['m1'])!.sourceTitle).toBe('Old');
+      db.run("DELETE FROM roadmap_items WHERE id = 'survivor'");
+      expect(db.all('SELECT id FROM roadmap_item_merges')).toHaveLength(0);
       db.close();
     });
   });

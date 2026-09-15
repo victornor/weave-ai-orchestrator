@@ -189,6 +189,16 @@ describe('prompt rendering', () => {
       }
     });
 
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('carries the roadmap block and bundling guidance (VS-478)', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const out = renderConductorInstructions(h.ctx, h.deps);
+      expect(out).toContain('weave_roadmap_block_create');
+      expect(out).toContain('weave_roadmap_block_start');
+      expect(out).toContain('weave_roadmap_item_merge');
+      expect(out).toMatch(/bundl/i);
+      expect(out).toMatch(/save tokens/i);
+    });
+
     it.runIf(existsSync(SHIPPED_TEMPLATES))('the shipped worker template consumes its object data (no same-class mismatch)', () => {
       h.ctx.templatesDir = SHIPPED_TEMPLATES;
       const out = renderWorkerInstructions(h.ctx, h.deps, worker);

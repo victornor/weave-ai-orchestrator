@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-15
+goal: "Roadmap blocks: group pending tickets into named blocks the weaver builds
+  up and bundles, start a whole block as real tickets, and give each project a
+  Roadmap page linked from the sidebar"

@@ -192,6 +192,21 @@ describe('each workspace group lists its own projects', () => {
     const current = within(rail).getAllByRole('link').filter((a) => a.getAttribute('aria-current') === 'page');
     expect(current).toHaveLength(1);
   });
+
+  it('gives each project a Roadmap sub-link in the rail and the phone More list, and highlights the project on its roadmap (VS-478)', () => {
+    state.projectsByWs = { acme: [{ id: 'p1', slug: 'agent-conductor', name: 'WeaveAI' }] };
+    state.path = '/w/acme/p/agent-conductor/roadmap';
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).getByRole('link', { name: 'Roadmap' })).toHaveAttribute('href', '/w/acme/p/agent-conductor/roadmap');
+    expect(within(rail).getByRole('link', { name: 'WeaveAI' })).toHaveAttribute('aria-current', 'page');
+
+    // The rail is hidden at phone width, so the More list carries the same pair.
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'More' }));
+    const dialog = screen.getByRole('dialog', { name: 'More' });
+    expect(within(dialog).getByRole('link', { name: 'Roadmap' })).toHaveAttribute('href', '/w/acme/p/agent-conductor/roadmap');
+    expect(within(dialog).getByRole('link', { name: 'WeaveAI' })).toHaveAttribute('href', '/w/acme/p/agent-conductor');
+  });
 });
 
 describe('the V2 rail shows a workspace\'s own loaded plugins with a page (VS-385)', () => {

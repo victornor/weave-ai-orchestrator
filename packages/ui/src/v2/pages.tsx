@@ -35,6 +35,7 @@ export { V2UsageScreen as V2UsagePage } from './usage/UsagePage';
 export { V2ChangelogScreen as V2ChangelogPage } from './changelog/ChangelogPage';
 // VS-352: the project overview is a real screen.
 export { V2ProjectScreen as V2ProjectPage } from './project/ProjectPage';
+export { V2RoadmapScreen as V2RoadmapPage } from './project/RoadmapPage';
 // VS-452: the change explorer a merge card opens.
 export { V2ChangeExplorerScreen as V2ChangeExplorerPage } from './project/ChangeExplorer';
 

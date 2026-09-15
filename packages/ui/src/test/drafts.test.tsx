@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Composer } from '../components/Composer';
-import { draftKey, readDraft, useDraft, writeDraft } from '../lib/drafts';
+import { draftKey, readDraft, seedDraft, takeSeededDraft, useDraft, writeDraft } from '../lib/drafts';
 
 /** A composer bound to one conversation's draft, the way the routes bind it. */
 function Box({ ws, thread }: { ws: string; thread: string }): React.ReactElement {
@@ -72,5 +72,22 @@ describe('drafts', () => {
     render(<Box ws="other" thread="ticket:tk_1" />);
     expect(box().value).toBe('');
     expect(readDraft(draftKey('acme', 'ticket:tk_1')).text).toBe('in acme');
+  });
+});
+
+describe('seeded prompts (VS-478)', () => {
+  it('is consumed once and never crosses workspaces', () => {
+    seedDraft('acme', 'Tell me about roadmaps');
+    expect(takeSeededDraft('other')).toBeNull();
+    expect(takeSeededDraft('acme')).toBe('Tell me about roadmaps');
+    expect(takeSeededDraft('acme')).toBeNull();
+  });
+
+  it('places the seed in the thread draft and leaves an existing draft alone', () => {
+    seedDraft('acme', 'Tell me about roadmaps');
+    writeDraft(draftKey('acme', 'thread:th_1'), { text: 'already typing' });
+    // The chat only consumes the seed into an empty composer, so the human's words survive.
+    expect(readDraft(draftKey('acme', 'thread:th_1')).text).toBe('already typing');
+    expect(takeSeededDraft('acme')).toBe('Tell me about roadmaps');
   });
 });

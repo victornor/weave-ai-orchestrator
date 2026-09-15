@@ -26,6 +26,7 @@ interface GhPr {
   statusCheckRollup?: GhCheck[] | null;
   reviewDecision?: string | null;
   mergeCommit?: { oid?: string } | null;
+  headRefOid?: string;
   files?: Array<{ path?: string; additions?: number; deletions?: number }> | null;
 }
 
@@ -39,7 +40,7 @@ const LIST_FIELDS = [
   'createdAt', 'updatedAt', 'mergedAt', 'closedAt', 'additions', 'deletions', 'changedFiles',
   'statusCheckRollup', 'reviewDecision', 'mergeCommit',
 ].join(',');
-const VIEW_FIELDS = `${LIST_FIELDS},body,files`;
+const VIEW_FIELDS = `${LIST_FIELDS},body,files,headRefOid`;
 
 /** `gh pr list` has no "updated since" filter, so the window is applied by the caller, not here. */
 const DEFAULT_LIST_LIMIT = 60;
@@ -140,7 +141,7 @@ export function workflowCountFromGh(stdout: string): boolean | null {
 
 /** Exported for the mapping tests, which run `gh`'s recorded JSON through it and never call GitHub. */
 export function pullRequestFromGh(doc: GhPr): ForgePullRequest { return toPullRequest(doc); }export function pullRequestDetailFromGh(doc: GhPr): ForgePullRequestDetail {
-  return { ...toPullRequest(doc), body: doc.body ?? '', files: (doc.files ?? []).map(toFile), checkRuns: (doc.statusCheckRollup ?? []).map(toCheck) };
+  return { ...toPullRequest(doc), body: doc.body ?? '', files: (doc.files ?? []).map(toFile), checkRuns: (doc.statusCheckRollup ?? []).map(toCheck), headSha: doc.headRefOid ?? null };
 }
 
 function rollupState(rollup: GhCheck[] | null | undefined): ForgeCheckState {

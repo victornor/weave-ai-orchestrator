@@ -357,6 +357,21 @@ export function V2DecisionCard({
       ? `/v2/w/${encodeURIComponent(ws)}/tickets/${encodeURIComponent(decision.ticketId)}/artifacts/${encodeURIComponent(artifact.externalId!)}`
       : null;
 
+  // VS-452: a merge card can open the change explorer for the pull request it is about. The number
+  // comes from the ticket's `pull_request` work product (the same records the Artifact link reads);
+  // the project is the route's own param, the slug the caller resolved `projectLabel` from. Both are
+  // needed to build the address, so the control is absent rather than broken when either is missing.
+  const reviewProject = projectSlug ?? decision.projectId;
+  const reviewNumber = useMemo(() => {
+    const product = (products.data ?? []).find((p) => p.type === 'pull_request' && p.url);
+    const m = product?.url ? /\/pull\/(\d+)(?:\b|$)/.exec(product.url) : null;
+    return m?.[1] ? Number(m[1]) : null;
+  }, [products.data]);
+  const reviewChangesHref =
+    reviewNumber !== null && ws && reviewProject
+      ? `/v2/w/${encodeURIComponent(ws)}/p/${encodeURIComponent(reviewProject)}/changes/${reviewNumber}`
+      : null;
+
   const approveKey = namedKind ? NAMED_CARD_OPTION_KEYS[namedKind].approve : 'approve';
   const reviseKey = namedKind === 'plan_approval' || namedKind === 'action_approval' ? NAMED_CARD_OPTION_KEYS[namedKind].revise : 'revise';
   const rejectKey = namedKind === 'plan_approval' || namedKind === 'action_approval' ? NAMED_CARD_OPTION_KEYS[namedKind].reject : 'reject';
@@ -637,6 +652,11 @@ export function V2DecisionCard({
             </>
           ) : namedKind === 'merge_approval' ? (
             <>
+              {reviewChangesHref ? (
+                <A to={reviewChangesHref} className="inline-flex h-9 items-center rounded-r4 border border-line-2 px-3 text-meta text-text-1 hover:bg-bg-2">
+                  Review changes
+                </A>
+              ) : null}
               <button
                 type="button" disabled={busy || blocked || missing.length > 0}
                 onClick={() => answer(approveKey)}

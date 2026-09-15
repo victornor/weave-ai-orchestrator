@@ -239,6 +239,14 @@ const v2KnowledgeSpecsRoute = v2WsRouteFor('knowledge/specs', 'V2KnowledgeSpecsP
 const v2UsageRoute = v2WsRouteFor('usage', 'V2UsagePage');
 const v2ChangelogRoute = v2WsRouteFor('changelog', 'V2ChangelogPage');
 const v2ProjectRoute = v2WsRouteFor('p/$project', 'V2ProjectPage');
+// VS-452: the change explorer, deep-linkable per file. A sibling of the project page rather than a
+// child, so a file's own URL is stable (`p/:project/changes/:number?file=`).
+const v2ChangesRoute = createRoute({
+  getParentRoute: () => v2WsRoute,
+  path: 'p/$project/changes/$number',
+  validateSearch: (s: Record<string, unknown>) => s,
+  component: lazyRouteComponent(() => import('./v2/pages'), 'V2ChangeExplorerPage'),
+});
 const v2TicketRoute = v2WsRouteFor('tickets/$ticketId', 'V2TicketPage');
 const v2TicketArtifactRoute = v2WsRouteFor('tickets/$ticketId/artifacts/$key', 'V2TicketArtifactReader');
 const v2ArtifactRoute = v2WsRouteFor('artifacts/$key', 'V2ArtifactPage');
@@ -365,6 +373,7 @@ const routeTree = rootRoute.addChildren([
         v2UsageRoute,
         v2ChangelogRoute,
         v2ProjectRoute,
+        v2ChangesRoute,
         v2TicketRoute,
         v2TicketArtifactRoute,
         v2ArtifactRoute,

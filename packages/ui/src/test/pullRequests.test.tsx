@@ -158,6 +158,7 @@ describe('opening one', () => {
       body: '## Why\n\nBecause the section was empty.',
       files: [{ path: 'packages/ui/src/routes/project/PullRequestsSection.tsx', additions: 120, deletions: 4 }, { path: 'README.md', additions: 1, deletions: 1 }],
       checkRuns: [{ name: 'ci / test', state: 'success', url: 'https://ci/1' }, { name: 'ci / lint', state: 'failure', url: null }],
+      headSha: null,
     },
   });
 

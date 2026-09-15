@@ -733,7 +733,7 @@ export interface ProjectPullRequest extends ForgePullRequest {
   changeName: string | null;
   queue: { state: 'landing' | 'waiting'; position: number | null } | null;
 }
-export interface ProjectPullRequestDetail extends ProjectPullRequest { body: string; files: ForgeChangedFile[]; checkRuns: ForgeCheck[] }
+export interface ProjectPullRequestDetail extends ProjectPullRequest { body: string; files: ForgeChangedFile[]; checkRuns: ForgeCheck[]; /** The pull request's current head commit (VS-452), or null when the forge reports none. */ headSha: string | null }
 export interface ProjectPullRequests {
   projectId: string;
   available: boolean;

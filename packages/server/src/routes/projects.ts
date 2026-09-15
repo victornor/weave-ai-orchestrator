@@ -164,7 +164,9 @@ export function projectRoutes(): Hono<AppEnv> {
     const project = s.projects.get(c.req.param('id'));
     const input = await body(c, z.object({ title: z.string().min(1).optional() }).strict());
     const { plan, agent } = await s.workers.startOrResumePlan(c.get('actor'), project.id, { title: input.title });
-    return c.json({ plan, agent: { id: agent.id, status: agent.status } });
+    // `runtimeId` lets the Plan modal resolve the planner model's context window for each turn's
+    // summary ("Planner did N tool calls · tokens · session size", VS-442).
+    return c.json({ plan, agent: { id: agent.id, status: agent.status, runtimeId: agent.runtimeId } });
   });
   app.get('/:id/plans/:planId', (c) => {
     const s = c.get('ws').services;

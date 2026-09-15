@@ -3,9 +3,9 @@
  * list, and drives submit/discard/tier-override/reorder through the plan hooks. Hooks are mocked
  * directly (the established V2 pattern — see chat.test.tsx), not a real QueryClient + fetch.
  */
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PlanDraft, Role, ThreadMessage, WorkspaceEvent } from '@weave-ai/shared';
+import type { PlanDraft, Role, RunEvent, RunTrace, ThreadMessage, WorkspaceEvent } from '@weave-ai/shared';
 import { project, role } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -15,6 +15,9 @@ const state = vi.hoisted(() => ({
   drafts: [] as Array<PlanDraft & { blockedBy: string[] }>,
   roles: [] as Role[],
   messages: [] as ThreadMessage[],
+  traces: [] as RunTrace[],
+  runEvents: [] as RunEvent[],
+  runState: 'connected' as 'connected' | 'offline' | 'unreachable',
   posted: [] as Array<Record<string, unknown>>,
   patched: [] as Array<Record<string, unknown>>,
   removed: [] as Array<Record<string, unknown>>,
@@ -24,6 +27,7 @@ const state = vi.hoisted(() => ({
   onEvent: null as ((e: WorkspaceEvent) => void) | null,
   listening: false,
   metered: false,
+  go: vi.fn(),
 }));
 
 function resetState(): void {
@@ -33,6 +37,9 @@ function resetState(): void {
   state.drafts = [];
   state.roles = [];
   state.messages = [];
+  state.traces = [];
+  state.runEvents = [];
+  state.runState = 'connected';
   state.posted = [];
   state.patched = [];
   state.removed = [];
@@ -42,6 +49,7 @@ function resetState(): void {
   state.onEvent = null;
   state.listening = false;
   state.metered = false;
+  state.go.mockReset();
 }
 
 vi.mock('../api/context', () => ({
@@ -66,18 +74,28 @@ vi.mock('../lib/dictation', () => ({
   }),
 }));
 
+vi.mock('../app/link', () => ({ useGo: () => state.go }));
+
+vi.mock('../api/runStream', () => ({
+  useRunEventStream: () => ({ events: state.runEvents, status: { state: state.runState }, retryNow: vi.fn() }),
+}));
+
 vi.mock('../api/hooks', () => ({
   useStartOrResumePlan: () => ({
-    mutate: (input: { projectId: string; title?: string }, opts?: { onSuccess?: (r: { plan: { id: string } }) => void }) => {
+    mutate: (input: { projectId: string; title?: string }, opts?: { onSuccess?: (r: { plan: { id: string }; agent: { id: string; status: string; runtimeId: string } }) => void }) => {
       state.startCalls.push(input);
-      if (state.planId) opts?.onSuccess?.({ plan: { id: state.planId } });
+      if (state.planId) opts?.onSuccess?.({ plan: { id: state.planId }, agent: { id: 'planner_1', status: 'active', runtimeId: 'claude' } });
     },
   }),
   usePlan: (_projectId: string | null, planId: string | null) => ({
     data: planId ? { plan: { id: planId, status: state.planStatus, threadId: 'th_plan', agentId: 'planner_1' }, drafts: state.drafts } : undefined,
   }),
   useRoles: () => ({ data: state.roles }),
-  useThreadMessages: () => ({ data: state.messages }),
+  useThreadMessages: () => ({ data: state.messages, isError: false }),
+  useRunTraces: () => ({ data: state.traces }),
+  useRunEvents: () => ({ data: [] }),
+  useRuntimes: () => ({ data: [{ id: 'claude', capabilities: { contextCompactionAt: 0.8 } }] }),
+  useRuntimeModels: () => ({ data: [{ id: 'sonnet', contextWindowTokens: 1_000_000 }] }),
   usePostThreadMessage: () => ({
     mutate: (v: Record<string, unknown>) => { state.posted.push(v); },
     mutateAsync: (v: Record<string, unknown>) => { state.posted.push(v); return Promise.resolve(); },
@@ -121,7 +139,7 @@ describe('PlanModal (VS-398)', () => {
   });
 
   it('renders the conversation and sends a message', () => {
-    state.messages = [{ id: 'm1', threadId: 'th_plan', direction: 'inbound', authorKind: 'human', authorId: 'v', body: 'Let’s plan the redesign', parts: [], createdAt: 't0' } as unknown as ThreadMessage];
+    state.messages = [{ id: 'm1', threadId: 'th_plan', direction: 'inbound', authorKind: 'human', authorId: 'v', body: 'Let’s plan the redesign', replyToMessageIds: [], parts: [], createdAt: 't0' } as unknown as ThreadMessage];
     render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
     expect(screen.getByText('Let’s plan the redesign')).toBeInTheDocument();
 
@@ -158,7 +176,7 @@ describe('PlanModal (VS-398)', () => {
   it('shows an attachment already sent on a plan message', () => {
     state.messages = [{
       id: 'm1', threadId: 'th_plan', direction: 'inbound', authorKind: 'human', authorId: 'v', body: 'here it is',
-      parts: [{ type: 'attachment', id: 'att1', filename: 'notes.txt', mediaType: 'text/plain', byteSize: 1234 }],
+      replyToMessageIds: [], parts: [{ type: 'attachment', id: 'att1', filename: 'notes.txt', mediaType: 'text/plain', byteSize: 1234 }],
       createdAt: 't0',
     } as unknown as ThreadMessage];
     render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
@@ -325,5 +343,90 @@ describe('PlanModal (VS-398)', () => {
     const canvas = container.querySelector('canvas') as HTMLCanvasElement;
     expect(canvas.className).toMatch(/\bw-full\b/);
     expect(canvas.className).toMatch(/\bh-full\b/);
+  });
+
+  it('renders a planner reply as markdown, not a plain-text bubble (VS-442)', () => {
+    state.messages = [{
+      id: 'm1', threadId: 'th_plan', direction: 'outbound', authorKind: 'agent', authorId: 'planner_1',
+      body: '## Approach\n\n- first step\n- second step\n\nRun `pnpm test` before you push.',
+      replyToMessageIds: [], parts: [], createdAt: 't0',
+    } as unknown as ThreadMessage];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.getByRole('heading', { name: 'Approach' })).toBeInTheDocument();
+    expect(screen.getAllByRole('listitem').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('pnpm test').tagName).toBe('CODE');
+  });
+
+  it('summarises a finished planner turn as “Planner did …” with tools, tokens and session (VS-442)', () => {
+    state.messages = [{
+      id: 'm1', threadId: 'th_plan', direction: 'outbound', authorKind: 'agent', authorId: 'planner_1', runId: 'pr1',
+      body: 'Drafted two tickets.', replyToMessageIds: [], parts: [], createdAt: 't0',
+    } as unknown as ThreadMessage];
+    state.traces = [{
+      runId: 'pr1', status: 'succeeded', agentId: 'planner_1', createdAt: 't0', startedAt: 't0', finishedAt: 't1',
+      durationMs: 34_000, toolCalls: 7, files: 0, errors: 0, texts: 2, events: 10, summary: null, model: 'sonnet',
+      usage: { inputTokens: 10_000, outputTokens: 8_400, cachedInputTokens: 0, contextTokens: 120_000, basis: 'reported' },
+    }];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    const summary = document.querySelector('[data-chat-summary]') as HTMLElement;
+    expect(summary).not.toBeNull();
+    expect(summary).toHaveTextContent(/Planner did/);
+    expect(summary).toHaveTextContent(/7 tool calls/);
+    expect(summary).toHaveTextContent(/18\.4k tok/);
+    expect(summary).toHaveTextContent(/120k\/1M ctx/);
+  });
+
+  it('renders the live working trace in the modal while the planner is running (VS-442)', async () => {
+    state.runEvents = [{
+      id: 'e1', runId: 'pr1', seq: 1, ts: 't0', stream: 'stdout', level: 'info',
+      type: 'assistant.text', payload: { text: 'Reading the plan template.' },
+    } as RunEvent];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    act(() => {
+      state.onEvent?.({ seq: 1, workspaceId: 'ws1', type: 'run.started', entityType: 'run', entityId: 'pr1', payload: { agentId: 'planner_1' }, createdAt: 't0' });
+    });
+    expect(screen.getByLabelText('Planner is working')).toBeInTheDocument();
+    expect(await screen.findByText('Reading the plan template.')).toBeInTheDocument();
+  });
+
+  it('hides the weaver-only reply control in the planner conversation (VS-442)', () => {
+    state.messages = [{
+      id: 'm1', threadId: 'th_plan', direction: 'outbound', authorKind: 'agent', authorId: 'planner_1',
+      body: 'A planner reply', replyToMessageIds: [], parts: [], createdAt: 't0',
+    } as unknown as ThreadMessage];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.getByText('A planner reply')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reply to this message' })).not.toBeInTheDocument();
+  });
+
+  it('returns to the bottom and resumes following when a message is sent from a scrolled-up view (VS-451)', async () => {
+    state.messages = [{
+      id: 'm1', threadId: 'th_plan', direction: 'outbound', authorKind: 'agent', authorId: 'planner_1',
+      body: 'History line', replyToMessageIds: [], parts: [], createdAt: '2026-09-13T09:00:00.000Z',
+    } as unknown as ThreadMessage];
+    const { container } = render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    await screen.findByText('History line');
+
+    // jsdom has no layout: stage the scroller's geometry so a scroll-up can be observed at all.
+    const el = container.querySelector('[data-v2-chat-scroll]') as HTMLElement;
+    let top = 0;
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => 1000 });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => 300 });
+    Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = Math.max(0, Math.min(v, 700)); } });
+
+    // At the bottom first, so an upward move is recognisable, then a wheel scroll up: the follow
+    // pauses and the button appears.
+    top = 700;
+    fireEvent.scroll(el);
+    fireEvent.wheel(el, { deltaY: -120 });
+    top = 100;
+    fireEvent.scroll(el);
+    expect(screen.getByRole('button', { name: /Scroll to bottom/ })).toBeInTheDocument();
+
+    // Sending returns the planner conversation to the bottom and resumes following.
+    fireEvent.change(screen.getByLabelText('Message the planner'), { target: { value: 'hello there' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(state.posted).toHaveLength(1));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Scroll to bottom/ })).toBeNull());
   });
 });

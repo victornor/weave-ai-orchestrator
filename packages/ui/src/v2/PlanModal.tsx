@@ -3,20 +3,31 @@
  * planning agent. Desktop: a centered dialog with the chat and the draft list side by side. Phone: a
  * full-screen sheet, the two panes switched by a tab (no room to show both at once). Opening always
  * resumes the project's one `drafting` plan, or starts a fresh one — never a second one.
+ *
+ * The planner chat is the weaver chat (VS-442): its conversation renders through the shared
+ * `ChatConversation` view, so markdown messages, the per-turn "Planner did …" summary and the live
+ * working trace are the same code as Chat's. Only the weaver-only extras — inline decision cards,
+ * dispatch chips, the reply control and the unattributed-worker row — are omitted here; the planner
+ * files no tickets and raises no decisions.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { PlanDraft, PlanDraftKind, Project, TicketPriority, WorkspaceEvent } from '@weave-ai/shared';
+import type { PlanDraft, PlanDraftKind, Project, RunTrace, TicketPriority, WorkspaceEvent } from '@weave-ai/shared';
 import { PLAN_DRAFT_KINDS, TICKET_PRIORITIES, projectLabel } from '@weave-ai/shared';
+import { resolveModel } from '@weave-ai/render';
 import {
   useStartOrResumePlan, usePlan, usePatchPlanDraft, useRemovePlanDraft, useSubmitPlan, useDiscardPlan,
-  useThreadMessages, usePostThreadMessage, useRoles,
+  useThreadMessages, usePostThreadMessage, useRoles, useRunTraces, useRuntimes, useRuntimeModels,
 } from '../api/hooks';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import { qk } from '../api/keys';
+import { useGo } from '../app/link';
 import { cx } from '../lib/cx';
+import { chatEntries, chatRows } from '../lib/dispatch';
+import { useNewOutboundMessageIds } from '../lib/streamReveal';
 import { ChatComposer } from './ChatComposer';
-import { AttachmentRows } from './ChatMessage';
+import { ChatConversation, useLiveRunSettle } from './ChatConversation';
+import type { ChatConversationHandle, LiveChatRun } from './ChatConversation';
 
 const TIERS = ['quick', 'standard', 'deep'] as const;
 
@@ -32,6 +43,9 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
   const [phoneTab, setPhoneTab] = useState<'chat' | 'drafts'>('chat');
   const [text, setText] = useState('');
   const [planId, setPlanId] = useState<string | null>(null);
+  // The planner's own runtime, so its turns' summary can resolve the model's context window (VS-442);
+  // `/plans/start` returns it alongside the agent's id.
+  const [plannerRuntimeId, setPlannerRuntimeId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -43,16 +57,24 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
   const start = useStartOrResumePlan();
   const ws = useWs();
   const conn = useConnection();
+  const go = useGo();
   const qc = useQueryClient();
-  const [plannerRunning, setPlannerRunning] = useState(false);
+  // The planner's live turn, tracked exactly as ChatPage tracks the weaver's: `fromStart` is true
+  // only for a run this modal saw begin, so its first line streams (VS-440).
+  const [live, setLive] = useState<LiveChatRun | null>(null);
+  // Sending returns the planner conversation to the bottom and resumes following, exactly as the
+  // weaver chat does (VS-451), through the shared view's handle (VS-442).
+  const conversationRef = useRef<ChatConversationHandle>(null);
 
   // Opening the modal (or switching its project) always resumes the one drafting plan for that
   // project, or starts a fresh one — never waits for a manual "start" action.
   useEffect(() => {
     if (!open || !effectiveProjectId) return;
     setPlanId(null);
+    setPlannerRuntimeId(null);
+    setLive(null);
     setPhoneTab('chat');
-    start.mutate({ projectId: effectiveProjectId }, { onSuccess: (r) => setPlanId(r.plan.id) });
+    start.mutate({ projectId: effectiveProjectId }, { onSuccess: (r) => { setPlanId(r.plan.id); setPlannerRuntimeId(r.agent.runtimeId); } });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fires only when the modal opens or the project changes, not on every render
   }, [open, effectiveProjectId]);
 
@@ -74,7 +96,8 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
       (e: WorkspaceEvent) => {
         if (plannerAgentId && (e.type === 'run.started' || e.type === 'run.finished')) {
           if ((e.payload as { agentId?: string } | null)?.agentId !== plannerAgentId) return;
-          setPlannerRunning(e.type === 'run.started');
+          if (e.type === 'run.started') setLive({ id: e.entityId, running: true, fromStart: true });
+          else setLive((cur) => (cur && cur.id === e.entityId ? { ...cur, running: false } : cur));
           return;
         }
         if (!planId || !e.type.startsWith('plan.')) return;
@@ -86,16 +109,44 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
     ),
   );
 
+  // The planner turns to summarise: the runs behind its own outbound messages. The conversation rows
+  // and the reply reveal are the same view models the weaver chat uses.
+  const messageRuns = useMemo(
+    () => [...new Set((messages.data ?? []).filter((m) => m.direction === 'outbound' && m.runId).map((m) => m.runId!))],
+    [messages.data],
+  );
+  const traces = useRunTraces({ ids: messageRuns, agent: plannerAgentId });
+  const rows = useMemo(
+    () => chatRows(chatEntries(messages.data ?? [], [], []).entries, traces.data ?? [], { showSilent: false }),
+    [messages.data, traces.data],
+  );
+  const rowRuns = useMemo(() => new Set((messages.data ?? []).map((m) => m.runId).filter((id): id is string => Boolean(id))), [messages.data]);
+  useLiveRunSettle(live, setLive, rowRuns);
+  const revealIds = useNewOutboundMessageIds(messages.data, plan.data?.plan.threadId ?? null);
+  const plannerModels = useRuntimeModels(plannerRuntimeId);
+  const runtimes = useRuntimes();
+  const compactionAt = (runtimes.data ?? []).find((r) => r.id === plannerRuntimeId)?.capabilities['contextCompactionAt'] as number | undefined;
+  const resolveContext = useCallback(
+    (t: RunTrace): { contextWindowTokens?: number | null; compactionAt?: number | null } => ({
+      contextWindowTokens: resolveModel(plannerModels.data, t.model)?.contextWindowTokens,
+      compactionAt,
+    }),
+    [plannerModels.data, compactionAt],
+  );
+
   if (!open) return null;
 
   const drafts = plan.data?.drafts ?? [];
   const canSubmit = drafts.length > 0 && plan.data?.plan.status === 'drafting' && !submit.isPending;
+  const plannerRunning = live?.running ?? false;
+  const projectName = (id: string | null): string | null => (id ? projectLabel(projects.find((p) => p.id === id) ?? { slug: id, name: id }) : null);
+  const openTicket = (identifier: string): void => go('/v2/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } });
 
   const send = (body: string, files: File[], opts: { idempotencyKey: string }): Promise<void> => {
     if (!plan.data || !effectiveProjectId) return Promise.reject(new Error('The planning conversation is still starting.'));
     return post
       .mutateAsync({ threadId: plan.data.plan.threadId, body, projectId: effectiveProjectId, files, idempotencyKey: opts.idempotencyKey })
-      .then(() => { setText(''); });
+      .then(() => { setText(''); conversationRef.current?.toBottom(); });
   };
 
   const move = (draftId: string, position: number): void => {
@@ -170,28 +221,29 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
           <section className={cx('flex min-h-0 min-w-0 flex-1 flex-col md:border-r md:border-line-1', phoneTab === 'drafts' && 'hidden md:flex')} aria-label="Conversation with the planner">
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
-              {!plan.data ? (
-                <p className="text-micro text-text-3">Starting the planning conversation…</p>
-              ) : !messages.data || messages.data.length === 0 ? (
-                <p className="text-micro text-text-3">Tell the planner what you want to build.</p>
-              ) : (
-                <ul className="flex flex-col gap-2.5">
-                  {messages.data.map((m) => (
-                    <li
-                      key={m.id}
-                      className={cx(
-                        'max-w-[85%] rounded-r4 border px-3 py-2 text-micro text-text-1',
-                        m.direction === 'inbound' ? 'self-end border-line-2 bg-bg-2' : 'border-line-1 bg-bg-0',
-                      )}
-                    >
-                      {m.body ? <p className="whitespace-pre-wrap">{m.body}</p> : null}
-                      <AttachmentRows ws={ws} threadId={m.threadId} parts={m.parts} />
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <ChatConversation
+              ref={conversationRef}
+              ws={ws}
+              rows={rows}
+              loading={
+                !plan.data
+                  ? <p className="text-micro text-text-3">Starting the planning conversation…</p>
+                  : messages.data === undefined && !messages.isError
+                    ? <p className="text-micro text-text-4">Loading the conversation…</p>
+                    : null
+              }
+              error={messages.isError ? <p className="text-micro text-text-3">Could not load the planning conversation.</p> : null}
+              empty={<p className="text-micro text-text-3">Tell the planner what you want to build.</p>}
+              actorName="Planner"
+              workingAriaLabel="Planner is working"
+              live={live}
+              working={plannerRunning}
+              revealIds={revealIds}
+              onTicket={openTicket}
+              projectName={projectName}
+              resolveContext={resolveContext}
+              ready={messages.data !== undefined}
+            />
             <div className="flex-none border-t border-line-1 p-2.5">
               <ChatComposer
                 projects={projects}

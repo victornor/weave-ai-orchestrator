@@ -24,7 +24,7 @@ describe('plan start/get/draft-patch/draft-remove HTTP (VS-398)', () => {
     const plan = startPlan(harness);
     harness.runtime.services.workers = {
       ...harness.runtime.services.workers,
-      startOrResumePlan: vi.fn(async () => ({ plan, agent: { id: 'ag_planner', status: 'active', kind: 'planner' } })),
+      startOrResumePlan: vi.fn(async () => ({ plan, agent: { id: 'ag_planner', status: 'active', runtimeId: 'claude' } })),
     } as never;
     const app = createApp(harness.deps);
 
@@ -32,9 +32,9 @@ describe('plan start/get/draft-patch/draft-remove HTTP (VS-398)', () => {
       method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ title: 'Redesign' }),
     }));
     expect(res.status).toBe(200);
-    const started = await res.json() as { plan: Plan; agent: { id: string; status: string } };
+    const started = await res.json() as { plan: Plan; agent: { id: string; status: string; runtimeId: string } };
     expect(started.plan.id).toBe(plan.id);
-    expect(started.agent).toEqual({ id: 'ag_planner', status: 'active' });
+    expect(started.agent).toEqual({ id: 'ag_planner', status: 'active', runtimeId: 'claude' });
     expect(harness.runtime.services.workers.startOrResumePlan).toHaveBeenCalledWith(expect.objectContaining({ kind: 'human' }), 'proj1', { title: 'Redesign' });
   });
 

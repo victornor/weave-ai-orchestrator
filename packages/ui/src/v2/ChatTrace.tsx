@@ -252,12 +252,15 @@ function summaryParts(trace: RunTrace, contextWindowTokens: number | null | unde
 export function ChatTurnTrace({
   trace,
   ws,
+  actorName = 'weaver',
   contextWindowTokens,
   compactionAt,
 }: {
   trace: RunTrace;
   /** The workspace the remembered expansion set is scoped to. */
   ws: string;
+  /** Who did the turn, named in the collapsed summary ("weaver" / "Planner"). */
+  actorName?: string;
   contextWindowTokens?: number | null;
   compactionAt?: number | null;
 }): React.ReactElement {
@@ -272,12 +275,12 @@ export function ChatTurnTrace({
       <button
         type="button"
         aria-expanded={open}
-        aria-label="What the weaver did"
+        aria-label={`What the ${actorName} did`}
         onClick={() => setExpanded(toggleExpandedTrace(ws, trace.runId))}
         className="flex items-center gap-2 self-start text-left"
       >
         <span className="ac-mono text-nano text-text-4">{open ? '▾' : '▸'}</span>
-        <span className={cx('ac-mono text-nano', failed ? 'text-failed' : 'text-text-4')}>weaver did</span>
+        <span className={cx('ac-mono text-nano', failed ? 'text-failed' : 'text-text-4')}>{actorName} did</span>
         <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-4">{parts.join(' · ')}</span>
       </button>
       {open ? <ChatTrace events={events.data ?? []} className="v2-anim-fade mt-1 border-l border-line-1 pl-2.5" /> : null}

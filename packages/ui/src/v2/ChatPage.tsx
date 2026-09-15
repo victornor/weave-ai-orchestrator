@@ -6,25 +6,22 @@
  * forking them; only the visual tree is V2's. V1 at `/` is untouched.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Decision, Project, ThreadMessage, Ticket } from '@weave-ai/shared';
-import { agentUiStatus, isActiveRun, isHumanReplyToolEvent, projectLabel } from '@weave-ai/shared';
+import type { Decision, Project, RunTrace, ThreadMessage, Ticket } from '@weave-ai/shared';
+import { agentUiStatus, isActiveRun, projectLabel } from '@weave-ai/shared';
 import { decisionCardPartsOf, resolveModel, runtimeLimitStrip } from '@weave-ai/render';
 import { A, useGo } from '../app/link';
 import { projectColorVar } from '../lib/projectColor';
-import { ScrollToBottomButton } from '../components/ScrollToBottom';
 import { EmptyState } from '../components/States';
 import { decisionCarriesSecret } from '../lib/decisionSecrets';
 import { isClosedRefusal, staleAnswerCopy } from '../lib/decisionStaleness';
 import { chatEntries, chatRows } from '../lib/dispatch';
+import type { ChatEntry } from '../lib/dispatch';
 import { draftKey, useDraft } from '../lib/drafts';
 import { enqueue, useQueueCount } from '../lib/queue';
-import { replyTargets } from '../lib/replyTargets';
-import { useStickToBottom } from '../lib/stickToBottom';
 import { useNewOutboundMessageIds } from '../lib/streamReveal';
 import { cx } from '../lib/cx';
 import { NetworkError, SEND_TIMEOUT_MS, withTimeout } from '../api/client';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
-import { useRunEventStream } from '../api/runStream';
 import {
   ACCOUNTS_REFRESH_MS,
   useAnswerDecision,
@@ -45,24 +42,14 @@ import {
 } from '../api/hooks';
 import { ChatMessage } from './ChatMessage';
 import { ChatComposer } from './ChatComposer';
-import { ChatTrace, ChatTurnTrace } from './ChatTrace';
+import { ChatConversation, useLiveRunSettle } from './ChatConversation';
+import type { ChatConversationHandle } from './ChatConversation';
 import { V2DispatchChip, V2WorkerChip } from './ChatChips';
 import { V2DecisionCard, type V2Answer } from './DecisionCard';
 import { useExitPresence } from './motion';
 import { SearchPanel } from './SearchPanel';
 import { PlanModal } from './PlanModal';
 import { DIVIDER_MAX, DIVIDER_MIN, clampDivider, readDivider, shouldSplit, useElementWidth, writeDivider } from './chatSplit';
-
-/** How long a finished turn is held on screen when no row replaces it (V1's SETTLE_MS). */
-const SETTLE_MS = 4000;
-
-/** How long a jumped-to message stays marked before the highlight clears (VS-447). */
-const JUMP_HIGHLIGHT_MS = 1600;
-
-/** Whether the human asked for reduced motion — a jump scrolls instantly rather than smoothly. */
-function prefersReducedMotion(): boolean {
-  return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
 
 /** The answer shown in a note: the chosen option's label, else the first line of the free text. */
 function decisionAnswerLabel(decision: Decision): string {
@@ -324,11 +311,6 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const [divider, setDivider] = useState(readDivider);
   const [dragging, setDragging] = useState(false);
   const dragStart = useRef<{ x: number; width: number } | null>(null);
-  // VS-447: the conversation scroller itself, for finding a message anchor to jump to, and the ids
-  // currently marked by a jump.
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [highlightIds, setHighlightIds] = useState<ReadonlySet<string>>(() => new Set());
   const { ref: shellRef, width: shellWidth } = useElementWidth<HTMLDivElement>();
 
   const offline = conn.state === 'offline' || conn.state === 'unreachable';
@@ -362,10 +344,6 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
     ),
   );
 
-  // `focused` gates the run stream (VS-199, as V1's `ChatPage focused` does): in Global Chats each
-  // pane renders this screen, but only the focused pane may hold a live stream to its weaver's run.
-  const { events: runEvents, status: runStreamStatus, retryNow } = useRunEventStream(live?.id ?? null, { live: focused && (live?.running ?? false) });
-  const liveEvents = useMemo(() => runEvents.filter((e) => !isHumanReplyToolEvent(e)), [runEvents]);
   const working = sending || (live?.running ?? false);
 
   const projectName = useCallback(
@@ -422,12 +400,8 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   );
 
   const rowRuns = useMemo(() => new Set((messages.data ?? []).map((m) => m.runId).filter((id): id is string => Boolean(id))), [messages.data]);
-  useEffect(() => {
-    if (!live || live.running) return;
-    if (rowRuns.has(live.id)) { setLive(null); return; }
-    const t = setTimeout(() => setLive(null), SETTLE_MS);
-    return () => clearTimeout(t);
-  }, [live, rowRuns]);
+  // The live section's own clearing is shared with the Plan modal's planner chat (VS-442).
+  useLiveRunSettle(live, setLive, rowRuns);
 
   const compactionAt = (runtimes.data ?? []).find((r) => r.id === conductorRuntime)?.capabilities['contextCompactionAt'] as number | undefined;
 
@@ -482,72 +456,17 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   );
 
   const jump = useMessageContext(fetchId, anchor);
-  const stick = useStickToBottom([messages.data, liveEvents.length], {
-    ready: messages.data !== undefined,
-    // The sentinel sits inside the scroller's bottom padding, so `scrollIntoView({block:'end'})`
-    // stops short of the true bottom; V2 measures the scroller's own end and follows with a rAF loop
-    // that keeps up with a growing reveal (VS-425).
-    exact: true,
-    ...(messages.hasOlder
-      ? { older: { hasOlder: true, isLoadingOlder: messages.isLoadingOlder, loadOlder: messages.loadOlder } }
-      : {}),
-  });
   // Only a weaver reply that arrived after this thread opened streams in; history never re-animates
   // and the human's own messages do not reveal.
   const revealIds = useNewOutboundMessageIds(messages.data, fetchId);
-  const attachScroll = useCallback((el: HTMLDivElement | null) => { scrollerRef.current = el; stick.scrollRef(el); }, [stick.scrollRef]);
-
-  // Which human message each weaver reply answers, computed from the loaded conversation (VS-447).
-  const { responses, repliesTo } = useMemo(() => replyTargets(messages.data ?? []), [messages.data]);
-
-  /**
-   * Jump to and briefly mark the named messages: centre the first in the conversation scroller,
-   * move focus to it, and stop the follow so it cannot yank the view back to the bottom. The scroll
-   * is instant under reduced motion; the mark clears itself after a beat.
-   */
-  const onJumpTo = useCallback(
-    (ids: string[]): void => {
-      const first = ids[0];
-      const scroller = scrollerRef.current;
-      if (!first || !scroller) return;
-      const target = Array.from(scroller.querySelectorAll<HTMLElement>('[data-message-id]')).find(
-        (el) => el.dataset['messageId'] === first,
-      );
-      if (!target) return;
-      stick.pause();
-      // Centre the target inside the conversation scroller itself. `scrollIntoView` would scroll
-      // every ancestor as well, shifting the shell and the panes on narrower widths, so compute the
-      // target's offset within the scroller and move only that.
-      const scrollerRect = scroller.getBoundingClientRect();
-      const targetRect = target.getBoundingClientRect();
-      const centred = scroller.scrollTop + (targetRect.top - scrollerRect.top) - (scroller.clientHeight - targetRect.height) / 2;
-      const to = Math.max(0, Math.min(centred, scroller.scrollHeight - scroller.clientHeight));
-      if (prefersReducedMotion() || typeof scroller.scrollTo !== 'function') scroller.scrollTop = to;
-      else scroller.scrollTo({ top: to, behavior: 'smooth' });
-      // Focus after the scroll so the browser does not scroll again to bring it into view.
-      target.focus({ preventScroll: true });
-      setHighlightIds(new Set(ids));
-      if (highlightTimer.current !== null) clearTimeout(highlightTimer.current);
-      highlightTimer.current = setTimeout(() => {
-        highlightTimer.current = null;
-        setHighlightIds(new Set());
-      }, JUMP_HIGHLIGHT_MS);
-    },
-    [stick.pause],
-  );
-
-  useEffect(
-    () => () => {
-      if (highlightTimer.current !== null) clearTimeout(highlightTimer.current);
-    },
-    [],
-  );
 
   // Sending always returns the view to the bottom and resumes following (VS-451): the human's own
   // message and the weaver's reply must not land behind a follow a stray upward scroll paused. Both
   // the successful send and the queued one go through here, so a queued message counts too; the
-  // reply arrives later and is followed because `following` is true again.
-  const toBottom = stick.toBottom;
+  // reply arrives later and is followed because `following` is true again. The follow itself lives in
+  // the shared conversation view (VS-442), so this reaches it through its imperative handle.
+  const conversationRef = useRef<ChatConversationHandle>(null);
+  const toBottom = useCallback((): void => { conversationRef.current?.toBottom(); }, []);
   const send = useCallback(
     (text: string, files: File[], opts: { projectId: string | null; replyToMessageId: string | null; idempotencyKey: string }): void | Promise<void> => {
       if (!fetchId) return;
@@ -637,6 +556,84 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
 
   const projectNameFor = projectName;
 
+  const resolveContext = useCallback(
+    (t: RunTrace): { contextWindowTokens?: number | null; compactionAt?: number | null } => ({
+      contextWindowTokens: resolveModel(conductorModels.data, t.model)?.contextWindowTokens,
+      compactionAt,
+    }),
+    [conductorModels.data, compactionAt],
+  );
+
+  // The weaver-only row extras, handed to the shared conversation view (VS-442): a decision-card
+  // message renders its card or its answered note in place of a bubble, and a turn's dispatches sit
+  // under its reply. The planner context passes neither, so it shows the plain bubble.
+  const renderDecisionMessage = useCallback((m: ThreadMessage): React.ReactNode | null => {
+    const cards = decisionCardPartsOf(m.parts);
+    if (cards.length === 0) return null;
+    return (
+      <>
+        {cards.map((card) => {
+          const d = decisionsById.get(card.ref.id);
+          if (!d) return null;
+          const ticket = d.ticketId ? ticketsById.get(d.ticketId) : undefined;
+          if (d.status === 'answered') {
+            return <DecisionNote key={card.ref.id} decision={d} ws={ws} ticketIdentifier={ticket?.identifier ?? null} />;
+          }
+          if (!showInlineDecisionCard) return null;
+          const projectId = d.projectId ?? ticket?.projectId ?? null;
+          const project = projectId ? projectsById.get(projectId) : undefined;
+          return (
+            <div key={card.ref.id} data-inline-decision-card>
+              <V2DecisionCard
+                decision={d}
+                ws={ws}
+                busy={answer.isPending}
+                exiting={exitingDecisionIds.has(d.id)}
+                askedBy={d.askedByAgentId}
+                askedByName={d.askedByAgentId ? agentNameById.get(d.askedByAgentId) ?? null : null}
+                ticketIdentifier={ticket?.identifier ?? d.ticketId}
+                projectLabel={project ? projectLabel(project) : null}
+                onAnswer={(a) => onAnswer(d.id, a)}
+              />
+            </div>
+          );
+        })}
+      </>
+    );
+  }, [decisionsById, ticketsById, projectsById, showInlineDecisionCard, exitingDecisionIds, answer.isPending, agentNameById, onAnswer, ws]);
+
+  const renderAfterTrace = useCallback((entry: ChatEntry): React.ReactNode => {
+    if (!entry.dispatches.length) return null;
+    return (
+      <div className="flex flex-wrap gap-1.5" data-v2-dispatch-row>
+        {entry.dispatches.map((d) => (
+          <V2DispatchChip
+            key={d.ticket.id}
+            identifier={d.ticket.identifier}
+            name={d.worker?.name ?? d.ticket.title}
+            status={d.status}
+            projectColorVar={d.ticket.projectId ? projectColorVar(d.ticket.projectId, projectIds) : undefined}
+            onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
+          />
+        ))}
+      </div>
+    );
+  }, [projectIds, openWorker, openTicket]);
+
+  const footer = unattributed.length ? (
+    <div className="flex flex-wrap gap-1.5" data-v2-live-worker-row>
+      {unattributed.map((w) => (
+        <V2WorkerChip
+          key={w.id}
+          name={w.name}
+          status={agentUiStatus(w.status)}
+          projectColorVar={w.projectId ? projectColorVar(w.projectId, projectIds) : undefined}
+          onClick={() => openWorker(w.id)}
+        />
+      ))}
+    </div>
+  ) : null;
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <ChatStatusBar
@@ -647,156 +644,42 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
 
       <div className="flex min-h-0 flex-1 items-stretch" ref={shellRef}>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="relative flex min-h-0 flex-1 flex-col">
-            {anchor ? (
-              <JumpView
-                ws={ws}
-                messages={jump.data ?? []}
-                targetId={anchor}
-                loading={jump.isLoading}
-                projectName={projectNameFor}
-                onTicket={openTicket}
-                onReply={(id) => patch({ replyToId: id })}
-                onBack={() => setAnchor(null)}
-              />
-            ) : (
-              <div ref={attachScroll} data-v2-chat-scroll className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-5">
-                <div className="mx-auto flex w-full max-w-[720px] flex-col gap-5">
-                  {messages.data === undefined && !messages.isError ? (
-                    <p className="text-micro text-text-4">Loading the conversation…</p>
-                  ) : messages.isError && fetchId ? (
-                    <p className="text-micro text-text-3">Could not load the thread; showing nothing until it returns.</p>
-                  ) : rows.length === 0 ? (
-                    <EmptyState title="Tell me what you need." detail="Ask the weaver to file a ticket, explain a failure, or tell you what is running." />
-                  ) : (
-                    rows.map((row) => {
-                      if (row.kind !== 'message') return null;
-                      const m = row.entry.message;
-                      const highlighted = highlightIds.has(m.id);
-                      const cards = decisionCardPartsOf(m.parts);
-                      if (cards.length > 0) {
-                        return (
-                          <div
-                            key={row.key}
-                            className={cx('flex flex-col gap-1.5', highlighted && 'v2-jump-highlight')}
-                            data-message-id={m.id}
-                            data-jump-highlight={highlighted || undefined}
-                            tabIndex={-1}
-                          >
-                            {cards.map((card) => {
-                              const d = decisionsById.get(card.ref.id);
-                              if (!d) return null;
-                              const ticket = d.ticketId ? ticketsById.get(d.ticketId) : undefined;
-                              if (d.status === 'answered') {
-                                // One muted note where the answered card sat, at every width.
-                                return <DecisionNote key={card.ref.id} decision={d} ws={ws} ticketIdentifier={ticket?.identifier ?? null} />;
-                              }
-                              // An open card renders inline only where the decisions pane is absent
-                              // (phone); on desktop the pane beside the conversation carries it.
-                              if (!showInlineDecisionCard) return null;
-                              const projectId = d.projectId ?? ticket?.projectId ?? null;
-                              const project = projectId ? projectsById.get(projectId) : undefined;
-                              return (
-                                <div key={card.ref.id} data-inline-decision-card>
-                                  <V2DecisionCard
-                                    decision={d}
-                                    ws={ws}
-                                     busy={answer.isPending}
-                                     exiting={exitingDecisionIds.has(d.id)}
-                                     askedBy={d.askedByAgentId}
-                                     askedByName={d.askedByAgentId ? agentNameById.get(d.askedByAgentId) ?? null : null}
-                                     ticketIdentifier={ticket?.identifier ?? d.ticketId}
-                                    projectLabel={project ? projectLabel(project) : null}
-                                    onAnswer={(a) => onAnswer(d.id, a)}
-                                  />
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      }
-                      const trace = row.trace;
-                      return (
-                        <div key={row.key} className="flex flex-col gap-1.5">
-                          <ChatMessage
-                            message={m}
-                            ws={ws}
-                            spent={trace?.usage ? trace.usage.inputTokens + trace.usage.outputTokens : null}
-                            projectName={projectNameFor(m.projectId)}
-                            onTicket={openTicket}
-                            reveal={revealIds.has(m.id)}
-                            highlighted={highlighted}
-                            responseIds={responses.get(m.id)}
-                            jumpBackTo={repliesTo.get(m.id) ?? null}
-                            onJumpTo={onJumpTo}
-                            {...(m.direction === 'outbound' ? { onReply: () => patch({ replyToId: m.id }) } : {})}
-                          />
-                          {m.direction === 'outbound' && trace ? (
-                            <ChatTurnTrace
-                              trace={trace}
-                              ws={ws}
-                              contextWindowTokens={resolveModel(conductorModels.data, trace.model)?.contextWindowTokens}
-                              compactionAt={compactionAt}
-                            />
-                          ) : null}
-                          {/* The work this turn filed, matching V1's dispatch labels: a worker's own
-                              name while it runs, the ticket's title before a worker exists. */}
-                          {row.entry.dispatches.length ? (
-                            <div className="flex flex-wrap gap-1.5" data-v2-dispatch-row>
-                              {row.entry.dispatches.map((d) => (
-                                <V2DispatchChip
-                                  key={d.ticket.id}
-                                  identifier={d.ticket.identifier}
-                                  name={d.worker?.name ?? d.ticket.title}
-                                  status={d.status}
-                                  projectColorVar={d.ticket.projectId ? projectColorVar(d.ticket.projectId, projectIds) : undefined}
-                                  onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
-                                />
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })
-                  )}
-
-                  {working || live ? (
-                    <section aria-label="Weaver is working" className="flex flex-col gap-2">
-                      <div className="flex items-center gap-2">
-                        <span className="size-1.5 flex-none rounded-pill bg-working" aria-hidden />
-                        <span className="ac-mono text-nano text-text-3">{live ? 'working' : 'starting…'}</span>
-                      </div>
-                      {live && (runStreamStatus.state === 'unreachable' || runStreamStatus.state === 'offline') ? (
-                        <p className="text-nano text-text-3">
-                          The live stream dropped.{' '}
-                          <button type="button" onClick={retryNow} className="text-text-3 underline">Refresh</button>
-                        </p>
-                      ) : null}
-                      {liveEvents.length || live?.fromStart ? (
-                        <ChatTrace events={liveEvents} runId={live?.id ?? null} className="border-l border-line-1 pl-2.5" reveal />
-                      ) : null}
-                    </section>
-                  ) : null}
-                  {/* Live work no message in this thread accounts for, exactly where V1 puts it. */}
-                  {unattributed.length ? (
-                    <div className="flex flex-wrap gap-1.5" data-v2-live-worker-row>
-                      {unattributed.map((w) => (
-                        <V2WorkerChip
-                          key={w.id}
-                          name={w.name}
-                          status={agentUiStatus(w.status)}
-                          projectColorVar={w.projectId ? projectColorVar(w.projectId, projectIds) : undefined}
-                          onClick={() => openWorker(w.id)}
-                        />
-                      ))}
-                    </div>
-                  ) : null}
-                  <div ref={stick.bottomRef} />
-                </div>
-              </div>
-            )}
-            {!anchor && !stick.atBottom ? <ScrollToBottomButton unread={stick.unread} onClick={stick.toBottom} /> : null}
-          </div>
+          {anchor ? (
+            <JumpView
+              ws={ws}
+              messages={jump.data ?? []}
+              targetId={anchor}
+              loading={jump.isLoading}
+              projectName={projectNameFor}
+              onTicket={openTicket}
+              onReply={(id) => patch({ replyToId: id })}
+              onBack={() => setAnchor(null)}
+            />
+          ) : (
+            <ChatConversation
+              ref={conversationRef}
+              ws={ws}
+              rows={rows}
+              loading={messages.data === undefined && !messages.isError ? <p className="text-micro text-text-4">Loading the conversation…</p> : null}
+              error={messages.isError && fetchId ? <p className="text-micro text-text-3">Could not load the thread; showing nothing until it returns.</p> : null}
+              empty={<EmptyState title="Tell me what you need." detail="Ask the weaver to file a ticket, explain a failure, or tell you what is running." />}
+              actorName="weaver"
+              workingAriaLabel="Weaver is working"
+              live={live}
+              working={working}
+              focused={focused}
+              revealIds={revealIds}
+              onTicket={openTicket}
+              projectName={projectNameFor}
+              onReply={(id) => patch({ replyToId: id })}
+              resolveContext={resolveContext}
+              ready={messages.data !== undefined}
+              {...(messages.hasOlder ? { older: { hasOlder: true, isLoadingOlder: messages.isLoadingOlder, loadOlder: messages.loadOlder } } : {})}
+              renderDecisionMessage={renderDecisionMessage}
+              renderAfterTrace={renderAfterTrace}
+              footer={footer}
+            />
+          )}
 
           <div className="flex-none border-t border-line-1 bg-bg-0 px-4 py-3">
             <div className="mx-auto w-full max-w-[720px]">

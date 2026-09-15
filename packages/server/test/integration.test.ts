@@ -314,11 +314,11 @@ describe('real core services over HTTP', () => {
       expect(sent?.replyToExcerpt).toBeNull();
     });
 
-    it('applies no default when the turn was woken by more than one human message', async () => {
+    it('links a batched turn\'s reply to every waking human message and quotes the newest (VS-449)', async () => {
       const { deps, harness } = boot();
       const app = createApp(deps);
       const services = deps.workspaces.get(harness.workspaceId)!.services;
-      const { threadId, token } = await turnWokenBy(harness, services, ['first question', 'second question']);
+      const { threadId, token, messageIds } = await turnWokenBy(harness, services, ['first question', 'second question']);
 
       const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_human_send`, {
         method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
@@ -327,7 +327,48 @@ describe('real core services over HTTP', () => {
       expect((await res.json()).ok).toBe(true);
 
       const sent = services.threads.messages(threadId).at(-1);
-      expect(sent?.replyToMessageId).toBeNull();
+      expect(sent?.replyToMessageIds).toEqual(messageIds);
+      expect(sent?.replyToMessageId).toBe(messageIds[1]);
+      expect(sent?.replyToExcerpt).toBe('second question');
+
+      // The API the chat reads exposes the link set (VS-447 consumes it before its own fallback).
+      const read = await (await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/threads/${threadId}/messages`, { headers: H }))).json();
+      expect(read.at(-1)?.replyToMessageIds).toEqual(messageIds);
+    });
+
+    it('does not relink a message an earlier send in the same turn already answered', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const { threadId, token, messageIds } = await turnWokenBy(harness, services, ['first question', 'second question']);
+      const send = (body: string) => app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_human_send`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { body } }),
+      }));
+
+      expect((await (await send('answering both')).json()).ok).toBe(true);
+      expect((await (await send('one more thing')).json()).ok).toBe(true);
+
+      const [first, second] = services.threads.messages(threadId).slice(-2);
+      expect(first?.replyToMessageIds).toEqual(messageIds);
+      expect(second?.replyToMessageIds).toEqual([]);
+    });
+
+    it('an explicit id links exactly that message, not the waking defaults', async () => {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const { threadId, token, messageIds } = await turnWokenBy(harness, services, ['first question', 'second question']);
+
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_human_send`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { body: 'answering the first', replyToMessageId: messageIds[0] } }),
+      }));
+      expect((await res.json()).ok).toBe(true);
+
+      const sent = services.threads.messages(threadId).at(-1);
+      expect(sent?.replyToMessageIds).toEqual([messageIds[0]]);
+      expect(sent?.replyToMessageId).toBe(messageIds[0]);
     });
   });
 

@@ -587,6 +587,62 @@ describe('migrations', () => {
     });
   });
 
+  describe('0042_thread_message_replies (VS-449)', () => {
+    function seedReplyThread(db: Db): void {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(`INSERT INTO channels (id, workspace_id, kind, config_json, status) VALUES ('c1', 'w1', 'web', '{}', 'active')`);
+      db.run(`INSERT INTO channel_threads (id, channel_id, agent_id, is_primary, created_at) VALUES ('th1', 'c1', 'a1', 1, 't0')`);
+      db.run(
+        `INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at)
+         VALUES ('asked', 'th1', 'outbound', 'agent', 'which one?', 't0')`);
+      db.run(
+        `INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at, reply_to_message_id)
+         VALUES ('answered', 'th1', 'inbound', 'human', 'that one', 't1', 'asked')`);
+    }
+
+    it('creates the table and backfills every existing single-target reply', () => {
+      const path = join(dir, 'replies1.sqlite');
+      const before = openDbAsOf(path, '0041_plan_drafts.sql');
+      expect(before.all<{ name: string }>('PRAGMA table_info(thread_message_replies)')).toEqual([]);
+      seedReplyThread(before);
+      before.close();
+
+      const db = openDb(path);
+      expect(db.all('SELECT * FROM thread_message_replies')).toEqual([
+        { messageId: 'answered', repliedToMessageId: 'asked', createdAt: 't1' },
+      ]);
+      expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+      db.close();
+    });
+
+    it('refuses a duplicate pair and a link to a message that does not exist', () => {
+      const db = openDb(join(dir, 'replies2.sqlite'));
+      seedReplyThread(db);
+      db.run(`INSERT INTO thread_message_replies (message_id, replied_to_message_id, created_at) VALUES ('answered', 'asked', 't1')`);
+      expect(() => db.run(
+        `INSERT INTO thread_message_replies (message_id, replied_to_message_id, created_at) VALUES ('answered', 'asked', 't2')`,
+      )).toThrow(/UNIQUE constraint failed/);
+      expect(() => db.run(
+        `INSERT INTO thread_message_replies (message_id, replied_to_message_id, created_at) VALUES ('answered', 'ghost', 't2')`,
+      )).toThrow(/FOREIGN KEY constraint failed/);
+      db.close();
+    });
+
+    it('indexes the reverse lookup and is a no-op on a second open', () => {
+      const path = join(dir, 'replies3.sqlite');
+      const db = openDb(path);
+      expect(db.all<{ name: string }>('PRAGMA index_list(thread_message_replies)').map((i) => i.name))
+        .toContain('thread_message_replies_target');
+      db.close();
+
+      const again = openDb(path);
+      expect(again.all("SELECT value FROM meta WHERE key = 'migration:0042_thread_message_replies.sql'")).toHaveLength(1);
+      again.close();
+    });
+  });
+
   describe('0022_incidents', () => {
     it('creates the daemon-level incidents table with no foreign keys', () => {
       const db = openDbAsOf(join(dir, 'incidents.sqlite'), '0022_incidents.sql');

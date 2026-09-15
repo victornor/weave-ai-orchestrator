@@ -318,6 +318,95 @@ describe('threads', () => {
     expect(third.replyToExcerpt).toBe('a first answer');
   });
 
+  describe('batched reply targets (VS-449)', () => {
+    it('links a reply to every waking message and quotes the newest', async () => {
+      const t = threads.bindOrGet('web', 'web-batch-1', null);
+      const first = await threads.inbound(HUMAN, t.id, 'first question');
+      const second = await threads.inbound(HUMAN, t.id, 'second question');
+      const out = await threads.outbound(CONDUCTOR, t.id, 'answering both', {
+        runId: 'run-batch', defaultReplyToMessageIds: [first.id, second.id],
+      });
+
+      expect(out.replyToMessageIds).toEqual([first.id, second.id]);
+      expect(out.replyToMessageId).toBe(second.id); // the newest is the single quote target
+      expect(out.replyToExcerpt).toBe('second question');
+      expect(threads.messages(t.id).find((m) => m.id === out.id)?.replyToMessageIds).toEqual([first.id, second.id]);
+    });
+
+    it('links a single waking message exactly as the old single-target default did', async () => {
+      const t = threads.bindOrGet('web', 'web-batch-2', null);
+      const only = await threads.inbound(HUMAN, t.id, 'are you there?');
+      const out = await threads.outbound(CONDUCTOR, t.id, 'yes', { runId: 'run-batch', defaultReplyToMessageIds: [only.id] });
+      expect(out.replyToMessageIds).toEqual([only.id]);
+      expect(out.replyToMessageId).toBe(only.id);
+      expect(out.replyToExcerpt).toBe('are you there?');
+    });
+
+    it('does not relink a message an earlier reply in the same turn already answered', async () => {
+      const t = threads.bindOrGet('web', 'web-batch-3', null);
+      const first = await threads.inbound(HUMAN, t.id, 'one');
+      const second = await threads.inbound(HUMAN, t.id, 'two');
+      const opening = await threads.outbound(CONDUCTOR, t.id, 'both answered', { runId: 'run-turn', defaultReplyToMessageIds: [first.id, second.id] });
+      const followUp = await threads.outbound(CONDUCTOR, t.id, 'one more thing', { runId: 'run-turn', defaultReplyToMessageIds: [first.id, second.id] });
+
+      expect(opening.replyToMessageIds).toEqual([first.id, second.id]);
+      expect(followUp.replyToMessageIds).toEqual([]);
+      expect(followUp.replyToMessageId).toBeNull();
+    });
+
+    it('links a message again when a different turn answers it', async () => {
+      const t = threads.bindOrGet('web', 'web-batch-4', null);
+      const only = await threads.inbound(HUMAN, t.id, 'still there?');
+      await threads.outbound(CONDUCTOR, t.id, 'yes', { runId: 'run-a', defaultReplyToMessageIds: [only.id] });
+      const again = await threads.outbound(CONDUCTOR, t.id, 'and again', { runId: 'run-b', defaultReplyToMessageIds: [only.id] });
+      expect(again.replyToMessageIds).toEqual([only.id]);
+    });
+
+    it('leaves an explicit null unlinked and links an explicit id exactly as given', async () => {
+      const t = threads.bindOrGet('web', 'web-batch-5', null);
+      const asked = await threads.inbound(HUMAN, t.id, 'which one?');
+      const relay = await threads.outbound(CONDUCTOR, t.id, 'unrelated update', { runId: 'run-x', replyToMessageId: null, defaultReplyToMessageIds: [asked.id] });
+      expect(relay.replyToMessageIds).toEqual([]);
+      expect(relay.replyToMessageId).toBeNull();
+
+      const explicit = await threads.outbound(CONDUCTOR, t.id, 'that one', { runId: 'run-x', replyToMessageId: asked.id, defaultReplyToMessageIds: [asked.id] });
+      expect(explicit.replyToMessageIds).toEqual([asked.id]);
+
+      // An explicit id is linked even when an earlier reply in the turn already answered it.
+      const second = await threads.outbound(CONDUCTOR, t.id, 'and again', { runId: 'run-x', replyToMessageId: asked.id });
+      expect(second.replyToMessageIds).toEqual([asked.id]);
+    });
+
+    it('ignores a default candidate from another thread', async () => {
+      const other = threads.bindOrGet('web', 'web-batch-6a', null);
+      const elsewhere = await threads.inbound(HUMAN, other.id, 'over there');
+      const t = threads.bindOrGet('web', 'web-batch-6b', null);
+      const out = await threads.outbound(CONDUCTOR, t.id, 'nothing to answer', { runId: 'run-y', defaultReplyToMessageIds: [elsewhere.id] });
+      expect(out.replyToMessageIds).toEqual([]);
+    });
+
+    it('exposes replyToMessageIds on message() and around(), not only on the write result', async () => {
+      const t = threads.bindOrGet('web', 'web-batch-7', null);
+      const first = await threads.inbound(HUMAN, t.id, 'a');
+      const second = await threads.inbound(HUMAN, t.id, 'b');
+      const out = await threads.outbound(CONDUCTOR, t.id, 'both', { runId: 'run-z', defaultReplyToMessageIds: [first.id, second.id] });
+
+      expect(threads.message(t.id, out.id).replyToMessageIds).toEqual([first.id, second.id]);
+      expect(threads.around(t.id, out.id).find((m) => m.id === out.id)?.replyToMessageIds).toEqual([first.id, second.id]);
+    });
+
+    it('writes the link table for an ordinary single-target reply too', async () => {
+      const t = threads.bindOrGet('web', 'web-batch-8', null);
+      const asked = await threads.outbound(CONDUCTOR, t.id, 'a question');
+      const answer = await threads.inbound(HUMAN, t.id, 'an answer', { replyToMessageId: asked.id });
+
+      expect(threads.message(t.id, answer.id).replyToMessageIds).toEqual([asked.id]);
+      const rows = h.db.all<{ repliedToMessageId: string }>(
+        'SELECT replied_to_message_id FROM thread_message_replies WHERE message_id = ?', [answer.id]);
+      expect(rows.map((r) => r.repliedToMessageId)).toEqual([asked.id]);
+    });
+  });
+
   it('stores the reply reference on a ticket-bound thread without raising a human_message wake', async () => {
     const ticket = tickets.create(HUMAN, { kind: 'change', title: 'Dark mode', projectId: h.projectId, assigneeRoleId: h.roleId });
     const workerId = h.addWorker(ticket.id);

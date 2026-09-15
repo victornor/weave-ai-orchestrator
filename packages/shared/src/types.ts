@@ -212,7 +212,13 @@ export interface UsageBillingMix { subscription: number; metered: number; unknow
 
 export interface KnowledgeFile { id: string; workspaceId: string; projectId: string | null; path: string; scope: E.KnowledgeScope; tokenEstimate: number; budgetTokens: number; lastCuratedAt: string | null; curationPending: boolean; hash: string; updatedAt: string }
 export interface ChannelThread { id: string; channelId: string; agentId: string; ticketId: string | null; externalThreadId: string | null; externalUserId: string | null; humanLabel: string | null; createdAt: string; lastMessageAt: string | null }
-export interface ThreadMessage { id: string; threadId: string; direction: 'inbound' | 'outbound'; authorKind: string; authorId: string | null; runId: string | null; projectId: string | null; replyToMessageId: string | null; replyToExcerpt: string | null; body: string; parts: unknown[]; externalMessageId: string | null; deliveryStatus: string; createdAt: string }
+/**
+ * `replyToMessageIds` is every message this one answers, oldest-first (VS-449) — several when a turn
+ * was woken by more than one human message and answered them together; normally one. It always
+ * contains `replyToMessageId` when that is non-null: the newest target, whose body `replyToExcerpt`
+ * renders.
+ */
+export interface ThreadMessage { id: string; threadId: string; direction: 'inbound' | 'outbound'; authorKind: string; authorId: string | null; runId: string | null; projectId: string | null; replyToMessageId: string | null; replyToMessageIds: string[]; replyToExcerpt: string | null; body: string; parts: unknown[]; externalMessageId: string | null; deliveryStatus: string; createdAt: string }
 /** One full-text search hit over a thread's stored messages (VS-320): newest first, with the matched text located by a snippet delimited by `\u0002` / `\u0003` (control characters no message body will ever contain — `[` / `]` collide with markdown links, checkboxes and `[Risk]`-style labels; never raw HTML — the client renders the highlight itself). */
 export interface ThreadSearchResult { messageId: string; authorKind: string; authorId: string | null; createdAt: string; snippet: string }
 /** A file/image attached to a `ThreadMessage` (VS-133). Always written in the same transaction as the message that owns it. */

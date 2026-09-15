@@ -208,6 +208,11 @@ function question(over: Partial<Decision> = {}): Decision {
   };
 }
 
+/** A live run event, as the run stream delivers it. */
+function liveEvent(seq: number, type: RunEvent['type'], payload: Record<string, unknown>): RunEvent {
+  return { id: `live${seq}`, runId: 'r9', seq, ts: '2026-09-15T00:00:00.000Z', stream: 'stdout', level: 'info', type, payload };
+}
+
 beforeEach(() => {
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
   state.width = 900;
@@ -291,6 +296,27 @@ describe('the V2 Chat screen', () => {
     utils.rerender(<V2ChatPage />);
     expect(screen.queryByText('A brand new line.')).toBeNull();
     expect(await screen.findByText('A brand new line.')).toBeInTheDocument();
+  });
+
+  it('shows an animated "Compacting conversation…" state instead of "working" while a compaction runs (VS-454)', () => {
+    state.lastRun = { id: 'r9', status: 'running' };
+    state.runEvents = [liveEvent(1, 'session.compaction.started', {})];
+    render(<V2ChatPage />);
+    expect(screen.getByText('Compacting conversation…')).toBeInTheDocument();
+    expect(document.querySelector('[data-v2-compacting] .animate-pulse')).not.toBeNull();
+    expect(screen.queryByText('working')).toBeNull();
+  });
+
+  it('leaves the compacting state and keeps the marker once completion arrives (VS-454)', () => {
+    state.lastRun = { id: 'r9', status: 'running' };
+    state.runEvents = [
+      liveEvent(1, 'session.compaction.started', {}),
+      liveEvent(2, 'session.compaction.completed', { trigger: 'auto', preTokens: 184_320, postTokens: 11_800 }),
+    ];
+    render(<V2ChatPage />);
+    expect(screen.queryByText('Compacting conversation…')).toBeNull();
+    expect(screen.getByText('working')).toBeInTheDocument();
+    expect(document.querySelector('[data-trace-compaction]')).toHaveTextContent('Conversation compacted · 184.3k → 11.8k tok');
   });
 
   it('keeps the decisions pane on desktop when nothing is waiting, and drops it below the threshold', async () => {

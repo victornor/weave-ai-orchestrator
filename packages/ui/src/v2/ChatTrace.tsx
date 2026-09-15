@@ -33,6 +33,21 @@ import { cx } from '../lib/cx';
 const NO_REVEAL: ReadonlySet<string> = new Set();
 
 /**
+ * VS-454: the live "Compacting conversation…" row, shown while the runtime is compacting and there
+ * is no completion yet. Matches the composer's listening state — a pulsing accent dot and a mono
+ * label — so a long compaction pause reads as work rather than a stuck weaver. Exported so the
+ * screenshot harness and tests render the real component, never a copy.
+ */
+export function CompactionRow(): React.ReactElement {
+  return (
+    <div className="flex items-center gap-2" data-v2-compacting>
+      <span className="size-1.5 flex-none animate-pulse rounded-full bg-accent-link" aria-hidden />
+      <span className="ac-mono text-nano text-text-3">Compacting conversation…</span>
+    </div>
+  );
+}
+
+/**
  * The one piece of variable text a line streams in when it first appears (VS-433): a narration's
  * body, a tool row's argument, a status line, a command. Used only for the reveal; the rendered
  * branches read their own fields.
@@ -46,6 +61,7 @@ function lineText(block: TranscriptBlock): string {
     case 'report': return block.report.summary;
     case 'command': return block.command;
     case 'human': return block.text;
+    case 'compaction': return block.text;
   }
 }
 
@@ -208,6 +224,11 @@ function TraceLine({ block, reveal }: { block: TranscriptBlock; reveal: boolean 
   }
   if (block.type === 'status') {
     return <div className="ac-mono text-nano text-text-4" data-trace-status>{text}</div>;
+  }
+  if (block.type === 'compaction') {
+    // VS-454: the finished-turn marker that explains a context-meter drop. Quieter than a status
+    // line's ink so it reads as a note about the conversation, not a thing the weaver did.
+    return <div className="ac-mono text-nano text-text-4" data-trace-compaction>{text}</div>;
   }
   if (block.type === 'report') {
     return <div className="ac-mono text-nano text-text-3" data-trace-report>{text}</div>;

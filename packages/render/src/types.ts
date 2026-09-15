@@ -3,7 +3,7 @@ import type { AuthorKind, BillingType, DecisionKind, DecisionStatus, TicketKind,
 
 // ---------------------------------------------------------------- transcript
 
-export type TranscriptBlockKind = 'text' | 'thinking' | 'tool' | 'file' | 'status' | 'phase' | 'error' | 'human_input';
+export type TranscriptBlockKind = 'text' | 'thinking' | 'tool' | 'file' | 'status' | 'phase' | 'error' | 'human_input' | 'compaction';
 
 export interface TranscriptBlockBase {
   /** Stable across re-renders: derived from the first run event folded into the block. */
@@ -83,7 +83,20 @@ export interface HumanInputBlock extends TranscriptBlockBase {
   delivery: 'mid_turn' | 'queued';
 }
 
-export type TranscriptBlock = TextBlock | ToolBlock | FileBlock | StatusBlock | PhaseBlock | ErrorBlock | HumanInputBlock;
+/**
+ * The runtime compacted the session's conversation (VS-454): the one-line marker a finished turn
+ * keeps so a sudden context-meter drop is explained. `text` is the rendered line
+ * (`Conversation compacted · 184k → 11.8k tok`); the token fields are what the runtime reported.
+ */
+export interface CompactionBlock extends TranscriptBlockBase {
+  kind: 'compaction';
+  text: string;
+  trigger: 'auto' | 'manual' | null;
+  preTokens: number | null;
+  postTokens: number | null;
+}
+
+export type TranscriptBlock = TextBlock | ToolBlock | FileBlock | StatusBlock | PhaseBlock | ErrorBlock | HumanInputBlock | CompactionBlock;
 
 export interface TranscriptOptions {
   /** Default true. Set false only where the consumer redacts itself. */

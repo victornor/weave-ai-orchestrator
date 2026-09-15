@@ -46,6 +46,8 @@ export function TranscriptLine({ block, expanded }: { block: TranscriptBlock; ex
       return <Text color={block.tone === 'error' ? 'red' : block.tone === 'warn' ? 'yellow' : undefined} dimColor={block.tone === 'info'}>{block.text}</Text>;
     case 'error':
       return <Text color="red">error{block.code ? ` ${block.code}` : ''}: {block.message}</Text>;
+    case 'compaction':
+      return <Text dimColor>{block.text}</Text>;
     default:
       return null;
   }

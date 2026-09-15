@@ -5,19 +5,24 @@
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PlanDraft, Role, RunEvent, RunTrace, ThreadMessage, WorkspaceEvent } from '@weave-ai/shared';
+import type { PlanDraft, PlanSummary, Role, RunEvent, RunTrace, ThreadMessage, WorkspaceEvent } from '@weave-ai/shared';
 import { project, role } from './factories';
 
 const state = vi.hoisted(() => ({
   startCalls: [] as Array<{ projectId: string; title?: string }>,
   planId: null as string | null,
   planStatus: 'drafting' as string,
+  tabs: [] as PlanSummary[],
+  newPlanId: null as string | null,
   drafts: [] as Array<PlanDraft & { blockedBy: string[] }>,
   roles: [] as Role[],
   messages: [] as ThreadMessage[],
   traces: [] as RunTrace[],
   runEvents: [] as RunEvent[],
   runState: 'connected' as 'connected' | 'offline' | 'unreachable',
+  created: [] as Array<Record<string, unknown>>,
+  activated: [] as Array<Record<string, unknown>>,
+  renamed: [] as Array<Record<string, unknown>>,
   posted: [] as Array<Record<string, unknown>>,
   patched: [] as Array<Record<string, unknown>>,
   removed: [] as Array<Record<string, unknown>>,
@@ -30,16 +35,28 @@ const state = vi.hoisted(() => ({
   go: vi.fn(),
 }));
 
+function planTab(over: Partial<PlanSummary> = {}): PlanSummary {
+  return {
+    id: 'plan_1', projectId: 'p1', title: 'Redesign the settings page', titleSource: 'human',
+    status: 'drafting', draftCount: 0, createdAt: 't0', updatedAt: 't0', ...over,
+  };
+}
+
 function resetState(): void {
   state.startCalls = [];
   state.planId = 'plan_1';
   state.planStatus = 'drafting';
+  state.tabs = [planTab()];
+  state.newPlanId = null;
   state.drafts = [];
   state.roles = [];
   state.messages = [];
   state.traces = [];
   state.runEvents = [];
   state.runState = 'connected';
+  state.created = [];
+  state.activated = [];
+  state.renamed = [];
   state.posted = [];
   state.patched = [];
   state.removed = [];
@@ -87,6 +104,34 @@ vi.mock('../api/hooks', () => ({
       if (state.planId) opts?.onSuccess?.({ plan: { id: state.planId }, agent: { id: 'planner_1', status: 'active', runtimeId: 'claude' } });
     },
   }),
+  // VS-477: the tab list and the per-tab mutations. The mutations mutate `state.tabs` the way the
+  // server would, so the focus-after-delete/submit behaviour is exercised rather than stubbed away.
+  usePlans: () => ({ data: { plans: state.tabs } }),
+  useCreatePlan: () => ({
+    isPending: false,
+    mutate: (input: Record<string, unknown>, opts?: { onSuccess?: (r: { plan: { id: string; projectId: string }; agent: { id: string; status: string; runtimeId: string } }) => void }) => {
+      state.created.push(input);
+      if (state.newPlanId) {
+        const tab = planTab({ id: state.newPlanId, projectId: String(input.projectId), title: null, titleSource: 'auto' });
+        state.tabs = [...state.tabs, tab];
+        opts?.onSuccess?.({ plan: { id: tab.id, projectId: tab.projectId }, agent: { id: 'planner_2', status: 'active', runtimeId: 'claude' } });
+      }
+    },
+  }),
+  useActivatePlan: () => ({
+    isPending: false,
+    mutate: (input: Record<string, unknown>, opts?: { onSuccess?: (r: { plan: { id: string }; agent: { id: string; status: string; runtimeId: string } }) => void }) => {
+      state.activated.push(input);
+      opts?.onSuccess?.({ plan: { id: String(input.planId) }, agent: { id: 'planner_1', status: 'active', runtimeId: 'claude' } });
+    },
+  }),
+  useRenamePlan: () => ({
+    isPending: false,
+    mutate: (input: Record<string, unknown>) => {
+      state.renamed.push(input);
+      state.tabs = state.tabs.map((t) => (t.id === input.planId ? { ...t, title: String(input.title), titleSource: 'human' } : t));
+    },
+  }),
   usePlan: (_projectId: string | null, planId: string | null) => ({
     data: planId ? { plan: { id: planId, status: state.planStatus, threadId: 'th_plan', agentId: 'planner_1' }, drafts: state.drafts } : undefined,
   }),
@@ -102,8 +147,22 @@ vi.mock('../api/hooks', () => ({
   }),
   usePatchPlanDraft: () => ({ mutate: (v: Record<string, unknown>, opts?: { onSuccess?: () => void }) => { state.patched.push(v); opts?.onSuccess?.(); }, isPending: false }),
   useRemovePlanDraft: () => ({ mutate: (v: Record<string, unknown>) => { state.removed.push(v); } }),
-  useSubmitPlan: () => ({ mutate: (v: Record<string, unknown>, opts?: { onSuccess?: () => void }) => { state.submitted.push(v); opts?.onSuccess?.(); }, isPending: false }),
-  useDiscardPlan: () => ({ mutate: (v: Record<string, unknown>, opts?: { onSuccess?: () => void }) => { state.discarded.push(v); opts?.onSuccess?.(); } }),
+  useSubmitPlan: () => ({
+    isPending: false,
+    mutate: (v: Record<string, unknown>, opts?: { onSuccess?: () => void }) => {
+      state.submitted.push(v);
+      state.tabs = state.tabs.filter((t) => t.id !== v.planId);
+      opts?.onSuccess?.();
+    },
+  }),
+  useDiscardPlan: () => ({
+    isPending: false,
+    mutate: (v: Record<string, unknown>, opts?: { onSuccess?: () => void }) => {
+      state.discarded.push(v);
+      state.tabs = state.tabs.filter((t) => t.id !== v.planId);
+      opts?.onSuccess?.();
+    },
+  }),
 }));
 
 const { PlanModal } = await import('../v2/PlanModal');
@@ -127,15 +186,24 @@ describe('PlanModal (VS-398)', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('starts or resumes the plan for the given project on open', () => {
+  it('focuses the project\'s drafting plan tab on open, without creating one (VS-477)', () => {
     render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
-    expect(state.startCalls).toEqual([{ projectId: 'p1' }]);
+    expect(state.activated).toEqual([{ projectId: 'p1', planId: 'plan_1' }]);
     expect(screen.getByRole('dialog', { name: 'Plan' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Plan: Redesign the settings page' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('defaults to the first project when none is given', () => {
     render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId={null} />);
-    expect(state.startCalls).toEqual([{ projectId: 'p1' }]);
+    expect(state.activated).toEqual([{ projectId: 'p1', planId: 'plan_1' }]);
+  });
+
+  it('shows an empty state with New plan when the project has no drafting plans (VS-477)', () => {
+    state.tabs = [];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New plan' })).toBeInTheDocument();
+    expect(state.activated).toEqual([]);
   });
 
   it('renders the conversation and sends a message', () => {
@@ -235,7 +303,7 @@ describe('PlanModal (VS-398)', () => {
     expect(state.removed).toEqual([{ projectId: 'p1', planId: 'plan_1', draftId: 'a' }]);
   });
 
-  it('disables submit with no drafts, enables it once one exists, and closes on submit', () => {
+  it('disables submit with no drafts, enables it once one exists, and closes its tab on submit (VS-477)', () => {
     const onClose = vi.fn();
     const { rerender } = render(<PlanModal open onClose={onClose} projects={PROJECTS} projectId="p1" />);
     expect(screen.getByRole('button', { name: 'Submit' })).toBeDisabled();
@@ -245,39 +313,122 @@ describe('PlanModal (VS-398)', () => {
     expect(screen.getByRole('button', { name: 'Submit' })).not.toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
     expect(state.submitted).toEqual([{ projectId: 'p1', planId: 'plan_1' }]);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    // The submitted plan's tab is gone; the last tab closing leaves the empty state, not a close.
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New plan' })).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('discards the plan and closes', () => {
-    const onClose = vi.fn();
-    render(<PlanModal open onClose={onClose} projects={PROJECTS} projectId="p1" />);
-    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+  it('submitting one tab leaves the others (VS-477)', () => {
+    state.tabs = [planTab({ id: 'plan_1' }), planTab({ id: 'plan_2', title: 'Second plan' })];
+    state.drafts = [draft({ id: 'a', title: 'A' })];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Submit' }));
+    expect(screen.queryByRole('tab', { name: 'Plan: Redesign the settings page' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Plan: Second plan' })).toBeInTheDocument();
+  });
+
+  it('deletes a plan from its tab after a confirm, without executing it (VS-477)', () => {
+    state.tabs = [planTab({ id: 'plan_1' }), planTab({ id: 'plan_2', title: 'Second plan', titleSource: 'auto' })];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete plan Redesign the settings page' }));
+    // Nothing is discarded until the confirm is accepted.
+    expect(state.discarded).toEqual([]);
+    expect(screen.getByRole('alertdialog', { name: 'Delete plan?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(state.discarded).toEqual([{ projectId: 'p1', planId: 'plan_1' }]);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('tab', { name: 'Plan: Redesign the settings page' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Plan: Second plan' })).toBeInTheDocument();
   });
 
-  it('switches the project scope and starts that project’s plan', () => {
+  it('keeps the plan when the delete confirm is cancelled (VS-477)', () => {
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete plan Redesign the settings page' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(state.discarded).toEqual([]);
+    expect(screen.getByRole('tab', { name: 'Plan: Redesign the settings page' })).toBeInTheDocument();
+  });
+
+  it('deleting the last tab leaves the empty state (VS-477)', () => {
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete plan Redesign the settings page' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New plan' })).toBeInTheDocument();
+  });
+
+  it('New plan creates and focuses a fresh tab (VS-477)', () => {
+    state.newPlanId = 'plan_2';
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'New plan' }));
+    expect(state.created).toEqual([{ projectId: 'p1' }]);
+    // The new (untitled) tab appears and is focused; the existing plan stays.
+    expect(screen.getByRole('tab', { name: 'Plan: New plan' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Plan: Redesign the settings page' })).toBeInTheDocument();
+    expect(state.activated.at(-1)).toEqual({ projectId: 'p1', planId: 'plan_2' });
+  });
+
+  it('scrolls the tab strip horizontally and keeps New plan visible with many tabs (VS-477)', () => {
+    state.tabs = Array.from({ length: 6 }, (_, i) => planTab({ id: `plan_${i}`, title: `Plan number ${i}` }));
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    const tablist = screen.getByRole('tablist', { name: 'Plans' });
+    expect(tablist.className).toContain('overflow-x-auto');
+    expect(tablist.className).toContain('min-w-0');
+    expect(screen.getAllByRole('tab')).toHaveLength(6);
+    // New plan is a sibling of the scroller, never inside it, so a long strip cannot scroll it away.
+    const newPlan = screen.getByRole('button', { name: 'New plan' });
+    expect(tablist.contains(newPlan)).toBe(false);
+  });
+
+  it('switching tabs focuses that plan and loads its conversation (VS-477)', () => {
+    state.tabs = [planTab({ id: 'plan_1' }), planTab({ id: 'plan_2', title: 'Second plan' })];
+    state.messages = [{ id: 'm1', threadId: 'th_plan', direction: 'inbound', authorKind: 'human', authorId: 'v', body: 'Second plan chat', replyToMessageIds: [], parts: [], createdAt: 't0' } as unknown as ThreadMessage];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    fireEvent.click(screen.getByRole('tab', { name: 'Plan: Second plan' }));
+    expect(state.activated.at(-1)).toEqual({ projectId: 'p1', planId: 'plan_2' });
+    expect(screen.getByRole('tab', { name: 'Plan: Second plan' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Second plan chat')).toBeInTheDocument();
+  });
+
+  it('renames a tab on double-click (VS-477)', () => {
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    fireEvent.doubleClick(screen.getByRole('tab', { name: 'Plan: Redesign the settings page' }));
+    fireEvent.change(screen.getByLabelText('Plan name'), { target: { value: 'Settings overhaul' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save name' }));
+    expect(state.renamed).toEqual([{ projectId: 'p1', planId: 'plan_1', title: 'Settings overhaul' }]);
+    expect(screen.getByRole('tab', { name: 'Plan: Settings overhaul' })).toBeInTheDocument();
+  });
+
+  it('shows the New plan placeholder for an untitled, auto-titled tab (VS-477)', () => {
+    state.tabs = [planTab({ id: 'plan_1', title: null, titleSource: 'auto' })];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.getByRole('tab', { name: 'Plan: New plan' })).toBeInTheDocument();
+  });
+
+  it('switches the project scope and focuses that project’s plan (VS-477)', () => {
     render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Web' }));
-    expect(state.startCalls.at(-1)).toEqual({ projectId: 'p2' });
+    expect(state.activated.at(-1)).toEqual({ projectId: 'p2', planId: 'plan_1' });
   });
 
-  it('invalidates the plan query when a matching plan.* event arrives out of band', () => {
+  it('invalidates the tab list and the open plan when a plan.* event arrives out of band (VS-477)', () => {
     render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
     expect(state.onEvent).toBeTruthy();
+    const list = ['w', 'ws1', 'plans', 'project', 'p1'];
 
-    // A plan-level event names the plan as its entity.
+    // A plan-level event names the plan as its entity; the tab list is always refreshed too.
     state.onEvent?.({ seq: 1, workspaceId: 'ws1', type: 'plan.submitted', entityType: 'plan', entityId: 'plan_1', payload: {}, createdAt: 't0' });
-    expect(state.invalidated).toEqual([['w', 'ws1', 'plans', 'plan_1']]);
+    expect(state.invalidated).toEqual([list, ['w', 'ws1', 'plans', 'plan_1']]);
 
     // A draft-level event names its own id as the entity, and the plan only in its payload.
     state.onEvent?.({ seq: 2, workspaceId: 'ws1', type: 'plan.draft_added', entityType: 'plan_draft', entityId: 'd1', payload: { planId: 'plan_1' }, createdAt: 't1' });
-    expect(state.invalidated).toEqual([['w', 'ws1', 'plans', 'plan_1'], ['w', 'ws1', 'plans', 'plan_1']]);
+    expect(state.invalidated).toEqual([list, ['w', 'ws1', 'plans', 'plan_1'], list, ['w', 'ws1', 'plans', 'plan_1']]);
 
-    // An event for a different plan, or a non-plan event, is ignored.
+    // An event for a different plan refreshes the list only; a non-plan event is ignored.
     state.onEvent?.({ seq: 3, workspaceId: 'ws1', type: 'plan.discarded', entityType: 'plan', entityId: 'plan_2', payload: {}, createdAt: 't2' });
+    expect(state.invalidated.at(-1)).toEqual(list);
     state.onEvent?.({ seq: 4, workspaceId: 'ws1', type: 'run.finished', entityType: 'run', entityId: 'r1', payload: {}, createdAt: 't3' });
-    expect(state.invalidated).toHaveLength(2);
+    expect(state.invalidated).toHaveLength(5);
   });
 
   it('edits a draft’s title, description, kind, priority and target role inline', () => {

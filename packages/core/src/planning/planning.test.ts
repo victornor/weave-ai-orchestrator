@@ -56,14 +56,47 @@ describe('planning (VS-398)', () => {
   const addDraft = (planId: string, over: Partial<Parameters<PlanningService['addDraft']>[2]> = {}) =>
     planning.addDraft(HUMAN, planId, { title: 'Add token plumbing', kind: 'change', suggestedTier: 'standard', ...over });
 
-  it('creates a drafting plan and refuses a second one for the same project', () => {
-    const plan = startPlan();
-    expect(plan.status).toBe('drafting');
-    expect(plan.projectId).toBe(h.projectId);
-    expect(plan.createdByKind).toBe('human');
-    expect(plan.createdById).toBe('victor');
-    expect(planning.getDrafting(h.projectId)?.id).toBe(plan.id);
-    expect(() => startPlan()).toThrow(/already has a drafting plan/);
+  it('allows several drafting plans at once and resumes the most recent (VS-477)', () => {
+    const first = startPlan();
+    expect(first.status).toBe('drafting');
+    expect(first.projectId).toBe(h.projectId);
+    expect(first.createdByKind).toBe('human');
+    expect(first.createdById).toBe('victor');
+    expect(first.titleSource).toBe('human');
+    const second = startPlan();
+    expect(second.id).not.toBe(first.id);
+    expect(planning.getDrafting(h.projectId)?.id).toBe(second.id);
+    // Summaries are newest first, and count each plan's own drafts.
+    addDraft(second.id, { title: 'B' });
+    addDraft(first.id, { title: 'A1' });
+    addDraft(first.id, { title: 'A2' });
+    expect(planning.listDrafting(h.projectId).map((p) => [p.id, p.draftCount])).toEqual([[second.id, 1], [first.id, 2]]);
+  });
+
+  it('lists only drafting plans as tab summaries, newest first (VS-477)', () => {
+    const first = startPlan();
+    const second = startPlan();
+    planning.submit(HUMAN, first.id);
+    expect(planning.listDrafting(h.projectId).map((p) => p.id)).toEqual([second.id]);
+    expect(planning.list(h.projectId).map((p) => p.id).sort()).toEqual([first.id, second.id].sort());
+  });
+
+  it('sets, replaces and protects a plan title (VS-477)', () => {
+    const plan = planning.create(HUMAN, h.projectId, { threadId: 'th1' });
+    expect(plan.title).toBeNull();
+    expect(plan.titleSource).toBe('auto');
+    const titled = planning.setTitle(HUMAN, plan.id, '  "Dark mode rollout"  ', 'auto');
+    expect(titled.title).toBe('Dark mode rollout');
+    expect(titled.titleSource).toBe('auto');
+    // An auto title may be replaced while it is still auto.
+    expect(planning.setTitle(HUMAN, plan.id, 'Dark mode and theming', 'auto').title).toBe('Dark mode and theming');
+    // An auto title is capped at six words, and an empty one is refused.
+    expect(planning.setTitle(HUMAN, plan.id, 'one two three four five six seven eight', 'auto').title).toBe('one two three four five six');
+    expect(() => planning.setTitle(HUMAN, plan.id, '   ', 'auto')).toThrow(/title is required/);
+    // Captain's rename wins, and an auto title can never overwrite it.
+    expect(planning.setTitle(HUMAN, plan.id, 'Captain owned', 'human').titleSource).toBe('human');
+    expect(() => planning.setTitle(HUMAN, plan.id, 'auto again', 'auto')).toThrow(/renamed by captain/);
+    expect(planning.get(plan.id).title).toBe('Captain owned');
   });
 
   it('allows a new drafting plan once the prior one is submitted or discarded', () => {

@@ -168,6 +168,46 @@ export function projectRoutes(): Hono<AppEnv> {
     // summary ("Planner did N tool calls · tokens · session size", VS-442).
     return c.json({ plan, agent: { id: agent.id, status: agent.status, runtimeId: agent.runtimeId } });
   });
+  /**
+   * VS-477: the project's drafting plans as tab summaries (id, title, titleSource, status, draft
+   * count, created/updated), newest first. `status=drafting` is the only supported filter — the tab
+   * strip is the sole consumer — and a plan's full conversation is still fetched per plan below.
+   */
+  app.get('/:id/plans', (c) => {
+    const s = c.get('ws').services;
+    const project = s.projects.get(c.req.param('id'));
+    const status = c.req.query('status') ?? 'drafting';
+    if (status !== 'drafting') throw new OcError('validation', 'only status=drafting is supported', { status });
+    return c.json({ plans: s.planning.listDrafting(project.id) });
+  });
+  /** VS-477: a fresh drafting plan with its own thread and planner, alongside any the project already has. */
+  app.post('/:id/plans', async (c) => {
+    const s = c.get('ws').services;
+    const project = s.projects.get(c.req.param('id'));
+    const input = await body(c, z.object({ title: z.string().min(1).optional() }).strict());
+    const { plan, agent } = await s.workers.createPlan(c.get('actor'), project.id, { title: input.title });
+    return c.json({ plan, agent: { id: agent.id, status: agent.status, runtimeId: agent.runtimeId } }, 201);
+  });
+  /**
+   * VS-477: focus a plan tab — ensure its planner is live and sweep the project's other planners
+   * that have gone idle, so several tabs never hold several live planners.
+   */
+  app.post('/:id/plans/:planId/activate', async (c) => {
+    const s = c.get('ws').services;
+    const project = s.projects.get(c.req.param('id'));
+    const plan = scopedPlan(s.planning, project.id, c.req.param('planId'));
+    const agent = await s.workers.ensurePlanner(c.get('actor'), plan.id);
+    await s.workers.retireIdlePlanners(project.id, { keepPlanId: plan.id });
+    return c.json({ plan: s.planning.get(plan.id), agent: { id: agent.id, status: agent.status, runtimeId: agent.runtimeId } });
+  });
+  /** VS-477: captain's rename of a plan tab; recorded as human, so an auto title never overwrites it. */
+  app.patch('/:id/plans/:planId', async (c) => {
+    const s = c.get('ws').services;
+    const project = s.projects.get(c.req.param('id'));
+    const plan = scopedPlan(s.planning, project.id, c.req.param('planId'));
+    const input = await body(c, z.object({ title: z.string().min(1) }).strict());
+    return c.json(s.planning.setTitle(c.get('actor'), plan.id, input.title, 'human'));
+  });
   app.get('/:id/plans/:planId', (c) => {
     const s = c.get('ws').services;
     const project = s.projects.get(c.req.param('id'));

@@ -1,8 +1,13 @@
 /**
- * The V2 Plan modal (VS-398): a captain-authored draft plan, drafted interactively with a read-only
- * planning agent. Desktop: a centered dialog with the chat and the draft list side by side. Phone: a
- * full-screen sheet, the two panes switched by a tab (no room to show both at once). Opening always
- * resumes the project's one `drafting` plan, or starts a fresh one — never a second one.
+ * The V2 Plan modal (VS-398, tabbed in VS-477): a captain-authored draft plan, drafted interactively
+ * with a read-only planning agent. Desktop: a centered dialog with the chat and the draft list side
+ * by side. Phone: a full-screen sheet, the two panes switched by a tab (no room to show both at once).
+ *
+ * A project may hold several drafting plans at once, shown as one tab per plan (VS-477). Tabs are
+ * server state — the list is fetched and each tab's plan is loaded on focus — while the last-focused
+ * tab is remembered on the device. A **New plan** control starts a fresh plan; a tab's delete control
+ * discards it after a confirm, leaving the others; an untitled tab reads **New plan** until the planner
+ * (or captain, by double-clicking the tab) names it.
  *
  * The planner chat is the weaver chat (VS-442): its conversation renders through the shared
  * `ChatConversation` view, so markdown messages, the per-turn "Planner did …" summary and the live
@@ -12,11 +17,12 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { PlanDraft, PlanDraftKind, Project, RunTrace, TicketPriority, WorkspaceEvent } from '@weave-ai/shared';
+import type { PlanDraft, PlanDraftKind, PlanSummary, Project, RunTrace, TicketPriority, WorkspaceEvent } from '@weave-ai/shared';
 import { PLAN_DRAFT_KINDS, TICKET_PRIORITIES, projectLabel } from '@weave-ai/shared';
 import { resolveModel } from '@weave-ai/render';
 import {
-  useStartOrResumePlan, usePlan, usePatchPlanDraft, useRemovePlanDraft, useSubmitPlan, useDiscardPlan,
+  usePlans, useCreatePlan, useActivatePlan, useRenamePlan,
+  usePlan, usePatchPlanDraft, useRemovePlanDraft, useSubmitPlan, useDiscardPlan,
   useThreadMessages, usePostThreadMessage, useRoles, useRunTraces, useRuntimes, useRuntimeModels,
 } from '../api/hooks';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
@@ -31,6 +37,17 @@ import type { ChatConversationHandle, LiveChatRun } from './ChatConversation';
 
 const TIERS = ['quick', 'standard', 'deep'] as const;
 
+/** The device-remembered last-focused tab, one per project. Server state keeps the tabs; this keeps the focus. */
+function lastTabKey(ws: string, projectId: string): string { return `weave:plan:lastTab:${ws}:${projectId}`; }
+function readLastTab(ws: string, projectId: string | null): string | null {
+  if (!projectId || typeof localStorage === 'undefined') return null;
+  try { return localStorage.getItem(lastTabKey(ws, projectId)); } catch { return null; }
+}
+function writeLastTab(ws: string, projectId: string | null, planId: string): void {
+  if (!projectId || typeof localStorage === 'undefined') return;
+  try { localStorage.setItem(lastTabKey(ws, projectId), planId); } catch { /* private mode: the tab choice is a convenience, never required */ }
+}
+
 export interface PlanModalProps {
   open: boolean;
   onClose: () => void;
@@ -42,10 +59,13 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
   const [scopedProjectId, setScopedProjectId] = useState<string | null>(projectId);
   const [phoneTab, setPhoneTab] = useState<'chat' | 'drafts'>('chat');
   const [text, setText] = useState('');
-  const [planId, setPlanId] = useState<string | null>(null);
+  const [activePlanId, setActivePlanId] = useState<string | null>(null);
   // The planner's own runtime, so its turns' summary can resolve the model's context window (VS-442);
-  // `/plans/start` returns it alongside the agent's id.
+  // `/activate` returns it alongside the agent's id.
   const [plannerRuntimeId, setPlannerRuntimeId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -54,7 +74,6 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
   const [editTargetRoleId, setEditTargetRoleId] = useState('');
 
   const effectiveProjectId = scopedProjectId ?? projects[0]?.id ?? null;
-  const start = useStartOrResumePlan();
   const ws = useWs();
   const conn = useConnection();
   const go = useGo();
@@ -66,19 +85,43 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
   // weaver chat does (VS-451), through the shared view's handle (VS-442).
   const conversationRef = useRef<ChatConversationHandle>(null);
 
-  // Opening the modal (or switching its project) always resumes the one drafting plan for that
-  // project, or starts a fresh one — never waits for a manual "start" action.
+  const plans = usePlans(effectiveProjectId);
+  const tabs = useMemo(() => plans.data?.plans ?? [], [plans.data]);
+  const create = useCreatePlan();
+  const activate = useActivatePlan();
+  const rename = useRenamePlan();
+
+  // Opening the modal, or switching its project, clears the focused plan, the remembered planner
+  // runtime and any in-progress tab interaction; the list below then picks the tab to focus.
   useEffect(() => {
-    if (!open || !effectiveProjectId) return;
-    setPlanId(null);
+    if (!open) return;
+    setActivePlanId(null);
     setPlannerRuntimeId(null);
     setLive(null);
     setPhoneTab('chat');
-    start.mutate({ projectId: effectiveProjectId }, { onSuccess: (r) => { setPlanId(r.plan.id); setPlannerRuntimeId(r.agent.runtimeId); } });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires only when the modal opens or the project changes, not on every render
+    setRenamingId(null);
+    setConfirmDeleteId(null);
   }, [open, effectiveProjectId]);
 
-  const plan = usePlan(effectiveProjectId, planId);
+  // Focus the remembered tab when it is still drafting, otherwise the newest drafting plan. With no
+  // drafting plans the modal shows the empty state — it never creates one unasked (VS-477).
+  useEffect(() => {
+    if (!open) return;
+    if (activePlanId && tabs.some((t) => t.id === activePlanId)) return;
+    const remembered = readLastTab(ws, effectiveProjectId);
+    setActivePlanId(tabs.find((t) => t.id === remembered)?.id ?? tabs[0]?.id ?? null);
+  }, [open, tabs, activePlanId, ws, effectiveProjectId]);
+
+  // Focusing a plan ensures its planner is live (resuming a retired one) and retires the project's
+  // other planners that have gone idle, so several tabs never hold several live planners.
+  useEffect(() => {
+    if (!open || !effectiveProjectId || !activePlanId) return;
+    activate.mutate({ projectId: effectiveProjectId, planId: activePlanId }, { onSuccess: (r) => setPlannerRuntimeId(r.agent.runtimeId) });
+    writeLastTab(ws, effectiveProjectId, activePlanId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires on focus change, not on every activate render
+  }, [open, effectiveProjectId, activePlanId]);
+
+  const plan = usePlan(effectiveProjectId, activePlanId);
   const roles = useRoles(effectiveProjectId ?? undefined);
   const messages = useThreadMessages(plan.data?.plan.threadId ?? null);
   const post = usePostThreadMessage();
@@ -87,9 +130,10 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
   const submit = useSubmitPlan();
   const discard = useDiscardPlan();
 
-  // Draft edits and replies can arrive from the planner between our own fetches; re-fetch the plan
-  // whenever a `plan.*` event names it, the same way ChatPage reacts to `run.*` events. The planner's
-  // own run is tracked too, so the composer can report a sent message as queued while it replies.
+  // Draft edits, titles and replies can arrive from the planner or another device between our own
+  // fetches; re-fetch the tab list and the open plan whenever a `plan.*` event names them, the same
+  // way ChatPage reacts to `run.*` events. The planner's own run is tracked too, so the composer can
+  // report a sent message as queued while it replies.
   const plannerAgentId = plan.data?.plan.agentId ?? null;
   useWorkspaceEvents(
     useCallback(
@@ -100,12 +144,14 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
           else setLive((cur) => (cur && cur.id === e.entityId ? { ...cur, running: false } : cur));
           return;
         }
-        if (!planId || !e.type.startsWith('plan.')) return;
+        if (!e.type.startsWith('plan.')) return;
+        if (effectiveProjectId) qc.invalidateQueries({ queryKey: qk.plans(ws, effectiveProjectId) });
+        if (!activePlanId) return;
         const eventPlanId = e.entityType === 'plan' ? e.entityId : (e.payload as { planId?: string } | undefined)?.planId;
-        if (eventPlanId !== planId) return;
-        qc.invalidateQueries({ queryKey: qk.plan(ws, planId) });
+        if (eventPlanId !== activePlanId) return;
+        qc.invalidateQueries({ queryKey: qk.plan(ws, activePlanId) });
       },
-      [planId, ws, qc, plannerAgentId],
+      [effectiveProjectId, activePlanId, ws, qc, plannerAgentId],
     ),
   );
 
@@ -141,6 +187,37 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
   const plannerRunning = live?.running ?? false;
   const projectName = (id: string | null): string | null => (id ? projectLabel(projects.find((p) => p.id === id) ?? { slug: id, name: id }) : null);
   const openTicket = (identifier: string): void => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } });
+  const tabLabel = (t: PlanSummary): string => t.title?.trim() || 'New plan';
+  const confirmPlan = tabs.find((t) => t.id === confirmDeleteId) ?? null;
+
+  const newPlan = (): void => {
+    if (!effectiveProjectId) return;
+    create.mutate({ projectId: effectiveProjectId }, { onSuccess: (r) => { setActivePlanId(r.plan.id); writeLastTab(ws, effectiveProjectId, r.plan.id); } });
+  };
+
+  const startRename = (t: PlanSummary): void => { setRenamingId(t.id); setRenameValue(t.title ?? ''); };
+  const saveRename = (t: PlanSummary): void => {
+    const title = renameValue.trim();
+    setRenamingId(null);
+    if (!title || !effectiveProjectId || title === (t.title ?? '')) return;
+    rename.mutate({ projectId: effectiveProjectId, planId: t.id, title });
+  };
+
+  /** Discard the confirmed tab; the others stay, and removing the last one leaves the empty state. */
+  const deleteConfirmed = (): void => {
+    const t = confirmPlan;
+    setConfirmDeleteId(null);
+    if (!t || !effectiveProjectId) return;
+    discard.mutate({ projectId: effectiveProjectId, planId: t.id }, {
+      onSuccess: () => { if (activePlanId === t.id) setActivePlanId(null); },
+    });
+  };
+
+  const afterSubmit = (): void => {
+    const submittedId = activePlanId;
+    setActivePlanId(null);
+    if (submittedId) qc.invalidateQueries({ queryKey: qk.plans(ws, effectiveProjectId ?? '') });
+  };
 
   const send = (body: string, files: File[], opts: { idempotencyKey: string }): Promise<void> => {
     if (!plan.data || !effectiveProjectId) return Promise.reject(new Error('The planning conversation is still starting.'));
@@ -210,196 +287,262 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
           </button>
         </header>
 
-        <div className="flex flex-none border-b border-line-1 md:hidden">
-          <button type="button" onClick={() => setPhoneTab('chat')} aria-pressed={phoneTab === 'chat'} className={cx('flex-1 py-2 text-micro', phoneTab === 'chat' ? 'text-text-1' : 'text-text-3')}>
-            Chat
-          </button>
-          <button type="button" onClick={() => setPhoneTab('drafts')} aria-pressed={phoneTab === 'drafts'} className={cx('flex-1 py-2 text-micro', phoneTab === 'drafts' ? 'text-text-1' : 'text-text-3')}>
-            Drafts ({drafts.length})
-          </button>
+        <div className="flex min-h-0 flex-none items-center gap-2 border-b border-line-1 px-3 py-1.5">
+          {/* The tabs scroll horizontally and never wrap; New plan sits outside the scroller so a long tab strip can never push it off-screen (VS-477). */}
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" role="tablist" aria-label="Plans">
+            {tabs.map((t) => {
+            const focused = t.id === activePlanId;
+            const label = tabLabel(t);
+            return (
+              <span key={t.id} className={cx('flex flex-none items-center gap-1 rounded-r4 border px-1.5', focused ? 'border-line-2 bg-bg-3' : 'border-transparent')}>
+                {renamingId === t.id ? (
+                  <>
+                    <input
+                      value={renameValue}
+                      autoFocus
+                      aria-label="Plan name"
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') saveRename(t); if (e.key === 'Escape') setRenamingId(null); }}
+                      className="h-7 w-[140px] rounded-r4 border border-line-2 bg-bg-input px-1.5 text-micro text-text-1 outline-none"
+                    />
+                    <button type="button" aria-label="Save name" onClick={() => saveRename(t)} className="text-nano text-text-2 hover:text-text-1">Save</button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={focused}
+                      aria-label={`Plan: ${label}`}
+                      onDoubleClick={() => startRename(t)}
+                      onClick={() => setActivePlanId(t.id)}
+                      className={cx('py-1 text-micro', focused ? 'text-text-1' : 'text-text-3 hover:text-text-2')}
+                    >
+                      {label}
+                    </button>
+                    <button type="button" aria-label={`Delete plan ${label}`} onClick={() => setConfirmDeleteId(t.id)} className="text-nano text-text-4 hover:text-text-1">
+                      ×
+                    </button>
+                  </>
+                )}
+              </span>
+            );
+          })}
+          </div>
+          {tabs.length > 0 ? (
+            <button
+              type="button"
+              onClick={newPlan}
+              disabled={!effectiveProjectId || create.isPending}
+              className="v2-tag flex-none text-text-2 disabled:opacity-50"
+            >
+              New plan
+            </button>
+          ) : null}
         </div>
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
-          <section className={cx('flex min-h-0 min-w-0 flex-1 flex-col md:border-r md:border-line-1', phoneTab === 'drafts' && 'hidden md:flex')} aria-label="Conversation with the planner">
-            <ChatConversation
-              ref={conversationRef}
-              ws={ws}
-              rows={rows}
-              loading={
-                !plan.data
-                  ? <p className="text-micro text-text-3">Starting the planning conversation…</p>
-                  : messages.data === undefined && !messages.isError
-                    ? <p className="text-micro text-text-4">Loading the conversation…</p>
-                    : null
-              }
-              error={messages.isError ? <p className="text-micro text-text-3">Could not load the planning conversation.</p> : null}
-              empty={<p className="text-micro text-text-3">Tell the planner what you want to build.</p>}
-              actorName="Planner"
-              workingAriaLabel="Planner is working"
-              live={live}
-              working={plannerRunning}
-              revealIds={revealIds}
-              onTicket={openTicket}
-              projectName={projectName}
-              resolveContext={resolveContext}
-              ready={messages.data !== undefined}
-            />
-            <div className="flex-none border-t border-line-1 p-2.5">
-              <ChatComposer
-                projects={projects}
-                projectId={effectiveProjectId}
-                onChangeProject={() => undefined}
-                value={text}
-                onChange={setText}
-                onSubmit={send}
-                showScope={false}
-                placeholder="Talk through the plan…"
-                ariaLabel="Message the planner"
-                disabled={!plan.data}
-                sharedDictation={false}
-                queuedReason={
-                  conn.state === 'offline' || conn.state === 'unreachable'
-                    ? 'Offline — your message is queued'
-                    : plannerRunning
-                      ? 'Planner is replying — your message is queued'
-                      : null
-                }
-              />
-            </div>
-          </section>
+        {confirmPlan ? (
+          <div role="alertdialog" aria-label="Delete plan?" className="flex flex-none items-center gap-2 border-b border-line-1 bg-bg-2 px-3.5 py-2 text-micro text-text-2">
+            <span>Delete “{tabLabel(confirmPlan)}”? No tickets will be created.</span>
+            <button type="button" onClick={deleteConfirmed} className="v2-tag text-text-1">Delete</button>
+            <button type="button" onClick={() => setConfirmDeleteId(null)} className="v2-tag text-text-3">Cancel</button>
+          </div>
+        ) : null}
 
-          <aside className={cx('flex min-h-0 min-w-0 flex-1 flex-col md:max-w-[380px]', phoneTab === 'chat' && 'hidden md:flex')} aria-label="Draft tickets">
-            <div className="min-h-0 flex-1 overflow-y-auto p-3">
-              {drafts.length === 0 ? (
-                <p className="text-micro text-text-3">No drafts yet — the planner adds them here as you talk.</p>
-              ) : (
-                <ul className="flex flex-col gap-2">
-                  {drafts.map((d, i) => {
-                    const effectiveTier = d.tierOverride ?? d.suggestedTier;
-                    const editing = editingId === d.id;
-                    return (
-                      <li key={d.id} className="rounded-r4 border border-line-2 bg-bg-2 p-2.5">
-                        {editing ? (
-                          <div className="flex flex-col gap-1.5">
-                            <input
-                              value={editTitle}
-                              onChange={(e) => setEditTitle(e.target.value)}
-                              aria-label={`Title of ${d.title}`}
-                              className="h-8 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1 outline-none"
-                            />
-                            <textarea
-                              value={editDescription}
-                              onChange={(e) => setEditDescription(e.target.value)}
-                              aria-label={`Description of ${d.title}`}
-                              rows={2}
-                              className="resize-none rounded-r4 border border-line-2 bg-bg-input px-2 py-1 text-micro text-text-1 outline-none"
-                            />
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <select
-                                value={editKind}
-                                onChange={(e) => setEditKind(e.target.value as PlanDraftKind)}
-                                aria-label={`Kind of ${d.title}`}
-                                className="h-7 rounded-r4 border border-line-2 bg-bg-input px-1 text-nano text-text-2 outline-none"
-                              >
-                                {PLAN_DRAFT_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
-                              </select>
-                              <select
-                                value={editPriority}
-                                onChange={(e) => setEditPriority(e.target.value as TicketPriority)}
-                                aria-label={`Priority of ${d.title}`}
-                                className="h-7 rounded-r4 border border-line-2 bg-bg-input px-1 text-nano text-text-2 outline-none"
-                              >
-                                {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
-                              </select>
-                              <select
-                                value={editTargetRoleId}
-                                onChange={(e) => setEditTargetRoleId(e.target.value)}
-                                aria-label={`Target role of ${d.title}`}
-                                className="h-7 rounded-r4 border border-line-2 bg-bg-input px-1 text-nano text-text-2 outline-none"
-                              >
-                                <option value="">Unassigned</option>
-                                {(roles.data ?? []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-                              </select>
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              <button type="button" disabled={!editTitle.trim() || patchDraft.isPending} onClick={() => saveEdit(d.id)} className="v2-tag text-nano">
-                                Save
-                              </button>
-                              <button type="button" onClick={cancelEdit} className="v2-tag text-nano text-text-3">
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="flex items-center gap-1.5">
-                              <span className="v2-tag text-nano">{d.kind}</span>
-                              <span className="v2-tag text-nano">{d.priority}</span>
-                              <div className="ml-auto flex items-center gap-1">
-                                <button type="button" aria-label={`Move ${d.title} up`} disabled={i === 0} onClick={() => move(d.id, i - 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
-                                  ↑
-                                </button>
-                                <button type="button" aria-label={`Move ${d.title} down`} disabled={i === drafts.length - 1} onClick={() => move(d.id, i + 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
-                                  ↓
-                                </button>
-                                <button type="button" aria-label={`Edit ${d.title}`} onClick={() => beginEdit(d)} className="text-text-4 hover:text-text-1">
-                                  Edit
-                                </button>
-                                <button
-                                  type="button"
-                                  aria-label={`Remove ${d.title}`}
-                                  onClick={() => effectiveProjectId && plan.data && removeDraft.mutate({ projectId: effectiveProjectId, planId: plan.data.plan.id, draftId: d.id })}
-                                  className="text-text-4 hover:text-text-1"
-                                >
-                                  ×
-                                </button>
+        {tabs.length === 0 ? (
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+            <p className="text-micro text-text-3">No plans yet. Start one to plan a body of work with the planner.</p>
+            <button type="button" onClick={newPlan} disabled={!effectiveProjectId || create.isPending} className="v2-tag border-accent bg-accent px-3 py-1.5 text-bg-0 disabled:opacity-50">
+              New plan
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-none border-b border-line-1 md:hidden">
+              <button type="button" onClick={() => setPhoneTab('chat')} aria-pressed={phoneTab === 'chat'} className={cx('flex-1 py-2 text-micro', phoneTab === 'chat' ? 'text-text-1' : 'text-text-3')}>
+                Chat
+              </button>
+              <button type="button" onClick={() => setPhoneTab('drafts')} aria-pressed={phoneTab === 'drafts'} className={cx('flex-1 py-2 text-micro', phoneTab === 'drafts' ? 'text-text-1' : 'text-text-3')}>
+                Drafts ({drafts.length})
+              </button>
+            </div>
+
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col md:flex-row">
+              <section className={cx('flex min-h-0 min-w-0 flex-1 flex-col md:border-r md:border-line-1', phoneTab === 'drafts' && 'hidden md:flex')} aria-label="Conversation with the planner">
+                <ChatConversation
+                  ref={conversationRef}
+                  ws={ws}
+                  rows={rows}
+                  loading={
+                    !plan.data
+                      ? <p className="text-micro text-text-3">Starting the planning conversation…</p>
+                      : messages.data === undefined && !messages.isError
+                        ? <p className="text-micro text-text-4">Loading the conversation…</p>
+                        : null
+                  }
+                  error={messages.isError ? <p className="text-micro text-text-3">Could not load the planning conversation.</p> : null}
+                  empty={<p className="text-micro text-text-3">Tell the planner what you want to build.</p>}
+                  actorName="Planner"
+                  workingAriaLabel="Planner is working"
+                  live={live}
+                  working={plannerRunning}
+                  revealIds={revealIds}
+                  onTicket={openTicket}
+                  projectName={projectName}
+                  resolveContext={resolveContext}
+                  ready={messages.data !== undefined}
+                />
+                <div className="flex-none border-t border-line-1 p-2.5">
+                  <ChatComposer
+                    projects={projects}
+                    projectId={effectiveProjectId}
+                    onChangeProject={() => undefined}
+                    value={text}
+                    onChange={setText}
+                    onSubmit={send}
+                    showScope={false}
+                    placeholder="Talk through the plan…"
+                    ariaLabel="Message the planner"
+                    disabled={!plan.data}
+                    sharedDictation={false}
+                    queuedReason={
+                      conn.state === 'offline' || conn.state === 'unreachable'
+                        ? 'Offline — your message is queued'
+                        : plannerRunning
+                          ? 'Planner is replying — your message is queued'
+                          : null
+                    }
+                  />
+                </div>
+              </section>
+
+              <aside className={cx('flex min-h-0 min-w-0 flex-1 flex-col md:max-w-[380px]', phoneTab === 'chat' && 'hidden md:flex')} aria-label="Draft tickets">
+                <div className="min-h-0 flex-1 overflow-y-auto p-3">
+                  {drafts.length === 0 ? (
+                    <p className="text-micro text-text-3">No drafts yet — the planner adds them here as you talk.</p>
+                  ) : (
+                    <ul className="flex flex-col gap-2">
+                      {drafts.map((d, i) => {
+                        const effectiveTier = d.tierOverride ?? d.suggestedTier;
+                        const editing = editingId === d.id;
+                        return (
+                          <li key={d.id} className="rounded-r4 border border-line-2 bg-bg-2 p-2.5">
+                            {editing ? (
+                              <div className="flex flex-col gap-1.5">
+                                <input
+                                  value={editTitle}
+                                  onChange={(e) => setEditTitle(e.target.value)}
+                                  aria-label={`Title of ${d.title}`}
+                                  className="h-8 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1 outline-none"
+                                />
+                                <textarea
+                                  value={editDescription}
+                                  onChange={(e) => setEditDescription(e.target.value)}
+                                  aria-label={`Description of ${d.title}`}
+                                  rows={2}
+                                  className="resize-none rounded-r4 border border-line-2 bg-bg-input px-2 py-1 text-micro text-text-1 outline-none"
+                                />
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <select
+                                    value={editKind}
+                                    onChange={(e) => setEditKind(e.target.value as PlanDraftKind)}
+                                    aria-label={`Kind of ${d.title}`}
+                                    className="h-7 rounded-r4 border border-line-2 bg-bg-input px-1 text-nano text-text-2 outline-none"
+                                  >
+                                    {PLAN_DRAFT_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}
+                                  </select>
+                                  <select
+                                    value={editPriority}
+                                    onChange={(e) => setEditPriority(e.target.value as TicketPriority)}
+                                    aria-label={`Priority of ${d.title}`}
+                                    className="h-7 rounded-r4 border border-line-2 bg-bg-input px-1 text-nano text-text-2 outline-none"
+                                  >
+                                    {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
+                                  </select>
+                                  <select
+                                    value={editTargetRoleId}
+                                    onChange={(e) => setEditTargetRoleId(e.target.value)}
+                                    aria-label={`Target role of ${d.title}`}
+                                    className="h-7 rounded-r4 border border-line-2 bg-bg-input px-1 text-nano text-text-2 outline-none"
+                                  >
+                                    <option value="">Unassigned</option>
+                                    {(roles.data ?? []).map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                                  </select>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  <button type="button" disabled={!editTitle.trim() || patchDraft.isPending} onClick={() => saveEdit(d.id)} className="v2-tag text-nano">
+                                    Save
+                                  </button>
+                                  <button type="button" onClick={cancelEdit} className="v2-tag text-nano text-text-3">
+                                    Cancel
+                                  </button>
+                                </div>
                               </div>
-                            </div>
-                            <p className="mt-1 text-micro text-text-1">{d.title}</p>
-                            {d.description ? <p className="mt-0.5 whitespace-pre-wrap text-nano text-text-3">{d.description}</p> : null}
-                            {d.targetRoleId ? <p className="mt-0.5 text-nano text-text-4">Role: {roles.data?.find((r) => r.id === d.targetRoleId)?.name ?? d.targetRoleId}</p> : null}
-                            {d.blockedBy.length > 0 ? <p className="mt-0.5 text-nano text-text-4">Depends on {d.blockedBy.length} draft{d.blockedBy.length > 1 ? 's' : ''}</p> : null}
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                              <span className="text-nano text-text-4">Tier ({d.suggestedTier} suggested):</span>
-                              {TIERS.map((t) => (
-                                <button
-                                  key={t}
-                                  type="button"
-                                  aria-pressed={effectiveTier === t}
-                                  onClick={() => setTier(d.id, effectiveTier, t, d.suggestedTier)}
-                                  className={cx('v2-tag text-nano', effectiveTier === t ? 'bg-bg-3 text-text-1' : 'text-text-3')}
-                                >
-                                  {t}
-                                </button>
-                              ))}
-                            </div>
-                          </>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+                            ) : (
+                              <>
+                                <div className="flex items-center gap-1.5">
+                                  <span className="v2-tag text-nano">{d.kind}</span>
+                                  <span className="v2-tag text-nano">{d.priority}</span>
+                                  <div className="ml-auto flex items-center gap-1">
+                                    <button type="button" aria-label={`Move ${d.title} up`} disabled={i === 0} onClick={() => move(d.id, i - 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
+                                      ↑
+                                    </button>
+                                    <button type="button" aria-label={`Move ${d.title} down`} disabled={i === drafts.length - 1} onClick={() => move(d.id, i + 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
+                                      ↓
+                                    </button>
+                                    <button type="button" aria-label={`Edit ${d.title}`} onClick={() => beginEdit(d)} className="text-text-4 hover:text-text-1">
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      aria-label={`Remove ${d.title}`}
+                                      onClick={() => effectiveProjectId && plan.data && removeDraft.mutate({ projectId: effectiveProjectId, planId: plan.data.plan.id, draftId: d.id })}
+                                      className="text-text-4 hover:text-text-1"
+                                    >
+                                      ×
+                                    </button>
+                                  </div>
+                                </div>
+                                <p className="mt-1 text-micro text-text-1">{d.title}</p>
+                                {d.description ? <p className="mt-0.5 whitespace-pre-wrap text-nano text-text-3">{d.description}</p> : null}
+                                {d.targetRoleId ? <p className="mt-0.5 text-nano text-text-4">Role: {roles.data?.find((r) => r.id === d.targetRoleId)?.name ?? d.targetRoleId}</p> : null}
+                                {d.blockedBy.length > 0 ? <p className="mt-0.5 text-nano text-text-4">Depends on {d.blockedBy.length} draft{d.blockedBy.length > 1 ? 's' : ''}</p> : null}
+                                <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                  <span className="text-nano text-text-4">Tier ({d.suggestedTier} suggested):</span>
+                                  {TIERS.map((t) => (
+                                    <button
+                                      key={t}
+                                      type="button"
+                                      aria-pressed={effectiveTier === t}
+                                      onClick={() => setTier(d.id, effectiveTier, t, d.suggestedTier)}
+                                      className={cx('v2-tag text-nano', effectiveTier === t ? 'bg-bg-3 text-text-1' : 'text-text-3')}
+                                    >
+                                      {t}
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+                <div className="flex flex-none items-center gap-2 border-t border-line-1 p-2.5">
+                  <button
+                    type="button"
+                    disabled={!canSubmit}
+                    onClick={() => effectiveProjectId && plan.data && submit.mutate({ projectId: effectiveProjectId, planId: plan.data.plan.id }, { onSuccess: afterSubmit })}
+                    className="v2-tag ml-auto border-accent bg-accent px-3 py-1.5 text-bg-0 disabled:opacity-50"
+                  >
+                    Submit
+                  </button>
+                </div>
+              </aside>
             </div>
-            <div className="flex flex-none items-center gap-2 border-t border-line-1 p-2.5">
-              <button
-                type="button"
-                onClick={() => effectiveProjectId && plan.data && discard.mutate({ projectId: effectiveProjectId, planId: plan.data.plan.id }, { onSuccess: onClose })}
-                className="v2-tag text-text-3 hover:text-text-1"
-              >
-                Discard
-              </button>
-              <button
-                type="button"
-                disabled={!canSubmit}
-                onClick={() => effectiveProjectId && plan.data && submit.mutate({ projectId: effectiveProjectId, planId: plan.data.plan.id }, { onSuccess: onClose })}
-                className="v2-tag ml-auto border-accent bg-accent px-3 py-1.5 text-bg-0 disabled:opacity-50"
-              >
-                Submit
-              </button>
-            </div>
-          </aside>
-        </div>
+          </>
+        )}
       </div>
     </div>
   );

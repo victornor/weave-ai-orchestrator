@@ -155,3 +155,72 @@ describe('plan submit/discard HTTP (VS-398)', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('plan tab HTTP (VS-477)', () => {
+  it('GET /plans lists drafting plans newest first with draft counts and title source', async () => {
+    harness = makeHarness(); seed(harness);
+    const first = startPlan(harness);
+    harness.db.insert('channel_threads', { id: 'th2', channelId: 'c1', agentId: 'ag_conductor', createdAt: 't0' });
+    const second = harness.runtime.services.planning.create({ kind: 'human', id: 'v' }, 'proj1', { threadId: 'th2' });
+    harness.runtime.services.planning.addDraft({ kind: 'human', id: 'v' }, second.id, { title: 'B', kind: 'change', suggestedTier: 'standard' });
+    const app = createApp(harness.deps);
+
+    const res = await app.fetch(new Request('http://127.0.0.1/api/w/ws1/projects/proj1/plans?status=drafting', { headers: authed() }));
+    expect(res.status).toBe(200);
+    const body = await res.json() as { plans: Array<{ id: string; draftCount: number; titleSource: string }> };
+    expect(body.plans.map((p) => p.id)).toEqual([second.id, first.id]);
+    expect(body.plans[0]).toMatchObject({ draftCount: 1, titleSource: 'auto' });
+    expect(body.plans[1]).toMatchObject({ titleSource: 'human' });
+  });
+
+  it('POST /plans creates an independent plan via workers.createPlan and returns 201', async () => {
+    harness = makeHarness(); seed(harness);
+    const plan = startPlan(harness);
+    const createSpy = vi.fn(async () => ({ plan, agent: { id: 'ag_planner2', status: 'active', runtimeId: 'claude' } }));
+    harness.runtime.services.workers = { ...harness.runtime.services.workers, createPlan: createSpy } as never;
+    const app = createApp(harness.deps);
+
+    const res = await app.fetch(new Request('http://127.0.0.1/api/w/ws1/projects/proj1/plans', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({}),
+    }));
+    expect(res.status).toBe(201);
+    expect((await res.json() as { agent: { id: string } }).agent.id).toBe('ag_planner2');
+    expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ kind: 'human' }), 'proj1', { title: undefined });
+  });
+
+  it('PATCH /plans/:planId renames as human, and a later auto title cannot overwrite it', async () => {
+    harness = makeHarness(); seed(harness);
+    const plan = startPlan(harness);
+    const app = createApp(harness.deps);
+
+    const res = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/proj1/plans/${plan.id}`, {
+      method: 'PATCH', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ title: 'Captain title' }),
+    }));
+    expect(res.status).toBe(200);
+    const renamed = await res.json() as Plan;
+    expect(renamed.title).toBe('Captain title');
+    expect(renamed.titleSource).toBe('human');
+    expect(() => harness!.runtime.services.planning.setTitle({ kind: 'human', id: 'v' }, plan.id, 'auto title', 'auto')).toThrow(/renamed by captain/);
+  });
+
+  it('POST /plans/:planId/activate ensures the planner and sweeps idle siblings', async () => {
+    harness = makeHarness(); seed(harness);
+    const plan = startPlan(harness);
+    const ensureSpy = vi.fn(async () => ({ id: 'ag_planner', status: 'active', runtimeId: 'claude' }));
+    const sweepSpy = vi.fn(async () => 0);
+    harness.runtime.services.workers = { ...harness.runtime.services.workers, ensurePlanner: ensureSpy, retireIdlePlanners: sweepSpy } as never;
+    const app = createApp(harness.deps);
+
+    const res = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/proj1/plans/${plan.id}/activate`, { method: 'POST', headers: authed() }));
+    expect(res.status).toBe(200);
+    expect(ensureSpy).toHaveBeenCalledWith(expect.objectContaining({ kind: 'human' }), plan.id);
+    expect(sweepSpy).toHaveBeenCalledWith('proj1', { keepPlanId: plan.id });
+  });
+
+  it('GET /plans rejects an unsupported status filter', async () => {
+    harness = makeHarness(); seed(harness);
+    const app = createApp(harness.deps);
+    const res = await app.fetch(new Request('http://127.0.0.1/api/w/ws1/projects/proj1/plans?status=submitted', { headers: authed() }));
+    expect(res.status).toBe(400);
+  });
+});

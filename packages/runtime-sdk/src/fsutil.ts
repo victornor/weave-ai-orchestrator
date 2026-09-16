@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { accessSync, constants, cpSync, mkdirSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, cpSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -100,7 +100,19 @@ export function installBundleFiles(home: AgentHome, bundle: InstructionBundle, o
   if (bundle.skills.length === 0) return;
   const skillsRoot = join(home.path, opts.skillsDir);
   mkdirSync(skillsRoot, { recursive: true });
-  for (const s of bundle.skills) cpSync(s.dir, join(skillsRoot, s.name), { recursive: true, dereference: true });
+  // Sync, don't accumulate: a skill renamed in the shipped set (agent-conductor-* -> weave-ai-*)
+  // otherwise leaves its old copy beside the new one, and the runtime lists both. Drop every
+  // directory the bundle no longer carries, and replace each wanted one so files removed from a
+  // skill also disappear.
+  const wanted = new Set(bundle.skills.map((s) => s.name));
+  for (const entry of readdirSync(skillsRoot, { withFileTypes: true })) {
+    if (entry.isDirectory() && !wanted.has(entry.name)) rmSync(join(skillsRoot, entry.name), { recursive: true, force: true });
+  }
+  for (const s of bundle.skills) {
+    const dest = join(skillsRoot, s.name);
+    rmSync(dest, { recursive: true, force: true });
+    cpSync(s.dir, dest, { recursive: true, dereference: true });
+  }
 }
 
 /** Bound a payload string (events carry redacted, size-limited text). */

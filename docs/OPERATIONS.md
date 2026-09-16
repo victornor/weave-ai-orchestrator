@@ -375,6 +375,23 @@ remain overridable per invocation (`--drain-timeout`) or in `daemon.yaml`.
 
 ## 7. Runtime credentials
 
+### Codex token consumption
+
+Codex reports cumulative usage across a resumed thread. Weave subtracts the previous counter to
+record each run's own usage, including its cached-input portion. Existing threads recover their
+baseline from the local Codex rollout; if that counter is unavailable, that turn's usage is unknown
+rather than charging the entire history again. Previously recorded usage is not rewritten.
+
+The adapter defaults to `toolOutputTokenLimit: 4096` and `compactionPercent: 60` in runtime
+options. The percentage uses the discovered model's normal context window; `contextWindowTokens`
+overrides both the active Codex window and the calculation. A 1,000,000-token window at 60% yields
+`model_auto_compact_token_limit=600000`. An optional `autoCompactTokenLimit` sets an absolute
+threshold instead. If the window is unknown, the adapter preserves Codex's own threshold rather
+than guessing; configure `contextWindowTokens` to apply a percentage to custom models. These
+limit retained tool output and compact long histories earlier; they do not impose a hard spending
+limit or a maximum number of model requests. Increase them when a task requires more context.
+Compaction can lose older details, so durable facts belong in tickets and knowledge files.
+
 ### One credential per runtime per host
 
 Every agent authenticates with **the same credential file the machine owner's own CLI uses**. There

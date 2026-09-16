@@ -4,7 +4,7 @@ import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, 
 import { runTmpDir } from '@weave-ai/runtime-sdk';
 import { asCodexSession } from './session.js';
 
-export interface CodexBuildOpts { tmpDir?: string; configExists?: boolean }
+export interface CodexBuildOpts { tmpDir?: string; configExists?: boolean; modelContextWindowTokens?: number }
 
 export interface CodexBuiltCommand extends BuiltCommand {
   /** Thread being resumed/forked, or null for a new thread (id arrives in `thread.started`). */
@@ -118,6 +118,24 @@ export function buildArgs(input: TurnInput, opts: CodexBuildOpts = {}): CodexBui
   if (model) args.push('-m', model);
   const effort = str(input.effort) ?? str(input.options?.['effort']);
   if (effort) args.push('-c', `model_reasoning_effort=${toml(effort)}`);
+
+  const positiveInteger = (option: string, value: unknown): number => {
+    if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) throw new Error(`codex: ${option} must be a positive integer`);
+    return value;
+  };
+  args.push('-c', `tool_output_token_limit=${positiveInteger('toolOutputTokenLimit', input.options?.['toolOutputTokenLimit'] ?? 4096)}`);
+  const percent = input.options?.['compactionPercent'] ?? 60;
+  if (typeof percent !== 'number' || !Number.isFinite(percent) || percent <= 0 || percent > 100) throw new Error('codex: compactionPercent must be greater than 0 and at most 100');
+  const configuredWindow = input.options?.['contextWindowTokens'];
+  const window = configuredWindow === undefined ? opts.modelContextWindowTokens : positiveInteger('contextWindowTokens', configuredWindow);
+  if (configuredWindow !== undefined) args.push('-c', `model_context_window=${window}`);
+  const explicitLimit = input.options?.['autoCompactTokenLimit'];
+  if (explicitLimit !== undefined) {
+    args.push('-c', `model_auto_compact_token_limit=${positiveInteger('autoCompactTokenLimit', explicitLimit)}`);
+  } else if (window !== undefined) {
+    args.push('-c', `model_auto_compact_token_limit=${Math.max(1, Math.floor(window * percent / 100))}`);
+  }
+  // Unknown window: preserve the CLI's threshold instead of guessing a model's capacity.
 
   const servers = Object.entries(input.mcpServers ?? {});
   const viaFile = input.options?.['mcpViaConfigFile'] === true;

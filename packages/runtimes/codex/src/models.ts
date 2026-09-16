@@ -50,7 +50,7 @@ export function parseBundledModels(stdout: string): RuntimeModel[] {
   const out: RuntimeModel[] = [];
   for (const raw of models) {
     if (!raw || typeof raw !== 'object') continue;
-    const row = raw as { slug?: unknown; display_name?: unknown; supported_reasoning_levels?: unknown };
+    const row = raw as { slug?: unknown; display_name?: unknown; supported_reasoning_levels?: unknown; context_window?: unknown };
     if (typeof row.slug !== 'string' || row.slug.length === 0) continue;
     const model: RuntimeModel = {
       id: row.slug,
@@ -58,6 +58,7 @@ export function parseBundledModels(stdout: string): RuntimeModel[] {
       provider: 'openai',
       source: 'detected',
     };
+    if (typeof row.context_window === 'number' && Number.isSafeInteger(row.context_window) && row.context_window > 0) model.contextWindowTokens = row.context_window;
     const efforts = effortsFromLevels(row.supported_reasoning_levels);
     if (efforts) model.efforts = efforts;
     out.push(model);
@@ -81,4 +82,13 @@ export async function listModels(opts?: { binaryPath?: string | null }): Promise
     if (parsed.length > 0) return parsed;
   } catch { /* fall through */ }
   return FALLBACK_MODELS.map((m) => ({ ...m }));
+}
+
+let cachedCatalog: { expires: number; models: Promise<RuntimeModel[]> } | undefined;
+
+/** Metadata discovery only; cache it so repeated turns do not spawn discovery repeatedly. */
+export async function modelContextWindow(model: string | null | undefined): Promise<number | undefined> {
+  if (!model) return undefined;
+  if (!cachedCatalog || cachedCatalog.expires < Date.now()) cachedCatalog = { expires: Date.now() + 300_000, models: listModels() };
+  return (await cachedCatalog.models).find(row => row.id === model)?.contextWindowTokens;
 }

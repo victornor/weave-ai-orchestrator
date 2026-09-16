@@ -1,5 +1,6 @@
 import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
 import { truncate } from '@weave-ai/runtime-sdk';
+import { turnUsage, type CodexUsage } from './usage.js';
 import { parseTestSummary } from '@weave-ai/shared';
 
 export interface CodexParseState {
@@ -7,6 +8,7 @@ export interface CodexParseState {
   completed: boolean;
   finalText: string | null;
   usage: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } | null;
+  cumulativeUsage: CodexUsage | null;
   isError: boolean;
   errorMessage: string | null;
 }
@@ -23,8 +25,8 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
  * `mcp_tool_call`, `web_search`, `todo_list`, `error`). Official JSONL uses item.type;
  * item_type is accepted for compatibility with the original 0.150.x fixtures.
  */
-export function createCodexParser(opts: { resumed: boolean } = { resumed: false }) {
-  const state: CodexParseState = { threadId: null, completed: false, finalText: null, usage: null, isError: false, errorMessage: null };
+export function createCodexParser(opts: { resumed: boolean; baseline?: CodexUsage | null } = { resumed: false }) {
+  const state: CodexParseState = { threadId: null, completed: false, finalText: null, usage: null, cumulativeUsage: null, isError: false, errorMessage: null };
   const messages: string[] = [];
   const toolCalls = new Set<string>();
 
@@ -58,12 +60,14 @@ export function createCodexParser(opts: { resumed: boolean } = { resumed: false 
         const out: RuntimeEvent[] = [];
         const u = obj(msg['usage']);
         if (u) {
-          state.usage = {
+          const total = {
             inputTokens: num(u['input_tokens']) ?? 0,
             outputTokens: num(u['output_tokens']) ?? 0,
             cachedInputTokens: num(u['cached_input_tokens']) ?? 0,
           };
-          out.push({ ts, type: 'usage.delta', payload: { ...state.usage, basis: 'per_turn' } });
+          state.cumulativeUsage = total;
+          state.usage = opts.baseline === null ? null : turnUsage(total, opts.baseline ?? { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 });
+          if (state.usage) out.push({ ts, type: 'usage.delta', payload: { ...state.usage, basis: 'per_turn' } });
         }
         state.finalText = messages.length > 0 ? messages[messages.length - 1]! : null;
         // Stream errors can describe retries; a completed turn recovered successfully.

@@ -96,3 +96,27 @@ describe('codex command events (VS-328)', () => {
     expect(cmd.payload['tests']).toEqual({ passed: 28, total: 28 });
   });
 });
+
+describe('session cumulative usage', () => {
+  it('subtracts the previous turn instead of charging the whole session again', () => {
+    const parser = createCodexParser({ resumed: true, baseline: { inputTokens: 448626, outputTokens: 2114, cachedInputTokens: 403072 } });
+    const events = parser.handle(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1661849, output_tokens: 5630, cached_input_tokens: 1555456 } }));
+    expect(parser.state.usage).toEqual({ inputTokens: 1213223, outputTokens: 3516, cachedInputTokens: 1152384 });
+    expect(events.find(e => e.type === 'usage.delta')?.payload).toMatchObject({ inputTokens: 1213223, basis: 'per_turn' });
+    expect(parser.state.cumulativeUsage?.inputTokens).toBe(1661849);
+  });
+
+  it('does not charge historical usage when a legacy baseline is unavailable', () => {
+    const parser = createCodexParser({ resumed: true, baseline: null });
+    const events = parser.handle(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 1931235, output_tokens: 5988 } }));
+    expect(parser.state.usage).toBeNull();
+    expect(parser.state.cumulativeUsage?.inputTokens).toBe(1931235);
+    expect(events.some(e => e.type === 'usage.delta')).toBe(false);
+  });
+
+  it('uses a fresh counter when Codex resets cumulative usage', () => {
+    const parser = createCodexParser({ resumed: true, baseline: { inputTokens: 1000, outputTokens: 100, cachedInputTokens: 800 } });
+    parser.handle(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 20, output_tokens: 2, cached_input_tokens: 10 } }));
+    expect(parser.state.usage).toEqual({ inputTokens: 20, outputTokens: 2, cachedInputTokens: 10 });
+  });
+});

@@ -9,7 +9,8 @@ import { extractReport } from '@weave-ai/shared';
 import { describeCodexAccount } from './account.js';
 import { buildArgs, mcpConfigToml, resumeCommand } from './args.js';
 import { createCodexParser } from './events.js';
-import { listModels as listCodexModels } from './models.js';
+import { listModels as listCodexModels, modelContextWindow } from './models.js';
+import { readThreadUsage } from './usage.js';
 import { asCodexSession, type CodexSessionRef } from './session.js';
 
 export const capabilities: RuntimeCapabilities = {
@@ -36,6 +37,10 @@ const CONFIG_SCHEMA: JsonSchema = {
     maxTurns: { type: 'integer', minimum: 1, description: 'Not enforced by codex; used by the supervisor only' },
     maxBudgetUsd: { type: 'number', exclusiveMinimum: 0, description: 'Not enforced by codex; used by the supervisor only' },
     mcpViaConfigFile: { type: 'boolean', default: false, description: 'Initialize MCP servers in an empty CODEX_HOME/config.toml; existing config is preserved using -c overrides' },
+    toolOutputTokenLimit: { type: 'integer', minimum: 1, default: 4096, description: 'Maximum tokens retained per tool output' },
+    compactionPercent: { type: 'number', exclusiveMinimum: 0, maximum: 100, default: 60, description: 'Compact at this percentage of the active model context window' },
+    contextWindowTokens: { type: 'integer', minimum: 1, description: 'Override the active Codex model context window in tokens' },
+    autoCompactTokenLimit: { type: 'integer', minimum: 1, description: 'Optional absolute compaction threshold; overrides compactionPercent' },
     extraArgs: { type: 'array', items: { type: 'string' } },
   },
 };
@@ -61,7 +66,7 @@ export const adapter: RuntimeAdapter = {
     if (!ref) throw new Error('codex: cannot fork a thread without a threadId');
     // `codex exec fork <id>` needs a prompt, so the fork happens on the next turn;
     // the new thread id arrives in that turn's `thread.started`.
-    return { threadId: ref.threadId, fork: true } satisfies CodexSessionRef;
+    return { threadId: ref.threadId, fork: true, ...(ref.usage ? { usage: ref.usage } : {}) } satisfies CodexSessionRef;
   },
 
   async describeSession(ref: SessionRef) {
@@ -74,7 +79,9 @@ export const adapter: RuntimeAdapter = {
 
   async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
     const tmpDir = runTmpDir(input.runId);
-    let built = buildArgs(input, { tmpDir, configExists: Boolean(input.configHome && existsSync(join(input.configHome, 'config.toml'))) });
+    const model = input.model || (typeof input.options['model'] === 'string' ? input.options['model'] : null);
+    const modelWindow = input.options['contextWindowTokens'] === undefined && input.options['autoCompactTokenLimit'] === undefined ? await modelContextWindow(model) : undefined;
+    let built = buildArgs(input, { tmpDir, modelContextWindowTokens: modelWindow, configExists: Boolean(input.configHome && existsSync(join(input.configHome, 'config.toml'))) });
     mkdirSync(tmpDir, { recursive: true });
     rmSync(built.lastMessagePath, { force: true });
     // Runtime config is shared by workers. Never overwrite a config created by another turn
@@ -88,12 +95,14 @@ export const adapter: RuntimeAdapter = {
         built.files = built.files.filter((file) => file !== configFile);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        built = buildArgs(input, { tmpDir, configExists: true });
+        built = buildArgs(input, { tmpDir, modelContextWindowTokens: modelWindow, configExists: true });
       }
     }
     writeFiles(built.files);
 
-    const parser = createCodexParser({ resumed: built.mode === 'resume' });
+    const previous = asCodexSession(input.session.ref);
+    const baseline = previous?.usage ?? readThreadUsage(input.configHome, built.threadId);
+    const parser = createCodexParser({ resumed: built.mode === 'resume', baseline: built.mode === 'new' ? undefined : baseline });
     let seq = 0;
     const launch = launchCommand(built.cmd, built.env);
     const run = spawnLines({
@@ -129,12 +138,12 @@ export const adapter: RuntimeAdapter = {
       }
       : undefined;
 
-    const model = input.model || (typeof input.options['model'] === 'string' ? input.options['model'] : null);
+
     return {
       exitCode: outcome.exitCode,
       signal: outcome.signal,
       timedOut: outcome.timedOut,
-      session: st.threadId ? { threadId: st.threadId } : (built.threadId && built.mode === 'resume' ? { threadId: built.threadId } : null),
+      session: st.threadId ? { threadId: st.threadId, ...(st.cumulativeUsage ? { usage: st.cumulativeUsage } : {}) } : (built.threadId && built.mode === 'resume' ? { threadId: built.threadId } : null),
       finalText,
       ...(structured !== undefined ? { structured } : {}),
       ...(st.usage ? { usage: { ...st.usage, basis: 'per_turn' as const } } : {}),

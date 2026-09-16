@@ -134,3 +134,17 @@ describe('resumeCommand (VS-249)', () => {
     expect(c.env).toEqual({ CODEX_HOME: '/ws/runtimes/codex' });
   });
 });
+
+it('bounds retained tool output and compacts history earlier on every invocation', () => {
+  const defaults = buildArgs(input()).args;
+  expect(defaults).toContain('tool_output_token_limit=4096');
+  expect(defaults.some(arg => arg.startsWith('model_auto_compact_token_limit='))).toBe(false);
+  expect(buildArgs(input(), { modelContextWindowTokens: 1000000 }).args).toContain('model_auto_compact_token_limit=600000');
+  expect(buildArgs(input({ options: { contextWindowTokens: 1000000, compactionPercent: 75 } })).args).toContain('model_auto_compact_token_limit=750000');
+  expect(buildArgs(input({ options: { contextWindowTokens: 1000000 } })).args).toContain('model_context_window=1000000');
+  expect(() => buildArgs(input({ options: { compactionPercent: 101 } }))).toThrow('compactionPercent');
+  const configured = buildArgs(input({ options: { toolOutputTokenLimit: 2048, autoCompactTokenLimit: 48000 }, session: { policy: 'per_ticket', ref: { threadId: 't' }, isFirstTurn: false } })).args;
+  expect(configured).toContain('tool_output_token_limit=2048');
+  expect(configured).toContain('model_auto_compact_token_limit=48000');
+  expect(() => buildArgs(input({ options: { autoCompactTokenLimit: -1 } }))).toThrow('positive integer');
+});

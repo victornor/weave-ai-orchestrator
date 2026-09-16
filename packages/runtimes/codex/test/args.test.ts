@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { TurnInput } from '@weave-ai/runtime-sdk';
 import { buildArgs, mcpConfigToml, mcpOverrides, resumeCommand } from '../src/args.js';
@@ -13,6 +14,7 @@ function input(over: Partial<TurnInput> = {}): TurnInput {
   };
 }
 const s = (a: string[]) => a.join(' ');
+const tokenKey = (name: string) => `AC_MCP_TOKEN_${name.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_${createHash('sha256').update(name).digest('hex').slice(0, 12).toUpperCase()}`;
 
 describe('codex buildArgs', () => {
   it('builds a new thread with the prompt on stdin', () => {
@@ -60,10 +62,10 @@ describe('codex buildArgs', () => {
       mcpServers: { 'weave-ai': { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer secret-token', 'X-Trace': 'abc' } } },
     }));
     expect(s(b.args)).toContain('-c mcp_servers.weave-ai.url="http://127.0.0.1:7777/mcp/runs/run-1"');
-    expect(s(b.args)).toContain('-c mcp_servers.weave-ai.bearer_token_env_var="AC_MCP_TOKEN_WEAVE_AI"');
-    expect(s(b.args)).toContain('-c mcp_servers.weave-ai.http_headers.X-Trace="abc"');
+    expect(s(b.args)).toContain(`-c mcp_servers.weave-ai.bearer_token_env_var="${tokenKey('weave-ai')}"`);
+    expect(s(b.args)).toContain('-c mcp_servers.weave-ai.http_headers={X-Trace="abc"}');
     expect(s(b.args)).not.toContain('secret-token');
-    expect(b.env['AC_MCP_TOKEN_WEAVE_AI']).toBe('secret-token');
+    expect(b.env[tokenKey('weave-ai')]).toBe('secret-token');
   });
 
   it('falls back to CODEX_HOME/config.toml when asked', () => {
@@ -81,9 +83,41 @@ describe('codex buildArgs', () => {
 
   it('mcpOverrides/mcpConfigToml handle stdio servers', () => {
     const o = mcpOverrides('local', { type: 'stdio', command: 'node', args: ['server.js'], env: { A: '1' } });
-    expect(s(o.args)).toBe('-c mcp_servers.local.command="node" -c mcp_servers.local.args=["server.js"] -c mcp_servers.local.env.A="1"');
+    expect(s(o.args)).toBe('-c mcp_servers.local.command="node" -c mcp_servers.local.args=["server.js"] -c mcp_servers.local.env={A="1"}');
     expect(mcpConfigToml({ local: { type: 'stdio', command: 'node', args: ['server.js'] } })).toContain('command = "node"');
   });
+});
+
+
+it('preserves existing runtime config by using invocation overrides', () => {
+  const b = buildArgs(input({ configHome: '/ws/codex', options: { mcpViaConfigFile: true }, mcpServers: { ac: { type: 'http', url: 'http://local/mcp' } } }), { configExists: true });
+  expect(b.files.some((f) => f.path === '/ws/codex/config.toml')).toBe(false);
+  expect(s(b.args)).toContain('mcp_servers.ac.url=');
+});
+
+it('serializes stdio env and quotes dotted TOML keys', () => {
+  const server = { type: 'stdio' as const, command: 'node', env: { 'A.B': 'value' } };
+  expect(mcpConfigToml({ 'local.test': server })).toContain('[mcp_servers."local.test".env]');
+  expect(mcpConfigToml({ 'local.test': server })).toContain('"A.B" = "value"');
+  expect(s(mcpOverrides('local', server).args)).toContain('mcp_servers.local.env={"A.B"="value"}');
+});
+
+it('keeps bearer secrets out of generated config files', () => {
+  const b = buildArgs(input({ configHome: '/ws/codex', options: { mcpViaConfigFile: true }, mcpServers: { ac: { type: 'http', url: 'http://local/mcp', headers: { Authorization: 'Bearer hidden-token' } } } }));
+  expect(b.files[0]?.content).toContain(`bearer_token_env_var = "${tokenKey('ac')}"`);
+  expect(b.files[0]?.content).not.toContain('hidden-token');
+  expect(b.env[tokenKey('ac')]).toBe('hidden-token');
+});
+
+
+it('keeps tokens distinct for server names that normalize to the same environment prefix', () => {
+  const b = buildArgs(input({ mcpServers: {
+    'ac-tools': { type: 'http', url: 'http://one/mcp', headers: { Authorization: 'Bearer first' } },
+    ac_tools: { type: 'http', url: 'http://two/mcp', headers: { Authorization: 'Bearer second' } },
+    'AC-TOOLS': { type: 'http', url: 'http://three/mcp', headers: { Authorization: 'Bearer third' } },
+  } }));
+  expect(Object.values(b.env)).toEqual(expect.arrayContaining(['first', 'second', 'third']));
+  expect(Object.keys(b.env)).toHaveLength(3);
 });
 
 describe('resumeCommand (VS-249)', () => {

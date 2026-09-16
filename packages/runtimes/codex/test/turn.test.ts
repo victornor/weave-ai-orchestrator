@@ -1,0 +1,121 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { RuntimeEvent, TurnHandle, TurnInput } from '@weave-ai/runtime-sdk';
+import { runTmpDir } from '@weave-ai/runtime-sdk';
+import { adapter } from '../src/adapter.js';
+
+const dirs: string[] = [];
+afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+
+function input(scenario = 'success', ref: TurnInput['session']['ref'] = null): TurnInput {
+  const dir = mkdtempSync(join(tmpdir(), 'ac-fake-codex-'));
+  dirs.push(dir);
+  // Absolute interpreter plus a PATH containing only this fixture guarantees no real CLI runs.
+  writeFileSync(join(dir, 'codex'), `#!${process.execPath}
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+let prompt = '';
+const emit = (event) => process.stdout.write(JSON.stringify(event) + '\\n');
+process.stdin.on('data', (chunk) => { prompt += chunk; });
+process.stdin.on('end', () => {
+  fs.writeFileSync(process.env.CAPTURE, JSON.stringify({ args, prompt, cwd: process.cwd(), home: process.env.CODEX_HOME }));
+  if (process.env.SCENARIO === 'empty') return;
+  emit({ type: 'thread.started', thread_id: args[1] === 'fork' ? 'forked-thread' : 'thread-1' });
+  emit({ type: 'turn.started' });
+  if (process.env.SCENARIO === 'hang') { setInterval(() => {}, 1000); return; }
+  if (process.env.SCENARIO === 'failure') {
+    emit({ type: 'turn.failed', error: { message: '401 Unauthorized' } });
+    process.exitCode = 0; return;
+  }
+  emit({ type: 'error', message: 'Reconnecting... 1/5' });
+  emit({ type: 'item.completed', item: { id: 'tool-1', type: 'mcp_tool_call', server: 'ac', tool: 'ac_report', status: 'completed', arguments: {}, result: { ok: true } } });
+  emit({ type: 'item.completed', item: { id: 'message-1', type: 'agent_message', text: 'stream final' } });
+  const output = args[args.indexOf('-o') + 1];
+  fs.writeFileSync(output, '{"state":"done","summary":"file final"}');
+  emit({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 20 } });
+});
+`, { mode: 0o755 });
+  return {
+    runId: `codex-${dir.split('/').at(-1)}`, turnEpoch: 1, cwd: dir, worktree: null,
+    session: { policy: 'per_ticket', ref, isFirstTurn: !ref }, systemPrompt: { text: '', mode: 'skip' },
+    prompt: 'private prompt\nsecond line', outputSchema: { type: 'object' }, mcpServers: {},
+    env: { PATH: dir + delimiter, CAPTURE: join(dir, 'capture.json'), SCENARIO: scenario },
+    configHome: dir, options: { model: 'test-model' }, limits: { timeoutMs: 5000 }, permission: { mode: 'auto' },
+  };
+}
+
+const sink = (events: RuntimeEvent[] = []) => ({ onSpawn: () => undefined, onRaw: () => undefined, onEvent: (ev: RuntimeEvent) => events.push(ev) });
+
+describe('Codex turn against a fake CLI', () => {
+  it.each([null, { threadId: 'thread-1' }, { threadId: 'thread-1', fork: true }])('completes new/resumed/forked turns: %j', async (ref) => {
+    const turn = input('success', ref);
+    writeFileSync(join(turn.cwd, 'config.toml'), 'model_provider = "custom"\n');
+    turn.options['mcpViaConfigFile'] = true;
+    turn.mcpServers = { ac: { type: 'http', url: 'http://localhost/mcp' } };
+    const events: RuntimeEvent[] = [];
+    const result = await adapter.runTurn(turn, sink(events));
+    expect(result.error).toBeUndefined();
+    expect(result.session).toEqual({ threadId: ref?.fork ? 'forked-thread' : 'thread-1' });
+    expect(events[0]?.type).toBe(ref && !ref.fork ? 'session.resumed' : 'session.started');
+    expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i));
+    expect(events.map((e) => e.type)).toContain('tool.call');
+    expect(result.finalText).toBe('{"state":"done","summary":"file final"}');
+    expect(result.structured).toEqual({ state: 'done', summary: 'file final' });
+    expect(result.usage).toEqual({ inputTokens: 100, cachedInputTokens: 80, outputTokens: 20, basis: 'per_turn' });
+    expect(result.model).toBe('test-model');
+    const capture = JSON.parse(readFileSync(join(turn.cwd, 'capture.json'), 'utf8'));
+    expect(capture.prompt).toBe(turn.prompt);
+    expect(capture.args).not.toContain(turn.prompt);
+    expect(capture.cwd).toBe(turn.cwd);
+    expect(capture.home).toBe(turn.configHome);
+    expect(readFileSync(join(turn.cwd, 'config.toml'), 'utf8')).toBe('model_provider = "custom"\n');
+    expect(existsSync(runTmpDir(turn.runId))).toBe(false);
+  });
+
+  it('classifies protocol failures even with a zero process exit', async () => {
+    expect((await adapter.runTurn(input('failure'), sink())).error?.family).toBe('auth');
+  });
+
+  it('rejects an empty successful process instead of silently completing the run', async () => {
+    expect((await adapter.runTurn(input('empty'), sink())).error?.message).toContain('without completing');
+  });
+
+  it('times out and cleans scratch files', async () => {
+    const turn = input('hang');
+    turn.limits.timeoutMs = 200;
+    const result = await adapter.runTurn(turn, sink());
+    expect(result.timedOut).toBe(true);
+    expect(result.error).toBeDefined();
+    expect(existsSync(runTmpDir(turn.runId))).toBe(false);
+  });
+
+  it('cancels the running process through its handle', async () => {
+    let handle: TurnHandle | undefined;
+    const result = await adapter.runTurn(input('hang'), {
+      ...sink(), onEvent: (ev) => { if (ev.type === 'turn.started') void handle!.cancel('kill'); },
+    }, (h) => { handle = h; });
+    expect(handle?.send).toBeUndefined();
+    expect(result.signal).toBe('SIGKILL');
+    expect(result.error).toBeDefined();
+  });
+});
+
+
+it('initializes MCP config once and overrides the endpoint on subsequent turns', async () => {
+  const first = input();
+  first.options['mcpViaConfigFile'] = true;
+  first.mcpServers = { ac: { type: 'http', url: 'http://first/mcp', headers: { Authorization: 'Bearer first-token' } } };
+  expect((await adapter.runTurn(first, sink())).error).toBeUndefined();
+  const config = readFileSync(join(first.cwd, 'config.toml'), 'utf8');
+  expect(config).toContain('http://first/mcp');
+  expect(config).not.toContain('first-token');
+  const next = input();
+  next.configHome = first.configHome;
+  next.options['mcpViaConfigFile'] = true;
+  next.mcpServers = { ac: { type: 'http', url: 'http://second/mcp', headers: { Authorization: 'Bearer second-token' } } };
+  expect((await adapter.runTurn(next, sink())).error).toBeUndefined();
+  expect(readFileSync(join(first.cwd, 'config.toml'), 'utf8')).toBe(config);
+  expect(JSON.parse(readFileSync(join(next.cwd, 'capture.json'), 'utf8')).args).toContain('mcp_servers.ac.url="http://second/mcp"');
+});

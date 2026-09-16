@@ -42,3 +42,10 @@ describe('codex adapter', () => {
     expect(['available', 'missing_binary', 'broken']).toContain((await adapter.detect()).status);
   });
 });
+
+
+it('accepts the reasoning levels exposed by the current bundled model catalog', () => {
+  const schema = adapter.configSchema();
+  const properties = schema['properties'] as Record<string, { enum?: string[] }>;
+  expect(properties['effort']?.enum).toEqual(expect.arrayContaining(['xhigh', 'max', 'ultra']));
+});

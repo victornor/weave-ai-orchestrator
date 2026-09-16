@@ -1,9 +1,10 @@
-import { readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type {
   AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
   RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@weave-ai/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, runTmpDir, spawnLines, writeFiles } from '@weave-ai/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, launchCommand, runTmpDir, spawnLines, writeFiles } from '@weave-ai/runtime-sdk';
 import { extractReport } from '@weave-ai/shared';
 import { describeCodexAccount } from './account.js';
 import { buildArgs, mcpConfigToml, resumeCommand } from './args.js';
@@ -30,11 +31,11 @@ const CONFIG_SCHEMA: JsonSchema = {
   additionalProperties: false,
   properties: {
     model: { type: 'string', description: 'Model id passed to `codex -m`' },
-    effort: { type: 'string', enum: ['minimal', 'low', 'medium', 'high'], description: 'model_reasoning_effort' },
+    effort: { type: 'string', enum: ['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'], description: 'model_reasoning_effort' },
     permissionMode: { type: 'string', enum: ['auto', 'restricted', 'bypass'] },
     maxTurns: { type: 'integer', minimum: 1, description: 'Not enforced by codex; used by the supervisor only' },
     maxBudgetUsd: { type: 'number', exclusiveMinimum: 0, description: 'Not enforced by codex; used by the supervisor only' },
-    mcpViaConfigFile: { type: 'boolean', default: false, description: 'Write MCP servers into CODEX_HOME/config.toml instead of -c overrides' },
+    mcpViaConfigFile: { type: 'boolean', default: false, description: 'Initialize MCP servers in an empty CODEX_HOME/config.toml; existing config is preserved using -c overrides' },
     extraArgs: { type: 'array', items: { type: 'string' } },
   },
 };
@@ -73,16 +74,33 @@ export const adapter: RuntimeAdapter = {
 
   async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
     const tmpDir = runTmpDir(input.runId);
-    const built = buildArgs(input, { tmpDir });
+    let built = buildArgs(input, { tmpDir, configExists: Boolean(input.configHome && existsSync(join(input.configHome, 'config.toml'))) });
+    mkdirSync(tmpDir, { recursive: true });
+    rmSync(built.lastMessagePath, { force: true });
+    // Runtime config is shared by workers. Never overwrite a config created by another turn
+    // between the existence check and materialization. The loser uses invocation overrides.
+    const configPath = input.configHome ? join(input.configHome, 'config.toml') : null;
+    const configFile = built.files.find((file) => file.path === configPath);
+    if (configFile && input.configHome) {
+      mkdirSync(input.configHome, { recursive: true });
+      try {
+        writeFileSync(configFile.path, configFile.content, { flag: 'wx', mode: 0o600 });
+        built.files = built.files.filter((file) => file !== configFile);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        built = buildArgs(input, { tmpDir, configExists: true });
+      }
+    }
     writeFiles(built.files);
 
-    const parser = createCodexParser({ resumed: built.mode !== 'new' });
+    const parser = createCodexParser({ resumed: built.mode === 'resume' });
     let seq = 0;
+    const launch = launchCommand(built.cmd, built.env);
     const run = spawnLines({
-      cmd: built.cmd,
+      cmd: launch.cmd,
       args: built.args,
       cwd: input.cwd,
-      env: { ...(process.env as Record<string, string>), ...built.env },
+      env: launch.env,
       stdin: built.stdin,
       timeoutMs: input.limits.timeoutMs,
       onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
@@ -103,13 +121,15 @@ export const adapter: RuntimeAdapter = {
     if (input.outputSchema && finalText) { try { structured = JSON.parse(finalText); } catch { structured = undefined; } }
     if (structured === undefined) structured = extractReport(finalText) ?? undefined;
 
-    const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError;
+    if (!st.completed && !st.errorMessage) st.errorMessage = 'codex exited without completing the turn';
+    const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError || !st.completed;
     const error = failed
-      ? classifyError(outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) ?? {
+      ? classifyError(outcome.exitCode === 0 ? 1 : outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) ?? {
         code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'codex turn failed',
       }
       : undefined;
 
+    const model = input.model || (typeof input.options['model'] === 'string' ? input.options['model'] : null);
     return {
       exitCode: outcome.exitCode,
       signal: outcome.signal,
@@ -118,7 +138,7 @@ export const adapter: RuntimeAdapter = {
       finalText,
       ...(structured !== undefined ? { structured } : {}),
       ...(st.usage ? { usage: { ...st.usage, basis: 'per_turn' as const } } : {}),
-      ...(input.model ? { model: input.model } : {}),
+      ...(model ? { model } : {}),
       provider: 'openai',
       ...(error ? { error } : {}),
     };

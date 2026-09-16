@@ -259,7 +259,19 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
     addFiles(pasted);
   }, [addFiles]);
 
-  const send = ctl.requestSend;
+  // A typed send submits this composer's own draft, never the shared session's: the session's draft
+  // is its target thread's and is empty until a session targets it, so routing a typed press there
+  // was a silent no-op (VS-484). Only a dictation listening or transcribing *for this thread* keeps
+  // its finish-and-send meaning through the shared controller.
+  const localSend = local.requestSend;
+  const sharedSend = shared?.requestSend;
+  const send = useCallback((): void => {
+    if (sessionHere && sharedSend && (dictation.listening || dictation.transcribing)) {
+      sharedSend();
+      return;
+    }
+    localSend();
+  }, [sessionHere, sharedSend, dictation.listening, dictation.transcribing, localSend]);
   const pendingSend = ctl.pendingSend;
 
   const siblings = projects.map((p) => p.id);

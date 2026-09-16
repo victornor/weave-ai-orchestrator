@@ -16,12 +16,26 @@ describe('describeCodexAccount', () => {
     expect(acc.note).toMatch(/rollout file/);
   });
 
-  it('reports an OAuth login in the runtime home as a subscription, without reading the file', () => {
+  it('reports an OAuth login in the runtime home as a subscription, from its authentication mode', () => {
     const home = tmp();
-    writeFileSync(join(home, 'auth.json'), '{"do-not-read":"me"}');
+    writeFileSync(join(home, 'auth.json'), '{"auth_mode":"chatgpt","tokens":{}}');
     const acc = describeCodexAccount({ configHome: home, env: {}, timeoutMs: 1000 });
     expect(acc).toMatchObject({ billingType: 'subscription_included', limitsAvailable: false, limits: [] });
     expect(acc.note).toMatch(/rollout file/);
+  });
+
+  it('recognizes API login stored in auth.json', () => {
+    const home = tmp();
+    writeFileSync(join(home, 'auth.json'), JSON.stringify({ auth_mode: 'apikey', OPENAI_API_KEY: 'test-key' }));
+    expect(describeCodexAccount({ configHome: home, env: {}, timeoutMs: 1000 }).billingType).toBe('metered_api');
+  });
+
+  it('does not infer a subscription from an invalid auth file', () => {
+    const home = tmp();
+    for (const raw of ['{}', 'invalid', 'null']) {
+      writeFileSync(join(home, 'auth.json'), raw);
+      expect(describeCodexAccount({ configHome: home, env: {}, timeoutMs: 1000 }).billingType).toBe('unknown');
+    }
   });
 
   it('prefers the API key when both are present', () => {

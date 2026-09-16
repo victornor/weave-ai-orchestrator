@@ -34,8 +34,6 @@ describe('codex exec --json parser', () => {
     expect(state.finalText).toBe('{"state":"done","summary":"said pong"}');
     expect(state.usage).toEqual({ inputTokens: 1200, outputTokens: 48, cachedInputTokens: 900 });
     expect(events.find((e) => e.type === 'command.executed')!.payload).toMatchObject({ command: 'echo pong', exitCode: 0, output: 'pong\n' });
-    // A command with no test summary carries no tally (VS-328).
-    expect(events.find((e) => e.type === 'command.executed')!.payload['tests']).toBeUndefined();
     expect(events.find((e) => e.type === 'file.changed')!.payload).toMatchObject({ path: '/home/agent/work/notes.md' });
     // item.started is kept as runtime.raw, never dropped
     expect(events.filter((e) => e.type === 'runtime.raw').map((e) => e.payload['originalType'])).toContain('item.started');
@@ -52,6 +50,39 @@ describe('codex exec --json parser', () => {
   it('reports session.resumed when resuming', () => {
     expect(run('synthetic-turn-tool-message', true).types[0]).toBe('session.resumed');
   });
+});
+
+
+describe('documented Codex item format', () => {
+  it('reads type-tagged messages and retains text before completion', () => {
+    const parser = createCodexParser();
+    expect(parser.handle(JSON.stringify({ type: 'item.completed', item: { id: 'm1', type: 'agent_message', text: 'hello' } }))[0]?.type).toBe('assistant.text');
+    expect(parser.state.finalText).toBe('hello');
+  });
+
+  it('clears a retry error after a successful turn', () => {
+    const parser = createCodexParser();
+    parser.handle(JSON.stringify({ type: 'error', message: 'Reconnecting... 1/5' }));
+    parser.handle(JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 3, output_tokens: 1 } }));
+    expect(parser.state.isError).toBe(false);
+    expect(parser.state.errorMessage).toBeNull();
+  });
+
+  it('preserves failed MCP tool details', () => {
+    const parser = createCodexParser();
+    const events = parser.handle(JSON.stringify({ type: 'item.completed', item: { type: 'mcp_tool_call', status: 'failed', error: { message: 'tool failed' } } }));
+    expect(events[1]?.payload).toMatchObject({ isError: true, content: '{"message":"tool failed"}' });
+  });
+});
+
+
+it('emits MCP calls while they run and does not duplicate them on completion', () => {
+  const parser = createCodexParser();
+  const item = { id: 'call-1', type: 'mcp_tool_call', server: 'ac', tool: 'ac_report', arguments: {} };
+  const started = parser.handle(JSON.stringify({ type: 'item.started', item }));
+  expect(started.map((event) => event.type)).toEqual(['runtime.raw', 'tool.call']);
+  expect(parser.handle(JSON.stringify({ type: 'item.updated', item })).map((event) => event.type)).toEqual(['runtime.raw']);
+  expect(parser.handle(JSON.stringify({ type: 'item.completed', item: { ...item, status: 'completed', result: { ok: true } } })).map((event) => event.type)).toEqual(['tool.result']);
 });
 
 describe('codex command events (VS-328)', () => {

@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, TurnInput } from '@weave-ai/runtime-sdk';
 import { runTmpDir } from '@weave-ai/runtime-sdk';
 import { asCodexSession } from './session.js';
 
-export interface CodexBuildOpts { tmpDir?: string }
+export interface CodexBuildOpts { tmpDir?: string; configExists?: boolean }
 
 export interface CodexBuiltCommand extends BuiltCommand {
   /** Thread being resumed/forked, or null for a new thread (id arrives in `thread.started`). */
@@ -16,18 +17,26 @@ export interface CodexBuiltCommand extends BuiltCommand {
 function str(v: unknown): string | null { return typeof v === 'string' && v.length > 0 ? v : null; }
 /** A `-c key=value` override; the value half is TOML, so strings are quoted. */
 function toml(value: string): string { return JSON.stringify(value); }
+function key(value: string): string { return /^[A-Za-z0-9_-]+$/.test(value) ? value : toml(value); }
+
+function inlineTable(values: Record<string, string>): string {
+  return `{${Object.entries(values).map(([k, v]) => `${key(k)}=${toml(v)}`).join(',')}}`;
+}
 
 function envVarName(server: string): string {
-  return `AC_MCP_TOKEN_${server.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+  const suffix = createHash('sha256').update(server).digest('hex').slice(0, 12).toUpperCase();
+  return `AC_MCP_TOKEN_${server.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_${suffix}`;
 }
 
 /** `-c mcp_servers.<name>....` overrides for one server, plus any env the token needs. */
 export function mcpOverrides(name: string, s: McpServerConfig): { args: string[]; env: Record<string, string> } {
+  if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error('codex: MCP server names must contain only letters, numbers, underscores or hyphens');
   const args: string[] = [];
   const env: Record<string, string> = {};
-  const push = (k: string, v: string) => { args.push('-c', `mcp_servers.${name}.${k}=${v}`); };
+  const push = (k: string, v: string) => { args.push('-c', `mcp_servers.${key(name)}.${k}=${v}`); };
   if (s.type === 'http') {
     push('url', toml(s.url ?? ''));
+    const headers: Record<string, string> = {};
     for (const [h, v] of Object.entries(s.headers ?? {})) {
       const bearer = h.toLowerCase() === 'authorization' ? /^Bearer\s+(.+)$/i.exec(v)?.[1] : undefined;
       if (bearer) {
@@ -36,32 +45,44 @@ export function mcpOverrides(name: string, s: McpServerConfig): { args: string[]
         env[key] = bearer;
         push('bearer_token_env_var', toml(key));
       } else {
-        push(`http_headers.${h}`, toml(v));
+        headers[h] = v;
       }
     }
+    if (Object.keys(headers).length) push('http_headers', inlineTable(headers));
   } else {
     push('command', toml(s.command ?? ''));
     if (s.args?.length) push('args', JSON.stringify(s.args));
-    for (const [k, v] of Object.entries(s.env ?? {})) push(`env.${k}`, toml(v));
+    if (Object.keys(s.env ?? {}).length) push('env', inlineTable(s.env ?? {}));
   }
   return { args, env };
 }
 
 /** TOML fallback for `CODEX_HOME/config.toml` when per-invocation `-c` is not wanted. */
-export function mcpConfigToml(servers: Record<string, McpServerConfig>): string {
+export function mcpConfigToml(servers: Record<string, McpServerConfig>, tokenEnv?: Record<string, string>): string {
   const lines: string[] = ['# written by Weave AI before each turn; do not edit'];
   for (const [name, s] of Object.entries(servers)) {
-    lines.push('', `[mcp_servers.${name}]`);
+    lines.push('', `[mcp_servers.${key(name)}]`);
     if (s.type === 'http') {
       lines.push(`url = ${toml(s.url ?? '')}`);
-      const headers = Object.entries(s.headers ?? {});
+      const headers = Object.entries(s.headers ?? {}).filter(([h, v]) => {
+        const bearer = h.toLowerCase() === 'authorization' ? /^Bearer\s+(.+)$/i.exec(v)?.[1] : undefined;
+        if (!bearer || !tokenEnv) return true;
+        const tokenKey = envVarName(name);
+        tokenEnv[tokenKey] = bearer;
+        lines.push(`bearer_token_env_var = ${toml(tokenKey)}`);
+        return false;
+      });
       if (headers.length > 0) {
-        lines.push(`[mcp_servers.${name}.http_headers]`);
+        lines.push(`[mcp_servers.${key(name)}.http_headers]`);
         for (const [h, v] of headers) lines.push(`${JSON.stringify(h)} = ${toml(v)}`);
       }
     } else {
       lines.push(`command = ${toml(s.command ?? '')}`);
       if (s.args?.length) lines.push(`args = ${JSON.stringify(s.args)}`);
+      if (Object.keys(s.env ?? {}).length) {
+        lines.push(`[mcp_servers.${key(name)}.env]`);
+        for (const [k, v] of Object.entries(s.env ?? {})) lines.push(`${key(k)} = ${toml(v)}`);
+      }
     }
   }
   return `${lines.join('\n')}\n`;
@@ -101,8 +122,8 @@ export function buildArgs(input: TurnInput, opts: CodexBuildOpts = {}): CodexBui
   const servers = Object.entries(input.mcpServers ?? {});
   const viaFile = input.options?.['mcpViaConfigFile'] === true;
   if (servers.length > 0) {
-    if (viaFile && input.configHome) {
-      files.push({ path: join(input.configHome, 'config.toml'), content: mcpConfigToml(input.mcpServers) });
+    if (viaFile && input.configHome && !opts.configExists) {
+      files.push({ path: join(input.configHome, 'config.toml'), content: mcpConfigToml(input.mcpServers, env) });
     } else {
       for (const [name, s] of servers) {
         const o = mcpOverrides(name, s);

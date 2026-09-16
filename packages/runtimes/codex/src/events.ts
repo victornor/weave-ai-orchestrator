@@ -4,6 +4,7 @@ import { parseTestSummary } from '@weave-ai/shared';
 
 export interface CodexParseState {
   threadId: string | null;
+  completed: boolean;
   finalText: string | null;
   usage: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } | null;
   isError: boolean;
@@ -19,11 +20,13 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
  * Stream parser for `codex exec --json` JSONL.
  * Event tags (`thread.started`, `turn.started|completed|failed`, `item.started|updated|completed`)
  * and item kinds (`agent_message`, `reasoning`, `command_execution`, `file_change`,
- * `mcp_tool_call`, `web_search`, `todo_list`, `error`) verified against codex 0.150.1.
+ * `mcp_tool_call`, `web_search`, `todo_list`, `error`). Official JSONL uses item.type;
+ * item_type is accepted for compatibility with the original 0.150.x fixtures.
  */
 export function createCodexParser(opts: { resumed: boolean } = { resumed: false }) {
-  const state: CodexParseState = { threadId: null, finalText: null, usage: null, isError: false, errorMessage: null };
+  const state: CodexParseState = { threadId: null, completed: false, finalText: null, usage: null, isError: false, errorMessage: null };
   const messages: string[] = [];
+  const toolCalls = new Set<string>();
 
   function handle(line: string): RuntimeEvent[] {
     let msg: Json | null;
@@ -36,13 +39,22 @@ export function createCodexParser(opts: { resumed: boolean } = { resumed: false 
         return [{ ts, type: opts.resumed ? 'session.resumed' : 'session.started', payload: { threadId: state.threadId } }];
       }
       case 'turn.started':
+        state.completed = false;
         return [{ ts, type: 'turn.started', payload: {} }];
       case 'item.started':
-      case 'item.updated':
-        return [raw(str(msg['type'])!, msg, ts)];
+      case 'item.updated': {
+        const it = obj(msg['item']);
+        const events = [raw(str(msg['type'])!, msg, ts)];
+        if (it && (str(it['type']) ?? str(it['item_type'])) === 'mcp_tool_call') {
+          const call = toolCall(it, ts);
+          if (call) events.push(call);
+        }
+        return events;
+      }
       case 'item.completed':
         return item(obj(msg['item']), ts);
       case 'turn.completed': {
+        state.completed = true;
         const out: RuntimeEvent[] = [];
         const u = obj(msg['usage']);
         if (u) {
@@ -54,6 +66,9 @@ export function createCodexParser(opts: { resumed: boolean } = { resumed: false 
           out.push({ ts, type: 'usage.delta', payload: { ...state.usage, basis: 'per_turn' } });
         }
         state.finalText = messages.length > 0 ? messages[messages.length - 1]! : null;
+        // Stream errors can describe retries; a completed turn recovered successfully.
+        state.isError = false;
+        state.errorMessage = null;
         out.push({ ts, type: 'turn.completed', payload: { threadId: state.threadId } });
         return out;
       }
@@ -79,10 +94,10 @@ export function createCodexParser(opts: { resumed: boolean } = { resumed: false 
   function item(it: Json | null, ts: string): RuntimeEvent[] {
     if (!it) return [];
     const id = str(it['id']) ?? '';
-    switch (str(it['item_type'])) {
+    switch (str(it['type']) ?? str(it['item_type'])) {
       case 'agent_message': {
         const text = str(it['text']) ?? '';
-        if (text) messages.push(text);
+        if (text) { messages.push(text); state.finalText = text; }
         return [{ ts, type: 'assistant.text', payload: { id, text } }];
       }
       case 'reasoning':
@@ -101,11 +116,13 @@ export function createCodexParser(opts: { resumed: boolean } = { resumed: false 
         const changes = Array.isArray(it['changes']) ? it['changes'] : [];
         return changes.map((c) => ({ ts, type: 'file.changed' as const, payload: { id, ...(obj(c) ?? { change: c }) } }));
       }
-      case 'mcp_tool_call':
+      case 'mcp_tool_call': {
+        const call = toolCall(it, ts);
         return [
-          { ts, type: 'tool.call', payload: { id, server: str(it['server']), name: str(it['tool']), input: it['arguments'] } },
-          { ts, type: 'tool.result', payload: { id, status: str(it['status']), isError: str(it['status']) === 'failed', content: truncate(JSON.stringify(it['result'] ?? null)) } },
+          ...(call ? [call] : []),
+          { ts, type: 'tool.result', payload: { id, status: str(it['status']), isError: str(it['status']) === 'failed', content: truncate(JSON.stringify(it['result'] ?? it['error'] ?? null)) } },
         ];
+      }
       case 'todo_list':
         return [{ ts, type: 'plan.proposed', payload: { id, items: it['items'] } }];
       case 'error': {
@@ -114,8 +131,15 @@ export function createCodexParser(opts: { resumed: boolean } = { resumed: false 
         return [{ ts, type: 'error', payload: { id, message: truncate(str(it['message']) ?? '', 2000) } }];
       }
       default:
-        return [raw(`item.${str(it['item_type']) ?? 'unknown'}`, it, ts)];
+        return [raw(`item.${str(it['type']) ?? str(it['item_type']) ?? 'unknown'}`, it, ts)];
     }
+  }
+
+  function toolCall(it: Json, ts: string): RuntimeEvent | null {
+    const id = str(it['id']) ?? '';
+    if (id && toolCalls.has(id)) return null;
+    if (id) toolCalls.add(id);
+    return { ts, type: 'tool.call', payload: { id, server: str(it['server']), name: str(it['tool']), input: it['arguments'] } };
   }
 
   function raw(originalType: string, payload: unknown, ts = new Date().toISOString()): RuntimeEvent {

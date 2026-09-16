@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { carriesWeaverReview, landingBranchOf, projectLabel, yoloEnabled } from '@weave-ai/shared';
+import { carriesWeaverReview, estimateTokens, landingBranchOf, projectLabel, yoloEnabled } from '@weave-ai/shared';
 import { formatAge } from '@weave-ai/render';
 import type * as S from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
@@ -87,6 +87,47 @@ function knowledgeText(deps: () => CoreServices, scope: S.KnowledgeScope, projec
   try { return deps().knowledge.get(scope, projectId ?? null).body ?? ''; } catch { return ''; }
 }
 
+/**
+ * The hub sections a worker's AGENTS.md carries inline. The full hub is one `weave_knowledge_get`
+ * away; a hub that grows past `inlineKnowledgeBudgetTokens` is cut here rather than re-sent whole on
+ * every request — this prompt is the per-turn bill, while `bootstrapBudgetTokens` bounds only the
+ * first-turn digest beside it.
+ */
+const WORKER_INLINE_SECTIONS = ['Overview', 'Current focus', 'Landmines'] as const;
+
+/** The `## Name` blocks named by `names`, in the order given; the whole body when it has none of them. */
+function pickSections(body: string, names: readonly string[]): string {
+  const wanted = new Set(names);
+  const out: string[] = [];
+  let current: { name: string; lines: string[] } | null = null;
+  const flush = (): void => {
+    if (current && wanted.has(current.name)) out.push(`## ${current.name}\n${current.lines.join('\n')}`.trimEnd());
+  };
+  for (const line of body.split('\n')) {
+    const heading = /^## (.+?)\s*$/.exec(line);
+    if (heading) { flush(); current = { name: heading[1]!, lines: [] }; continue; }
+    if (current) current.lines.push(line);
+  }
+  flush();
+  return out.join('\n\n');
+}
+
+/** `text` in at most `budget` tokens, with a pointer to what the cut left out. */
+function boundedTokens(text: string, budget: number): string {
+  if (estimateTokens(text) <= budget) return text;
+  return `${text.slice(0, Math.max(0, Math.floor(budget * 3.5)))}\n\n(truncated; call \`weave_knowledge_get\` for the full text)`;
+}
+
+/** The bounded shared + project knowledge a worker's AGENTS.md inlines (VS-161 without the full dump). */
+function inlineKnowledge(ctx: WorkspaceContext, deps: () => CoreServices, agent: S.Agent): { shared: string; project: string } {
+  const budget = ctx.config.defaults.inlineKnowledgeBudgetTokens;
+  const shared = boundedTokens(knowledgeText(deps, 'shared'), budget);
+  const body = agent.projectId ? knowledgeText(deps, 'project', agent.projectId) : '';
+  const project = body ? (pickSections(body, WORKER_INLINE_SECTIONS) || body) : '';
+  const remaining = budget - estimateTokens(shared);
+  return { shared, project: remaining > 0 ? boundedTokens(project, remaining) : '' };
+}
+
 export interface WorkerTemplateData extends Record<string, unknown> {
   workspace: { name: string; id: string };
   human: { name: string };
@@ -138,7 +179,7 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
       verifiedFreshAt: t?.originKind === 'curation' ? (p?.lastFetchedAt ?? null) : null,
     },
     brief: { definitionOfDone: definitionOfDone((t?.kind ?? 'task') as S.TicketKind, deliveryMode), relaunchNote: opts.relaunchNote ?? null, noWorktree: !agent.worktreePath },
-    knowledge: { shared: knowledgeText(deps, 'shared'), project: agent.projectId ? knowledgeText(deps, 'project', agent.projectId) : '' },
+    knowledge: inlineKnowledge(ctx, deps, agent),
   };
 }
 

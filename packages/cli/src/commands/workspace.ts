@@ -81,6 +81,7 @@ export function register(program: Command): void {
 Keys:    knowledgeBudgetTokens.project=<n>    knowledgeBudgetTokens.document=<n>
          knowledgeBudgetTokens.workspace=<n>  knowledgeBudgetTokens.shared=<n>
          knowledgeBudgetTokens.decisions=<n>  bootstrapBudgetTokens=<n>
+         inlineKnowledgeBudgetTokens=<n>
          maxConcurrentRuns=<n>  turnTimeoutSec=<n>  autoMerge=true|false
 Example: weave workspace set-default knowledgeBudgetTokens.project=20000`)
     .action(async (assignments: string[], _opts: unknown, command: Command) => run(async () => {

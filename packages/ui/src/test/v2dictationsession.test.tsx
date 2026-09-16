@@ -75,6 +75,7 @@ vi.mock('../lib/dictation', async (importOriginal) => {
 });
 
 const { DictationSessionProvider, useDictationSession } = await import('../v2/DictationSession');
+const { ChatComposer } = await import('../v2/ChatComposer');
 const { api } = await import('../api/client');
 
 /** Registers itself as the live composer, as `ChatComposer` does. */
@@ -116,6 +117,35 @@ function Sender(): React.ReactElement {
     <button type="button" onClick={() => session?.requestSend()}>
       send-shared
     </button>
+  );
+}
+
+/** The real V2 composer inside the provider, so the shared-session send routing is covered end to end. */
+function TypingComposer({ onSubmit, threadId = 't1' }: { onSubmit: (text: string) => void; threadId?: string }): React.ReactElement {
+  const [text, setText] = useState('');
+  return (
+    <ChatComposer
+      projects={[]}
+      projectId={null}
+      onChangeProject={() => undefined}
+      value={text}
+      onChange={setText}
+      onSubmit={(t) => { onSubmit(t); }}
+      dictationTarget={{ ws: 'acme', threadId, projectId: null, replyToMessageId: null }}
+    />
+  );
+}
+
+/** Types in a composer whose thread can change, as navigating between chat threads does. */
+function SwitchingTypingComposer({ onSubmit }: { onSubmit: (text: string) => void }): React.ReactElement {
+  const [threadId, setThreadId] = useState('t1');
+  return (
+    <>
+      <button type="button" onClick={() => setThreadId('t2')}>
+        switch-thread
+      </button>
+      <TypingComposer threadId={threadId} onSubmit={onSubmit} />
+    </>
   );
 }
 
@@ -335,5 +365,51 @@ describe('sending from the V2 dictation bar (VS-450)', () => {
     toggleRoute();
     stopFromBar();
     expect(screen.getByTestId('v2-dictation-bar')).toHaveTextContent('Transcribing…');
+  });
+});
+
+describe('a typed send inside the shared dictation session (VS-484)', () => {
+  it('posts typed text through the composer with a session mounted and no dictation started', () => {
+    const onSubmit = vi.fn();
+    render(
+      <DictationSessionProvider>
+        <TypingComposer onSubmit={onSubmit} />
+      </DictationSessionProvider>,
+    );
+    fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'typed to the weaver' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith('typed to the weaver');
+  });
+
+  it('keeps finish-and-send while dictating in the target thread', () => {
+    render(
+      <DictationSessionProvider>
+        <Starter />
+        <TypingComposer onSubmit={vi.fn()} />
+      </DictationSessionProvider>,
+    );
+    start();
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    // It queued the send and stopped the mic (the VS-282/VS-416 path), rather than submitting the
+    // typed draft immediately.
+    expect(screen.getByRole('button', { name: 'Send queued' })).toBeInTheDocument();
+    expect(dict.stops).toBe(1);
+  });
+
+  it('does not let a dictation for another thread capture this composer typed send', () => {
+    const onSubmit = vi.fn();
+    render(
+      <DictationSessionProvider>
+        <Starter />
+        <SwitchingTypingComposer onSubmit={onSubmit} />
+      </DictationSessionProvider>,
+    );
+    start();
+    fireEvent.click(screen.getByText('switch-thread'));
+    fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'for thread two' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onSubmit).toHaveBeenCalledWith('for thread two');
+    expect(sends).toHaveLength(0);
   });
 });

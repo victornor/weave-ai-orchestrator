@@ -11,8 +11,8 @@ import { REPORT_STATES } from './enums.js';
 const KnowledgeReportSchema = z
   .object({
     recorded: z.boolean(),
-    where: z.string().trim().min(1).max(200).optional(),
-    reason: z.string().trim().min(1).max(200).optional(),
+    where: z.string().trim().min(1).max(200).nullish().transform((v) => v ?? undefined),
+    reason: z.string().trim().min(1).max(200).nullish().transform((v) => v ?? undefined),
   })
   .refine((v) => (v.recorded ? Boolean(v.where) : Boolean(v.reason)), {
     message: 'knowledge.where is required when recorded is true; knowledge.reason is required when recorded is false',
@@ -22,27 +22,43 @@ const KnowledgeReportSchema = z
 export const RunReportSchema = z.object({
   state: z.enum(REPORT_STATES),
   summary: z.string().max(4000),
-  tickets: z.array(z.object({ id: z.string(), status: z.string().optional(), note: z.string().optional() })).default([]),
-  nextAction: z.object({ owner: z.enum(['self', 'weaver', 'human', 'none']), what: z.string() }).optional(),
+  tickets: z.array(z.object({ id: z.string(), status: z.string().nullish().transform((v) => v ?? undefined), note: z.string().nullish().transform((v) => v ?? undefined) })).default([]),
+  nextAction: z.object({ owner: z.enum(['self', 'weaver', 'human', 'none']), what: z.string() }).nullish().transform((v) => v ?? undefined),
   knowledge: KnowledgeReportSchema,
   uncommittedWork: z.boolean().default(false),
 });
 export type RunReport = z.infer<typeof RunReportSchema>;
+/** Strict structured-output schema: closed objects, every property required, optional values nullable. */
 export const RUN_REPORT_JSON_SCHEMA = {
   type: 'object',
+  additionalProperties: false,
   properties: {
     state: { type: 'string', enum: [...REPORT_STATES] },
     summary: { type: 'string' },
-    tickets: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, status: { type: 'string' }, note: { type: 'string' } }, required: ['id'] } },
-    nextAction: { type: 'object', properties: { owner: { type: 'string', enum: ['self', 'weaver', 'human', 'none'] }, what: { type: 'string' } }, required: ['owner', 'what'] },
+    tickets: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        properties: { id: { type: 'string' }, status: { type: ['string', 'null'] }, note: { type: ['string', 'null'] } },
+        required: ['id', 'status', 'note'],
+      },
+    },
+    nextAction: {
+      type: ['object', 'null'],
+      additionalProperties: false,
+      properties: { owner: { type: 'string', enum: ['self', 'weaver', 'human', 'none'] }, what: { type: 'string' } },
+      required: ['owner', 'what'],
+    },
     knowledge: {
       type: 'object',
-      properties: { recorded: { type: 'boolean' }, where: { type: 'string' }, reason: { type: 'string' } },
-      required: ['recorded'],
+      additionalProperties: false,
+      properties: { recorded: { type: 'boolean' }, where: { type: ['string', 'null'] }, reason: { type: ['string', 'null'] } },
+      required: ['recorded', 'where', 'reason'],
     },
     uncommittedWork: { type: 'boolean' },
   },
-  required: ['state', 'summary', 'knowledge'],
+  required: ['state', 'summary', 'tickets', 'nextAction', 'knowledge', 'uncommittedWork'],
 } as const;
 
 /** Extract a report from free text: last fenced ```json block or trailing JSON object. */

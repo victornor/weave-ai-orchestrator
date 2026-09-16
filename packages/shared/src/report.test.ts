@@ -38,9 +38,9 @@ describe('RunReportSchema.knowledge', () => {
     expect(r.success).toBe(true);
   });
 
-  it('the JSON-schema hint lists knowledge as required with recorded its only required key', () => {
+  it('the JSON-schema requires knowledge and uses nullable values for optional details', () => {
     expect(RUN_REPORT_JSON_SCHEMA.required).toContain('knowledge');
-    expect(RUN_REPORT_JSON_SCHEMA.properties.knowledge.required).toEqual(['recorded']);
+    expect(RUN_REPORT_JSON_SCHEMA.properties.knowledge.required).toEqual(['recorded', 'where', 'reason']);
   });
 });
 
@@ -62,5 +62,34 @@ describe('extractReport with the knowledge field', () => {
   it('returns null for recorded:true with no where, and recorded:false with no reason', () => {
     expect(extractReport(wrap(base({ recorded: true })))).toBeNull();
     expect(extractReport(wrap(base({ recorded: false })))).toBeNull();
+  });
+});
+
+
+describe('strict structured report compatibility', () => {
+  it.each([
+    { recorded: true, where: 'PROJECT.md', reason: null },
+    { recorded: false, where: null, reason: 'Nothing durable' },
+  ])('accepts nullable optional values and keeps the knowledge decision valid: %j', (knowledge) => {
+    const report = RunReportSchema.parse({
+      state: 'idle', summary: 'Complete', tickets: [{ id: 'TST-1', status: null, note: null }],
+      nextAction: null, knowledge, uncommittedWork: false,
+    });
+    expect(report.nextAction).toBeUndefined();
+    expect(report.tickets[0]?.status).toBeUndefined();
+    expect(report.tickets[0]?.note).toBeUndefined();
+    expect(report.knowledge).toEqual(knowledge.recorded
+      ? { recorded: true, where: 'PROJECT.md', reason: undefined }
+      : { recorded: false, where: undefined, reason: 'Nothing durable' });
+    expect(extractReport(JSON.stringify({ ...report, nextAction: null }))).not.toBeNull();
+  });
+
+  it.each([true, false])('still rejects a knowledge decision without its required explanation: %j', (recorded) => {
+    expect(RunReportSchema.safeParse({ state: 'idle', summary: 'x', knowledge: { recorded, where: null, reason: null } }).success).toBe(false);
+  });
+
+  it('does not turn required values into optional nullable values', () => {
+    expect(RunReportSchema.safeParse({ state: null, summary: 'x', knowledge: { recorded: false, reason: 'x' } }).success).toBe(false);
+    expect(RunReportSchema.safeParse({ state: 'idle', summary: null, knowledge: { recorded: false, reason: 'x' } }).success).toBe(false);
   });
 });

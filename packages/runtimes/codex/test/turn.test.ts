@@ -4,8 +4,13 @@ import { delimiter, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RuntimeEvent, TurnHandle, TurnInput } from '@weave-ai/runtime-sdk';
 import { runTmpDir } from '@weave-ai/runtime-sdk';
+import { RUN_REPORT_JSON_SCHEMA, RunReportSchema } from '@weave-ai/shared';
 import { adapter } from '../src/adapter.js';
 
+const strictReport = {
+  state: 'idle', summary: 'file final', tickets: [], nextAction: null,
+  knowledge: { recorded: false, where: null, reason: 'Nothing durable' }, uncommittedWork: false,
+};
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
@@ -24,6 +29,22 @@ process.stdin.on('end', () => {
   if (process.env.SCENARIO === 'empty') return;
   emit({ type: 'thread.started', thread_id: args[1] === 'fork' ? 'forked-thread' : 'thread-1' });
   emit({ type: 'turn.started' });
+  const schema = JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8'));
+  function checkSchema(node) {
+    if (!node || typeof node !== 'object') return;
+    const types = Array.isArray(node.type) ? node.type : [node.type];
+    if (types.includes('object')) {
+      if (node.additionalProperties !== false) throw new Error('invalid_json_schema: additionalProperties must be false');
+      const keys = Object.keys(node.properties || {});
+      if (!Array.isArray(node.required) || node.required.length !== keys.length || keys.some((key) => !node.required.includes(key))) throw new Error('invalid_json_schema: every property must be required');
+      for (const child of Object.values(node.properties || {})) checkSchema(child);
+    }
+    if (node.items) checkSchema(node.items);
+  }
+  try { checkSchema(schema); } catch (error) {
+    emit({ type: 'turn.failed', error: { message: error.message } });
+    process.exitCode = 1; return;
+  }
   if (process.env.SCENARIO === 'hang') { setInterval(() => {}, 1000); return; }
   if (process.env.SCENARIO === 'failure') {
     emit({ type: 'turn.failed', error: { message: '401 Unauthorized' } });
@@ -33,14 +54,14 @@ process.stdin.on('end', () => {
   emit({ type: 'item.completed', item: { id: 'tool-1', type: 'mcp_tool_call', server: 'ac', tool: 'ac_report', status: 'completed', arguments: {}, result: { ok: true } } });
   emit({ type: 'item.completed', item: { id: 'message-1', type: 'agent_message', text: 'stream final' } });
   const output = args[args.indexOf('-o') + 1];
-  fs.writeFileSync(output, '{"state":"done","summary":"file final"}');
+  fs.writeFileSync(output, ${JSON.stringify(JSON.stringify(strictReport))});
   emit({ type: 'turn.completed', usage: { input_tokens: 100, cached_input_tokens: 80, output_tokens: 20 } });
 });
 `, { mode: 0o755 });
   return {
     runId: `codex-${dir.split('/').at(-1)}`, turnEpoch: 1, cwd: dir, worktree: null,
     session: { policy: 'per_ticket', ref, isFirstTurn: !ref }, systemPrompt: { text: '', mode: 'skip' },
-    prompt: 'private prompt\nsecond line', outputSchema: { type: 'object' }, mcpServers: {},
+    prompt: 'private prompt\nsecond line', outputSchema: RUN_REPORT_JSON_SCHEMA as unknown as Record<string, unknown>, mcpServers: {},
     env: { PATH: dir + delimiter, CAPTURE: join(dir, 'capture.json'), SCENARIO: scenario },
     configHome: dir, options: { model: 'test-model' }, limits: { timeoutMs: 5000 }, permission: { mode: 'auto' },
   };
@@ -61,8 +82,9 @@ describe('Codex turn against a fake CLI', () => {
     expect(events[0]?.type).toBe(ref && !ref.fork ? 'session.resumed' : 'session.started');
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i));
     expect(events.map((e) => e.type)).toContain('tool.call');
-    expect(result.finalText).toBe('{"state":"done","summary":"file final"}');
-    expect(result.structured).toEqual({ state: 'done', summary: 'file final' });
+    expect(result.finalText).toBe(JSON.stringify(strictReport));
+    expect(result.structured).toEqual(strictReport);
+    expect(RunReportSchema.safeParse(result.structured).success).toBe(true);
     expect(result.usage).toEqual({ inputTokens: 100, cachedInputTokens: 80, outputTokens: 20, basis: 'per_turn' });
     expect(result.model).toBe('test-model');
     const capture = JSON.parse(readFileSync(join(turn.cwd, 'capture.json'), 'utf8'));
@@ -118,4 +140,17 @@ it('initializes MCP config once and overrides the endpoint on subsequent turns',
   expect((await adapter.runTurn(next, sink())).error).toBeUndefined();
   expect(readFileSync(join(first.cwd, 'config.toml'), 'utf8')).toBe(config);
   expect(JSON.parse(readFileSync(join(next.cwd, 'capture.json'), 'utf8')).args).toContain('mcp_servers.ac.url="http://second/mcp"');
+});
+
+
+it.each([
+  { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
+  { type: 'object', additionalProperties: false, properties: { summary: { type: 'string' } }, required: [] },
+  { type: 'object', additionalProperties: false, properties: { child: { type: 'object', properties: {} } }, required: ['child'] },
+])('the fake provider rejects invalid schemas, including nested objects: %j', async (schema) => {
+  const turn = input();
+  turn.outputSchema = schema;
+  const result = await adapter.runTurn(turn, sink());
+  expect(result.error?.message).toContain('invalid_json_schema');
+  expect(result.exitCode).toBe(1);
 });

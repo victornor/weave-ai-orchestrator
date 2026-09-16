@@ -328,6 +328,13 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
    */
   mergeChecksAlarmSec: z.number().int().min(60).default(1200),
   bootstrapBudgetTokens: z.number().int().default(16000),
+  /**
+   * How much of the shared + project knowledge a worker's AGENTS.md inlines. Only the hub's
+   * Overview / Current focus / Landmines ride in the always-sent prompt; the rest stays one
+   * `weave_knowledge_get` away. This is what a worker's file_only runtime reads on every request, so
+   * it is the per-turn bill — `bootstrapBudgetTokens` bounds only the first-turn digest beside it.
+   */
+  inlineKnowledgeBudgetTokens: z.number().int().default(4000),
   knowledgeBudgetTokens: KnowledgeBudgetsSchema.default({}),
   workerArchiveDays: z.number().int().default(30),
   runLogRetentionDays: z.number().int().default(30),

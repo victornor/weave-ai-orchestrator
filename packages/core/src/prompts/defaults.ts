@@ -149,4 +149,6 @@ export const BRIEF_TMPL = `## Brief
 {{#if knowledge.project}}## Project knowledge base
 
 {{knowledge.project}}
-{{/if}}`;
+{{/if}}
+The knowledge above is the hubs' key sections, not the whole hub. Call \`weave_knowledge_get("shared")\` or \`weave_knowledge_get("project")\` for the Documents, Learnings or Decisions sections.
+`;

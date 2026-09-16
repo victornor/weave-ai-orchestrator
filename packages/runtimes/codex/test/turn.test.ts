@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -63,14 +63,14 @@ process.stdin.on('end', () => {
     session: { policy: 'per_ticket', ref, isFirstTurn: !ref }, systemPrompt: { text: '', mode: 'skip' },
     prompt: 'private prompt\nsecond line', outputSchema: RUN_REPORT_JSON_SCHEMA as unknown as Record<string, unknown>, mcpServers: {},
     env: { PATH: dir + delimiter, CAPTURE: join(dir, 'capture.json'), SCENARIO: scenario },
-    configHome: dir, options: { model: 'test-model' }, limits: { timeoutMs: 5000 }, permission: { mode: 'auto' },
+    configHome: dir, options: { model: 'test-model', contextWindowTokens: 1000000 }, limits: { timeoutMs: 5000 }, permission: { mode: 'auto' },
   };
 }
 
 const sink = (events: RuntimeEvent[] = []) => ({ onSpawn: () => undefined, onRaw: () => undefined, onEvent: (ev: RuntimeEvent) => events.push(ev) });
 
 describe('Codex turn against a fake CLI', () => {
-  it.each([null, { threadId: 'thread-1' }, { threadId: 'thread-1', fork: true }])('completes new/resumed/forked turns: %j', async (ref) => {
+  it.each([null, { threadId: 'thread-1', usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 } }, { threadId: 'thread-1', fork: true, usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 } }])('completes new/resumed/forked turns: %j', async (ref) => {
     const turn = input('success', ref);
     writeFileSync(join(turn.cwd, 'config.toml'), 'model_provider = "custom"\n');
     turn.options['mcpViaConfigFile'] = true;
@@ -78,7 +78,7 @@ describe('Codex turn against a fake CLI', () => {
     const events: RuntimeEvent[] = [];
     const result = await adapter.runTurn(turn, sink(events));
     expect(result.error).toBeUndefined();
-    expect(result.session).toEqual({ threadId: ref?.fork ? 'forked-thread' : 'thread-1' });
+    expect(result.session).toEqual({ threadId: ref?.fork ? 'forked-thread' : 'thread-1', usage: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80 } });
     expect(events[0]?.type).toBe(ref && !ref.fork ? 'session.resumed' : 'session.started');
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i));
     expect(events.map((e) => e.type)).toContain('tool.call');
@@ -153,4 +153,22 @@ it.each([
   const result = await adapter.runTurn(turn, sink());
   expect(result.error?.message).toContain('invalid_json_schema');
   expect(result.exitCode).toBe(1);
+});
+
+it('charges only this turn when resuming an existing session', async () => {
+  const turn = input('success', { threadId: 'thread-1', usage: { inputTokens: 60, outputTokens: 5, cachedInputTokens: 40 } });
+  const events: RuntimeEvent[] = [];
+  const result = await adapter.runTurn(turn, sink(events));
+  expect(result.usage).toEqual({ inputTokens: 40, outputTokens: 15, cachedInputTokens: 40, basis: 'per_turn' });
+  expect(result.session).toMatchObject({ usage: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80 } });
+  expect(events.find(e => e.type === 'usage.delta')?.payload).toEqual(result.usage);
+});
+
+it('recovers the baseline for a session created before usage was saved in its reference', async () => {
+  const turn = input('success', { threadId: 'thread-1' });
+  const dir = join(turn.cwd, 'sessions', '2026', '09', '16');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'rollout-thread-1.jsonl'), JSON.stringify({ payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 60, output_tokens: 5, cached_input_tokens: 40 } } } }));
+  const result = await adapter.runTurn(turn, sink());
+  expect(result.usage).toEqual({ inputTokens: 40, outputTokens: 15, cachedInputTokens: 40, basis: 'per_turn' });
 });

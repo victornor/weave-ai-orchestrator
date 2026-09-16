@@ -47,3 +47,8 @@ describe('listModels', () => {
     expect(models.every((m) => m.source === 'static' && m.efforts === undefined)).toBe(true);
   });
 });
+
+it('reports the normal context window instead of the optional maximum', () => {
+  const models = parseBundledModels(JSON.stringify({ models: [{ slug: 'model', context_window: 272000, max_context_window: 1000000 }] }));
+  expect(models[0]?.contextWindowTokens).toBe(272000);
+});

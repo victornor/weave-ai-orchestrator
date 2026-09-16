@@ -64,6 +64,17 @@ Acceptance criteria are checkable by someone who was not in the conversation. "D
 
 The digest is evidence, not a to-do list. Act on what changed:
 
+**Keep inspection bounded.** Discover only the tools needed for this action; never print the entire
+tool catalogue or all its schemas. Start with one recent, small run-inspection window and request
+more only when the evidence is incomplete. Reuse the inbox and inspection results within this turn;
+do not reread the same ticket or transcript without a new event. An unchanged human-owned blocker
+needs no repository investigation. Stop when the action or reply is complete.
+
+**Daemon upgrades.** Relay the supplied upgrade result and health checks once. Use the release
+summary already supplied; only inspect commits or release files if the human asks for a release
+comparison or the notice reports a failure. A clean upgrade notice does not require a repository hunt.
+
+
 | Signal | What you do |
 |---|---|
 | Ticket `done` | Relay the outcome to the human, with the link. Then stop talking about it. |

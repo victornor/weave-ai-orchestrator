@@ -2,7 +2,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
-import { docFolderOf, docPathFor, docSlugOf, isDocPath, isHubStub, mergeEntries, readMirrorFile, repoKnowledgePath, seedBody } from './files.js';
+import { docFolderOf, docPathFor, docSlugOf, isDocPath, isDuplicateCandidate, isHubSectionPointer, isHubStub, isRedirectStub, mergeEntries, readMirrorFile, repoKnowledgePath, seedBody, similarity } from './files.js';
 
 describe('isHubStub', () => {
   it('treats seed decisions.md as a stub', () => {
@@ -19,6 +19,29 @@ describe('isHubStub', () => {
 
   it('ignores fill-in hints and HTML comments', () => {
     expect(isHubStub('# Workspace\n\n<!-- Weaver-only. Budget 3000 tokens. -->\n\n## Portfolio\n\n(one line per project: id — purpose — default role)\n')).toBe(true);
+  });
+});
+
+describe('VS-501 knowledge health classification', () => {
+  it('rejects the real one-word Status boilerplate but keeps a real near-duplicate candidate', () => {
+    expect(isDuplicateCandidate('**Status:**')).toBe(false);
+    expect(isDuplicateCandidate('The gateway retries idempotent calls twice.')).toBe(true);
+  });
+
+  it('recognizes a repeated PROJECT.md document pointer but not a document entry', () => {
+    expect(isHubSectionPointer('projects/agent-conductor/PROJECT.md', '[[daemon-test-suite]] — known core/server suite flakes')).toBe(true);
+    expect(isHubSectionPointer('projects/agent-conductor/docs/run-engine.md', '[[daemon-test-suite]] — known core/server suite flakes')).toBe(false);
+  });
+
+  it('recognizes the real design-contract redirect and a simple one-line redirect', () => {
+    expect(isRedirectStub('# Design contract — moved to [[design-design-contract]]\n\nThis slug was a duplicate. The design contract lives at [[design-design-contract]], written by VS-91.')).toBe(true);
+    expect(isRedirectStub('# Legacy\n\nThe real document is [[canonical-doc]].')).toBe(true);
+    expect(isRedirectStub('# Design contract\n\nThis document explains the design contract and links to [[design-design-contract]].')).toBe(false);
+  });
+
+  it('can disable containment scoring for the periodic sweep without changing the default', () => {
+    expect(similarity('status', 'the status check passed')).toBe(0.95);
+    expect(similarity('status', 'the status check passed', { containment: false })).toBeLessThan(0.8);
   });
 });
 

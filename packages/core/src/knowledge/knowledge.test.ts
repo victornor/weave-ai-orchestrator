@@ -348,6 +348,48 @@ describe('knowledge', () => {
     expect(report.scanned).toBe(1500);
   });
 
+  it('filters Status boilerplate and repeated PROJECT.md section pointers from duplicate reports (VS-501)', () => {
+    knowledge.replace(
+      HUMAN, 'project',
+      '# API\n\n## Landmines\n'
+      + '- 2026-01-01 · **Status:**\n'
+      + '- 2026-01-02 · The `statusCheckRollup` check reports the status of unrelated pull requests.\n'
+      + '- 2026-01-03 · Docker socket activation starts the daemon when its socket is touched.\n'
+      + '\n## Documents\n'
+      + '- 2026-01-04 · [[daemon-test-suite]] — known core/server suite flakes and harness traps\n',
+      'human', h.projectId,
+    );
+    const report = knowledge.duplicates({ scope: 'project', projectId: h.projectId });
+    expect(report.pairs).toEqual([]);
+
+    knowledge.replace(
+      HUMAN, 'project',
+      '# API\n\n## Landmines\n'
+      + '- 2026-01-01 · [[daemon-test-suite]] — known core/server suite flakes and harness traps\n'
+      + '\n## Documents\n'
+      + '- 2026-01-02 · [[daemon-test-suite]] — known core/server suite flakes and harness traps\n',
+      'human', h.projectId,
+    );
+    expect(knowledge.duplicates({ scope: 'project', projectId: h.projectId }).pairs).toEqual([]);
+  });
+
+  it('does not classify the real design-contract redirect as an orphan (VS-501)', () => {
+    knowledge.putDoc(
+      WORKER, 'project', 'design-contract',
+      '# Design contract — moved to [[design-design-contract]]\n\n'
+      + 'This slug was a duplicate. The design contract lives at [[design-design-contract]], written by VS-91 on 2026-09-07 when it removed `docs/design/` from the repository.\n\n'
+      + 'VS-93 preserved the same `docs/design/DESIGN-CONTRACT.md` here two minutes later, not having re-checked `ac_knowledge_docs` immediately before writing. Both copies were byte-identical to the source file, so nothing was lost; on the owner\'s decision (2026-09-07) VS-91\'s slug is the canonical one, because it is the slug VS-91\'s merged and archived proposal names. This body replaced the duplicate and the full text it held is in the document archive beside this file.\n\n'
+      + 'Go to [[design-design-contract]]. The briefs that produced the mockup it transcribes are [[design-claude-design-prompt]] and [[design-claude-design-followup-1]].\n',
+      h.projectId,
+    );
+    knowledge.putDoc(WORKER, 'project', 'ordinary-orphan', '# Ordinary orphan\n\nNothing links here.\n', h.projectId);
+
+    const health = knowledge.health(h.projectId);
+    expect(health.orphans.map((d) => d.slug)).toContain('ordinary-orphan');
+    expect(health.orphans.map((d) => d.slug)).not.toContain('design-contract');
+    expect(knowledge.listDocs({ projectId: h.projectId }).map((d) => d.slug)).toEqual(expect.arrayContaining(['design-contract', 'ordinary-orphan']));
+  });
+
   it('the workspace-wide health view (no project) reports every project\'s hubs and documents', () => {
     knowledge.putDoc(WORKER, 'project', 'an-orphan', '# An orphan\n\nNothing links here.\n', h.projectId);
     const all = knowledge.health();

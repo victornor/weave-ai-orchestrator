@@ -454,6 +454,20 @@ describe('supervisor scheduled passes', () => {
       await supervisor.tick(); // the same pair: not new, so no further wake
       expect(healthWakes()).toBe(afterNew);
     });
+
+    it('stays silent when duplicate, pointer and redirect candidates have all been filtered (VS-501)', async () => {
+      const health = vi.fn(() => ({ ...emptyHealth }));
+      const duplicates = vi.fn(() => ({ pairs: [], scanned: 0, capped: false }));
+      h.services.knowledge = { requestCuration: vi.fn(async () => ({})), health, duplicates } as never;
+      const healthWakes = (): number => wake.calls.filter((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'knowledge_health').length;
+
+      await supervisor.tick(); // first sweep records the already-filtered baseline
+      reopenGates();
+      await supervisor.tick(); // no short Status pair, hub pointer, or redirect orphan remains
+
+      expect(healthWakes()).toBe(0);
+      expect(duplicates).toHaveBeenCalled();
+    });
   });
 
   describe('approval integrity (VS-104)', () => {

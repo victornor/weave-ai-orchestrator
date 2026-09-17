@@ -111,11 +111,13 @@ function RuntimeOptionsEditor({ runtime, runtimes, options, onChange }: {
 }
 
 /** One agent's runtime / model / thinking, side by side in one row, with its runtime options beneath. */
-function ModelControls({ label, setting, runtimes, recessed, onChange }: {
-  label: string; setting: T.ModelSetting; runtimes: T.RuntimeInfo[]; recessed?: boolean; onChange: (next: T.ModelSetting) => void;
+function ModelControls({ label, setting, runtimes, recessed, runtimeOptional, preserveEffortOnRuntimeChange, onChange }: {
+  label: string; setting: T.ModelSetting; runtimes: T.RuntimeInfo[]; recessed?: boolean;
+  runtimeOptional?: boolean; preserveEffortOnRuntimeChange?: boolean; onChange: (next: T.ModelSetting) => void;
 }): React.ReactElement {
   const models = useRuntimeModels(setting.runtime);
   const known = models.data ?? [];
+  const configured = setting.runtime.length > 0;
   const [freeText, setFreeText] = useState(false);
   const custom = freeText || isCustomModel(setting.model, known);
   const effmode = effortModeFor(effortsForModel(setting.model, known, custom), setting.effort);
@@ -125,51 +127,58 @@ function ModelControls({ label, setting, runtimes, recessed, onChange }: {
   return (
     <div className="flex flex-col gap-2">
       <div className="grid gap-2 sm:grid-cols-3">
-      <div className={col}>
-        <span className="ac-label">runtime</span>
-        <select aria-label={`${label} runtime`} className={ctl} value={setting.runtime}
-          onChange={(e) => { setFreeText(false); onChange({ ...setting, runtime: e.target.value, effort: undefined }); }}>
-          {runtimes.map((r) => (
-            <option key={r.id} value={r.id} disabled={!isRuntimeAvailable(r)}>
-              {r.displayName}{isRuntimeAvailable(r) ? '' : ` (${runtimeStatusLabel(r)})`}
-            </option>
-          ))}
-          {runtimes.some((r) => r.id === setting.runtime) ? null : <option value={setting.runtime}>{setting.runtime} (not installed)</option>}
-        </select>
-      </div>
-      <div className={col}>
-        <span className="ac-label">model</span>
-        <select aria-label={`${label} model`} className={ctl} value={custom ? '__other' : setting.model ?? ''}
-          onChange={(e) => {
-            if (e.target.value === '__other') { setFreeText(true); return; }
-            setFreeText(false);
-            onChange(settingAfterModelChange(setting, e.target.value === '' ? null : e.target.value, known));
-          }}>
-          <option value="">default (the runtime chooses)</option>
-          {known.map((m) => <option key={m.id} value={m.id}>{modelOptionLabel(m)}</option>)}
-          <option value="__other">something else…</option>
-        </select>
-        {custom ? (
-          <CommitInput ariaLabel={`${label} model id`} placeholder="model id" value={setting.model ?? ''}
-            onCommit={(v) => onChange(settingAfterModelChange(setting, v.trim() || null, known))} />
-        ) : null}
-      </div>
-      <div className={col}>
-        <span className="ac-label">thinking</span>
-        {effmode === 'picker' ? (
-          <select aria-label={`${label} thinking level`} className={ctl} value={setting.effort ?? ''}
-            onChange={(e) => onChange({ ...setting, effort: e.target.value === '' ? undefined : e.target.value })}>
-            <option value="">default (unset)</option>
-            {effortsForModel(setting.model, known, custom)!.map((l) => <option key={l} value={l}>{l}</option>)}
+        <div className={col}>
+          <span className="ac-label">runtime</span>
+          <select aria-label={`${label} runtime`} className={ctl} value={setting.runtime}
+            onChange={(e) => {
+              setFreeText(false);
+              onChange({ ...setting, runtime: e.target.value, ...(preserveEffortOnRuntimeChange ? {} : { effort: undefined }) });
+            }}>
+            {runtimeOptional ? <option value="">choose a runtime…</option> : null}
+            {runtimes.map((r) => (
+              <option key={r.id} value={r.id} disabled={!isRuntimeAvailable(r)}>
+                {r.displayName}{isRuntimeAvailable(r) ? '' : ` (${runtimeStatusLabel(r)})`}
+              </option>
+            ))}
+            {setting.runtime && !runtimes.some((r) => r.id === setting.runtime) ? <option value={setting.runtime}>{setting.runtime} (not installed)</option> : null}
           </select>
-        ) : effmode === 'freetext' ? (
-          <CommitInput ariaLabel={`${label} thinking level`} placeholder="effort" value={setting.effort ?? ''}
-            onCommit={(v) => onChange({ ...setting, effort: v.trim() || undefined })} />
-        ) : (
-          <span className="text-micro text-text-3">not configurable</span>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-2 sm:col-span-3">
+        </div>
+        <div className={col}>
+          <span className="ac-label">model</span>
+          <select aria-label={`${label} model`} className={ctl} value={custom ? '__other' : setting.model ?? ''}
+            disabled={!configured}
+            onChange={(e) => {
+              if (e.target.value === '__other') { setFreeText(true); return; }
+              setFreeText(false);
+              onChange(settingAfterModelChange(setting, e.target.value === '' ? null : e.target.value, known));
+            }}>
+            <option value="">default (the runtime chooses)</option>
+            {known.map((m) => <option key={m.id} value={m.id}>{modelOptionLabel(m)}</option>)}
+            <option value="__other">something else…</option>
+          </select>
+          {custom ? (
+            <CommitInput ariaLabel={`${label} model id`} placeholder="model id" value={setting.model ?? ''}
+              onCommit={(v) => onChange(settingAfterModelChange(setting, v.trim() || null, known))} />
+          ) : null}
+        </div>
+      {configured ? (
+        <div className={col}>
+          <span className="ac-label">thinking</span>
+          {effmode === 'picker' ? (
+            <select aria-label={`${label} thinking level`} className={ctl} value={setting.effort ?? ''}
+              onChange={(e) => onChange({ ...setting, effort: e.target.value === '' ? undefined : e.target.value })}>
+              <option value="">default (unset)</option>
+              {effortsForModel(setting.model, known, custom)!.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          ) : effmode === 'freetext' ? (
+            <CommitInput ariaLabel={`${label} thinking level`} placeholder="effort" value={setting.effort ?? ''}
+              onCommit={(v) => onChange({ ...setting, effort: v.trim() || undefined })} />
+          ) : (
+            <span className="text-micro text-text-3">not configurable</span>
+          )}
+        </div>
+      ) : null}
+      {configured ? <div className="flex flex-wrap items-center gap-2 sm:col-span-3">
         <span className="ac-label">auto-compact</span>
         <select
           aria-label={`${label} auto-compact mode`}
@@ -201,10 +210,10 @@ function ModelControls({ label, setting, runtimes, recessed, onChange }: {
         <span className="text-nano text-text-3">
           {compaction.mode === 'off' ? 'the runtime compacts on its own' : compaction.mode === 'percent' ? '% of the model window' : "the last request's size in tokens"}
         </span>
+      </div> : null}
       </div>
-      </div>
-      <RuntimeOptionsEditor runtime={setting.runtime} runtimes={runtimes} options={setting.options}
-        onChange={(options) => onChange({ ...setting, options })} />
+      {configured ? <RuntimeOptionsEditor runtime={setting.runtime} runtimes={runtimes} options={setting.options}
+        onChange={(options) => onChange({ ...setting, options })} /> : null}
     </div>
   );
 }
@@ -355,6 +364,7 @@ function OptionRow({ option, runtimes, open, onToggle, onSave, onRemove }: {
   useEffect(() => setDraft(option.description), [option.description]);
   const max = WorkerModelOptionSchema.shape.description.maxLength;
   const over = max != null && draft.trim().length > max;
+  const descriptionInvalid = draft.trim().length === 0 || over;
   const patch = (next: T.WorkerModelOption): void => onSave(next);
   return (
     <div className="v2-card flex flex-col">
@@ -378,9 +388,10 @@ function OptionRow({ option, runtimes, open, onToggle, onSave, onRemove }: {
               <span className="min-w-0 flex-1 text-micro text-text-3">Write it as a rule, not a mood. The weaver reads this and nothing else.</span>
               <span className={cx('ac-mono text-nano', over ? 'text-failed' : 'text-text-3')}>{draft.trim().length} / {max ?? 200}</span>
             </div>
+            {descriptionInvalid ? <span role="alert" className="text-micro text-failed">{over ? `Description must be ${max} characters or fewer.` : 'Description is required.'}</span> : null}
           </div>
-          <ModelControls label={option.id} setting={{ runtime: option.runtime ?? runtimes[0]?.id ?? 'claude', model: option.model, ...(option.effort !== undefined ? { effort: option.effort } : {}), ...(option.compaction ? { compaction: option.compaction } : {}), ...(option.options ? { options: option.options } : {}) }}
-            runtimes={runtimes} recessed={!configured}
+          <ModelControls label={option.id} setting={{ runtime: option.runtime ?? '', model: option.model, ...(option.effort !== undefined ? { effort: option.effort } : {}), ...(option.compaction ? { compaction: option.compaction } : {}), ...(option.options ? { options: option.options } : {}) }}
+            runtimes={runtimes} recessed={!configured} runtimeOptional preserveEffortOnRuntimeChange
             onChange={(next) => patch({ ...option, runtime: next.runtime, model: next.model, effort: next.effort, compaction: next.compaction, options: next.options })} />
           <div className="flex justify-end">
             <Button size="sm" variant="danger" onClick={onRemove}>Remove</Button>

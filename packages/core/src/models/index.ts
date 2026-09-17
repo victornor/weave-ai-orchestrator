@@ -2,7 +2,7 @@
  * The workspace's two model settings as a service (VS-77, ADR 0011): read them, change one, and
  * settle the question a mixed-runtime migration left open.
  */
-import { DEFAULT_MODEL_SETTING, OcError, WorkspaceModelsSchema, runtimeOptionErrors, type EffectiveModels, type WorkspaceModels, type WorkspaceModelsPut, type WorkspaceModelsView } from '@weave-ai/shared';
+import { DEFAULT_MODEL_SETTING, OcError, WorkspaceModelsSchema, runtimeOptionErrors, workerOptionErrors, type EffectiveModels, type WorkspaceModels, type WorkspaceModelsPut, type WorkspaceModelsView } from '@weave-ai/shared';
 import type { Db } from '@weave-ai/db';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, ModelsService } from '../api.js';
@@ -83,10 +83,14 @@ export function createModelsService(ctx: WorkspaceContext, deps: () => CoreServi
       // A setting may only carry options its own runtime declares — the adapter's `configSchema()`.
       const optionErrors = runtimeOptionErrors(
         (r) => ctx.registries.runtimes.get(r)?.configSchema(),
-        [parsed.data.weaver, parsed.data.workers, ...(parsed.data.workerOptions ?? [])],
+        [parsed.data.weaver, parsed.data.workers],
       );
-      if (optionErrors.length > 0) {
-        throw new OcError('validation', `invalid runtime options: ${optionErrors.join('; ')}`);
+      const catalogErrors = workerOptionErrors(
+        (r) => ctx.registries.runtimes.get(r),
+        parsed.data.workerOptions ?? [],
+      );
+      if (optionErrors.length > 0 || catalogErrors.length > 0) {
+        throw new OcError('validation', `invalid runtime options: ${[...optionErrors, ...catalogErrors].join('; ')}`);
       }
       const before = ctx.config.models;
       await ctx.saveConfig({ ...ctx.config, models: parsed.data });

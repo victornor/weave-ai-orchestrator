@@ -3,7 +3,7 @@ import { homedir, hostname } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, runtimeOptionErrors, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@weave-ai/shared';
+import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, runtimeOptionErrors, workerOptionErrors, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@weave-ai/shared';
 import { detectHostToolsCached, clearHostToolCache, ensureHostToolPath, getLogger, listScratchTrees, workspaceLoader, type HostTool } from '@weave-ai/core';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { cancelRunningRuns } from '../daemon.js';
@@ -343,9 +343,15 @@ async function modelsPut(
   }
   const optionErrors = runtimeOptionErrors(
     (r) => deps.registries.runtimes.get(r)?.configSchema(),
-    [current.weaver, current.workers, ...(current.workerOptions ?? [])],
+    [current.weaver, current.workers],
   );
-  if (optionErrors.length > 0) throw new OcError('validation', `invalid runtime options: ${optionErrors.join('; ')}`);
+  const catalogErrors = workerOptionErrors(
+    (r) => deps.registries.runtimes.get(r),
+    current.workerOptions ?? [],
+  );
+  if (optionErrors.length > 0 || catalogErrors.length > 0) {
+    throw new OcError('validation', `invalid runtime options: ${[...optionErrors, ...catalogErrors].join('; ')}`);
+  }
   persistDaemonModels(deps, {
     weaver: current.weaver ?? undefined,
     workers: current.workers ?? undefined,

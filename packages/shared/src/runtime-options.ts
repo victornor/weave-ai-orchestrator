@@ -35,6 +35,31 @@ export function runtimeOptionProperties(schema: unknown): Array<[string, Runtime
 export interface RuntimeOptionIssues { valid: boolean; byKey: Record<string, string> }
 
 /**
+ * Validate the runtime identity and adapter-specific options carried by worker catalog entries.
+ * Runtime settings for the weaver/workers controls remain intentionally tolerant of an absent
+ * adapter during config reads; a worker option is different because it is an explicit runnable
+ * choice and must not be saved with an unknown runtime.
+ */
+export function workerOptionErrors(
+  runtimeFor: (runtime: string) => { configSchema(): unknown } | undefined,
+  options: ReadonlyArray<{ id: string; runtime?: string | null; options?: Record<string, unknown> }>,
+): string[] {
+  const out: string[] = [];
+  for (const option of options) {
+    if (!option.runtime) continue;
+    const adapter = runtimeFor(option.runtime);
+    if (!adapter) {
+      out.push(`${option.id}: runtime '${option.runtime}' is not registered`);
+      continue;
+    }
+    if (!option.options || Object.keys(option.options).length === 0) continue;
+    const issues = validateRuntimeOptions(adapter.configSchema(), option.options);
+    if (!issues.valid) out.push(`${option.id}: ${option.runtime}: ${Object.entries(issues.byKey).map(([k, v]) => `${k} ${v}`).join('; ')}`);
+  }
+  return out;
+}
+
+/**
  * Check `options` against a runtime's `configSchema()`. Unknown keys are refused only when the
  * schema says `additionalProperties: false`; a schema that cannot describe itself (no `properties`)
  * accepts everything, since there is nothing to validate against.

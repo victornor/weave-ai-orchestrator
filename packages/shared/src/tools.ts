@@ -3,7 +3,7 @@ export const MCP_SERVER_NAME = 'weave-ai';
 
 /** MCP tool names exposed to agents (PLAN §9.2). Stable API. */
 export const COMMON_TOOLS = [
-  'weave_inbox', 'weave_ticket_get', 'weave_ticket_list', 'weave_ticket_comments', 'weave_ticket_checkout', 'weave_ticket_release', 'weave_ticket_comment',
+  'weave_inbox', 'weave_ticket_get', 'weave_ticket_attachment_put', 'weave_ticket_list', 'weave_ticket_comments', 'weave_ticket_checkout', 'weave_ticket_release', 'weave_ticket_comment',
   'weave_ticket_document_put', 'weave_ticket_document_get', 'weave_ticket_transition', 'weave_ticket_work_product', 'weave_ask', 'weave_report', 'weave_incident', 'weave_knowledge_get', 'weave_knowledge_note',
   'weave_knowledge_replace', 'weave_knowledge_docs', 'weave_knowledge_doc_get', 'weave_knowledge_doc_put', 'weave_knowledge_search', 'weave_knowledge_semantic_search', 'weave_openspec_status', 'weave_spec_list', 'weave_spec_get', 'weave_spec_search', 'weave_spec_change_get', 'weave_ticket_merge_done', 'weave_worktree_status', 'weave_artifact_kit', 'weave_ticket_artifact_put',
   // VS-397: a worker may read its own project's roadmap; the three writes are weaver-only (WEAVER_TOOLS).

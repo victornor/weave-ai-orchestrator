@@ -208,6 +208,7 @@ const TRACKED: (EventType | EphemeralEventType)[] = [
   'ticket.comment',
   'ticket.document',
   'ticket.work_product',
+  'ticket.attachment',
   'ticket.merged',
   'decision.created',
   'decision.answered',
@@ -349,6 +350,9 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       // An artifact publish/republish is what makes it appear (or move to the top of) the document
       // explorer's Artifacts entry, live, with no reload (VS-270).
       inv(qk.artifactsRoot(ws));
+      break;
+    case 'ticket.attachment':
+      inv(qk.ticket(ws, id));
       break;
     case 'decision.answered':
     case 'decision.expired':

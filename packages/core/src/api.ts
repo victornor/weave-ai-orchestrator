@@ -95,6 +95,10 @@ export interface TicketsService {
    */
   openPullRequest(actor: Actor, id: string, input: { title: string; body?: string }): Promise<{ url: string; number: number }>;
   workProducts(id: string): Array<Record<string, unknown>>;
+  /** Attach a validated file from an allowlisted workspace path to a ticket (VS-502). */
+  putAttachment(actor: Actor, id: string, input: { path: string; label?: string }): S.TicketAttachment;
+  attachments(id: string): S.TicketAttachment[];
+  attachment(id: string, attachmentId: string): S.TicketAttachment;
   /** Publishes (or, called again with the same `key`, updates) the one `type: 'artifact'` work product for that key, keyed by `externalId === key` — used only by `weave_ticket_artifact_put`, never by the general work-product tool. */
   putArtifactWorkProduct(actor: Actor, id: string, key: string, wp: { url: string; title?: string; kind?: string }): { id: string };
   /** Every published artifact across the given project's tickets (every ticket when `projectId` is

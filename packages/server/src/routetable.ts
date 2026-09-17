@@ -110,6 +110,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'PUT', path: `${W}/tickets/{id}/blockers`, tag: 'tickets', summary: 'Replace the blocker set', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/tickets/{id}/comments`, tag: 'tickets', summary: 'Comments', auth: 'session' },
   { method: 'POST', path: `${W}/tickets/{id}/comments`, tag: 'tickets', summary: 'Comment as the human (wakes the worker)', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/tickets/{id}/attachments/{attachmentId}`, tag: 'tickets', summary: 'Read a ticket attachment', auth: 'session' },
   { method: 'GET', path: `${W}/tickets/{id}/documents/by-id/{documentId}`, tag: 'tickets', summary: 'Read a ticket document by its id (VS-224)', auth: 'session' },
   { method: 'GET', path: `${W}/tickets/{id}/documents/{key}`, tag: 'tickets', summary: 'Read a ticket document revision', auth: 'session' },
   { method: 'PUT', path: `${W}/tickets/{id}/documents/{key}`, tag: 'tickets', summary: 'Write a ticket document revision', auth: 'session', mutating: true },

@@ -109,6 +109,7 @@ function ticketDetail(v: unknown): T.TicketDetail {
     children: listOf<Ticket>(r['children'] ?? []),
     documents: docs.map((d) => ({ key: String(d['key'] ?? ''), revision: Number(d['revision'] ?? 0), updatedAt: String(d['updatedAt'] ?? d['createdAt'] ?? ''), title: d['title'] as string | undefined })),
     workProducts: listOf<T.WorkProduct>(r['workProducts'] ?? []),
+    attachments: listOf<T.TicketAttachment>(r['attachments'] ?? []),
     mergeQueue: {
       position: (((r['mergeQueue'] ?? {}) as Record<string, unknown>)['position'] as number | null | undefined) ?? null,
       concurrency: Number(((r['mergeQueue'] ?? {}) as Record<string, unknown>)['concurrency'] ?? 1),

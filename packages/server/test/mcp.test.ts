@@ -1,3 +1,7 @@
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ASKABLE_DECISION_KINDS, DECISION_KINDS, OcError, ok } from '@weave-ai/shared';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -114,6 +118,46 @@ describe('MCP endpoint', () => {
     expect(payload.ok).toBe(true);
     expect(payload.data.ticket.identifier).toBe('ACME-42');
     await client.close();
+  });
+
+  it('puts a ticket attachment through the worker tool and returns durable metadata', async () => {
+    const { client, h } = await connect();
+    h.impls.tickets!['putAttachment'] = (_actor: unknown, ticketId: string, input: { path: string; label?: string }) => ({
+      id: 'att_1', ticketId, label: input.label ?? 'attachment', mediaType: 'image/png', byteSize: 45,
+      sha256: 'a'.repeat(64), storageKey: 'stored.png', createdAt: '2026-09-17T00:00:00.000Z',
+    });
+
+    const res = await client.callTool({ name: 'weave_ticket_attachment_put', arguments: { id: 'ACME-42', path: '/tmp/screenshot.png', label: 'screenshot.png' } });
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.ok).toBe(true);
+    expect(payload.data).toMatchObject({ id: 'att_1', ticketId: 'tk_1', label: 'screenshot.png', mediaType: 'image/png', byteSize: 45, sha256: 'a'.repeat(64), url: '/api/w/ws1/tickets/tk_1/attachments/att_1' });
+    await client.close();
+  });
+
+  it('returns ticket image attachments as real MCP image blocks', async () => {
+    const { client, h } = await connect();
+    const root = mkdtempSync(join(tmpdir(), 'ac-ticket-mcp-attachment-'));
+    try {
+      const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAAAAAAAAAAAAAAAAAAAAAAAAElFTkSuQmCC', 'base64');
+      const storageKey = 'stored.png';
+      const attachmentsDir = join(root, 'attachments');
+      mkdirSync(attachmentsDir, { recursive: true });
+      writeFileSync(join(attachmentsDir, storageKey), bytes);
+      (h.runtime.ctx.paths as { attachments: string }).attachments = attachmentsDir;
+      h.impls.tickets!['attachments'] = () => [{
+        id: 'att_1', ticketId: 'tk_1', label: 'screenshot.png', mediaType: 'image/png', byteSize: bytes.byteLength,
+        sha256: createHash('sha256').update(bytes).digest('hex'), storageKey, createdAt: '2026-09-17T00:00:00.000Z',
+      }];
+
+      const res = await client.callTool({ name: 'weave_ticket_get', arguments: { id: 'ACME-42' } });
+      const blocks = res.content as Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+      const payload = JSON.parse(blocks[0]!.text!);
+      expect(payload.data.attachments).toEqual([expect.objectContaining({ id: 'att_1', label: 'screenshot.png', mediaType: 'image/png', byteSize: bytes.byteLength })]);
+      expect(blocks.find((block) => block.type === 'image')).toEqual({ type: 'image', data: bytes.toString('base64'), mimeType: 'image/png' });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      await client.close();
+    }
   });
 
   it('weave_artifact_kit returns the kit and reference material to a worker and a conductor alike', async () => {

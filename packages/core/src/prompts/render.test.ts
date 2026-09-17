@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
 import type { Agent, RoleSpec } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
-import { buildTurnPrompt, humanName, renderBrief, renderCharter, renderConductorInstructions, renderSessionInstructions, renderWorkerInstructions } from './index.js';
+import { buildTurnPrompt, humanName, renderBrief, renderCharter, renderConductorInstructions, renderPlannerInstructions, renderSessionInstructions, renderWorkerInstructions } from './index.js';
 
 const SHIPPED_TEMPLATES = fileURLToPath(new URL('../../../../templates', import.meta.url));
 const SHIPPED_WEAVER_SKILL = fileURLToPath(new URL('../../../../skills/weave-ai-weaver/SKILL.md', import.meta.url));
@@ -547,6 +547,33 @@ describe('prompt rendering', () => {
     expect(prompt).not.toContain('weave_human_send');
   });
 
+  it('tells the planner its one exception to never creating a real ticket is dispatching a scout draft in its own plan (VS-517)', () => {
+    const now = nowIso();
+    h.db.insert('channels', { id: 'ch1b', workspaceId: h.workspaceId, kind: 'web' });
+    h.db.insert('channel_threads', { id: 'th1b', channelId: 'ch1b', agentId: h.conductorId, createdAt: now });
+    const planId = newId();
+    h.db.insert('plans', {
+      id: planId, workspaceId: h.workspaceId, projectId: h.projectId, threadId: 'th1b', status: 'drafting',
+      createdByKind: 'human', createdById: 'victor', createdAt: now, updatedAt: now,
+    });
+    const plannerId = newId();
+    h.db.insert('agents', {
+      id: plannerId, workspaceId: h.workspaceId, kind: 'planner', projectId: h.projectId, planId,
+      name: 'Planner', runtimeId: 'claude', status: 'active', homePath: '/tmp/planner',
+      turnEpoch: 0, turnCount: 0, spawnedBy: 'human', briefRevision: 1, createdAt: now, updatedAt: now,
+    });
+    const planner = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [plannerId])!;
+    h.services.planning = { get: () => ({ id: planId, projectId: h.projectId, title: null }) } as never;
+    h.services.projects = { get: () => ({ id: h.projectId, slug: h.projectSlug }) } as never;
+    const instructions = renderPlannerInstructions(h.ctx, h.deps, planner);
+    expect(instructions).toContain('weave_plan_draft_dispatch');
+    expect(instructions).toContain('You never message a worker or answer a decision');
+    expect(instructions).toContain('not reflexively, and not as a way to start');
+    expect(instructions).toContain('adding a draft never dispatches it');
+    expect(instructions).toContain('that draft\'s report reaches you through `weave_plan_get`');
+    expect(instructions).not.toContain('You never create a real ticket, message a worker, or answer a decision.');
+  });
+
   it('tells the weaver to read, create from and report on a submitted plan (VS-398)', async () => {
     const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
     const wake = { id: 'w-plan', workspaceId: h.workspaceId, agentId: conductor.id, source: 'plan_submitted', reason: 'Draft plan "Redesign" submitted for API', payload: { planId: 'pl-42' }, status: 'claimed' } as never;
@@ -556,6 +583,31 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('weave_plan_draft_link');
     expect(prompt).toContain('do not re-split, re-merge or reorder drafts on your own judgement');
     expect(prompt).toContain('mark that draft failed too, naming the missing dependency');
+    // VS-517: an already-dispatched scout draft is not a second ticket to create.
+    expect(prompt).toContain('do not create a second ticket for it');
+  });
+
+  it('tells the planner to read a finished dispatched scout\'s report, never the weaver (VS-517)', async () => {
+    const now = nowIso();
+    h.db.insert('channels', { id: 'ch2', workspaceId: h.workspaceId, kind: 'web' });
+    h.db.insert('channel_threads', { id: 'th2', channelId: 'ch2', agentId: h.conductorId, createdAt: now });
+    const planId = newId();
+    h.db.insert('plans', {
+      id: planId, workspaceId: h.workspaceId, projectId: h.projectId, threadId: 'th2', status: 'drafting',
+      createdByKind: 'human', createdById: 'victor', createdAt: now, updatedAt: now,
+    });
+    const plannerId = newId();
+    h.db.insert('agents', {
+      id: plannerId, workspaceId: h.workspaceId, kind: 'planner', projectId: h.projectId, planId,
+      name: 'Planner', runtimeId: 'claude', status: 'active', homePath: '/tmp/planner',
+      turnEpoch: 0, turnCount: 0, spawnedBy: 'human', briefRevision: 1, createdAt: now, updatedAt: now,
+    });
+    const planner = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [plannerId])!;
+    const wake = { id: 'w-sr', workspaceId: h.workspaceId, agentId: plannerId, source: 'scout_report', reason: 'TST-9 finished — read its report', payload: { ticketId: 'tkt-9', draftId: 'draft-1', planId }, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, planner, [wake], {});
+    expect(prompt).toContain('draft-1');
+    expect(prompt).toContain('weave_plan_get');
+    expect(prompt).toContain("that draft's `report`");
   });
 
   it('names the decision in the weaver\'s wake line (VS-361)', async () => {

@@ -4,6 +4,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Plan, PlanDraft, ToolResult } from '@weave-ai/shared';
+import { createRolesService } from '@weave-ai/core';
 import { runTool, type ToolCtx } from '../src/tools.js';
 import type { RunTokenClaims } from '../src/runtoken.js';
 import { makeHarness, type Harness } from './fakes.js';
@@ -153,6 +154,72 @@ describe('the weave_plan_* tools (VS-398)', () => {
       expect(res.ok).toBe(false);
       if (!res.ok) expect(res.error.code).toBe('forbidden');
     }
+  });
+
+  it('lets the planner dispatch its own scout draft as a real, immediately-assigned ticket, and refuses everything else (VS-517)', async () => {
+    const h = makeHarness(); harness = h; seed(h);
+    h.db.run(`INSERT INTO roles (id, workspace_id, project_id, slug, name, charter_summary, scope_text, status, created_at, updated_at)
+      VALUES ('role1','ws1','proj1','scout','Scout','c','s','active','t0','t0')`);
+    h.runtime.services.roles = createRolesService(h.runtime.ctx, () => h.runtime.services);
+    let n = 0;
+    h.runtime.services.tickets = {
+      ...h.runtime.services.tickets,
+      create: (_actor, input) => {
+        n += 1;
+        const id = `dispatched-${n}`;
+        h.db.insert('tickets', {
+          id, workspaceId: 'ws1', projectId: input.projectId ?? null, number: 900 + n, identifier: `TST-9${n}`,
+          kind: input.kind, title: input.title, description: input.description ?? '', status: input.assigneeRoleId ? 'todo' : 'backlog',
+          priority: input.priority ?? 'medium', assigneeRoleId: input.assigneeRoleId ?? null, createdByKind: 'agent', createdAt: 't0', updatedAt: 't0',
+        });
+        return h.runtime.services.tickets.get(id);
+      },
+      get: (id: string) => h.db.get('SELECT * FROM tickets WHERE id = ?', [id]) as never,
+    } as never;
+    const plan = startPlan(h);
+    const claims = planner(plan.id);
+
+    const scoutRes = await call(h, 'weave_plan_draft_add', { title: 'Scout the auth flow', kind: 'scout', suggestedTier: 'quick', targetRoleId: 'role1' }, claims);
+    if (!scoutRes.ok) throw new Error(JSON.stringify(scoutRes.error));
+    const scout = dataOf<PlanDraft>(scoutRes);
+    const change = dataOf<PlanDraft>(await call(h, 'weave_plan_draft_add', { title: 'Build it', kind: 'change', suggestedTier: 'standard', targetRoleId: 'role1' }, claims));
+
+    const dispatched = await call(h, 'weave_plan_draft_dispatch', { draftId: scout.id }, claims);
+    expect(dispatched.ok).toBe(true);
+    const linkedDraft = dataOf<PlanDraft>(dispatched);
+    expect(linkedDraft.status).toBe('created');
+    expect(linkedDraft.createdTicketId).toBeTruthy();
+
+    const ticket = h.runtime.services.tickets.get(linkedDraft.createdTicketId!);
+    expect(ticket).toMatchObject({ kind: 'scout', title: 'Scout the auth flow', status: 'todo', assigneeRoleId: 'role1' });
+
+    // Dispatching a change draft is refused, and it stays unfiled.
+    const refused = await call(h, 'weave_plan_draft_dispatch', { draftId: change.id }, claims);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.error.code).toBe('validation');
+    expect(h.runtime.services.planning.getDraft(change.id).status).toBe('pending');
+
+    // Dispatching it a second time is refused too.
+    const twice = await call(h, 'weave_plan_draft_dispatch', { draftId: scout.id }, claims);
+    expect(twice.ok).toBe(false);
+
+    // The weaver and a worker have no path to this tool at all.
+    const scout2 = h.runtime.services.planning.addDraft({ kind: 'human', id: 'v' }, plan.id, { title: 'Another scout', kind: 'scout', suggestedTier: 'quick', targetRoleId: 'role1' });
+    const asWeaver = await call(h, 'weave_plan_draft_dispatch', { draftId: scout2.id }, WEAVER);
+    expect(asWeaver.ok).toBe(false);
+    const asWorker = await call(h, 'weave_plan_draft_dispatch', { draftId: scout2.id }, WORKER);
+    expect(asWorker.ok).toBe(false);
+  });
+
+  it('refuses a planner dispatching a draft outside its own plan', async () => {
+    const h = makeHarness(); harness = h; seed(h);
+    const mine = startPlan(h, 'proj1');
+    h.db.insert('channel_threads', { id: 'th2', channelId: 'c1', agentId: 'ag_conductor', createdAt: 't0' });
+    const theirs = h.runtime.services.planning.create({ kind: 'human', id: 'victor' }, 'proj2', { threadId: 'th2' });
+    const foreignDraft = h.runtime.services.planning.addDraft({ kind: 'human', id: 'v' }, theirs.id, { title: 'Foreign scout', kind: 'scout', suggestedTier: 'quick' });
+    const res = await call(h, 'weave_plan_draft_dispatch', { draftId: foreignDraft.id }, planner(mine.id));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error.code).toBe('forbidden');
   });
 
   it('refuses a worker every weave_plan_* tool', async () => {

@@ -44,7 +44,10 @@ describe('tickets', () => {
       retireIfLanded: vi.fn(async () => ({ retired: true })),
       relaunch: vi.fn(async (_a: Actor, workerId: string) => ({ id: workerId })),
       conductor: vi.fn(() => ({ id: h.conductorId })),
+      ensurePlanner: vi.fn(async (_a: Actor, planId: string) => ({ id: `planner-${planId}` })),
     } as never;
+    // VS-517: most tests never dispatched their scout from a plan — the default finds none.
+    h.services.planning = { findDraftByTicket: vi.fn(() => null), get: vi.fn() } as never;
     tickets = createTicketsService(h.ctx, h.deps);
     h.services.tickets = tickets;
   });
@@ -1111,6 +1114,53 @@ describe('tickets', () => {
       const child = make({ title: 'child', parentId: parent.id });
       tickets.cancel(HUMAN, child.id, 'not needed');
       expect(wake.calls.some((c) => c.agentId === parentWorker && c.input.source === 'children_completed')).toBe(true);
+    });
+  });
+
+  // VS-517: a scout draft the planner dispatched before submission reports back to its plan's
+  // planner, never the weaver — but only while the plan is still drafting.
+  describe('scout report routing (VS-517)', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    /** Finish a scout ticket's transitions and let the scheduled report-routing follow-up fire. */
+    const finishScout = async (t: { id: string }) => {
+      await tickets.transition(AGENT, t.id, { to: 'in_progress' });
+      await tickets.transition(AGENT, t.id, { to: 'done' });
+      vi.advanceTimersByTime(200);
+      await tickets.stop();
+    };
+
+    it('wakes the plan\'s planner, not the weaver, when a dispatched scout finishes while its plan is drafting', async () => {
+      const t = make({ kind: 'scout', title: 'Investigate' });
+      h.services.planning = {
+        findDraftByTicket: vi.fn((id: string) => (id === t.id ? { draftId: 'draft-1', planId: 'plan-1' } : null)),
+        get: vi.fn(() => ({ id: 'plan-1', status: 'drafting' })),
+      } as never;
+      await finishScout(t);
+      expect(wake.calls.some((c) => c.agentId === 'planner-plan-1' && c.input.source === 'scout_report')).toBe(true);
+      expect(wake.calls.some((c) => c.agentId === h.conductorId)).toBe(false);
+      expect((h.services.workers as unknown as { ensurePlanner: ReturnType<typeof vi.fn> }).ensurePlanner).toHaveBeenCalledWith(expect.anything(), 'plan-1');
+    });
+
+    it('does not try to reach a planner for a scout that was never dispatched from a plan', async () => {
+      const t = make({ kind: 'scout', title: 'Investigate' });
+      await finishScout(t);
+      expect(wake.calls.some((c) => c.input.source === 'scout_report')).toBe(false);
+    });
+
+    it('falls back to no report routing once the dispatching plan is no longer drafting (submitted or discarded)', async () => {
+      for (const status of ['submitted', 'discarded'] as const) {
+        wake.calls.length = 0;
+        const t = make({ kind: 'scout', title: 'Investigate' });
+        h.services.planning = {
+          findDraftByTicket: vi.fn(() => ({ draftId: 'draft-1', planId: 'plan-1' })),
+          get: vi.fn(() => ({ id: 'plan-1', status })),
+        } as never;
+        await finishScout(t);
+        expect(wake.calls.some((c) => c.input.source === 'scout_report')).toBe(false);
+        expect((h.services.workers as unknown as { ensurePlanner: ReturnType<typeof vi.fn> }).ensurePlanner).not.toHaveBeenCalled();
+      }
     });
   });
 

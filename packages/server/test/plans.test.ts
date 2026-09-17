@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Plan } from '@weave-ai/shared';
 import { createApp } from '../src/app.js';
 import { authed, makeHarness, type Harness } from './fakes.js';
-import { createPlanningService } from '@weave-ai/core';
+import { createPlanningService, createRolesService } from '@weave-ai/core';
 
 let harness: Harness | null = null;
 afterEach(async () => { await harness?.close(); harness = null; });
@@ -222,5 +222,50 @@ describe('plan tab HTTP (VS-477)', () => {
     const app = createApp(harness.deps);
     const res = await app.fetch(new Request('http://127.0.0.1/api/w/ws1/projects/proj1/plans?status=submitted', { headers: authed() }));
     expect(res.status).toBe(400);
+  });
+});
+
+describe('POST /plans/:planId/drafts/:draftId/dispatch (VS-517)', () => {
+  it('dispatches a pending scout draft as a real, immediately-assigned ticket, and GET carries its live status', async () => {
+    harness = makeHarness(); seed(harness);
+    harness.db.run(`INSERT INTO roles (id, workspace_id, project_id, slug, name, charter_summary, scope_text, status, created_at, updated_at)
+      VALUES ('role1','ws1','proj1','scout','Scout','c','s','active','t0','t0')`);
+    harness.runtime.services.roles = createRolesService(harness.runtime.ctx, () => harness!.runtime.services);
+    let n = 0;
+    harness.runtime.services.tickets = {
+      ...harness.runtime.services.tickets,
+      create: (_actor, input) => {
+        n += 1;
+        const id = `dispatched-${n}`;
+        harness!.db.insert('tickets', {
+          id, workspaceId: 'ws1', projectId: input.projectId ?? null, number: 900 + n, identifier: `TST-9${n}`,
+          kind: input.kind, title: input.title, description: input.description ?? '', status: input.assigneeRoleId ? 'todo' : 'backlog',
+          priority: input.priority ?? 'medium', assigneeRoleId: input.assigneeRoleId ?? null, createdByKind: 'human', createdAt: 't0', updatedAt: 't0',
+        });
+        return harness!.runtime.services.tickets.get(id);
+      },
+      get: (id: string) => harness!.db.get('SELECT * FROM tickets WHERE id = ?', [id]) as never,
+      getDocument: () => null,
+    } as never;
+    const plan = startPlan(harness);
+    const scout = harness.runtime.services.planning.addDraft({ kind: 'human', id: 'v' }, plan.id, { title: 'Scout the auth flow', kind: 'scout', suggestedTier: 'quick', targetRoleId: 'role1' });
+    const change = harness.runtime.services.planning.addDraft({ kind: 'human', id: 'v' }, plan.id, { title: 'Build it', kind: 'change', suggestedTier: 'standard' });
+    const app = createApp(harness.deps);
+
+    const res = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/proj1/plans/${plan.id}/drafts/${scout.id}/dispatch`, { method: 'POST', headers: authed() }));
+    expect(res.status).toBe(200);
+    const dispatched = await res.json() as { status: string; createdTicketId: string };
+    expect(dispatched.status).toBe('created');
+    expect(dispatched.createdTicketId).toBeTruthy();
+
+    // The change draft has no dispatch route reachable for it in spirit — but even if pointed at it, it is refused and stays unfiled.
+    const refused = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/proj1/plans/${plan.id}/drafts/${change.id}/dispatch`, { method: 'POST', headers: authed() }));
+    expect(refused.status).not.toBe(200);
+    expect(harness.runtime.services.planning.getDraft(change.id).status).toBe('pending');
+
+    // GET carries the dispatched draft's live ticket status alongside the rest.
+    const got = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/proj1/plans/${plan.id}`, { headers: authed() }));
+    const body = await got.json() as { drafts: Array<{ id: string; ticketStatus?: string }> };
+    expect(body.drafts.find((d) => d.id === scout.id)?.ticketStatus).toBe('todo');
   });
 });

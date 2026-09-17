@@ -13,7 +13,7 @@ import {
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES, ROADMAP_STATUSES, ROADMAP_BLOCK_STATUSES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
   ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS, ATTACHMENT_MAX_PER_MESSAGE,
-  PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, WEAVER_REVIEW_WAITING_ON_MAX,
+  PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, WEAVER_REVIEW_WAITING_ON_MAX, TERMINAL_TICKET_STATUSES,
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent, validateArtifactImageDataUris,
   isWorkerOptionConfigured,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock, type AgentKind,
@@ -1249,11 +1249,17 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_plan_get', scope: 'weaver', input: z.object({ planId: z.string().min(1).optional() }),
-    description: 'Read a draft plan and its ordered drafts, each with its dependencies, target role, priority and effective tier. A planning agent reads its own plan by omitting planId; the weaver must name one (the id carried by a plan_submitted wake\'s payload). `creationOrder` lists the draft ids in an order where every dependency comes before its dependents — create tickets in that order and each draft\'s blockers already have ticket ids to pass as `blockedBy`.',
+    description: 'Read a draft plan and its ordered drafts, each with its dependencies, target role, priority and effective tier. A planning agent reads its own plan by omitting planId; the weaver must name one (the id carried by a plan_submitted wake\'s payload). `creationOrder` lists the still-`pending` draft ids in an order where every dependency comes before its dependents — a draft already `created` (dispatched, or linked by an earlier submission pass) or `failed` is left out of it; use its `createdTicketId` directly as a dependent\'s blocker instead of creating it again. A draft with a `createdTicketId` also carries `ticketStatus` and, once that ticket is terminal, `report` (its report document, or null if it never delivered one) — read a dispatched scout\'s report this way, with no other tool.',
     handler: (ctx, i) => {
       const planId = requirePlanId(ctx, i.planId);
       const s = svc(ctx);
-      const drafts = s.planning.listDrafts(planId).map((d) => ({ ...d, blockedBy: s.planning.draftBlockers(d.id) }));
+      const drafts = s.planning.listDrafts(planId).map((d) => {
+        const base = { ...d, blockedBy: s.planning.draftBlockers(d.id) };
+        if (!d.createdTicketId) return base;
+        const ticket = s.tickets.get(d.createdTicketId);
+        const terminal = TERMINAL_TICKET_STATUSES.includes(ticket.status);
+        return { ...base, ticketStatus: ticket.status, report: terminal ? (s.tickets.getDocument(ticket.id, 'report')?.body ?? null) : undefined };
+      });
       return { plan: s.planning.get(planId), drafts, creationOrder: s.planning.creationOrder(planId) };
     },
   },
@@ -1313,6 +1319,11 @@ export const TOOLS: ToolDef[] = [
     name: 'weave_plan_draft_reorder', scope: 'planner', input: z.object({ draftId: z.string().min(1), position: z.number().int().min(0) }),
     description: 'Move a draft to a new position in the plan\'s order (0-based). Every other draft\'s position shifts to stay dense; a position past the end clamps to last.',
     handler: (ctx, i) => { requireOwnDraft(ctx, i.draftId); return svc(ctx).planning.updateDraft(ctx.actor, i.draftId, { position: i.position }); },
+  },
+  {
+    name: 'weave_plan_draft_dispatch', scope: 'planner', input: z.object({ draftId: z.string().min(1) }),
+    description: 'Dispatch a `scout` draft in this plan as a real ticket right now, before the plan is submitted — the only draft kind, and the one narrow exception to never creating a real ticket. Refused for any other draft kind, a draft already dispatched or otherwise linked to a ticket, a draft with no target role, or a plan that is no longer drafting. Captain can do this too from the Plan modal; either way the report reaches you here, not the weaver — once the ticket finishes, call weave_plan_get again and read the linked draft\'s `report`.',
+    handler: (ctx, i) => { requireOwnDraft(ctx, i.draftId); return svc(ctx).planning.dispatchDraft(ctx.actor, i.draftId); },
   },
   {
     name: 'weave_plan_reply', scope: 'planner', input: z.object({ body: z.string().min(1) }),

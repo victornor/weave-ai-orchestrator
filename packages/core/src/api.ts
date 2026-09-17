@@ -964,6 +964,19 @@ export interface PlanningService {
   removeDraft(actor: Actor, draftId: string): void;
   /** Records what submission did with a draft: linked to the ticket the weaver created, or failed with a reason. Weaver-only in practice. */
   linkDraft(draftId: string, outcome: { ticketId: string } | { failureReason: string }): S.PlanDraft;
+  /**
+   * VS-517: the draft (and its plan) a ticket was created from, whether linked by post-submission
+   * weaver processing or by the planner dispatching a scout draft directly — null for a ticket with
+   * no such draft. Used to route a dispatched scout's completion back to its plan's planner.
+   */
+  findDraftByTicket(ticketId: string): { draftId: string; planId: string } | null;
+  /**
+   * VS-517: dispatch a `scout` draft in the caller's own `drafting` plan as a real ticket immediately,
+   * without waiting for plan submission. Refused for any other draft kind, a draft not in `pending`
+   * status, or a plan that is not `drafting`. Links the draft to the created ticket the same way
+   * post-submission processing does (`linkDraft`), so it is never re-filed at submission time.
+   */
+  dispatchDraft(actor: Actor, draftId: string): S.PlanDraft;
 }
 
 export interface RoadmapCreateInput {

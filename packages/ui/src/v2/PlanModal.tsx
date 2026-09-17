@@ -22,7 +22,7 @@ import { PLAN_DRAFT_KINDS, TICKET_PRIORITIES, projectLabel } from '@weave-ai/sha
 import { resolveModel } from '@weave-ai/render';
 import {
   usePlans, useCreatePlan, useActivatePlan, useRenamePlan,
-  usePlan, usePatchPlanDraft, useRemovePlanDraft, useSubmitPlan, useDiscardPlan,
+  usePlan, usePatchPlanDraft, useRemovePlanDraft, useDispatchPlanDraft, useSubmitPlan, useDiscardPlan,
   useThreadMessages, usePostThreadMessage, useRoles, useRunTraces, useRuntimes, useRuntimeModels,
 } from '../api/hooks';
 import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
@@ -127,8 +127,16 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
   const post = usePostThreadMessage();
   const patchDraft = usePatchPlanDraft();
   const removeDraft = useRemovePlanDraft();
+  const dispatchDraft = useDispatchPlanDraft();
   const submit = useSubmitPlan();
   const discard = useDiscardPlan();
+  // VS-517: a dispatched scout's ticket ids, so a `ticket.status` event for one of them (the ticket
+  // finishing, or any other status change) refreshes the plan the same way a `plan.*` event does —
+  // without this, "reported" would only ever appear after a reload.
+  const dispatchedTicketIds = useMemo(
+    () => new Set((plan.data?.drafts ?? []).map((d) => d.createdTicketId).filter((id): id is string => Boolean(id))),
+    [plan.data],
+  );
 
   // Draft edits, titles and replies can arrive from the planner or another device between our own
   // fetches; re-fetch the tab list and the open plan whenever a `plan.*` event names them, the same
@@ -144,6 +152,10 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
           else setLive((cur) => (cur && cur.id === e.entityId ? { ...cur, running: false } : cur));
           return;
         }
+        if (e.type === 'ticket.status' && activePlanId && dispatchedTicketIds.has(e.entityId)) {
+          qc.invalidateQueries({ queryKey: qk.plan(ws, activePlanId) });
+          return;
+        }
         if (!e.type.startsWith('plan.')) return;
         if (effectiveProjectId) qc.invalidateQueries({ queryKey: qk.plans(ws, effectiveProjectId) });
         if (!activePlanId) return;
@@ -151,7 +163,7 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
         if (eventPlanId !== activePlanId) return;
         qc.invalidateQueries({ queryKey: qk.plan(ws, activePlanId) });
       },
-      [effectiveProjectId, activePlanId, ws, qc, plannerAgentId],
+      [effectiveProjectId, activePlanId, ws, qc, plannerAgentId, dispatchedTicketIds],
     ),
   );
 
@@ -484,43 +496,68 @@ export function PlanModal({ open, onClose, projects, projectId }: PlanModalProps
                                   <span className="v2-tag text-nano">{d.kind}</span>
                                   <span className="v2-tag text-nano">{d.priority}</span>
                                   <div className="ml-auto flex items-center gap-1">
-                                    <button type="button" aria-label={`Move ${d.title} up`} disabled={i === 0} onClick={() => move(d.id, i - 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
-                                      ↑
-                                    </button>
-                                    <button type="button" aria-label={`Move ${d.title} down`} disabled={i === drafts.length - 1} onClick={() => move(d.id, i + 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
-                                      ↓
-                                    </button>
-                                    <button type="button" aria-label={`Edit ${d.title}`} onClick={() => beginEdit(d)} className="text-text-4 hover:text-text-1">
-                                      Edit
-                                    </button>
-                                    <button
-                                      type="button"
-                                      aria-label={`Remove ${d.title}`}
-                                      onClick={() => effectiveProjectId && plan.data && removeDraft.mutate({ projectId: effectiveProjectId, planId: plan.data.plan.id, draftId: d.id })}
-                                      className="text-text-4 hover:text-text-1"
-                                    >
-                                      ×
-                                    </button>
+                                    {d.status === 'pending' ? (
+                                      <>
+                                        <button type="button" aria-label={`Move ${d.title} up`} disabled={i === 0} onClick={() => move(d.id, i - 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
+                                          ↑
+                                        </button>
+                                        <button type="button" aria-label={`Move ${d.title} down`} disabled={i === drafts.length - 1} onClick={() => move(d.id, i + 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
+                                          ↓
+                                        </button>
+                                        <button type="button" aria-label={`Edit ${d.title}`} onClick={() => beginEdit(d)} className="text-text-4 hover:text-text-1">
+                                          Edit
+                                        </button>
+                                        {d.kind === 'scout' && plan.data?.plan.status === 'drafting' ? (
+                                          <button
+                                            type="button"
+                                            aria-label={`Dispatch ${d.title}`}
+                                            disabled={dispatchDraft.isPending}
+                                            onClick={() => effectiveProjectId && plan.data && dispatchDraft.mutate({ projectId: effectiveProjectId, planId: plan.data.plan.id, draftId: d.id })}
+                                            className="text-nano text-text-2 hover:text-text-1"
+                                          >
+                                            Dispatch
+                                          </button>
+                                        ) : null}
+                                        <button
+                                          type="button"
+                                          aria-label={`Remove ${d.title}`}
+                                          onClick={() => effectiveProjectId && plan.data && removeDraft.mutate({ projectId: effectiveProjectId, planId: plan.data.plan.id, draftId: d.id })}
+                                          className="text-text-4 hover:text-text-1"
+                                        >
+                                          ×
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <span className="text-nano text-text-3">
+                                        {d.status === 'failed'
+                                          ? `Failed${d.failureReason ? `: ${d.failureReason}` : ''}`
+                                          : d.ticketStatus && ['done', 'cancelled'].includes(d.ticketStatus)
+                                            ? 'Reported'
+                                            : 'Dispatched — running'}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                                 <p className="mt-1 text-micro text-text-1">{d.title}</p>
                                 {d.description ? <p className="mt-0.5 whitespace-pre-wrap text-nano text-text-3">{d.description}</p> : null}
                                 {d.targetRoleId ? <p className="mt-0.5 text-nano text-text-4">Role: {roles.data?.find((r) => r.id === d.targetRoleId)?.name ?? d.targetRoleId}</p> : null}
                                 {d.blockedBy.length > 0 ? <p className="mt-0.5 text-nano text-text-4">Depends on {d.blockedBy.length} draft{d.blockedBy.length > 1 ? 's' : ''}</p> : null}
-                                <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                                  <span className="text-nano text-text-4">Tier ({d.suggestedTier} suggested):</span>
-                                  {TIERS.map((t) => (
-                                    <button
-                                      key={t}
-                                      type="button"
-                                      aria-pressed={effectiveTier === t}
-                                      onClick={() => setTier(d.id, effectiveTier, t, d.suggestedTier)}
-                                      className={cx('v2-tag text-nano', effectiveTier === t ? 'bg-bg-3 text-text-1' : 'text-text-3')}
-                                    >
-                                      {t}
-                                    </button>
-                                  ))}
-                                </div>
+                                {d.status === 'pending' ? (
+                                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                    <span className="text-nano text-text-4">Tier ({d.suggestedTier} suggested):</span>
+                                    {TIERS.map((t) => (
+                                      <button
+                                        key={t}
+                                        type="button"
+                                        aria-pressed={effectiveTier === t}
+                                        onClick={() => setTier(d.id, effectiveTier, t, d.suggestedTier)}
+                                        className={cx('v2-tag text-nano', effectiveTier === t ? 'bg-bg-3 text-text-1' : 'text-text-3')}
+                                      >
+                                        {t}
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
                               </>
                             )}
                           </li>

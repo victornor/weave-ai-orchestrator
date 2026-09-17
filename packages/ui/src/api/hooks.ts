@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, RoadmapBlock, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanSummary, ChannelThread } from '@weave-ai/shared';
+import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, TicketStatus, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, RoadmapBlock, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanSummary, ChannelThread } from '@weave-ai/shared';
 import { dayKey } from '@weave-ai/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -342,12 +342,15 @@ export interface PlanDraftPatchBody {
   position?: number;
 }
 
+/** A draft enriched (VS-517) with its dispatched ticket's live status and, once terminal, its report — present only once a draft has a `createdTicketId`. */
+export type DispatchedPlanDraft = PlanDraft & { blockedBy: string[]; ticketStatus?: TicketStatus; report?: string | null };
+
 /** A plan and its ordered drafts, each carrying `blockedBy`. Disabled until both ids are known (the modal calls `useStartOrResumePlan` first). */
-export function usePlan(projectId: string | null | undefined, planId: string | null | undefined): UseQueryResult<{ plan: Plan; drafts: Array<PlanDraft & { blockedBy: string[] }> }> {
+export function usePlan(projectId: string | null | undefined, planId: string | null | undefined): UseQueryResult<{ plan: Plan; drafts: DispatchedPlanDraft[] }> {
   const ws = useWs();
   return useQuery({
     queryKey: qk.plan(ws, planId ?? ''),
-    queryFn: () => api.ws<{ plan: Plan; drafts: Array<PlanDraft & { blockedBy: string[] }> }>(ws, `/projects/${projectId}/plans/${planId}`),
+    queryFn: () => api.ws<{ plan: Plan; drafts: DispatchedPlanDraft[] }>(ws, `/projects/${projectId}/plans/${planId}`),
     enabled: Boolean(projectId) && Boolean(planId),
   });
 }
@@ -430,6 +433,16 @@ export function useRemovePlanDraft(): UseMutationResult<unknown, Error, { projec
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ projectId, planId, draftId }) => api.ws(ws, `/projects/${projectId}/plans/${planId}/drafts/${draftId}`, { method: 'DELETE' }),
+    onSuccess: (_d, { planId }) => { void qc.invalidateQueries({ queryKey: qk.plan(ws, planId) }); },
+  });
+}
+
+/** VS-517: captain starts a scout draft running right now, before the plan is submitted — the only draft kind this ever applies to. */
+export function useDispatchPlanDraft(): UseMutationResult<PlanDraft, Error, { projectId: string; planId: string; draftId: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, planId, draftId }) => api.ws<PlanDraft>(ws, `/projects/${projectId}/plans/${planId}/drafts/${draftId}/dispatch`, { method: 'POST' }),
     onSuccess: (_d, { planId }) => { void qc.invalidateQueries({ queryKey: qk.plan(ws, planId) }); },
   });
 }

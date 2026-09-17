@@ -40,6 +40,9 @@ export const SESSION_ONLY_TOOLS = ['weave_session_take_ticket'] as const;
  * workspace-/decision-scope knowledge — enforced server-side, not by this list alone). The only
  * tools that write are the draft-editing ones, each scoped to the calling agent's own plan
  * (`agent.planId`). There is deliberately no submit tool: only captain submits, via an HTTP action.
+ * `weave_plan_draft_dispatch` (VS-517) is the one exception to "never a real ticket" — a scout draft,
+ * and nothing else; captain has the same action from the Plan modal, and either path reports back
+ * here via `weave_plan_get`, never to the weaver.
  */
 export const PLANNER_TOOLS = [
   'weave_inbox', 'weave_ticket_list', 'weave_ticket_get',
@@ -47,6 +50,8 @@ export const PLANNER_TOOLS = [
   'weave_knowledge_docs', 'weave_knowledge_doc_get', 'weave_knowledge_get', 'weave_knowledge_search', 'weave_knowledge_semantic_search',
   'weave_role_list', 'weave_role_get',
   'weave_plan_get', 'weave_plan_draft_add', 'weave_plan_draft_update', 'weave_plan_draft_remove', 'weave_plan_draft_reorder',
+  /** VS-517: the one, narrow exception to "the planner can never create a real ticket" — a scout draft in its own drafting plan, dispatched before submission. Captain has the same action from the Plan modal (POST .../drafts/:draftId/dispatch); both call the same core `dispatchDraft`. */
+  'weave_plan_draft_dispatch',
   /** VS-477: the planner names its own plan (≤ 6 words) so its tab is labelled; refused once captain renamed it. */
   'weave_plan_set_title',
   /** The planner's own reply tool — `weave_human_send` is weaver-only and `weave_ticket_comment` needs a ticket the planner never has. */

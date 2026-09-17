@@ -7,8 +7,9 @@ import { formatAge } from '@weave-ai/render';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
-import { parkForHuman } from '../runs/engine.js';
+import { parkForHuman, runProducedEvidence } from '../runs/engine.js';
 import { ungateRuntime } from '../runs/authgate.js';
+import { allWorkerStallStates, createWorkerStallState, deleteWorkerStallState, getWorkerStallState, recordEscalation, recordRecoveryAttempt } from './stall-state.js';
 import { archivedDirFor } from '../openspec/index.js';
 import { CURATION_BUDGET_FRACTION, budgetOf, docSlugOf, isDocPath } from '../knowledge/files.js';
 import { sh } from '../util/exec.js';
@@ -568,6 +569,12 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
    * deliberately independent of `watchdog()`: that one only ever looks at `runs` with
    * `status = 'running'`, so a worker whose turn ended cleanly and was simply never re-woken (the
    * VS-199 shape) falls entirely outside it.
+   *
+   * VS-498: also excludes a `blocked` ticket explicitly. A block is not always represented by an
+   * open `decisions` row — a ticket-level `blockedBy` or an `{owner, action}` unblock can leave a
+   * worker legitimately waiting with none of the other exclusions above in play — and this sweep now
+   * drives bounded automatic recovery and escalation from its result, so a worker correctly blocked
+   * must never enter that path.
    */
   function stalledWorkers(): StalledAgentRow[] {
     const timeoutMs = (ctx.config.defaults.stalledWorkerTimeoutSec ?? 300) * 1000;
@@ -576,12 +583,13 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     // its time by more than the grace margin. Past that the dispatcher would have claimed it, so the
     // worker has no route back and must be reported. Other queued wakes always count.
     const selfWakeCutoff = new Date(Date.now() - SELF_WAKE_STALL_GRACE_MS).toISOString();
-    const terminal = TERMINAL_TICKET_STATUSES.map(() => '?').join(',');
+    const excluded = [...TERMINAL_TICKET_STATUSES, 'blocked'];
+    const excludedPlaceholders = excluded.map(() => '?').join(',');
     return ctx.db.all<StalledAgentRow>(
       `SELECT a.id AS id, a.ticket_id AS ticket_id, a.last_run_at AS last_run_at, t.identifier AS identifier
          FROM agents a JOIN tickets t ON t.id = a.ticket_id
         WHERE a.workspace_id = ? AND a.kind = 'worker' AND a.status != 'retired'
-          AND t.status NOT IN (${terminal})
+          AND t.status NOT IN (${excludedPlaceholders})
           AND t.interactive_session = 0
           AND a.last_run_at IS NOT NULL AND a.last_run_at < ?
           AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.agent_id = a.id AND r.status IN ('queued','running'))
@@ -591,22 +599,111 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
                    OR (w.status = 'queued' AND NOT (w.source = 'self_scheduled' AND w.not_before IS NOT NULL AND w.not_before <= ?)))
           )
           AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.ticket_id = a.ticket_id AND d.status = 'open')`,
-      [ctx.workspaceId, ...TERMINAL_TICKET_STATUSES, cutoff, selfWakeCutoff],
+      [ctx.workspaceId, ...excluded, cutoff, selfWakeCutoff],
     );
   }
 
   /**
    * Raises `worker.stalled` (already a `DIGEST_EVENT_TYPES` member, so the conductor sees it on its
-   * next digest with no extra wiring) for each match, deduped per `(agentId, lastRunAt)` so a
-   * worker that is still stalled next sweep is not re-notified until it actually gets a new run.
-   * Detection only, per the ticket: nothing here enqueues a wakeup, retry or restart.
+   * next digest with no extra wiring, and already invalidates the workers/ticket reads on the client
+   * — VS-328) for each match, deduped per `(agentId, lastRunAt)` so a worker that is still stalled
+   * next sweep is not re-notified every tick until it actually gets a new run.
    */
   function stalledWorkerScan(): void {
     for (const row of stalledWorkers()) {
       if (stalledNotified.get(row.id) === row.lastRunAt) continue;
       stalledNotified.set(row.id, row.lastRunAt);
       log.warn({ agentId: row.id, ticket: row.identifier, lastRunAt: row.lastRunAt }, 'worker is idle with an unfinished ticket and nothing left to wake it');
-      ctx.events.emit('worker.stalled', 'agent', row.id, { ticketId: row.ticketId, reason: 'idle', lastRunAt: row.lastRunAt });
+      ctx.events.emit('worker.stalled', 'agent', row.id, { ticketId: row.ticketId, reason: 'idle', lastRunAt: row.lastRunAt, state: 'stalled' });
+    }
+  }
+
+  /**
+   * VS-498: the reset half of stall recovery, run before `stallRecoveryScan` each pass so a worker
+   * that already recovered is never re-flagged from a stale row. Walks every worker currently
+   * persisted as being in an active stall/recovery cycle — independent of `stalledWorkers()`, which
+   * an outstanding recovery wake or an open escalation decision deliberately removes the worker
+   * from — and clears the cycle when either applies:
+   *
+   * - a `succeeded` run since the last recovery attempt (or since first detection, if none has been
+   *   made yet) left observable evidence of progress on the ticket, using the same evidence test the
+   *   stuck-worker gate uses; or
+   * - its escalation decision exists and is no longer `open` (answered, withdrawn, expired or
+   *   superseded) and no evidence of progress has been found either — the weaver has resolved it, so
+   *   the worker starts with a clean slate: if it stalls again it gets the full number of automatic
+   *   recovery attempts again, rather than escalating again immediately.
+   */
+  function stallRecoveryResetPass(): void {
+    for (const state of allWorkerStallStates(ctx)) {
+      const since = state.lastAttemptAt ?? state.firstDetectedAt;
+      const progressed = ctx.db
+        .all<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'succeeded' AND finished_at > ? ORDER BY finished_at", [state.agentId, since])
+        .some((r) => runProducedEvidence(ctx, r.id, state.ticketId));
+      if (progressed) {
+        if (state.escalationDecisionId) {
+          try {
+            const d = deps().decisions.list({ ticketId: state.ticketId }).find((x) => x.id === state.escalationDecisionId);
+            if (d && d.status === 'open') deps().decisions.withdraw(SYSTEM, d.id, 'the worker made progress on its own');
+          } catch (e) { log.warn({ agentId: state.agentId, err: String(e) }, 'could not withdraw a stall escalation decision'); }
+        }
+        deleteWorkerStallState(ctx, state.agentId);
+        log.info({ agentId: state.agentId, ticketId: state.ticketId }, 'worker recovered from a stall');
+        ctx.events.emit('worker.stalled', 'agent', state.agentId, { ticketId: state.ticketId, reason: 'recovered', state: 'recovered' });
+        continue;
+      }
+      if (state.escalationDecisionId) {
+        const d = deps().decisions.list({ ticketId: state.ticketId }).find((x) => x.id === state.escalationDecisionId);
+        if (d && d.status !== 'open') {
+          deleteWorkerStallState(ctx, state.agentId);
+          log.info({ agentId: state.agentId, ticketId: state.ticketId }, 'stall escalation resolved with no evidence of progress; clean slate');
+          ctx.events.emit('worker.stalled', 'agent', state.agentId, { ticketId: state.ticketId, reason: 'escalation_resolved', state: 'recovered' });
+        }
+      }
+    }
+  }
+
+  /**
+   * VS-498: for each worker `stalledWorkers()` still matches, either enqueue a bounded automatic
+   * recovery wake targeting that same worker agent — never a new one, so the pending-spawn sweep's
+   * `worker_id IS NULL` guard keeps this ticket out of its consideration throughout — or, once the
+   * configured cap of attempts is reached, raise a weaver-owned `gate_finding` instead of enqueueing
+   * a further one. Once that decision is open, `stalledWorkers()`'s own "no open decision" clause
+   * keeps this worker out of the next scan, so escalation only ever happens once per stall.
+   */
+  function stallRecoveryScan(): void {
+    const cap = ctx.config.defaults.stalledWorkerMaxAutoRecoverAttempts ?? 2;
+    const now = nowIso();
+    for (const row of stalledWorkers()) {
+      let state = getWorkerStallState(ctx, row.id);
+      if (!state) {
+        createWorkerStallState(ctx, row.id, row.ticketId, now);
+        state = getWorkerStallState(ctx, row.id)!;
+      }
+      if (state.attempts < cap) {
+        const attempt = state.attempts + 1;
+        try {
+          const w = deps().wake.enqueue(row.id, {
+            source: 'system',
+            reason: `stalled worker auto-resumed (attempt ${attempt} of ${cap})`,
+            payload: { kind: 'stall_recovery', attempt, cap },
+            idempotencyKey: `stall-recovery:${row.id}:${attempt}`,
+            requestedBy: SYSTEM,
+          });
+          recordRecoveryAttempt(ctx, row.id, attempt, w.id, now);
+          log.warn({ agentId: row.id, ticket: row.identifier, attempt, cap }, 'auto-recovering a stalled worker');
+        } catch (e) { log.warn({ agentId: row.id, err: String(e) }, 'stall recovery wake failed'); }
+        continue;
+      }
+      try {
+        const d = deps().decisions.create(SYSTEM, {
+          ticketId: row.ticketId, kind: 'gate_finding', owner: 'weaver',
+          title: `${row.identifier}'s worker stalled after ${state.attempts} automatic recovery attempt(s)`,
+          context: `The worker's last turn ended cleanly with its ticket unfinished and nothing left to wake it, and it did not recover after ${state.attempts} automatic nudge(s). Steer it, relaunch it, or cancel the ticket.`,
+          correlationKey: `stalled-worker:${row.id}`,
+        });
+        recordEscalation(ctx, row.id, d.id, now);
+        log.warn({ agentId: row.id, ticket: row.identifier, attempts: state.attempts }, 'stalled worker escalated to the weaver');
+      } catch (e) { log.warn({ agentId: row.id, err: String(e) }, 'stall escalation failed'); }
     }
   }
 
@@ -1357,6 +1454,8 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
           try { deps().decisions.sweepTerminalTickets(SYSTEM, TERMINAL_DECISION_GRACE_MS); }
           catch (e) { log.error({ err: String(e) }, 'stale terminal-decision sweep failed'); }
           try { stalledWorkerScan(); } catch (e) { log.error({ err: String(e) }, 'stalled worker scan failed'); }
+          try { stallRecoveryResetPass(); } catch (e) { log.error({ err: String(e) }, 'stall recovery reset pass failed'); }
+          try { stallRecoveryScan(); } catch (e) { log.error({ err: String(e) }, 'stall recovery scan failed'); }
           // VS-469: re-wake the weaver for an approval it left unreviewed past the first threshold.
           try { reviewReminderScan(); } catch (e) { log.error({ err: String(e) }, 'review reminder scan failed'); }
         }

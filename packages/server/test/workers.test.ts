@@ -157,6 +157,48 @@ describe('GET /workers/:id — sessionResumable (VS-106)', () => {
   });
 });
 
+describe('GET /workers — stalled (VS-498)', () => {
+  function seedStallRow(h: Harness, agentId: string, ticketId: string): void {
+    h.db.run(
+      "INSERT INTO tickets (id, workspace_id, number, identifier, kind, title, status, created_by_kind, created_at, updated_at) VALUES (?, 'ws1', 3, 'ACME-3', 'task', 'Do the thing', 'in_progress', 'human', 't0', 't0')",
+      [ticketId],
+    );
+    h.db.run(
+      "INSERT INTO agents (id, workspace_id, kind, ticket_id, name, runtime_id, status, home_path, created_at, updated_at) VALUES (?, 'ws1', 'worker', ?, 'Backend Engineer #1', 'fake', 'active', '/tmp/home', 't0', 't0')",
+      [agentId, ticketId],
+    );
+    h.db.insert('worker_stall_state', { agentId, workspaceId: 'ws1', ticketId, attempts: 1, firstDetectedAt: 't0', createdAt: 't0', updatedAt: 't0' });
+  }
+
+  it('marks a worker in an active stall/recovery cycle, and no others, on the workers list', async () => {
+    const { h, fetch } = app();
+    seedStallRow(h, 'ag_stalled', 'tk_stalled');
+    h.impls.workers!['list'] = () => [worker({ id: 'ag_stalled', ticketId: 'tk_stalled' }), worker({ id: 'ag_ok', ticketId: 'tk_1' })];
+
+    const res = await fetch('/api/w/ws1/workers', { headers: authed() });
+    const list: Array<{ id: string; stalled: boolean }> = await res.json();
+    expect(list.find((w) => w.id === 'ag_stalled')?.stalled).toBe(true);
+    expect(list.find((w) => w.id === 'ag_ok')?.stalled).toBe(false);
+  });
+
+  it('marks a stalled worker on its own detail read', async () => {
+    const { h, fetch } = app();
+    seedStallRow(h, 'ag_stalled', 'tk_stalled');
+    h.impls.workers!['get'] = () => worker({ id: 'ag_stalled', ticketId: 'tk_stalled' });
+
+    const res = await fetch('/api/w/ws1/workers/ag_stalled', { headers: authed() });
+    expect((await res.json()).stalled).toBe(true);
+  });
+
+  it('does not mark a worker with no active stall/recovery cycle', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['get'] = () => worker();
+
+    const res = await fetch('/api/w/ws1/workers/ag_1', { headers: authed() });
+    expect((await res.json()).stalled).toBe(false);
+  });
+});
+
 describe('POST /workers/:id/message — refuses a retired worker (VS-106)', () => {
   it('surfaces wrong_status rather than a 202', async () => {
     const { h, fetch } = app();

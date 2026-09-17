@@ -1646,4 +1646,47 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0049_worker_stall_state (VS-498)', () => {
+    function seedAgent(db: Db, id: string, ticketId: string): void {
+      db.insert('agents', {
+        id, workspaceId: 'w1', kind: 'worker', ticketId, name: 'Worker', runtimeId: 'claude',
+        homePath: '/tmp/w', createdAt: 't0', updatedAt: 't0',
+      });
+    }
+
+    it('creates the table with its columns, index and foreign keys', () => {
+      const db = openDb(join(dir, 'stall.sqlite'));
+      expect(db.all<{ name: string }>('PRAGMA table_info(worker_stall_state)').map((c) => c.name)).toEqual([
+        'agent_id', 'workspace_id', 'ticket_id', 'attempts', 'first_detected_at', 'last_attempt_at',
+        'last_attempt_wake_id', 'escalated_at', 'escalation_decision_id', 'created_at', 'updated_at',
+      ]);
+      expect(db.all<{ name: string }>('PRAGMA index_list(worker_stall_state)').map((i) => i.name))
+        .toEqual(expect.arrayContaining(['worker_stall_state_ticket', 'worker_stall_state_ws']));
+      expect(db.all<{ from: string; table: string }>('PRAGMA foreign_key_list(worker_stall_state)').map((f) => `${f.from}->${f.table}`).sort())
+        .toEqual(['agent_id->agents', 'ticket_id->tickets', 'workspace_id->workspaces']);
+      db.close();
+    });
+
+    it('round-trips a row keyed by agent_id, one per worker', () => {
+      const db = openDb(join(dir, 'stall-row.sqlite'));
+      db.run(`INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+              VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(`INSERT INTO tickets (id, workspace_id, number, identifier, kind, title, created_by_kind, created_at, updated_at)
+              VALUES ('t1', 'w1', 1, 'VS-1', 'change', 'Add dark mode', 'human', 't0', 't0')`);
+      seedAgent(db, 'a1', 't1');
+      db.insert('worker_stall_state', {
+        agentId: 'a1', workspaceId: 'w1', ticketId: 't1', attempts: 1,
+        firstDetectedAt: 't0', lastAttemptAt: 't1', lastAttemptWakeId: 'wk1',
+        createdAt: 't0', updatedAt: 't1',
+      });
+      expect(db.get('SELECT * FROM worker_stall_state WHERE agent_id = ?', ['a1'])).toMatchObject({
+        agentId: 'a1', ticketId: 't1', attempts: 1, escalatedAt: null, escalationDecisionId: null,
+      });
+      expect(() => db.insert('worker_stall_state', {
+        agentId: 'a1', workspaceId: 'w1', ticketId: 't1', firstDetectedAt: 't0', createdAt: 't0', updatedAt: 't0',
+      })).toThrow(/UNIQUE constraint failed/);
+      db.close();
+    });
+  });
 });

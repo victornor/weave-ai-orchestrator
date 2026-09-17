@@ -176,7 +176,7 @@ const EVIDENCE_TABLES = ['ticket_comments', 'ticket_document_revisions', 'ticket
  * under the acting run's id on every status change, note or not, so that alone also answers "did the
  * ticket's status move during this run" without needing a before/after snapshot.
  */
-function runProducedEvidence(ctx: WorkspaceContext, runId: string, ticketId: string | null): boolean {
+export function runProducedEvidence(ctx: WorkspaceContext, runId: string, ticketId: string | null): boolean {
   if (!ticketId) return false;
   for (const table of EVIDENCE_TABLES) {
     if (ctx.db.get(`SELECT 1 FROM ${table} WHERE run_id = ? LIMIT 1`, [runId])) return true;

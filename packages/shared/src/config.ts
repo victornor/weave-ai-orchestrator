@@ -359,6 +359,17 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
    */
   stalledWorkerTimeoutSec: z.number().int().min(60).default(300),
   /**
+   * VS-498: how many times the supervisor automatically wakes a detected-stalled worker to continue
+   * its own ticket before giving up and raising a weaver-owned `gate_finding` instead. Independent of
+   * `stalledWorkerTimeoutSec`: that governs how long a gap must be before a stall is even considered;
+   * this governs how many times a genuine stall is nudged before it stops being treated as
+   * self-recoverable. 2 gives a worker that stopped once at an unlucky but clean point a real second
+   * chance without letting a systematically-stuck worker cycle through detection and recovery
+   * indefinitely — each attempt still costs a full `stalledWorkerTimeoutSec` wait to re-detect, so a
+   * larger cap directly trades a slower escalation for more automatic attempts.
+   */
+  stalledWorkerMaxAutoRecoverAttempts: z.number().int().min(0).default(2),
+  /**
    * VS-467: how long a merge-slot holder may sit with unresolved checks before the supervisor raises
    * its weaver-visible alarm — and how often the alarm repeats while it stays unresolved. A run that
    * never starts, is cancelled and never re-runs, or belongs to a head the gate will not accept

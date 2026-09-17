@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { describeLiveInput } from '@weave-ai/core';
+import { describeLiveInput, isWorkerStalled } from '@weave-ai/core';
 import { TICKET_KINDS } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
@@ -31,6 +31,9 @@ export function workerRoutes(): Hono<AppEnv> {
         scheduledWake: scheduledWake(ws.services, w.id),
         activity: activity?.activity ?? null,
         tests: activity?.tests ?? null,
+        // VS-498: in an active stall/recovery cycle — distinct from `active`, so a board reading this
+        // list can tell a stalled worker apart from one genuinely mid-turn.
+        stalled: isWorkerStalled(ws.ctx, w.id),
       };
     }));
   });
@@ -57,6 +60,8 @@ export function workerRoutes(): Hono<AppEnv> {
       sessionResumable: safe(() => s.workers.sessionResumable(worker.id)) ?? false,
       // VS-317: the worker's own pending self-wake, so its status view does not read as idle.
       scheduledWake: scheduledWake(s, worker.id),
+      // VS-498: in an active stall/recovery cycle — see the workers list for what this means.
+      stalled: isWorkerStalled(ws.ctx, worker.id),
     });
   });
 

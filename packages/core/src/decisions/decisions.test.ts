@@ -636,6 +636,24 @@ describe('decisions', () => {
       expect(woken.input.payload).toMatchObject({ decisionId: d.id, answerInputs: { base_url: 'https://example.test', regions: ['eu', 'us'] } });
     });
 
+    it('lets the weaver answer required choice inputs and applies the same validation', async () => {
+      const workerId = h.addWorker(ticket().id);
+      const inputs = [
+        { key: 'guard_handling', label: 'Guard handling', type: 'single_choice' as const, required: true, choices: [{ key: 'keep', label: 'Keep' }, { key: 'remove', label: 'Remove' }] },
+        { key: 'delivery', label: 'Delivery', type: 'single_choice' as const, required: true, choices: [{ key: 'separate', label: 'Separate' }, { key: 'inline', label: 'Inline' }] },
+      ];
+      const d = decisions.create(AGENT, { kind: 'question', owner: 'weaver', title: 'Which handling?', inputs, askedByAgentId: workerId, correlationKey: newId() });
+
+      await expect(decisions.answer(conductor(), d.id, { inputs: { guard_handling: 'keep' } })).rejects.toThrow(/"delivery".*is required/);
+      await expect(decisions.answer(conductor(), d.id, { inputs: { guard_handling: 'unknown', delivery: 'separate' } })).rejects.toThrow(/"unknown" is not a choice.*"guard_handling"/);
+      expect(decisions.get(d.id).status).toBe('open');
+      expect(decisions.get(d.id).answerInputs).toBeNull();
+
+      const answered = await decisions.answer(conductor(), d.id, { inputs: { guard_handling: 'keep', delivery: 'separate' } });
+      expect(answered.answerInputs).toEqual({ guard_handling: 'keep', delivery: 'separate' });
+      expect(wake.calls.at(-1)!.input.payload).toMatchObject({ decisionId: d.id, answerInputs: { guard_handling: 'keep', delivery: 'separate' } });
+    });
+
     it('answers with a choice and values together', async () => {
       const d = decisions.create(AGENT, {
         kind: 'question', title: 'Which and where?', options: [{ key: 'now', label: 'Now' }, { key: 'later', label: 'Later' }], inputs: INPUTS,

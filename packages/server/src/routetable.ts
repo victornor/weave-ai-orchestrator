@@ -35,6 +35,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'POST', path: '/api/workspaces/import', tag: 'daemon', summary: 'Import a portable export into a workspace directory and register it', auth: 'session', mutating: true },
   { method: 'GET', path: '/api/incidents', tag: 'daemon', summary: 'System incidents agents filed, newest first; ?reporter=conductor|worker', auth: 'session' },
   { method: 'GET', path: '/api/incidents/{id}', tag: 'daemon', summary: 'One system incident', auth: 'session' },
+  { method: 'GET', path: '/api/events', tag: 'daemon', summary: 'SSE event stream for all loaded workspaces; ?after=<base64url cursor map> resumes each outbox', auth: 'session' },
   { method: 'GET', path: '/api/runs/{id}', tag: 'runs', summary: 'One run by id across workspaces (the global V2 run detail)', auth: 'session' },
   { method: 'GET', path: '/api/runtimes', tag: 'daemon', summary: 'Registered runtimes with detection and capabilities', auth: 'session' },
   { method: 'GET', path: '/api/runtimes/{id}/models', tag: 'daemon', summary: 'Models a runtime reports', auth: 'session' },

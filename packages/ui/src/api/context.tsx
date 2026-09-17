@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { WorkspaceEvent } from '@weave-ai/shared';
 import type { EventStream } from './events';
 import type { ConnectionStatus } from './events';
-import { acquireWorkspaceStream, releaseWorkspaceStream } from './streams';
+import { acquireGlobalStream, acquireWorkspaceStream, releaseGlobalStream, releaseWorkspaceStream } from './streams';
 import { setWorkspaceId } from './client';
 
 interface Ctx {
@@ -91,17 +91,14 @@ export function useWorkspaceEvents(fn: (e: WorkspaceEvent) => void): void {
   }, [stream]);
 }
 
-/** Opens one EventStream per listed workspace while a global page is mounted (VS-168). Every mount
- *  shares the one stream per workspace with the workspace page's provider (VS-417). */
+/** Opens one daemon-wide stream while a global page is mounted. Workspace ids remain in each event,
+ * so query invalidation still reaches the correct global cache (VS-509). */
 export function FanInStreams({ ids }: { ids: readonly string[] }): null {
   const qc = useQueryClient();
-  const key = ids.join('\0');
   useEffect(() => {
     if (!ids.length) return;
-    for (const id of ids) acquireWorkspaceStream(id, qc);
-    return () => {
-      for (const id of ids) releaseWorkspaceStream(id);
-    };
-  }, [qc, key]);
+    acquireGlobalStream(qc);
+    return () => releaseGlobalStream();
+  }, [qc, ids.length]);
   return null;
 }

@@ -11,18 +11,23 @@
 import { useContext } from 'react';
 import { QueryClient, QueryClientContext } from '@tanstack/react-query';
 import type { QueryClient as QueryClientType } from '@tanstack/react-query';
-import { EventStream } from './events';
+import { EventStream, GlobalEventStream } from './events';
 
 interface Entry {
   stream: EventStream;
   refs: number;
 }
 
-const entries = new Map<string, Entry>();
+interface GlobalEntry {
+  stream: GlobalEventStream;
+  refs: number;
+}
 
 /** The app's query client where there is one, a throwaway otherwise — a stream still opens outside
  *  a provider (a component test that mocks the read hooks); its invalidations are simply unobserved. */
 const fallbackClient = new QueryClient();
+const entries = new Map<string, Entry>();
+const globalEntry: GlobalEntry = { stream: new GlobalEventStream(fallbackClient), refs: 0 };
 
 export function useStreamQueryClient(): QueryClientType {
   return useContext(QueryClientContext) ?? fallbackClient;
@@ -59,4 +64,29 @@ export function workspaceStreamCount(): number {
 export function resetWorkspaceStreams(): void {
   for (const entry of entries.values()) entry.stream.stop();
   entries.clear();
+}
+
+/** The one daemon-wide stream shared by all global consumers in this document. */
+export function acquireGlobalStream(qc: QueryClientType): GlobalEventStream {
+  // The first consumer supplies the app's query client; subsequent consumers share the same entry.
+  if (globalEntry.refs === 0) {
+    // GlobalEventStream's query client is intentionally fixed for the document. The fallback is
+    // only observable in tests/components mounted without a QueryClientProvider.
+    globalEntry.stream = new GlobalEventStream(qc);
+  }
+  globalEntry.refs += 1;
+  if (globalEntry.refs === 1) globalEntry.stream.start();
+  return globalEntry.stream;
+}
+
+export function releaseGlobalStream(): void {
+  if (globalEntry.refs === 0) return;
+  globalEntry.refs -= 1;
+  if (globalEntry.refs === 0) globalEntry.stream.stop();
+}
+
+/** Test-only global registry reset. */
+export function resetGlobalStream(): void {
+  globalEntry.stream.stop();
+  globalEntry.refs = 0;
 }

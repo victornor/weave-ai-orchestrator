@@ -1,6 +1,6 @@
 /**
  * VS-369: a V2 decision card updates from the workspace event stream while it is on screen. A V2
- * global page has no `WorkspaceProvider`, so `V2Shell` fans in one stream per listed workspace;
+ * global page has no `WorkspaceProvider`, so `V2Shell` fans in one daemon-wide stream;
  * this drives those streams (a `decision.updated` review mark, a `decision.created`) through the
  * real `EventStream`/`invalidateFor` and asserts the rendered card flips or appears. It also covers
  * the Chat decisions pane, which gets its stream from `V2Workspace`.
@@ -96,9 +96,9 @@ const { V2ChatPage } = await import('../v2/ChatPage');
 const { FanInStreams, WorkspaceProvider } = await import('../api/context');
 
 function deliver(workspace: string, evt: { type: string; entityId: string; payload: unknown }): void {
-  const src = FakeEventSource.open.filter((s) => s.url.includes(`/w/${workspace}/events`)).at(-1);
+  const src = FakeEventSource.open.filter((s) => s.url === '/api/events' || s.url.includes(`/w/${workspace}/events`)).at(-1);
   for (const fn of src?.listeners.get(evt.type) ?? []) {
-    fn({ data: JSON.stringify({ seq: 1, createdAt: '2026-09-14T00:00:00.000Z', ...evt }) } as MessageEvent<string>);
+    fn({ data: JSON.stringify({ seq: 1, workspaceId: workspace, createdAt: '2026-09-14T00:00:00.000Z', ...evt }) } as MessageEvent<string>);
   }
 }
 

@@ -175,6 +175,8 @@ export interface WorkerFeedProps {
   runId?: string | null;
   /** The workspace the run belongs to; required outside a workspace route. */
   ws?: string;
+  /** Uses the daemon-wide stream when this feed is rendered by a global page. */
+  global?: boolean;
   /** Bounds the height for embedding in a card or a narrow pane. */
   compact?: boolean;
   /**
@@ -193,7 +195,7 @@ export interface WorkerFeedProps {
 }
 
 /** The feed: a run's status, its trace and its usage. */
-export function WorkerFeed({ agentId, runId, ws, compact = false, bodyHeight, resizable = false, showChrome = true, label = 'Worker live feed', className }: WorkerFeedProps): React.ReactElement {
+export function WorkerFeed({ agentId, runId, ws, global = false, compact = false, bodyHeight, resizable = false, showChrome = true, label = 'Worker live feed', className }: WorkerFeedProps): React.ReactElement {
   const resolved = useWorkerRun(agentId, ws);
   // The worker's *current* run wins when it can be resolved; a specific `runId` (a decision's asking
   // run) is only the fallback, so a revision run that starts after the ask is what Watch follows.
@@ -202,7 +204,7 @@ export function WorkerFeed({ agentId, runId, ws, compact = false, bodyHeight, re
   const recent = useRuns({ limit: 200 }, ws);
   const id = resolved.run?.id ?? runId ?? null;
   const streaming = resolved.run ? resolved.live : false;
-  const { events, status, retryNow } = useRunEventStream(id, { live: streaming, newest: !streaming, ws });
+  const { events, status, retryNow } = useRunEventStream(id, { live: streaming, newest: !streaming, ws, global });
   const [paneHeight, setPaneHeight] = useState(TRACE_PANE_HEIGHT_DEFAULT);
 
   // The status line describes the run the feed actually renders — the worker's, else the passed

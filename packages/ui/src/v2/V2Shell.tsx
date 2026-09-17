@@ -545,8 +545,8 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       {/* One fan-in mount only: a global V2 page has no `WorkspaceProvider`, so it holds no stream
-          of its own — fan in one per listed workspace so decisions and the rail's counts update live
-          (VS-366, VS-369). `fanIn` also excludes Global Chats, whose panes open one each. */}
+          of its own — fan in one daemon-wide stream so decisions and the rail's counts update live
+          (VS-366, VS-369, VS-509). `fanIn` also excludes Global Chats, whose panes open one each. */}
       {fanIn ? <FanInStreams ids={ids} /> : null}
       {collapsed ? (
         <aside className="v2-anim-fade hidden w-[48px] flex-none flex-col items-center border-r border-line-1 bg-bg-1 py-2 md:flex">

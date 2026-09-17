@@ -2,10 +2,13 @@
  * VS-227: HTTP/1.1 leaves about six connections per origin. Persistent EventSources that ignore
  * `document.hidden` fill the cap and starve GET /threads and POST /messages.
  */
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventStream } from '../api/events';
+import { FanInStreams } from '../api/context';
 import { request, NetworkError } from '../api/client';
+import { render } from '@testing-library/react';
+import { resetGlobalStream } from '../api/streams';
 import { resetDocumentVisible, setDocumentHidden } from './visibility';
 
 const CAP = 6;
@@ -44,6 +47,7 @@ beforeEach(() => {
   (globalThis as unknown as { EventSource: unknown }).EventSource = CappedEventSource;
 });
 afterEach(() => {
+  resetGlobalStream();
   resetDocumentVisible();
   vi.unstubAllGlobals();
 });
@@ -77,5 +81,18 @@ describe('HTTP/1.1 connection budget (VS-227)', () => {
 
     await expect(request('/api/w/ws1/threads/th_1/messages', { timeoutMs: 0 })).resolves.toEqual([]);
     for (const s of streams) s.stop();
+  });
+
+  it('global fan-in uses one connection even with more workspaces than the HTTP/1.1 budget (VS-509)', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('[]', { status: 200 }))));
+    const view = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <FanInStreams ids={Array.from({ length: CAP + 4 }, (_, i) => `ws${i}`)} />
+      </QueryClientProvider>,
+    );
+    expect(CappedEventSource.open.filter((s) => !s.closed)).toHaveLength(1);
+    expect(CappedEventSource.used).toBe(1);
+    await expect(request('/api/w/ws1/threads', { timeoutMs: 0 })).resolves.toEqual([]);
+    view.unmount();
   });
 });

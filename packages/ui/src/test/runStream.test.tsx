@@ -12,7 +12,7 @@ import { act, renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunEvent } from '@weave-ai/shared';
-import { resetWorkspaceStreams } from '../api/streams';
+import { resetGlobalStream, resetWorkspaceStreams } from '../api/streams';
 
 const persisted = vi.hoisted(() => ({ data: [] as RunEvent[] }));
 
@@ -48,8 +48,8 @@ class FakeEventSource {
   close(): void { this.closed = true; }
 
   /** A `run.event` workspace frame, as the daemon broadcasts it. */
-  emitRun(event: RunEvent): void {
-    const frame = { seq: 0, workspaceId: 'ws1', type: 'run.event', entityType: 'run', entityId: event.runId, payload: { runId: event.runId, event }, createdAt: '' };
+  emitRun(event: RunEvent, workspaceId = 'ws1'): void {
+    const frame = { seq: 0, workspaceId, type: 'run.event', entityType: 'run', entityId: event.runId, payload: { runId: event.runId, event }, createdAt: '' };
     for (const fn of this.listeners.get('run.event') ?? []) fn({ data: JSON.stringify(frame) } as MessageEvent<string>);
   }
   connect(): void { this.onopen?.(); }
@@ -64,6 +64,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   resetWorkspaceStreams();
+  resetGlobalStream();
   vi.useRealTimers();
   vi.clearAllMocks();
 });
@@ -181,5 +182,16 @@ describe('useRunEventStream', () => {
     act(() => { vi.advanceTimersByTime(500); });
     act(() => { last().connect(); });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['w', 'ws1', 'runs', 'run1', 'events'] });
+  });
+
+  it('uses one global source and filters run frames by workspace as well as run id', () => {
+    const { result } = renderHook(() => useRunEventStream('run1', { ws: 'ws1', global: true }));
+    expect(last().url).toBe('/api/events');
+    act(() => {
+      last().emitRun(ev({ id: 'wrong-workspace', seq: 1, runId: 'run1' }), 'ws2');
+      const frame = { seq: 0, workspaceId: 'ws1', type: 'run.event', entityType: 'run', entityId: 'run1', payload: { runId: 'run1', event: ev({ id: 'right', seq: 2 }) }, createdAt: '' };
+      for (const fn of last().listeners.get('run.event') ?? []) fn({ data: JSON.stringify(frame) } as MessageEvent<string>);
+    });
+    expect(result.current.events.map((e) => e.id)).toEqual(['right']);
   });
 });

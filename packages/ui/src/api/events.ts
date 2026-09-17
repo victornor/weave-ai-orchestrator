@@ -23,8 +23,8 @@ export class EventStream {
   /** Background tab (VS-227): EventSource is closed so HTTP/1.1 slots stay free for REST. */
   private hidden = false;
   private listening = false;
-  /** Whether an earlier connection has already opened this session — the first `onopen` is a fresh
-   *  mount, already covered by every query's own initial fetch; every one after it is a reconnect. */
+  /** Whether an earlier connection has already opened this session — the first onopen is a fresh
+   * mount; every one after it is a reconnect. */
   private everConnected = false;
 
   constructor(
@@ -172,6 +172,116 @@ export class EventStream {
     if (Object.keys(patch).length > 0) this.set(patch);
     invalidateFor(this.qc, this.workspace, evt);
     for (const l of this.eventListeners) l(evt);
+  }
+}
+
+/** One daemon-wide SSE stream for global pages. Its Last-Event-ID is an opaque cursor map produced
+ * by the server; unlike EventStream, no single workspace sequence can represent its position. */
+export class GlobalEventStream {
+  private es: EventSource | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private listeners = new Set<Listener>();
+  private eventListeners = new Set<EventListener>();
+  private status: ConnectionStatus = { state: 'connecting', capturedAt: null, attempts: 0 };
+  private stopped = false;
+  private hidden = false;
+  private listening = false;
+  private cursor = '';
+
+  constructor(private readonly qc: QueryClient) {}
+
+  getStatus(): ConnectionStatus { return this.status; }
+  subscribe(fn: Listener): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
+  onEvent(fn: EventListener): () => void { this.eventListeners.add(fn); return () => this.eventListeners.delete(fn); }
+
+  start(): void {
+    this.stopped = false;
+    if (typeof window !== 'undefined' && !this.listening) {
+      window.addEventListener('online', this.onOnline);
+      window.addEventListener('offline', this.onOffline);
+      document.addEventListener('visibilitychange', this.onVisibility);
+      this.listening = true;
+    }
+    if (documentIsHidden()) {
+      this.hidden = true;
+      this.set({ state: 'hidden' });
+      return;
+    }
+    this.open();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.hidden = false;
+    this.es?.close();
+    this.es = null;
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this.onOnline);
+      window.removeEventListener('offline', this.onOffline);
+      document.removeEventListener('visibilitychange', this.onVisibility);
+      this.listening = false;
+    }
+  }
+
+  retryNow(): void {
+    if (this.stopped || this.hidden) return;
+    this.status = { ...this.status, attempts: 0 };
+    this.set({ state: 'connecting' });
+    this.open();
+  }
+
+  private onOnline = (): void => { if (!this.hidden && this.status.state !== 'connected') this.open(); };
+  private onOffline = (): void => { this.set({ state: 'offline' }); };
+  private onVisibility = (): void => {
+    if (documentIsHidden()) { this.pauseForHidden(); return; }
+    if (!this.hidden || this.stopped) return;
+    this.hidden = false;
+    this.open();
+  };
+  private pauseForHidden(): void {
+    this.hidden = true;
+    this.es?.close();
+    this.es = null;
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    this.set({ state: 'hidden' });
+  }
+  private set(patch: Partial<ConnectionStatus>): void {
+    this.status = { ...this.status, ...patch };
+    for (const listener of this.listeners) listener(this.status);
+  }
+  private open(): void {
+    if (this.stopped || this.hidden) return;
+    this.es?.close();
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+    const after = this.cursor ? `?after=${encodeURIComponent(this.cursor)}` : '';
+    const source = new EventSource(`/api/events${after}`, { withCredentials: true });
+    this.es = source;
+    if (this.status.state === 'hidden') this.set({ state: 'connecting' });
+    source.onopen = () => {
+      this.set({ state: 'connected', attempts: 0, capturedAt: new Date().toISOString() });
+    };
+    source.onmessage = (m) => this.handle(m as MessageEvent<string>);
+    for (const type of TRACKED) source.addEventListener(type, (m) => this.handle(m as MessageEvent<string>));
+    source.onerror = () => {
+      source.close();
+      if (this.stopped || this.hidden) return;
+      const attempts = this.status.attempts + 1;
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      this.set({ state: offline ? 'offline' : attempts > BACKOFF.length ? 'offline' : 'reconnecting', attempts });
+      const delay = BACKOFF[Math.min(attempts - 1, BACKOFF.length - 1)] ?? 15000;
+      this.timer = setTimeout(() => this.open(), delay);
+    };
+  }
+  private handle(m: MessageEvent<string>): void {
+    let evt: WorkspaceEvent;
+    try { evt = JSON.parse(m.data) as WorkspaceEvent; } catch { return; }
+    if (evt.seq > 0 && m.lastEventId) this.cursor = m.lastEventId;
+    const patch: Partial<ConnectionStatus> = { capturedAt: evt.createdAt ?? new Date().toISOString() };
+    if (this.status.state !== 'connected') patch.state = 'connected';
+    this.set(patch);
+    invalidateFor(this.qc, evt.workspaceId, evt);
+    for (const listener of this.eventListeners) listener(evt);
   }
 }
 

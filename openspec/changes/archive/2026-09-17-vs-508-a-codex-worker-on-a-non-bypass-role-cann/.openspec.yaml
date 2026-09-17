@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-17
+goal: A codex worker on a non-bypass role can call any Weave AI tool

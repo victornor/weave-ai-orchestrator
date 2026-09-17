@@ -5,6 +5,7 @@ import { runTmpDir } from '@weave-ai/runtime-sdk';
 import { asCodexSession } from './session.js';
 
 export interface CodexBuildOpts { tmpDir?: string; configExists?: boolean; modelContextWindowTokens?: number }
+type McpApprovalMode = 'never';
 
 export interface CodexBuiltCommand extends BuiltCommand {
   /** Thread being resumed/forked, or null for a new thread (id arrives in `thread.started`). */
@@ -29,7 +30,7 @@ function envVarName(server: string): string {
 }
 
 /** `-c mcp_servers.<name>....` overrides for one server, plus any env the token needs. */
-export function mcpOverrides(name: string, s: McpServerConfig): { args: string[]; env: Record<string, string> } {
+export function mcpOverrides(name: string, s: McpServerConfig, approvalMode?: McpApprovalMode): { args: string[]; env: Record<string, string> } {
   if (!/^[A-Za-z0-9_-]+$/.test(name)) throw new Error('codex: MCP server names must contain only letters, numbers, underscores or hyphens');
   const args: string[] = [];
   const env: Record<string, string> = {};
@@ -54,6 +55,7 @@ export function mcpOverrides(name: string, s: McpServerConfig): { args: string[]
     if (s.args?.length) push('args', JSON.stringify(s.args));
     if (Object.keys(s.env ?? {}).length) push('env', inlineTable(s.env ?? {}));
   }
+  if (approvalMode) push('default_tools_approval_mode', toml(approvalMode));
   // Codex serializes calls to a server that does not declare this, so every weave_* call became its
   // own round trip — and each round trip re-sends the whole session window. The control-plane server
   // is concurrency-safe (the daemon serializes its own writes), so allow the model to batch
@@ -63,7 +65,7 @@ export function mcpOverrides(name: string, s: McpServerConfig): { args: string[]
 }
 
 /** TOML fallback for `CODEX_HOME/config.toml` when per-invocation `-c` is not wanted. */
-export function mcpConfigToml(servers: Record<string, McpServerConfig>, tokenEnv?: Record<string, string>): string {
+export function mcpConfigToml(servers: Record<string, McpServerConfig>, tokenEnv?: Record<string, string>, approvalMode?: McpApprovalMode): string {
   const lines: string[] = ['# written by Weave AI before each turn; do not edit'];
   for (const [name, s] of Object.entries(servers)) {
     lines.push('', `[mcp_servers.${key(name)}]`);
@@ -89,6 +91,7 @@ export function mcpConfigToml(servers: Record<string, McpServerConfig>, tokenEnv
         for (const [k, v] of Object.entries(s.env ?? {})) lines.push(`${key(k)} = ${toml(v)}`);
       }
     }
+    if (approvalMode) lines.push(`default_tools_approval_mode = ${toml(approvalMode)}`);
     // See mcpOverrides: without this Codex serializes every call to the server.
     lines.push('supports_parallel_tool_calls = true');
   }
@@ -150,12 +153,13 @@ export function buildArgs(input: TurnInput, opts: CodexBuildOpts = {}): CodexBui
 
   const servers = Object.entries(input.mcpServers ?? {});
   const viaFile = input.options?.['mcpViaConfigFile'] === true;
+  const mcpApprovalMode: McpApprovalMode | undefined = input.permission.mode === 'bypass' ? undefined : 'never';
   if (servers.length > 0) {
     if (viaFile && input.configHome && !opts.configExists) {
-      files.push({ path: join(input.configHome, 'config.toml'), content: mcpConfigToml(input.mcpServers, env) });
+      files.push({ path: join(input.configHome, 'config.toml'), content: mcpConfigToml(input.mcpServers, env, mcpApprovalMode) });
     } else {
       for (const [name, s] of servers) {
-        const o = mcpOverrides(name, s);
+        const o = mcpOverrides(name, s, mcpApprovalMode);
         args.push(...o.args);
         Object.assign(env, o.env);
       }

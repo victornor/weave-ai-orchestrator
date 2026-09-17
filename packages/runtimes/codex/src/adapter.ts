@@ -78,6 +78,9 @@ export const adapter: RuntimeAdapter = {
   /** `codex app-server` → thread/resume → thread/compact/start. See `compact.ts`. */
   compactSession: compactCodexThread,
 
+  /** From `codex debug models --bundled` (`context_window`), the same source the turn's threshold reads. */
+  modelContextWindow: (model) => modelContextWindow(model),
+
   /** Billing mode only: Codex exposes no plan limits to a non-interactive run. */
   async describeAccount(input: AccountProbeInput): Promise<AccountDescription> { return describeCodexAccount(input); },
 

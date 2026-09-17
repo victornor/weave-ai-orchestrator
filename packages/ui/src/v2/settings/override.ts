@@ -8,7 +8,7 @@ import type { DaemonModels, ModelSetting, WorkspaceModelsSource, WorkerModelOpti
 
 export type AgentKind = 'weaver' | 'workers';
 export type OverrideState = 'inherited' | 'overridden';
-export type ModelLike = { runtime: string | null; model: string | null; effort?: string };
+export type ModelLike = { runtime: string | null; model: string | null; effort?: string; compaction?: { mode: string; value?: number } };
 
 function norm(v: string | null | undefined): string {
   return v ?? '';
@@ -35,7 +35,13 @@ export function diffSetting(effective: ModelLike, baseline: ModelLike): string[]
   if (norm(effective.runtime) !== norm(baseline.runtime)) out.push(`runtime ${baseline.runtime ?? 'not chosen'} → ${effective.runtime ?? 'not chosen'}`);
   if (norm(effective.model) !== norm(baseline.model)) out.push(`model ${baseline.model ?? 'default'} → ${effective.model ?? 'default'}`);
   if (norm(effective.effort) !== norm(baseline.effort)) out.push(`thinking ${baseline.effort ?? 'default'} → ${effective.effort ?? 'default'}`);
+  if (describeCompaction(effective.compaction) !== describeCompaction(baseline.compaction)) out.push(`auto-compact ${describeCompaction(baseline.compaction)} → ${describeCompaction(effective.compaction)}`);
   return out;
+}
+
+function describeCompaction(c: { mode: string; value?: number } | undefined): string {
+  if (!c || c.mode === 'off') return 'off';
+  return `${c.value ?? '?'}${c.mode === 'percent' ? '%' : ' tok'}`;
 }
 
 /** The daemon option a workspace option is compared against, matched by id; undefined when the daemon has none. */

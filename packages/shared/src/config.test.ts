@@ -1,6 +1,27 @@
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_MERGE_CONCURRENCY, DEFAULT_MODEL_SETTING, DEFAULT_WORKER_TIERS, DEFAULT_WORKSPACE_MODELS, DaemonConfigSchema, DaemonModelsSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkerModelOptionSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, isWorkerOptionConfigured, mergeConcurrencyOf, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
+import { compactionThreshold, DEFAULT_MERGE_CONCURRENCY, DEFAULT_MODEL_SETTING, DEFAULT_WORKER_TIERS, DEFAULT_WORKSPACE_MODELS, DaemonConfigSchema, DaemonModelsSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkerModelOptionSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, isWorkerOptionConfigured, mergeConcurrencyOf, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
+
+describe('automatic compaction policy', () => {
+  it('is a fraction of the window for percent and the exact number for tokens', () => {
+    expect(compactionThreshold({ mode: 'percent', value: 60 }, 1_000_000)).toBe(600_000);
+    expect(compactionThreshold({ mode: 'tokens', value: 300_000 }, 1_000_000)).toBe(300_000);
+    expect(compactionThreshold({ mode: 'tokens', value: 300_000 }, null)).toBe(300_000);
+  });
+
+  it('is null when off, when no value is set, or when a percent has no known window', () => {
+    expect(compactionThreshold(undefined, 1_000_000)).toBeNull();
+    expect(compactionThreshold({ mode: 'off' }, 1_000_000)).toBeNull();
+    expect(compactionThreshold({ mode: 'percent' }, 1_000_000)).toBeNull();
+    expect(compactionThreshold({ mode: 'percent', value: 60 }, null)).toBeNull();
+    expect(compactionThreshold({ mode: 'percent', value: 0 }, 1_000_000)).toBeNull();
+  });
+
+  it('clamps a percent to 1–99 so it can never mean never or always', () => {
+    expect(compactionThreshold({ mode: 'percent', value: 500 }, 1_000_000)).toBe(990_000);
+    expect(compactionThreshold({ mode: 'percent', value: 0.1 }, 1_000_000)).toBe(10_000);
+  });
+});
 
 describe('project config: landingBranch (VS-119)', () => {
   it('parses without a landing branch declared', () => {

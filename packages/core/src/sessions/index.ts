@@ -10,6 +10,8 @@ export interface SessionRow {
   cumulativeUsage: Record<string, number> | null; createdAt: string; updatedAt: string;
   /** ISO while an out-of-band compaction is running; null otherwise. Set on the session, never `agents.status`. */
   compactingAt?: string | null; compactingError?: string | null;
+  /** The last turn's own context size (its last request), for the automatic compaction policy. */
+  lastContextTokens?: number | null;
 }
 
 export interface TurnSession { session: SessionRow; ref: SessionRef | null; isFirstTurn: boolean; stale: boolean; policy: SessionPolicy }
@@ -17,7 +19,7 @@ export interface TurnSession { session: SessionRow; ref: SessionRef | null; isFi
 export interface SessionsService {
   active(agentId: string): SessionRow | null;
   forTurn(agent: { id: string; kind: string; runtimeId: string }, policy: SessionPolicy): TurnSession;
-  record(sessionId: string, patch: { ref?: SessionRef | null; displayId?: string | null; runId?: string | null; error?: string | null; usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } | null }): void;
+  record(sessionId: string, patch: { ref?: SessionRef | null; displayId?: string | null; runId?: string | null; error?: string | null; usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } | null; contextTokens?: number | null }): void;
   reset(agentId: string, reason: string): SessionRow;
   close(agentId: string): void;
   markStaleIfIdle(agentId: string, maxIdleDays: number): boolean;
@@ -91,6 +93,8 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
         lastError: patch.error === undefined ? undefined : patch.error,
         turnCount: cur.turnCount + 1,
         cumulativeUsageJson: usage,
+        // The last request's size, not the turn's totals — what an automatic compaction policy is measured against.
+        lastContextTokens: patch.contextTokens === undefined ? undefined : patch.contextTokens,
         updatedAt: nowIso(),
       });
     },

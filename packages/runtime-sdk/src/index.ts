@@ -170,6 +170,13 @@ export interface RuntimeAdapter {
    */
   compactSession?(input: CompactSessionInput): Promise<CompactSessionResult>;
   /**
+   * The context window of one of this runtime's models, in tokens, when the runtime can state it —
+   * what a percentage compaction policy is a fraction of. Optional: a runtime whose models carry no
+   * window (OpenCode) omits it, and a percentage policy is then reported as unavailable for it
+   * rather than measured against a window nobody declared. Never throws; unknown resolves undefined.
+   */
+  modelContextWindow?(model: string | null | undefined): Promise<number | undefined>;
+  /**
    * The billing mode and plan limit windows of the account these credentials belong to.
    * Optional: an adapter that cannot determine any of it omits the method rather than
    * reporting zeros. Must never spend model tokens or start an agent session, and must

@@ -666,6 +666,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
         runId,
         error: status === 'succeeded' ? null : errorCode,
         usage: usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cachedInputTokens: usage.cachedInputTokens } : null,
+        contextTokens: usage?.contextTokens ?? null,
       });
     }
 

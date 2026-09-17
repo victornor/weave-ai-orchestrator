@@ -132,10 +132,36 @@ export const DEFAULT_KNOWLEDGE_BUDGETS: KnowledgeBudgets = KnowledgeBudgetsSchem
  * launched with. `model: null` means the runtime picks; `effort` is optional and is the only place
  * it can still be set — the claude, codex and opencode adapters each turn it into a CLI flag.
  */
+/** How a session is compacted automatically: never, at a percentage of the model window, or at an absolute size. */
+export const COMPACTION_MODES = ['off', 'percent', 'tokens'] as const;
+export const ModelCompactionSchema = z.object({
+  mode: z.enum(COMPACTION_MODES).default('off'),
+  /**
+   * `percent`: 1–99 of the model's context window; `tokens`: an absolute request size. Mutually
+   * exclusive by `mode` and unused when it is `off`. Read against the last turn's own context size.
+   */
+  value: z.number().positive().optional(),
+});
+export type ModelCompaction = z.infer<typeof ModelCompactionSchema>;
+
+/**
+ * The request size at which a policy compacts, or null when it is off or cannot be computed (a
+ * percentage with no known window). `windowTokens` is the model's own context window; a percentage
+ * is clamped to 1–99 so a policy can never mean "never" or "always".
+ */
+export function compactionThreshold(compaction: ModelCompaction | undefined, windowTokens: number | null | undefined): number | null {
+  if (!compaction || compaction.mode === 'off' || compaction.value === undefined || compaction.value <= 0) return null;
+  if (compaction.mode === 'tokens') return Math.round(compaction.value);
+  if (!windowTokens || windowTokens <= 0) return null;
+  return Math.round(windowTokens * Math.min(99, Math.max(1, compaction.value)) / 100);
+}
+
 export const ModelSettingSchema = z.object({
   runtime: z.string().min(1).default('claude'),
   model: z.string().nullable().default(null),
   effort: z.string().optional(),
+  /** Automatic compaction for an agent on this setting, on top of whatever the CLI does by itself. */
+  compaction: ModelCompactionSchema.optional(),
 });
 export type ModelSetting = z.infer<typeof ModelSettingSchema>;
 

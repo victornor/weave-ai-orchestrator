@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ATTACHMENT_MAX_IMAGE_BYTES, ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_MAX_TEXT_BYTES,
   ATTACHMENT_MAX_ZIP_INPUT_BYTES, ATTACHMENT_ZIP_MEDIA_TYPE,
-  attachmentMaxBytes, guessOutboundMediaType, isAttachmentImageType, isAttachmentTextType, sniffImageType,
+  attachmentContentDisposition, attachmentMaxBytes, guessOutboundMediaType, isAttachmentImageType, isAttachmentTextType, sniffImageType,
 } from './attachments.js';
 
 describe('attachment policy constants', () => {
@@ -61,5 +61,32 @@ describe('outbound-only additions (VS-273) leave the inbound policy untouched', 
     expect(guessOutboundMediaType('report.TXT')).toBe('text/plain'); // case-insensitive
     expect(guessOutboundMediaType('index.css')).toBe('application/octet-stream');
     expect(guessOutboundMediaType('no-extension')).toBe('application/octet-stream');
+  });
+});
+
+describe('attachmentContentDisposition (VS-528)', () => {
+  it('serves an image inline so it can be previewed', () => {
+    expect(attachmentContentDisposition('image/png', 'shot.png')).toBe('inline');
+    expect(attachmentContentDisposition('image/webp', 'shot.webp')).toBe('inline');
+  });
+
+  it('serves anything else as a named download with both filename forms', () => {
+    expect(attachmentContentDisposition('application/zip', 'vs527-apply-these.zip'))
+      .toBe(`attachment; filename="vs527-apply-these.zip"; filename*=UTF-8''vs527-apply-these.zip`);
+    expect(attachmentContentDisposition('text/markdown', 'notes.md'))
+      .toBe(`attachment; filename="notes.md"; filename*=UTF-8''notes.md`);
+  });
+
+  it('reduces the plain filename to header-safe ASCII without losing the true name', () => {
+    // A quote or backslash would end the quoted-string early; a non-ASCII byte is invalid in a header.
+    expect(attachmentContentDisposition('text/markdown', 'a"b\\c.md'))
+      .toBe(`attachment; filename="a_b_c.md"; filename*=UTF-8''a%22b%5Cc.md`);
+    expect(attachmentContentDisposition('text/markdown', 'résumé.md'))
+      .toBe(`attachment; filename="r_sum_.md"; filename*=UTF-8''r%C3%A9sum%C3%A9.md`);
+  });
+
+  it('never leaves a raw non-ASCII byte or control character in the header value', () => {
+    const value = attachmentContentDisposition('application/octet-stream', 'a"b\nrésumé.bin');
+    expect(value).toMatch(/^[\x20-\x7e]*$/); // every byte is printable ASCII, so Node cannot throw
   });
 });

@@ -73,6 +73,16 @@ describe('documented Codex item format', () => {
     const events = parser.handle(JSON.stringify({ type: 'item.completed', item: { type: 'mcp_tool_call', status: 'failed', error: { message: 'tool failed' } } }));
     expect(events[1]?.payload).toMatchObject({ isError: true, content: '{"message":"tool failed"}' });
   });
+
+  it('makes malformed MCP calls actionable instead of silently omitting them', () => {
+    const parser = createCodexParser();
+    const events = parser.handle(JSON.stringify({
+      type: 'item.completed',
+      item: { id: 'call-1', type: 'mcp_tool_call', server: 'weave-ai', status: 'failed', error: { message: 'bad tool event' } },
+    }));
+    expect(events[0]).toMatchObject({ type: 'error', payload: { message: 'codex emitted malformed mcp_tool_call: missing tool' } });
+    expect(events[1]).toMatchObject({ type: 'tool.result', payload: { id: 'call-1', isError: true } });
+  });
 });
 
 

@@ -50,8 +50,18 @@ process.stdin.on('end', () => {
     emit({ type: 'turn.failed', error: { message: '401 Unauthorized' } });
     process.exitCode = 0; return;
   }
+  const hasRunScopedMcp = args.some((arg) => arg.includes('mcp_servers.weave-ai.url='));
+  const automaticApproval = args.includes('approval_policy="on-request"');
+  const bypassApproval = args.includes('--dangerously-bypass-approvals-and-sandbox');
+  // This preserves the worker failure reported by VS-485: before the adapter
+  // supplied the auto posture, a configured MCP call failed before it ran.
+  if (hasRunScopedMcp && !automaticApproval && !bypassApproval) {
+    emit({ type: 'turn.failed', error: { message: 'MCP tool call requires approval, but approval policy is never' } });
+    process.exitCode = 1; return;
+  }
   emit({ type: 'error', message: 'Reconnecting... 1/5' });
-  emit({ type: 'item.completed', item: { id: 'tool-1', type: 'mcp_tool_call', server: 'ac', tool: 'ac_report', status: 'completed', arguments: {}, result: { ok: true } } });
+  emit({ type: 'item.completed', item: { id: 'tool-read', type: 'mcp_tool_call', server: 'weave-ai', tool: 'weave_ticket_get', status: 'completed', arguments: { id: 'VS-485' }, result: { ok: true, data: { id: 'VS-485' } } } });
+  emit({ type: 'item.completed', item: { id: 'tool-write', type: 'mcp_tool_call', server: 'weave-ai', tool: 'weave_ticket_document_put', status: 'failed', arguments: { key: 'report' }, error: { code: 'CONFLICT', message: 'document revision conflict' } } });
   emit({ type: 'item.completed', item: { id: 'message-1', type: 'agent_message', text: 'stream final' } });
   const output = args[args.indexOf('-o') + 1];
   fs.writeFileSync(output, ${JSON.stringify(JSON.stringify(strictReport))});
@@ -74,14 +84,15 @@ describe('Codex turn against a fake CLI', () => {
     const turn = input('success', ref);
     writeFileSync(join(turn.cwd, 'config.toml'), 'model_provider = "custom"\n');
     turn.options['mcpViaConfigFile'] = true;
-    turn.mcpServers = { ac: { type: 'http', url: 'http://localhost/mcp' } };
+    turn.mcpServers = { 'weave-ai': { type: 'http', url: 'http://localhost/mcp/runs/run-1', headers: { Authorization: 'Bearer ticket-token' } } };
     const events: RuntimeEvent[] = [];
     const result = await adapter.runTurn(turn, sink(events));
     expect(result.error).toBeUndefined();
     expect(result.session).toEqual({ threadId: ref?.fork ? 'forked-thread' : 'thread-1', usage: { inputTokens: 100, outputTokens: 20, cachedInputTokens: 80 } });
     expect(events[0]?.type).toBe(ref && !ref.fork ? 'session.resumed' : 'session.started');
     expect(events.map((e) => e.seq)).toEqual(events.map((_, i) => i));
-    expect(events.map((e) => e.type)).toContain('tool.call');
+    expect(events.filter((e) => e.type === 'tool.call').map((e) => e.payload['name'])).toEqual(['weave_ticket_get', 'weave_ticket_document_put']);
+    expect(events.filter((e) => e.type === 'tool.result').map((e) => e.payload['isError'])).toEqual([false, true]);
     expect(result.finalText).toBe(JSON.stringify(strictReport));
     expect(result.structured).toEqual(strictReport);
     expect(RunReportSchema.safeParse(result.structured).success).toBe(true);
@@ -90,10 +101,30 @@ describe('Codex turn against a fake CLI', () => {
     const capture = JSON.parse(readFileSync(join(turn.cwd, 'capture.json'), 'utf8'));
     expect(capture.prompt).toBe(turn.prompt);
     expect(capture.args).not.toContain(turn.prompt);
+    expect(capture.args).toContain('approval_policy="on-request"');
+    expect(capture.args.join(' ')).toContain('mcp_servers.weave-ai.url="http://localhost/mcp/runs/run-1"');
+    expect(capture.args.join(' ')).not.toContain('ticket-token');
     expect(capture.cwd).toBe(turn.cwd);
     expect(capture.home).toBe(turn.configHome);
     expect(readFileSync(join(turn.cwd, 'config.toml'), 'utf8')).toBe('model_provider = "custom"\n');
     expect(existsSync(runTmpDir(turn.runId))).toBe(false);
+  });
+
+  it('keeps the configured MCP server callable for the weaver bypass posture', async () => {
+    const turn = input();
+    writeFileSync(join(turn.cwd, 'config.toml'), 'model_provider = "custom"\\n');
+    turn.options['mcpViaConfigFile'] = true;
+    turn.permission = { mode: 'bypass' };
+    turn.mcpServers = { 'weave-ai': { type: 'http', url: 'http://localhost/mcp/runs/weaver', headers: { Authorization: 'Bearer weaver-token' } } };
+    const events: RuntimeEvent[] = [];
+    const result = await adapter.runTurn(turn, sink(events));
+    expect(result.error).toBeUndefined();
+    expect(events.filter((e) => e.type === 'tool.call').map((e) => e.payload['name'])).toEqual(['weave_ticket_get', 'weave_ticket_document_put']);
+    const capture = JSON.parse(readFileSync(join(turn.cwd, 'capture.json'), 'utf8'));
+    expect(capture.args).toContain('--dangerously-bypass-approvals-and-sandbox');
+    expect(capture.args).not.toContain('approval_policy="on-request"');
+    expect(capture.args.join(' ')).toContain('mcp_servers.weave-ai.url="http://localhost/mcp/runs/weaver"');
+    expect(capture.args.join(' ')).not.toContain('weaver-token');
   });
 
   it('classifies protocol failures even with a zero process exit', async () => {

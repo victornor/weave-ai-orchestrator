@@ -74,6 +74,21 @@ describe('decisions', () => {
     }
   });
 
+  it('resolves a ticketed session\'s question or concern to the conductor, like a worker\'s (VS-495)', () => {
+    const t = ticket();
+    const sessionId = h.addWorker(t.id, { kind: 'session' });
+    for (const kind of ['question', 'concern'] as const) {
+      expect(decisions.create(AGENT, { ticketId: t.id, kind, title: kind, askedByAgentId: sessionId, correlationKey: `${kind}:${newId()}` }).owner).toBe('weaver');
+    }
+  });
+
+  it('keeps a ticketless session\'s question or concern owned by the human, like the conductor\'s own (VS-495)', () => {
+    const sessionId = h.addWorker(null, { kind: 'session' });
+    for (const kind of ['question', 'concern'] as const) {
+      expect(decisions.create(AGENT, { kind, title: kind, askedByAgentId: sessionId, correlationKey: `${kind}:${newId()}` }).owner).toBe('human');
+    }
+  });
+
   it('keeps a question or concern owned by the human when the conductor itself asks (or nobody is named)', () => {
     const t = ticket();
     for (const kind of ['question', 'concern'] as const) {

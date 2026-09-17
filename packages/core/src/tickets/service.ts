@@ -481,6 +481,13 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     // VS-172: leave the live set in this same transition so Live cannot keep a leftover cell.
     try { releaseWorkersForTerminal(t, actor); }
     catch (e) { log.warn({ err: e, ticketId: t.id }, 'releasing workers for a terminal ticket failed'); }
+    // VS-495: a persistent session on this ticket returns to ticketless conversation instead — it is
+    // not among `releaseWorkersForTerminal`'s `kind = 'worker'` rows, so it needs its own call.
+    const session = db.get<{ id: string }>("SELECT id FROM agents WHERE ticket_id = ? AND kind = 'session' AND status NOT IN ('retired')", [t.id]);
+    if (session) {
+      try { void deps().workers.releaseSessionTicket(actor, session.id); }
+      catch (e) { log.warn({ err: e, ticketId: t.id }, 'releasing a session ticket failed'); }
+    }
   }
 
   function releaseWorkersForTerminal(t: Ticket, actor: Actor): void {
@@ -753,8 +760,11 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
 
   // ---------- service ----------
 
+  // VS-495: `kind IN ('worker','session')` — a persistent session holding this ticket is who a reply
+  // or a retry should reach, exactly as a spawned worker would be; excluding it would silently spawn
+  // a duplicate agent on the session's own ticket instead of waking the one already working it.
   function latestWorkerFor(ticketId: string): Agent | null {
-    return db.get<Agent>("SELECT * FROM agents WHERE ticket_id = ? AND kind = 'worker' ORDER BY created_at DESC LIMIT 1", [ticketId]) ?? null;
+    return db.get<Agent>("SELECT * FROM agents WHERE ticket_id = ? AND kind IN ('worker','session') ORDER BY created_at DESC LIMIT 1", [ticketId]) ?? null;
   }
 
   /**
@@ -1813,8 +1823,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         if (t.monitorNextCheckAt) return false;
         // Waiting in the merge queue is an action path: the queue wakes it when a slot frees (§11.4).
         if (t.status === 'merging' && !t.mergeStartedAt) return false;
+        // VS-495: `kind IN ('worker','session')` — a persistent session's ticket must be checked for
+        // liveness the same way a worker's is, not silently exempted because it holds no worker row.
         const worker = db.get<{ id: string; status: string }>(
-          "SELECT id, status FROM agents WHERE ticket_id = ? AND kind = 'worker' AND status NOT IN ('retired','done') ORDER BY created_at DESC LIMIT 1",
+          "SELECT id, status FROM agents WHERE ticket_id = ? AND kind IN ('worker','session') AND status NOT IN ('retired','done') ORDER BY created_at DESC LIMIT 1",
           [t.id],
         );
         if (!worker) return !t.assigneeRoleId; // no role at all ⇒ nothing will ever spawn; a role means a pending spawn

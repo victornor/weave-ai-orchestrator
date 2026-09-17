@@ -633,6 +633,16 @@ describe('run engine', () => {
       expect(resumed.id).not.toBe(runId);
       expect(resumed.status).toBe('succeeded');
     });
+
+    it("a persistent session's mid-turn interrupt finalizes exactly like a worker's or the weaver's own — no session-specific code path exists (VS-495)", async () => {
+      const sessionId = h.addWorker(null, { kind: 'session', worktreePath: null, branch: null });
+      const runId = seedRunning(sessionId, { mode: 'interrupt', cause: 'message' });
+      const run = await executeRun(h.ctx, h.deps, runId);
+      expect(run.status).toBe('interrupted');
+      expect(run.errorCode).toBe('interrupted_by_message');
+      const agent = h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [sessionId])!;
+      expect(['active', 'error']).toContain(agent.status);
+    });
   });
 
   // VS-339: a turn cut off by a daemon shutdown is interrupted whatever the child's exit code says,

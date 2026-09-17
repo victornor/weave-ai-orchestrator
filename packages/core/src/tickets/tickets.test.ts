@@ -1138,6 +1138,38 @@ describe('tickets', () => {
     });
   });
 
+  describe('a terminal ticket returns its persistent session, not its worker, to ticketless (VS-495)', () => {
+    it('calls releaseSessionTicket for a session-kind agent instead of releaseWorkersForTerminal\'s worker path', async () => {
+      const releaseSessionTicket = vi.fn(async () => undefined);
+      h.services.workers = { ...(h.services.workers as object), releaseSessionTicket } as never;
+
+      const t = make({ kind: 'task' });
+      const sessionId = h.addWorker(t.id, { kind: 'session' });
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+
+      await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' });
+
+      expect(releaseSessionTicket).toHaveBeenCalledWith(expect.anything(), sessionId);
+      // Unlike a worker, a session's status and worktree binding are not this transition's concern —
+      // releaseSessionTicket (stubbed above) owns that; releaseWorkersForTerminal must not also touch
+      // this row, since it is not `kind = 'worker'`.
+      expect(h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [sessionId])!.status).not.toBe('done');
+    });
+
+    it('does not call releaseSessionTicket when the ticket has an ordinary worker', async () => {
+      const releaseSessionTicket = vi.fn(async () => undefined);
+      h.services.workers = { ...(h.services.workers as object), releaseSessionTicket } as never;
+
+      const t = make({ kind: 'task' });
+      h.addWorker(t.id);
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+
+      await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' });
+
+      expect(releaseSessionTicket).not.toHaveBeenCalled();
+    });
+  });
+
   describe('mergeDone', () => {
     it('archives the openspec change and completes the ticket', async () => {
       const t = make();

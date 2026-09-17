@@ -212,7 +212,7 @@ function ticketStatusAsOf(ctx: WorkspaceContext, ticketId: string, atIso: string
 }
 
 function sessionPolicyFor(agent: Agent, role: Role | null): SessionPolicy {
-  if (agent.kind === 'weaver' || agent.kind === 'planner') return 'persistent';
+  if (agent.kind === 'weaver' || agent.kind === 'planner' || agent.kind === 'session') return 'persistent';
   return (role?.sessionPolicy ?? 'per_ticket') as SessionPolicy;
 }
 

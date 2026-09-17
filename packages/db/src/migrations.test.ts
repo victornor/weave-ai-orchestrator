@@ -1660,7 +1660,7 @@ describe('migrations', () => {
       expect(db.get('SELECT id, kind, plan_id FROM agents WHERE id = ?', ['a-weaver'])).toMatchObject({ id: 'a-weaver', kind: 'weaver', planId: null });
       expect(db.get('SELECT id, kind, ticket_id, plan_id FROM agents WHERE id = ?', ['a-worker']))
         .toMatchObject({ id: 'a-worker', kind: 'worker', ticketId: 't1', planId: null });
-      expect(persistedKindCheck(db, 'agents')).toEqual(['weaver', 'worker', 'planner']);
+      expect(persistedKindCheck(db, 'agents')).toEqual(['weaver', 'worker', 'planner', 'session']);
       db.run(
         `INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, created_at, updated_at)
          VALUES ('p1', 'w1', 'p1', 'P1', 'git@x', '/tmp/p1', 't0', 't0')`,
@@ -1724,6 +1724,56 @@ describe('migrations', () => {
       expect(() => db.insert('worker_stall_state', {
         agentId: 'a1', workspaceId: 'w1', ticketId: 't1', firstDetectedAt: 't0', createdAt: 't0', updatedAt: 't0',
       })).toThrow(/UNIQUE constraint failed/);
+      db.close();
+    });
+  });
+
+  describe('0050_agent_kind_session (VS-495)', () => {
+    it('widens agents.kind to include session, without disturbing existing agents, and enforces one live session per role', () => {
+      const path = join(dir, 'agents-session.sqlite');
+      const before = openDbAsOf(path, '0048_knowledge_embeddings.sql');
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      before.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, created_at, updated_at)
+         VALUES ('p1', 'w1', 'p1', 'P1', 'git@x', '/tmp/p1', 't0', 't0')`,
+      );
+      before.run(
+        `INSERT INTO roles (id, workspace_id, project_id, slug, name, charter_summary, scope_text, created_at, updated_at)
+         VALUES ('r1', 'w1', 'p1', 'backend', 'Backend', 'owns it', 'backend work', 't0', 't0')`,
+      );
+      before.insert('agents', {
+        id: 'a-worker', workspaceId: 'w1', kind: 'worker', name: 'Worker', ticketId: 't1', runtimeId: 'claude',
+        homePath: '/tmp/worker', createdAt: 't0', updatedAt: 't0',
+      });
+      before.close();
+
+      const db = openDb(path);
+      expect(db.get('SELECT id, kind, ticket_id FROM agents WHERE id = ?', ['a-worker']))
+        .toMatchObject({ id: 'a-worker', kind: 'worker', ticketId: 't1' });
+      expect(persistedKindCheck(db, 'agents')).toEqual(['weaver', 'worker', 'planner', 'session']);
+
+      db.insert('agents', {
+        id: 'a-session', workspaceId: 'w1', kind: 'session', projectId: 'p1', roleId: 'r1', name: 'Backend session', runtimeId: 'claude',
+        homePath: '/tmp/session', createdAt: 't0', updatedAt: 't0',
+      });
+      expect(db.get('SELECT id, kind, role_id AS roleId, ticket_id AS ticketId FROM agents WHERE id = ?', ['a-session']))
+        .toMatchObject({ id: 'a-session', kind: 'session', roleId: 'r1', ticketId: null });
+
+      // Only one live session per role.
+      expect(() => db.insert('agents', {
+        id: 'a-session-2', workspaceId: 'w1', kind: 'session', projectId: 'p1', roleId: 'r1', name: 'Backend session 2', runtimeId: 'claude',
+        homePath: '/tmp/session2', createdAt: 't0', updatedAt: 't0',
+      })).toThrow(/UNIQUE constraint failed/);
+
+      // A retired session for the same role does not block a new one.
+      db.update('agents', 'a-session', { status: 'retired' });
+      db.insert('agents', {
+        id: 'a-session-3', workspaceId: 'w1', kind: 'session', projectId: 'p1', roleId: 'r1', name: 'Backend session 3', runtimeId: 'claude',
+        homePath: '/tmp/session3', createdAt: 't0', updatedAt: 't0',
+      });
+      expect(db.get('SELECT id FROM agents WHERE id = ?', ['a-session-3'])).toMatchObject({ id: 'a-session-3' });
       db.close();
     });
   });

@@ -11,6 +11,7 @@ import type {
   ChangelogHeatmap,
   ChangelogKind,
   ChangelogPage,
+  ChannelThread,
   Decision,
   KnowledgeFile,
   KnowledgeScope,
@@ -364,6 +365,8 @@ export interface WorkerScheduledWake { at: string | null; reason: string }
 export interface WorkerDetail {
   agent: Agent;
   ticket: Ticket | null;
+  /** VS-495: a persistent session's own conversation thread; null for every other kind. */
+  thread: ChannelThread | null;
   role: Role | null;
   project: Project | null;
   lastRun: Run | null;

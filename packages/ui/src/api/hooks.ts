@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, RoadmapBlock, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanSummary } from '@weave-ai/shared';
+import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, RoadmapBlock, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanSummary, ChannelThread } from '@weave-ai/shared';
 import { dayKey } from '@weave-ai/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -65,6 +65,7 @@ function workerDetail(v: unknown): T.WorkerDetail {
   return {
     agent,
     ticket: (r['ticket'] as Ticket | null | undefined) ?? null,
+    thread: (r['thread'] as ChannelThread | null | undefined) ?? null,
     role: (r['role'] as Role | null | undefined) ?? null,
     project: (r['project'] as Project | null | undefined) ?? null,
     lastRun: (r['lastRun'] as Run | null | undefined) ?? null,
@@ -990,6 +991,33 @@ export function useStartSession(): UseMutationResult<Agent, Error, { ticketId: s
   return useMutation({
     mutationFn: (body) => api.ws<Agent>(ws, '/workers/start-session', { method: 'POST', body }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: qk.workers(ws) }),
+  });
+}
+
+/**
+ * VS-495: a role's persistent, no-ticket session — idempotent, returns the role's existing live
+ * session and its thread if it already has one rather than creating a second.
+ */
+export function usePersistentSession(): UseMutationResult<{ agent: Agent; thread: ChannelThread }, Error, { projectId: string; roleId: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => api.ws<{ agent: Agent; thread: ChannelThread }>(ws, '/workers/persistent-session', { method: 'POST', body }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.workers(ws) }),
+  });
+}
+
+/**
+ * VS-495: start an out-of-band compaction of any agent's session by id — `useCompactWeaver` calls
+ * the weaver's own dedicated route; this is the same underlying service (`compactSession`, already
+ * generic over any agent) for every other kind, worker or persistent session alike.
+ */
+export function useCompactWorker(id: string): UseMutationResult<{ started: boolean; runtime: string }, Error, void> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.ws<{ started: boolean; runtime: string }>(ws, `/workers/${id}/compact`, { method: 'POST' }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: qk.worker(ws, id) }); },
   });
 }
 

@@ -10,9 +10,12 @@ import { useParams } from '@tanstack/react-router';
 import { agentUiStatus, heldByHuman, projectLabel } from '@weave-ai/shared';
 import { workerPauseReason } from '@weave-ai/render';
 import {
+  useCompactWorker,
   useEndHandover,
   useHandoverCommand,
+  usePostThreadMessage,
   useStartHandover,
+  useThreadMessages,
   useWorker,
   useWorkerAction,
   useWorkerBrief,
@@ -30,6 +33,7 @@ import { StatusBadge } from '../components/StatusGlyph';
 import { Tabs } from '../components/Tabs';
 import { draftKey, useDraft } from '../lib/drafts';
 import { cents, tokens } from '../lib/format';
+import { cx } from '../lib/cx';
 import { V2Page } from './V2Page';
 import { WorkerFeed } from './WorkerFeed';
 
@@ -37,6 +41,32 @@ const TABS = [
   { key: 'transcript', label: 'Transcript' },
   { key: 'brief', label: 'Brief' },
 ] as const;
+
+/**
+ * VS-495: a persistent session with no ticket has no ticket-comment history for `WorkerFeed` to
+ * read — its conversation lives in its own thread instead, the same storage the weaver's own chat
+ * uses. This renders that thread plainly: no live-run trace, no decision cards, no dispatch chips —
+ * those are `ChatConversation`'s weaver/planner-only extras (see `PlanModal`), and a persistent
+ * session's ticketless turns raise none of them.
+ */
+function SessionThreadFeed({ threadId, label }: { threadId: string; label: string }): React.ReactElement {
+  const history = useThreadMessages(threadId);
+  if (history.isLoading) return <SkeletonRows rows={4} />;
+  if (history.isError) return <ErrorState code="THREAD_UNREADABLE" message={history.error?.message ?? 'Could not load this conversation.'} />;
+  if (!history.data?.length) return <p className="text-meta text-text-3">Nothing said yet — say something below.</p>;
+  return (
+    <ol aria-label={label} className="flex flex-col gap-3">
+      {history.data.map((m) => (
+        <li key={m.id} className={cx('flex flex-col gap-1', m.direction === 'outbound' ? 'items-start' : 'items-end')}>
+          <div className={cx('max-w-[85%] rounded-r6 px-3 py-2 text-meta', m.direction === 'outbound' ? 'bg-bg-2 text-text-1' : 'bg-accent-tint text-text-1')}>
+            <Markdown source={m.body} />
+          </div>
+          <span className="ac-mono text-nano text-text-4">{m.direction === 'outbound' ? 'session' : 'you'}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 export function V2WorkerPage(): React.ReactElement {
   const { workerId } = useParams({ strict: false }) as { workerId?: string };
@@ -55,6 +85,8 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
   const brief = useWorkerBrief(workerId);
   const action = useWorkerAction();
   const message = useWorkerMessage();
+  const postThreadMessage = usePostThreadMessage();
+  const compact = useCompactWorker(workerId);
   const held = detail.data ? heldByHuman(detail.data.agent) : false;
   const [sessionOpen, setSessionOpen] = useState(false);
   const [givingBack, setGivingBack] = useState(false);
@@ -97,7 +129,8 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
     );
   }
 
-  const { agent, ticket, project, usage, worktree, input } = detail.data;
+  const { agent, ticket, thread, project, usage, worktree, input } = detail.data;
+  const isSession = agent.kind === 'session';
   const pausedFor = workerPauseReason(agent);
   const steerLabel =
     lastOutcome ??
@@ -140,6 +173,11 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
               Session
             </Button>
           )}
+          {isSession ? (
+            <Button size="sm" variant="secondary" disabled={compact.isPending} onClick={() => compact.mutate()}>
+              {compact.isPending ? 'Compacting…' : 'Compact now'}
+            </Button>
+          ) : null}
           <Button size="sm" onClick={() => action.mutate({ id: workerId, action: 'relaunch', note: 'relaunched from the web app' })}>
             Relaunch
           </Button>
@@ -205,7 +243,11 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === 'transcript' ? (
           <div className="mx-auto max-w-3xl p-4 md:p-5">
-            <WorkerFeed agentId={workerId} ws={ws} label={`${agent.name} transcript`} />
+            {isSession && !ticket && thread ? (
+              <SessionThreadFeed threadId={thread.id} label={`${agent.name} conversation`} />
+            ) : (
+              <WorkerFeed agentId={workerId} ws={ws} label={`${agent.name} transcript`} />
+            )}
             <div ref={bottom} />
           </div>
         ) : (
@@ -234,6 +276,21 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
                       : 'Queued for the next turn.',
                 );
               }}
+            />
+          </div>
+        </div>
+      ) : isSession && thread ? (
+        // VS-495: a persistent session's ticketless conversation posts to its own thread — the same
+        // storage and route the weaver's own chat uses — never a ticket comment, since there is none.
+        <div className="flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-5">
+          <div className="mx-auto max-w-3xl">
+            {/* Uncontrolled (no value/onChange): there is no ticket to key a persisted draft on
+                (`steerTicketId` is null here), and a draft key of null makes `patch` a no-op while
+                `value` stays fixed at the empty string — passing them would make typing impossible. */}
+            <Composer
+              placeholder="Talk to this session…"
+              submitLabel="Send"
+              onSubmit={async (body) => { await postThreadMessage.mutateAsync({ threadId: thread.id, body }); }}
             />
           </div>
         </div>

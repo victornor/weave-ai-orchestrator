@@ -13,6 +13,11 @@ const state = vi.hoisted(() => ({
   start: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   patch: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   actionError: null as Error | null,
+  // VS-495: null keeps every existing test's ticketed worker unchanged; a session test overrides both.
+  noTicket: false,
+  thread: null as { id: string; agentId: string } | null,
+  postThread: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  compact: vi.fn() as unknown as ReturnType<typeof vi.fn>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -24,10 +29,13 @@ vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
 vi.mock('../lib/drafts', () => ({ draftKey: () => 'k', useDraft: () => ({ draft: { text: 'steer this' }, patch: state.patch }) }));
 vi.mock('../v2/WorkerFeed', () => ({ WorkerFeed: () => <div data-testid="worker-feed" /> }));
 vi.mock('../api/hooks', () => ({
-  useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: ticket({ id: 'tk1', identifier: 'ACME-1' }), role: null, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
+  useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: state.noTicket ? null : ticket({ id: 'tk1', identifier: 'ACME-1' }), thread: state.thread, role: null, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
   useWorkerBrief: () => ({ data: { brief: '# The brief' } }),
   useWorkerAction: () => ({ mutate: state.action, error: state.actionError }),
   useWorkerMessage: () => ({ mutateAsync: state.send, error: null }),
+  usePostThreadMessage: () => ({ mutateAsync: state.postThread, error: null }),
+  useCompactWorker: () => ({ mutate: state.compact, isPending: false, error: null }),
+  useThreadMessages: () => ({ data: [], isLoading: false, isError: false, error: null }),
   useHandoverCommand: () => ({ isLoading: false, data: null }),
   useStartHandover: () => ({ mutate: state.start, error: null }),
   useEndHandover: () => ({ mutateAsync: state.end, error: null }),
@@ -47,6 +55,10 @@ beforeEach(() => {
   state.patch = vi.fn();
   state.actionError = null;
   state.agent = agent({ id: 'a1', name: 'Backend Engineer #7', status: 'running', runtimeId: 'claude-code' });
+  state.noTicket = false;
+  state.thread = null;
+  state.postThread = vi.fn().mockResolvedValue(undefined);
+  state.compact = vi.fn();
 });
 
 describe('V2 worker page', () => {
@@ -93,5 +105,26 @@ describe('V2 worker page', () => {
     expect(state.action).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Confirm cancel' }));
     expect(state.action).toHaveBeenCalledWith({ id: 'a1', action: 'cancel', reason: 'cancelled from the web app' });
+  });
+
+  describe('a persistent session with no ticket (VS-495)', () => {
+    beforeEach(() => {
+      state.agent = agent({ id: 'a1', kind: 'session', ticketId: null, name: 'Backend Engineer — session', status: 'active', runtimeId: 'claude-code' });
+      state.noTicket = true;
+      state.thread = { id: 'th1', agentId: 'a1' };
+    });
+
+    it('offers Compact now and posts to the thread instead of a ticket', async () => {
+      render(<WorkerBody workerId="a1" />);
+      expect(screen.queryByRole('button', { name: 'Ticket' })).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Compact now' }));
+      expect(state.compact).toHaveBeenCalled();
+
+      fireEvent.change(screen.getByPlaceholderText('Talk to this session…'), { target: { value: 'hello there' } });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      expect(state.postThread).toHaveBeenCalledWith({ threadId: 'th1', body: 'hello there' });
+      expect(state.send).not.toHaveBeenCalled();
+    });
   });
 });

@@ -112,11 +112,15 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
     }
   };
 
+  // VS-495: only a `kind='worker'` agent counts against `project.maxWorkers` — matching the
+  // spawn-time gate (`liveInProject` in workers/index.ts and roles/index.ts). A `session`-kind
+  // agent (or the weaver/planner) running concurrently in the same project must not compete for,
+  // or be throttled by, the project's transient-worker pool.
   const projectRunning = (projectId: string): number => {
     let n = 0;
     for (const entry of state.active.values()) {
-      const a = ctx.db.get<{ projectId: string | null }>('SELECT project_id FROM agents WHERE id = ?', [entry.agentId]);
-      if (a?.projectId === projectId) n += 1;
+      const a = ctx.db.get<{ projectId: string | null; kind: string }>('SELECT project_id, kind FROM agents WHERE id = ?', [entry.agentId]);
+      if (a?.projectId === projectId && a.kind === 'worker') n += 1;
     }
     return n;
   };
@@ -224,7 +228,7 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
           if (compactingInDb(agent.id)) continue;
           if (await compactionDue(agent)) continue;
           if (ctx.isolated && !isEligibleWhileIsolated(agent.id, now)) continue;
-          if (agent.projectId) {
+          if (agent.projectId && agent.kind === 'worker') {
             const project = ctx.db.get<{ maxWorkers: number }>('SELECT max_workers FROM projects WHERE id = ?', [agent.projectId]);
             if (project && projectRunning(agent.projectId) >= project.maxWorkers) continue;
           }

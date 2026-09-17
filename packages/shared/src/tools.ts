@@ -27,6 +27,13 @@ export const WEAVER_TOOLS = [
 ] as const;
 export const WORKER_ONLY_TOOLS = ['weave_ticket_create', 'weave_schedule_wakeup', 'weave_ticket_open_pull_request'] as const; // project-scoped creation, self-scheduling, and delivery for workers
 /**
+ * VS-495: a persistent role session's own tool, on top of everything a worker already has
+ * (`COMMON_TOOLS` + `WORKER_ONLY_TOOLS`) — assigns a ticket to its own role and binds itself as the
+ * ticket's worker in one atomic call, then gets a worktree for it, without going through the
+ * weaver-only `weave_ticket_assign` or spawning a second, `kind='worker'` agent.
+ */
+export const SESSION_ONLY_TOOLS = ['weave_session_take_ticket'] as const;
+/**
  * VS-398: the read-only planning agent's whole tool surface — never `COMMON_TOOLS` plus
  * subtractions, since most of `COMMON_TOOLS` is ticket- or worktree-shaped and a planner has neither.
  * Read tools are scoped to the planner's own plan's project (never another project, never
@@ -55,7 +62,7 @@ export const PLANNER_TOOLS = [
 export const FIRST_TURN_TOOLS = [
   'weave_inbox', 'weave_ticket_get', 'weave_ticket_comments', 'weave_ticket_comment', 'weave_ticket_document_get',
 ] as const;
-export type ToolName = (typeof COMMON_TOOLS)[number] | (typeof WEAVER_TOOLS)[number] | (typeof PLANNER_TOOLS)[number] | (typeof FIRST_TURN_TOOLS)[number];
+export type ToolName = (typeof COMMON_TOOLS)[number] | (typeof WEAVER_TOOLS)[number] | (typeof WORKER_ONLY_TOOLS)[number] | (typeof SESSION_ONLY_TOOLS)[number] | (typeof PLANNER_TOOLS)[number] | (typeof FIRST_TURN_TOOLS)[number];
 
 /** The weaver's tool whose words reach the human; its body is the reply itself. Kept as the single name for backward compatibility — `HUMAN_REPLY_TOOLS` is the full set `isHumanReplyToolEvent` checks against. */
 export const HUMAN_REPLY_TOOL = 'weave_human_send' satisfies ToolName;

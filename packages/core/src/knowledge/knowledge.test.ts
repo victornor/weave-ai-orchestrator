@@ -6,6 +6,7 @@ import { newId } from '@weave-ai/db';
 import { estimateTokens } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createKnowledgeService } from './service.js';
+import { createKnowledgeUsageService } from './usage.js';
 import { BUDGETS, PROJECT_SECTIONS, parseDoc, parseLinks } from './files.js';
 import type { Actor, KnowledgeService } from '../api.js';
 
@@ -289,9 +290,62 @@ describe('knowledge', () => {
     const clean = knowledge2.health(h2.projectId);
     expect(clean.orphans).toEqual([]);
     expect(clean.stale).toEqual([]);
+    expect(clean.neverRead).toEqual([]);
     expect(clean.unresolvedLinks).toEqual([]);
     expect(clean.hubs.find((hub) => hub.path === 'projects/api/PROJECT.md')).toMatchObject({ nearBudget: false });
     h2.cleanup();
+  });
+
+  it('reports a never-read document as a health measure, and not one read within the window (VS-492)', () => {
+    const usage = createKnowledgeUsageService(h.ctx, h.deps);
+    h.services.knowledgeUsage = usage;
+    const oldUnread = knowledge.putDoc(WORKER, 'project', 'old-unread', '# Old unread\n\nNobody opened this.\n', h.projectId);
+    const oldRead = knowledge.putDoc(WORKER, 'project', 'old-read', '# Old read\n\nOpened this season.\n', h.projectId);
+    knowledge.putDoc(WORKER, 'project', 'fresh-unread', '# Fresh unread\n\nJust created.\n', h.projectId);
+    const longAgo = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000).toISOString();
+    h.db.run('UPDATE knowledge_files SET updated_at = ? WHERE path IN (?, ?)', [longAgo, oldUnread.path, oldRead.path]);
+    usage.recordRead({ runId: 'run-health', agentId: h.conductorId, ticketId: null, scope: 'project', projectId: h.projectId, slug: 'old-read', tokens: 5 });
+
+    const slugs = knowledge.health(h.projectId).neverRead.map((d) => d.slug);
+    expect(slugs).toContain('old-unread');
+    expect(slugs).not.toContain('old-read');
+    expect(slugs).not.toContain('fresh-unread');
+  });
+
+  it('reports near-duplicate existing entries within a scope and never changes anything (VS-492)', () => {
+    knowledge.replace(
+      HUMAN, 'project',
+      '# API\n\n## Learnings\n'
+      + '- 2026-01-01 · The gateway retries idempotent calls twice before failing.\n'
+      + '- 2026-01-02 · The gateway retries idempotent calls twice.\n'
+      + '- 2026-01-03 · Invoices are immutable once issued.\n',
+      'human', h.projectId,
+    );
+    const bodyBefore = knowledge.get('project', h.projectId).body;
+    const revisionsBefore = knowledge.revisions('project', h.projectId).length;
+
+    const report = knowledge.duplicates({ scope: 'project', projectId: h.projectId });
+    expect(report.capped).toBe(false);
+    expect(report.pairs.length).toBeGreaterThanOrEqual(1);
+    const pair = report.pairs[0]!;
+    expect(pair.score).toBeGreaterThanOrEqual(0.8);
+    expect([pair.a.path, pair.b.path]).toContain('projects/api/PROJECT.md');
+
+    // The sweep is read-only: same body, same revision history.
+    expect(knowledge.get('project', h.projectId).body).toBe(bodyBefore);
+    expect(knowledge.revisions('project', h.projectId).length).toBe(revisionsBefore);
+  });
+
+  it('reports nothing for a scope whose entries are unrelated, and caps a corpus past the bound (VS-492)', () => {
+    const unrelated = '# API\n\n## Learnings\n- 2026-01-01 · Alpha is the first subject.\n- 2026-01-02 · Beta is a different subject entirely.\n';
+    knowledge.replace(HUMAN, 'project', unrelated, 'human', h.projectId);
+    expect(knowledge.duplicates({ scope: 'project', projectId: h.projectId }).pairs).toEqual([]);
+
+    const lines = Array.from({ length: 1501 }, (_, i) => `- 2026-01-01 · fact ${i} about subject ${i}`).join('\n');
+    knowledge.replace(HUMAN, 'project', `# API\n\n## Learnings\n${lines}\n`, 'human', h.projectId);
+    const report = knowledge.duplicates({ scope: 'project', projectId: h.projectId });
+    expect(report.capped).toBe(true);
+    expect(report.scanned).toBe(1500);
   });
 
   it('the workspace-wide health view (no project) reports every project\'s hubs and documents', () => {
@@ -355,6 +409,29 @@ describe('knowledge', () => {
     expect(revs.map((r) => r.reason)).toContain('curation');
     knowledge.revert(HUMAN, 'project', before.revision, h.projectId);
     expect(knowledge.get('project', h.projectId).body).toContain('The build needs Node 22 or newer.');
+  });
+
+  it('records what a replacement supersedes, rejects an unmatched claim, and leaves the archive and body alone (VS-492)', () => {
+    knowledge.note(WORKER, 'project', 'Learnings', 'The gateway retries idempotent calls twice before failing.', h.projectId);
+    const replacement = '# API\n\n## Learnings\n- 2026-01-01 · The gateway no longer retries; a failed call surfaces immediately.\n';
+    const result = knowledge.replace(HUMAN, 'project', replacement, 'curation', h.projectId, undefined, undefined, ['retries idempotent calls twice']);
+    expect(result.superseded).toHaveLength(1);
+    expect(result.superseded[0]).toContain('retries idempotent calls twice');
+
+    const rev = knowledge.revisions('project', h.projectId).find((r) => r.revision === result.revision)!;
+    expect(rev.superseded).toHaveLength(1);
+    expect(rev.superseded[0]).toContain('retries idempotent calls twice');
+    // Still archived as before, and the body written is exactly the one supplied.
+    const archive = join(h.ctx.paths.knowledge, 'projects/api/archive');
+    const archived = readFileSync(join(archive, `${new Date().toISOString().slice(0, 10)}.md`), 'utf8');
+    expect(archived).toContain('retries idempotent calls twice');
+    expect(knowledge.get('project', h.projectId).body).toContain('no longer retries');
+
+    // A claim that matches no existing entry is rejected with nothing written.
+    const revsBefore = knowledge.revisions('project', h.projectId).length;
+    expect(() => knowledge.replace(HUMAN, 'project', '# API\n\n## Learnings\n- 2026-01-01 · Something.\n', 'curation', h.projectId, undefined, undefined, ['a claim that is not there']))
+      .toThrowError(expect.objectContaining({ code: 'validation' }));
+    expect(knowledge.revisions('project', h.projectId).length).toBe(revsBefore);
   });
 
   it('clears the pending flag on every file in a scope when that scope is curated', () => {

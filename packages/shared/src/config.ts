@@ -374,6 +374,15 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
    */
   inlineKnowledgeBudgetTokens: z.number().int().default(4000),
   knowledgeBudgetTokens: KnowledgeBudgetsSchema.default({}),
+  /**
+   * VS-492: how long a linked document may go with no recorded read before it is treated as a
+   * never-read document — a curation condition and a health measure. 90 days deliberately matches
+   * `DOCUMENT_STALE_MS` (a season of silence), so "nobody has read it in a season" is judged on the
+   * same horizon as "nobody has written it in a season" and the two signals stay comparable; a
+   * shorter window would flag documents between ordinary curation cycles, a much longer one would let
+   * an obsolete document sit for most of a year.
+   */
+  knowledgeNeverReadDays: z.number().int().min(1).default(90),
   workerArchiveDays: z.number().int().default(30),
   runLogRetentionDays: z.number().int().default(30),
   permissionMode: z.enum(PERMISSION_MODES).default('auto'),

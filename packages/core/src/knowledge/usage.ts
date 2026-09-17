@@ -153,8 +153,11 @@ export function createKnowledgeUsageService(ctx: WorkspaceContext, deps: () => C
 
     neverRead(query) {
       const { start, end } = parseWindow(query);
+      // VS-492: an explicit lower bound overrides the window's start, so the never-read curation
+      // trigger and health measure can use the configured day count rather than a fixed vocabulary.
+      const since = query.since ?? start;
       const catalogue = deps().knowledge.listDocs(query.projectId !== undefined ? { projectId: query.projectId } : {});
-      const params: Param[] = [ws, start, end];
+      const params: Param[] = [ws, since, end];
       const readRows = db.all<{ scope: KnowledgeScope; projectId: string | null; slug: string }>(
         `SELECT DISTINCT scope, doc_project_id AS projectId, slug FROM knowledge_usage_events
          WHERE workspace_id = ? AND occurred_at >= ? AND occurred_at < ? AND kind = 'document' AND slug IS NOT NULL`,

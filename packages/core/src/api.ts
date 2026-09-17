@@ -511,8 +511,9 @@ export interface KnowledgeMirror { worktreePath: string; projectSlug: string }
 export interface KnowledgeService {
   get(scope: S.KnowledgeScope, projectId?: string | null): { path: string; body: string; tokenEstimate: number; budgetTokens: number; lastCuratedAt: string | null; curationPending: boolean; revision: number };
   note(actor: Actor, scope: S.KnowledgeScope, section: string, text: string, projectId?: string | null, doc?: string, mirror?: KnowledgeMirror): { remainingTokens: number; revision: number };
-  replace(actor: Actor, scope: S.KnowledgeScope, body: string, reason: S.KnowledgeRevisionReason, projectId?: string | null, removed?: string[], mirror?: KnowledgeMirror): { revision: number };
-  revisions(scope: S.KnowledgeScope, projectId?: string | null): Array<{ revision: number; authorKind: string; reason: string; createdAt: string; ticketId: string | null; ticketIdentifier: string | null }>;
+  /** VS-492: `supersedes` names the existing claims this replacement corrects; each must match an entry. */
+  replace(actor: Actor, scope: S.KnowledgeScope, body: string, reason: S.KnowledgeRevisionReason, projectId?: string | null, removed?: string[], mirror?: KnowledgeMirror, supersedes?: string[]): { revision: number; superseded: string[] };
+  revisions(scope: S.KnowledgeScope, projectId?: string | null): Array<{ revision: number; authorKind: string; reason: string; createdAt: string; ticketId: string | null; ticketIdentifier: string | null; superseded: string[] }>;
   revert(actor: Actor, scope: S.KnowledgeScope, revision: number, projectId?: string | null): { revision: number };
   lint(): Array<{ path: string; scope: string; projectId: string | null; tokenEstimate: number; budgetTokens: number; pct: number; lastCuratedAt: string | null; curationPending: boolean }>;
   requestCuration(actor: Actor, scope: S.KnowledgeScope, projectId?: string | null): Promise<{ ticketId?: string; wakeId?: string }>;
@@ -536,11 +537,24 @@ export interface KnowledgeService {
   graph(projectId?: string | null): KnowledgeGraph;
   /** The knowledge network's health (VS-102): derived on read, no new table. `projectId` omitted means the whole workspace. */
   health(projectId?: string | null): KnowledgeHealth;
+  /**
+   * VS-492: a bounded, read-only sweep comparing existing entries within a scope with each other,
+   * reporting likely-duplicate pairs. It never edits, merges or deletes anything.
+   */
+  duplicates(filter?: { scope?: S.KnowledgeScope; projectId?: string | null }): KnowledgeDuplicateReport;
 }
+export interface KnowledgeDuplicateEntry {
+  path: string; scope: S.KnowledgeScope; projectId: string | null; slug: string | null;
+  section: string; text: string; line: string;
+}
+export interface KnowledgeDuplicatePair { score: number; a: KnowledgeDuplicateEntry; b: KnowledgeDuplicateEntry }
+export interface KnowledgeDuplicateReport { pairs: KnowledgeDuplicatePair[]; scanned: number; capped: boolean }
 export interface KnowledgeHealth {
   hubs: Array<{ path: string; scope: S.KnowledgeScope; projectId: string | null; projectSlug: string | null; tokenEstimate: number; budgetTokens: number; pct: number; nearBudget: boolean; curationPending: boolean; lastCuratedAt: string | null }>;
   orphans: KnowledgeDocSummary[];
   stale: KnowledgeDocSummary[];
+  /** VS-492: documents no run has read within the configured never-read window. */
+  neverRead: KnowledgeDocSummary[];
   unresolvedLinks: Array<{ fromPath: string; fromTitle: string; toSlug: string }>;
 }
 export interface KnowledgeDocSummary {
@@ -574,7 +588,12 @@ export interface KnowledgeContextUsage {
   hubTokens: number; documentTokens: number; totalTokens: number;
   documents: Array<{ scope: S.KnowledgeScope; projectId: string | null; slug: string | null; tokens: number }>;
 }
-export interface KnowledgeUsageQuery { projectId?: string | null; window?: S.UsageWindow }
+/**
+ * A knowledge-usage query. `since` (VS-492) is an explicit ISO lower bound that overrides `window`
+ * for callers that need a day count the fixed `USAGE_WINDOWS` vocabulary cannot express — the
+ * never-read curation trigger and health measure use it with the configured window.
+ */
+export interface KnowledgeUsageQuery { projectId?: string | null; window?: S.UsageWindow; since?: string }
 export interface KnowledgeDocumentUsage { scope: S.KnowledgeScope; projectId: string | null; slug: string; title: string | null; reads: number; tokens: number }
 export interface KnowledgeDocumentRef { scope: S.KnowledgeScope; projectId: string | null; slug: string; title: string | null; tokenEstimate: number }
 /**

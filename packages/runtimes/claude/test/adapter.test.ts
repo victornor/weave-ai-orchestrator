@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { adapter } from '../src/adapter.js';
+import { writeFakeClaudeCompactCli } from './fakeCli.js';
 
 const dirs: string[] = [];
 const tmp = (p: string) => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push(d); return d; };
@@ -19,6 +20,25 @@ const skillsDirFromManifest = (runtimeId: string): string => {
 };
 
 describe('claude adapter', () => {
+  it('requires a compact boundary from the command output, not only exit status', async () => {
+    const boundaryDir = writeFakeClaudeCompactCli({ boundary: true });
+    dirs.push(boundaryDir);
+    const success = await adapter.compactSession!({
+      ref: { sessionId: 'fake-compact-session' }, cwd: tmp('ac-compact-cwd-'),
+      env: { PATH: `${boundaryDir}:${process.env['PATH'] ?? ''}` },
+    });
+    expect(success).toMatchObject({ ok: true, via: 'command' });
+
+    const noBoundaryDir = writeFakeClaudeCompactCli({ boundary: false });
+    dirs.push(noBoundaryDir);
+    const failure = await adapter.compactSession!({
+      ref: { sessionId: 'fake-compact-session' }, cwd: tmp('ac-compact-cwd-'),
+      env: { PATH: `${noBoundaryDir}:${process.env['PATH'] ?? ''}` },
+    });
+    expect(failure).toMatchObject({ ok: false, via: 'command', detail: { boundary: false, isError: false } });
+    expect(failure.error?.message).toContain('compact boundary');
+  });
+
   it('declares its identity, capabilities and per-CLI conventions', () => {
     expect(adapter.id).toBe('claude');
     expect(adapter.skillsDir()).toBe('.claude/skills');

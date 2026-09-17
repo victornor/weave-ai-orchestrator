@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-17
+goal: "Automatic compaction retries forever: the policy re-fires every
+  dispatcher tick and never clears"

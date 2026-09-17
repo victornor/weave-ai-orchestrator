@@ -94,7 +94,50 @@ describe('dispatcher holds an agent whose session is compacting', () => {
     expect(compacted).toHaveLength(1);
     expect(runCountFor(workerId)).toBe(0);
     expect(wakeStatus(w.id)).toBe('queued');
+    expect(h.db.get<{ lastContextTokens: number | null }>('SELECT last_context_tokens AS lastContextTokens FROM agent_sessions WHERE agent_id = ?', [workerId])!.lastContextTokens).toBeNull();
     expect(h.db.get<{ n: number }>('SELECT COUNT(*) n FROM agent_sessions WHERE agent_id = ? AND compacting_at IS NOT NULL', [workerId])!.n).toBe(0); // finished and cleared
+
+    // The same observation must not trigger another compaction on a later dispatcher tick. The
+    // held wake is released once the compaction mark clears and can now run normally.
+    await dispatcher.tick();
+    await dispatcher.drain();
+    expect(compacted).toHaveLength(1);
+    expect(runCountFor(workerId)).toBe(1);
+    expect(wakeStatus(w.id)).not.toBe('queued');
+  });
+
+  it('does not retry a failed policy compaction for the same context observation', async () => {
+    setup();
+    h.services.workers = createWorkersService(h.ctx, h.deps);
+    const compacted: unknown[] = [];
+    (runtime as unknown as { compactSession: (i: unknown) => Promise<unknown> }).compactSession = async (i: unknown) => {
+      compacted.push(i);
+      return { ok: false, via: 'command', error: { code: 'compact_failed', message: 'no boundary' } };
+    };
+    h.ctx.config.models = { weaver: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null, compaction: { mode: 'tokens', value: 100_000 } }, workerOptions: [] };
+    const workerId = h.addWorker(seedTicket(), { runtimeId: 'fake', worktreePath: null });
+    const now = nowIso();
+    h.db.insert('agent_sessions', {
+      id: newId(), agentId: workerId, runtimeId: 'fake', status: 'active', turnCount: 1,
+      sessionRefJson: JSON.stringify({ threadId: 't-1' }), cumulativeUsageJson: {}, lastContextTokens: 150_000, createdAt: now, updatedAt: now,
+    });
+    const w = h.services.wake!.enqueue(workerId, { source: 'ticket_comment', reason: 'a follow-up', payload: {} });
+
+    await dispatcher.tick();
+    await dispatcher.drain();
+    await new Promise((r) => setImmediate(r));
+
+    expect(compacted).toHaveLength(1);
+    expect(wakeStatus(w.id)).toBe('queued');
+    expect(h.db.get<{ lastContextTokens: number | null; compactingError: string | null }>(
+      'SELECT last_context_tokens AS lastContextTokens, compacting_error AS compactingError FROM agent_sessions WHERE agent_id = ?', [workerId],
+    )).toMatchObject({ lastContextTokens: null, compactingError: 'no boundary' });
+
+    await dispatcher.tick();
+    await dispatcher.drain();
+    expect(compacted).toHaveLength(1);
+    expect(runCountFor(workerId)).toBe(1);
+    expect(wakeStatus(w.id)).not.toBe('queued');
   });
 
   it('does not compact when the setting is off or the context is under the threshold', async () => {

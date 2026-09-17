@@ -47,3 +47,19 @@ rl.on('close', () => process.exit(0));
   chmodSync(path, 0o755);
   return dir;
 }
+
+/** A fake print-mode Claude binary for the external `/compact` command. */
+export function writeFakeClaudeCompactCli(opts: { boundary?: boolean; sessionId?: string } = {}): string {
+  const dir = mkdtempSync(join(tmpdir(), 'ac-fake-claude-compact-'));
+  const path = join(dir, 'claude');
+  const sessionId = opts.sessionId ?? 'fake-compact-session';
+  const output = opts.boundary
+    ? { type: 'system', subtype: 'compact_boundary', session_id: sessionId, compact_metadata: { trigger: 'manual', pre_tokens: 200_000, post_tokens: 12_000 } }
+    : { type: 'result', subtype: 'success', is_error: false, result: 'already compact' };
+  const script = `#!/usr/bin/env node
+process.stdout.write(${JSON.stringify(JSON.stringify(output))} + '\\n');
+`;
+  writeFileSync(path, script, { mode: 0o755 });
+  chmodSync(path, 0o755);
+  return dir;
+}

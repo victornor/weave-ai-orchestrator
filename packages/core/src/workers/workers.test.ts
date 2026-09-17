@@ -78,7 +78,7 @@ describe('workers', () => {
     it('marks the session compacting, calls the runtime, then clears the mark', async () => {
       const ticket = seedTicket();
       const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
-      h.db.run('UPDATE agent_sessions SET session_ref_json = ? WHERE agent_id = ?', [JSON.stringify({ sessionId: 'sess-1' }), worker.id]);
+      h.db.run('UPDATE agent_sessions SET session_ref_json = ?, last_context_tokens = ? WHERE agent_id = ?', [JSON.stringify({ sessionId: 'sess-1' }), 150_000, worker.id]);
       const seen = withCompactor();
 
       expect(await workers.compactSession(HUMAN, worker.id)).toEqual({ started: true, runtime: 'claude' });
@@ -87,24 +87,25 @@ describe('workers', () => {
       expect(seen).toHaveLength(1);
       expect((seen[0] as { ref: unknown; configHome: string }).ref).toEqual({ sessionId: 'sess-1' });
       expect((seen[0] as { configHome: string }).configHome).toContain('claude');
-      const row = h.db.get<{ compactingAt: string | null; compactingError: string | null }>(
-        'SELECT compacting_at AS compactingAt, compacting_error AS compactingError FROM agent_sessions WHERE agent_id = ?', [worker.id],
+      const row = h.db.get<{ compactingAt: string | null; compactingError: string | null; lastContextTokens: number | null }>(
+        'SELECT compacting_at AS compactingAt, compacting_error AS compactingError, last_context_tokens AS lastContextTokens FROM agent_sessions WHERE agent_id = ?', [worker.id],
       )!;
       expect(row.compactingAt).toBeNull();
       expect(row.compactingError).toBeNull();
+      expect(row.lastContextTokens).toBeNull();
     });
 
     it('records the failure message when the runtime refuses', async () => {
       const ticket = seedTicket();
       const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
-      h.db.run('UPDATE agent_sessions SET session_ref_json = ? WHERE agent_id = ?', [JSON.stringify({ sessionId: 'sess-1' }), worker.id]);
+      h.db.run('UPDATE agent_sessions SET session_ref_json = ?, last_context_tokens = ? WHERE agent_id = ?', [JSON.stringify({ sessionId: 'sess-1' }), 150_000, worker.id]);
       const rt = new FakeRuntime();
       (rt as unknown as { compactSession: () => Promise<unknown> }).compactSession = async () => ({ ok: false, error: { code: 'x', message: 'nope' } });
       h.ctx.registries.runtimes.set('claude', rt);
 
       await workers.compactSession(HUMAN, worker.id);
       await new Promise((r) => setImmediate(r));
-      expect(h.db.get<{ compactingError: string | null }>('SELECT compacting_error AS compactingError FROM agent_sessions WHERE agent_id = ?', [worker.id])!.compactingError).toBe('nope');
+      expect(h.db.get<{ compactingError: string | null; lastContextTokens: number | null }>('SELECT compacting_error AS compactingError, last_context_tokens AS lastContextTokens FROM agent_sessions WHERE agent_id = ?', [worker.id])).toMatchObject({ compactingError: 'nope', lastContextTokens: null });
     });
 
     it('refuses while a turn is running', async () => {

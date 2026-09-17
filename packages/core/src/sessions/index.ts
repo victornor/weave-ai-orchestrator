@@ -121,7 +121,14 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
     },
 
     setCompacting(sessionId, at, error = null) {
-      ctx.db.update('agent_sessions', sessionId, { compactingAt: at, compactingError: error, updatedAt: nowIso() });
+      // Consume the context observation when an out-of-band compaction starts. The dispatcher must
+      // not retry the same measurement after either a successful compaction or a legitimate failure.
+      ctx.db.update('agent_sessions', sessionId, {
+        compactingAt: at,
+        compactingError: error,
+        lastContextTokens: at === null ? undefined : null,
+        updatedAt: nowIso(),
+      });
     },
 
     compacting(agentId) {

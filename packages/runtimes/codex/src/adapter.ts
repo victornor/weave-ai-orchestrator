@@ -10,7 +10,7 @@ import { describeCodexAccount } from './account.js';
 import { buildArgs, mcpConfigToml, resumeCommand } from './args.js';
 import { createCodexParser } from './events.js';
 import { listModels as listCodexModels, modelContextWindow } from './models.js';
-import { readThreadUsage } from './usage.js';
+import { readThreadContextTokens, readThreadUsage } from './usage.js';
 import { asCodexSession, type CodexSessionRef } from './session.js';
 
 export const capabilities: RuntimeCapabilities = {
@@ -137,7 +137,7 @@ export const adapter: RuntimeAdapter = {
         code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'codex turn failed',
       }
       : undefined;
-
+    const contextTokens = readThreadContextTokens(input.configHome, st.threadId ?? built.threadId);
 
     return {
       exitCode: outcome.exitCode,
@@ -146,7 +146,9 @@ export const adapter: RuntimeAdapter = {
       session: st.threadId ? { threadId: st.threadId, ...(st.cumulativeUsage ? { usage: st.cumulativeUsage } : {}) } : (built.threadId && built.mode === 'resume' ? { threadId: built.threadId } : null),
       finalText,
       ...(structured !== undefined ? { structured } : {}),
-      ...(st.usage ? { usage: { ...st.usage, basis: 'per_turn' as const } } : {}),
+      // The turn's cumulative usage is not a context size; the thread's last request is. Read it from
+      // the rollout so the chat's context meter has a real figure for a Codex session.
+      ...(st.usage ? { usage: { ...st.usage, ...(contextTokens != null ? { contextTokens } : {}), basis: 'per_turn' as const } } : {}),
       ...(model ? { model } : {}),
       provider: 'openai',
       ...(error ? { error } : {}),

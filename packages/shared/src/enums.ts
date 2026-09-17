@@ -110,7 +110,7 @@ export type DecisionInputType = (typeof DECISION_INPUT_TYPES)[number];
 export const SECRET_SCOPES = ['workspace', 'project', 'role'] as const;
 export type SecretScope = (typeof SECRET_SCOPES)[number];
 
-export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'ticket_blocked', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved', 'live_interrupt', 'self_scheduled', 'plan_submitted'] as const;
+export const WAKE_SOURCES = ['human_message', 'ticket_assigned', 'ticket_comment', 'mention', 'decision_answered', 'blockers_resolved', 'children_completed', 'ticket_blocked', 'timer', 'routine', 'system', 'retry', 'conductor_request', 'merge_approved', 'live_interrupt', 'self_scheduled', 'plan_submitted', 'scout_report'] as const;
 export type WakeSource = (typeof WAKE_SOURCES)[number];
 
 /** VS-398: a captain-authored, pre-ticket planning session and its ordered draft tickets. */

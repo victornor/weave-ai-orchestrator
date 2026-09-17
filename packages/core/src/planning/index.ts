@@ -112,6 +112,17 @@ export function createPlanningService(ctx: WorkspaceContext, deps: () => CoreSer
     for (const b of unique) db.run('INSERT INTO plan_draft_blockers (plan_draft_id, blocks_on_draft_id) VALUES (?, ?)', [draftId, b]);
   };
 
+  /** Shared by post-submission weaver linking and pre-submission planner dispatch: both record what became of a draft the same way. */
+  const applyLink = (draftId: string, outcome: { ticketId: string } | { failureReason: string }): PlanDraft => {
+    const current = getDraft(draftId);
+    const now = nowIso();
+    if ('ticketId' in outcome) db.update('plan_drafts', draftId, { status: 'created', createdTicketId: outcome.ticketId, failureReason: null, updatedAt: now });
+    else db.update('plan_drafts', draftId, { status: 'failed', failureReason: outcome.failureReason, updatedAt: now });
+    const draft = getDraft(draftId);
+    ctx.events.emit('plan.draft_linked', 'plan_draft', draftId, { planId: current.planId });
+    return draft;
+  };
+
   return {
     list(projectId) {
       const pid = resolveProject(projectId);
@@ -203,9 +214,12 @@ export function createPlanningService(ctx: WorkspaceContext, deps: () => CoreSer
     creationOrder(planId) {
       const drafts = db.all<PlanDraft>('SELECT * FROM plan_drafts WHERE plan_id = ? ORDER BY position, created_at, id', [planId]);
       const blockersOf = new Map(drafts.map((d) => [d.id, new Set(draftBlockers(d.id))]));
-      const done = new Set<string>();
+      // VS-517: a draft already `created` (dispatched before submission) or `failed` needs no ticket
+      // created for it — seed it as already `done` so a still-`pending` dependent's blockers resolve
+      // through it, but leave it out of the returned order, which the weaver walks to create tickets.
+      const done = new Set(drafts.filter((d) => d.status !== 'pending').map((d) => d.id));
       const order: string[] = [];
-      const remaining = [...drafts];
+      const remaining = drafts.filter((d) => d.status === 'pending');
       while (remaining.length) {
         const idx = remaining.findIndex((d) => [...blockersOf.get(d.id)!].every((b) => done.has(b)));
         if (idx === -1) {
@@ -294,13 +308,26 @@ export function createPlanningService(ctx: WorkspaceContext, deps: () => CoreSer
     },
 
     linkDraft(draftId, outcome) {
-      const current = getDraft(draftId);
-      const now = nowIso();
-      if ('ticketId' in outcome) db.update('plan_drafts', draftId, { status: 'created', createdTicketId: outcome.ticketId, failureReason: null, updatedAt: now });
-      else db.update('plan_drafts', draftId, { status: 'failed', failureReason: outcome.failureReason, updatedAt: now });
+      return applyLink(draftId, outcome);
+    },
+
+    findDraftByTicket(ticketId) {
+      const row = db.get<{ id: string; planId: string }>('SELECT id, plan_id FROM plan_drafts WHERE created_ticket_id = ?', [ticketId]);
+      return row ? { draftId: row.id, planId: row.planId } : null;
+    },
+
+    dispatchDraft(actor, draftId) {
       const draft = getDraft(draftId);
-      ctx.events.emit('plan.draft_linked', 'plan_draft', draftId, { planId: current.planId });
-      return draft;
+      const plan = get(draft.planId);
+      requireDrafting(plan);
+      if (draft.kind !== 'scout') throw new OcError('validation', `draft ${draftId} is a ${draft.kind}, not a scout — only a scout draft can be dispatched before submission`, { draftId, kind: draft.kind });
+      if (draft.status !== 'pending') throw new OcError('validation', `draft ${draftId} is already ${draft.status}`, { draftId, status: draft.status });
+      if (!draft.targetRoleId) throw new OcError('validation', `draft ${draftId} has no target role — a scout draft needs one to dispatch`, { draftId });
+      const ticket = deps().tickets.create(actor, {
+        projectId: plan.projectId, kind: 'scout', title: draft.title, description: draft.description,
+        priority: draft.priority, assigneeRoleId: draft.targetRoleId, workerModelId: draft.tierOverride ?? draft.suggestedTier,
+      });
+      return applyLink(draftId, { ticketId: ticket.id });
     },
   };
 }

@@ -131,6 +131,7 @@ vi.mock('../api/hooks', () => ({
   useRoles: () => ({ data: [] }),
   usePatchPlanDraft: () => ({ mutate: vi.fn() }),
   useRemovePlanDraft: () => ({ mutate: vi.fn() }),
+  useDispatchPlanDraft: () => ({ mutate: vi.fn(), isPending: false }),
   useSubmitPlan: () => ({ mutate: vi.fn(), isPending: false }),
   useDiscardPlan: () => ({ mutate: vi.fn() }),
 }));

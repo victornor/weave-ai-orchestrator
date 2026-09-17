@@ -496,6 +496,29 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       try { void deps().workers.releaseSessionTicket(actor, session.id); }
       catch (e) { log.warn({ err: e, ticketId: t.id }, 'releasing a session ticket failed'); }
     }
+    // VS-517: a scout draft the planner dispatched before submission reports back to its plan's
+    // planner, never the weaver — but only while the plan is still `drafting`; once it is not (the
+    // plan was submitted or discarded, or this ticket was never planner-dispatched at all), this is a
+    // no-op and the ticket finishes exactly like any other standalone ticket. Scheduled rather than
+    // awaited: `ensurePlanner` provisions a worktree, and a terminal ticket transition must not block
+    // on that.
+    try {
+      // Only a `scout` ticket can ever be linked from a draft this way (`dispatchDraft` refuses any
+      // other kind) — skip the lookup entirely for every other kind, which is also most of what a
+      // planning-less test harness transitions to terminal.
+      const draft = t.kind === 'scout' ? deps().planning.findDraftByTicket(t.id) : null;
+      if (draft) {
+        const plan = deps().planning.get(draft.planId);
+        if (plan.status === 'drafting') {
+          schedule(50, `scout report wake for ${t.identifier}`, async () => {
+            const agent = await deps().workers.ensurePlanner(actor, plan.id);
+            wake(agent.id, 'scout_report', `${t.identifier} finished — read its report`, { ticketId: t.id, draftId: draft.draftId, planId: plan.id });
+          });
+        }
+      }
+    } catch (e) {
+      log.warn({ err: e, ticketId: t.id }, 'scout report routing failed');
+    }
   }
 
   function releaseWorkersForTerminal(t: Ticket, actor: Actor): void {

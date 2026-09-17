@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { OcError, ProjectConfigSchema, ProjectPoliciesSchema, ROADMAP_STATUSES, ROADMAP_BLOCK_STATUSES, TICKET_KINDS, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, TICKET_PRIORITIES, projectLabel } from '@weave-ai/shared';
+import { OcError, ProjectConfigSchema, ProjectPoliciesSchema, ROADMAP_STATUSES, ROADMAP_BLOCK_STATUSES, TICKET_KINDS, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, TICKET_PRIORITIES, TERMINAL_TICKET_STATUSES, projectLabel } from '@weave-ai/shared';
 import type { CoreServices } from '@weave-ai/core';
 import type { AppEnv } from '../types.js';
 import { body } from '../http.js';
@@ -250,7 +250,15 @@ export function projectRoutes(): Hono<AppEnv> {
     const s = c.get('ws').services;
     const project = s.projects.get(c.req.param('id'));
     const plan = scopedPlan(s.planning, project.id, c.req.param('planId'));
-    const drafts = s.planning.listDrafts(plan.id).map((d) => ({ ...d, blockedBy: s.planning.draftBlockers(d.id) }));
+    // VS-517: a dispatched draft's ticket status (and, once it finishes, its report) rides along
+    // here too, so the Plan modal shows a running or reported scout without a trip to the work page.
+    const drafts = s.planning.listDrafts(plan.id).map((d) => {
+      const base = { ...d, blockedBy: s.planning.draftBlockers(d.id) };
+      if (!d.createdTicketId) return base;
+      const ticket = s.tickets.get(d.createdTicketId);
+      const terminal = TERMINAL_TICKET_STATUSES.includes(ticket.status);
+      return { ...base, ticketStatus: ticket.status, report: terminal ? (s.tickets.getDocument(ticket.id, 'report')?.body ?? null) : undefined };
+    });
     return c.json({ plan, drafts });
   });
   app.patch('/:id/plans/:planId/drafts/:draftId', async (c) => {
@@ -268,6 +276,19 @@ export function projectRoutes(): Hono<AppEnv> {
     const draft = scopedDraft(s.planning, plan.id, c.req.param('draftId'));
     s.planning.removeDraft(c.get('actor'), draft.id);
     return c.json({ ok: true });
+  });
+  /**
+   * VS-517: captain starts a scout draft running right now, before the plan is submitted — the one
+   * exception to "drafts stay unfiled until submission". Deliberately human-only, like every other
+   * plan-editing route here: the planning agent has no tool that reaches this, so nothing but
+   * captain's own click in the Plan modal can ever dispatch one.
+   */
+  app.post('/:id/plans/:planId/drafts/:draftId/dispatch', (c) => {
+    const s = c.get('ws').services;
+    const project = s.projects.get(c.req.param('id'));
+    const plan = scopedPlan(s.planning, project.id, c.req.param('planId'));
+    const draft = scopedDraft(s.planning, plan.id, c.req.param('draftId'));
+    return c.json(s.planning.dispatchDraft(c.get('actor'), draft.id));
   });
   app.post('/:id/plans/:planId/submit', async (c) => {
     const s = c.get('ws').services;

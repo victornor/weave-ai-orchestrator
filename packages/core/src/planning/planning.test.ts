@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OcError } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createPlanningService } from './index.js';
-import type { Actor, PlanningService } from '../api.js';
+import type { Actor, PlanningService, TicketCreateInput } from '../api.js';
 
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
 const OTHER_PROJECT = 'p-other';
@@ -231,6 +231,78 @@ describe('planning (VS-398)', () => {
     expect(failedDraft.status).toBe('failed');
     expect(failedDraft.failureReason).toBe('no role fits');
     expect(planning.getDraft(created.id).status).toBe('created');
+  });
+
+  it('finds the draft (and plan) a ticket was linked from, or null for an unlinked ticket (VS-517)', () => {
+    const plan = startPlan();
+    const draft = addDraft(plan.id, { title: 'Scout it' });
+    expect(planning.findDraftByTicket('tkt-1')).toBeNull();
+    planning.linkDraft(draft.id, { ticketId: 'tkt-1' });
+    expect(planning.findDraftByTicket('tkt-1')).toEqual({ draftId: draft.id, planId: plan.id });
+  });
+
+  describe('dispatchDraft (VS-517)', () => {
+    const addScout = (planId: string, over: Partial<Parameters<PlanningService['addDraft']>[2]> = {}) =>
+      planning.addDraft(HUMAN, planId, { title: 'Scout the auth flow', kind: 'scout', suggestedTier: 'quick', targetRoleId: h.roleId, ...over });
+
+    beforeEach(() => {
+      let n = 0;
+      h.services.tickets = {
+        create: (_actor: Actor, input: TicketCreateInput) => {
+          n += 1;
+          const id = `dispatched-tkt-${n}`;
+          h.ctx.db.insert('tickets', {
+            id, workspaceId: h.workspaceId, projectId: input.projectId ?? null, number: 900 + n, identifier: `TST-9${n}`,
+            kind: input.kind, title: input.title, status: 'todo', priority: input.priority ?? 'medium',
+            assigneeRoleId: input.assigneeRoleId ?? null, createdByKind: 'human', createdAt: 't0', updatedAt: 't0',
+          });
+          return { id, workspaceId: h.workspaceId, identifier: `TST-9${n}`, number: 900 + n, kind: input.kind, title: input.title, status: 'todo', priority: input.priority ?? 'medium', projectId: input.projectId ?? null, assigneeRoleId: input.assigneeRoleId ?? null } as never;
+        },
+      } as never;
+    });
+
+    it('dispatches a pending scout draft as a real ticket and links it immediately', () => {
+      const plan = startPlan();
+      const draft = addScout(plan.id);
+      const linked = planning.dispatchDraft(HUMAN, draft.id);
+      expect(linked.status).toBe('created');
+      expect(linked.createdTicketId).toBe('dispatched-tkt-1');
+    });
+
+    it('refuses to dispatch a non-scout draft', () => {
+      const plan = startPlan();
+      const draft = addDraft(plan.id, { kind: 'change' });
+      expect(() => planning.dispatchDraft(HUMAN, draft.id)).toThrow(/not a scout/);
+    });
+
+    it('refuses to dispatch a draft that is not in a drafting plan', () => {
+      const plan = startPlan();
+      const draft = addScout(plan.id);
+      planning.submit(HUMAN, plan.id);
+      expect(() => planning.dispatchDraft(HUMAN, draft.id)).toThrow(/not drafting/);
+    });
+
+    it('refuses to dispatch an already-dispatched draft a second time', () => {
+      const plan = startPlan();
+      const draft = addScout(plan.id);
+      planning.dispatchDraft(HUMAN, draft.id);
+      expect(() => planning.dispatchDraft(HUMAN, draft.id)).toThrow(/already created/);
+    });
+
+    it('refuses to dispatch a scout draft with no target role', () => {
+      const plan = startPlan();
+      const draft = addScout(plan.id, { targetRoleId: null });
+      expect(() => planning.dispatchDraft(HUMAN, draft.id)).toThrow(/target role/);
+    });
+  });
+
+  it('creation order skips an already-dispatched draft but still lets a dependent resolve through it (VS-517)', () => {
+    const plan = startPlan();
+    const scout = addDraft(plan.id, { title: 'Scout', kind: 'scout' });
+    const dependent = addDraft(plan.id, { title: 'Depends on the scout' });
+    planning.updateDraft(HUMAN, dependent.id, { blockedBy: [scout.id] });
+    planning.linkDraft(scout.id, { ticketId: 'tkt-1' });
+    expect(planning.creationOrder(plan.id)).toEqual([dependent.id]);
   });
 
   it('sets and clears the plan’s live agent', () => {

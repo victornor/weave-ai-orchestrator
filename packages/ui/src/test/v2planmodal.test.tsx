@@ -14,7 +14,7 @@ const state = vi.hoisted(() => ({
   planStatus: 'drafting' as string,
   tabs: [] as PlanSummary[],
   newPlanId: null as string | null,
-  drafts: [] as Array<PlanDraft & { blockedBy: string[] }>,
+  drafts: [] as Array<PlanDraft & { blockedBy: string[]; ticketStatus?: string; report?: string | null }>,
   roles: [] as Role[],
   messages: [] as ThreadMessage[],
   traces: [] as RunTrace[],
@@ -26,6 +26,7 @@ const state = vi.hoisted(() => ({
   posted: [] as Array<Record<string, unknown>>,
   patched: [] as Array<Record<string, unknown>>,
   removed: [] as Array<Record<string, unknown>>,
+  dispatched: [] as Array<Record<string, unknown>>,
   submitted: [] as Array<Record<string, unknown>>,
   discarded: [] as Array<Record<string, unknown>>,
   invalidated: [] as unknown[][],
@@ -60,6 +61,7 @@ function resetState(): void {
   state.posted = [];
   state.patched = [];
   state.removed = [];
+  state.dispatched = [];
   state.submitted = [];
   state.discarded = [];
   state.invalidated = [];
@@ -147,6 +149,7 @@ vi.mock('../api/hooks', () => ({
   }),
   usePatchPlanDraft: () => ({ mutate: (v: Record<string, unknown>, opts?: { onSuccess?: () => void }) => { state.patched.push(v); opts?.onSuccess?.(); }, isPending: false }),
   useRemovePlanDraft: () => ({ mutate: (v: Record<string, unknown>) => { state.removed.push(v); } }),
+  useDispatchPlanDraft: () => ({ isPending: false, mutate: (v: Record<string, unknown>) => { state.dispatched.push(v); } }),
   useSubmitPlan: () => ({
     isPending: false,
     mutate: (v: Record<string, unknown>, opts?: { onSuccess?: () => void }) => {
@@ -169,7 +172,8 @@ const { PlanModal } = await import('../v2/PlanModal');
 
 const PROJECTS = [project({ id: 'p1', slug: 'api', name: 'API' }), project({ id: 'p2', slug: 'web', name: 'Web' })];
 
-function draft(over: Partial<PlanDraft & { blockedBy: string[] }> = {}): PlanDraft & { blockedBy: string[] } {
+type TestDraft = PlanDraft & { blockedBy: string[]; ticketStatus?: string; report?: string | null };
+function draft(over: Partial<TestDraft> = {}): TestDraft {
   return {
     id: 'd1', planId: 'plan_1', position: 0, title: 'Add token plumbing', description: '', kind: 'change',
     priority: 'medium', targetRoleId: null, suggestedTier: 'standard', tierOverride: null, status: 'pending',
@@ -301,6 +305,56 @@ describe('PlanModal (VS-398)', () => {
     render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Remove A' }));
     expect(state.removed).toEqual([{ projectId: 'p1', planId: 'plan_1', draftId: 'a' }]);
+  });
+
+  it('shows Dispatch only for a pending scout draft in a drafting plan, never for other kinds (VS-517)', () => {
+    state.drafts = [
+      draft({ id: 'a', title: 'Scout it', kind: 'scout' }),
+      draft({ id: 'b', title: 'Build it', kind: 'change' }),
+    ];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.getByRole('button', { name: 'Dispatch Scout it' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dispatch Build it' })).not.toBeInTheDocument();
+  });
+
+  it('dispatches a scout draft', () => {
+    state.drafts = [draft({ id: 'a', title: 'Scout it', kind: 'scout' })];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Dispatch Scout it' }));
+    expect(state.dispatched).toEqual([{ projectId: 'p1', planId: 'plan_1', draftId: 'a' }]);
+  });
+
+  it('does not offer Dispatch once the plan is no longer drafting', () => {
+    state.planStatus = 'submitted';
+    state.drafts = [draft({ id: 'a', title: 'Scout it', kind: 'scout' })];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.queryByRole('button', { name: 'Dispatch Scout it' })).not.toBeInTheDocument();
+  });
+
+  it('shows a dispatched scout as running, then as reported once its ticket is terminal, with no reorder/edit/remove controls', () => {
+    state.drafts = [draft({ id: 'a', title: 'Scout it', kind: 'scout', status: 'created', createdTicketId: 'tkt-9', ticketStatus: 'in_progress' })];
+    const { rerender } = render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.getByText('Dispatched — running')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Edit Scout it' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove Scout it' })).not.toBeInTheDocument();
+
+    state.drafts = [draft({ id: 'a', title: 'Scout it', kind: 'scout', status: 'created', createdTicketId: 'tkt-9', ticketStatus: 'done' })];
+    rerender(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.getByText('Reported')).toBeInTheDocument();
+  });
+
+  it('shows a failed dispatch with its reason', () => {
+    state.drafts = [draft({ id: 'a', title: 'Scout it', kind: 'scout', status: 'failed', failureReason: 'no role fits' })];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    expect(screen.getByText('Failed: no role fits')).toBeInTheDocument();
+  });
+
+  it('refreshes the plan when a dispatched draft\'s ticket status changes, without a manual reload (VS-517)', () => {
+    state.drafts = [draft({ id: 'a', title: 'Scout it', kind: 'scout', status: 'created', createdTicketId: 'tkt-9', ticketStatus: 'in_progress' })];
+    render(<PlanModal open onClose={vi.fn()} projects={PROJECTS} projectId="p1" />);
+    state.invalidated = [];
+    act(() => { state.onEvent?.({ type: 'ticket.status', entityType: 'ticket', entityId: 'tkt-9', payload: {} } as unknown as WorkspaceEvent); });
+    expect(state.invalidated).toContainEqual(['w', 'ws1', 'plans', 'plan_1']);
   });
 
   it('disables submit with no drafts, enables it once one exists, and closes its tab on submit (VS-477)', () => {

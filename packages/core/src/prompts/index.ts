@@ -493,8 +493,19 @@ export async function buildTurnPrompt(
     if (w.source !== 'plan_submitted') continue;
     const planId = typeof w.payload?.planId === 'string' ? w.payload.planId : null;
     notes.push(planId
-      ? `- A draft plan was submitted (plan \`${planId}\`): call \`weave_plan_get\` to read it, then create one real ticket per draft, in \`creationOrder\`, via \`weave_ticket_create\` — its role, priority and effective tier (the tier override when one is set, else the suggested tier) carried over exactly, and \`blockedBy\` naming the tickets already created from its dependencies. Call \`weave_plan_draft_link\` once per draft as you create it (or once you know it cannot be created, with why) — never leave one unaccounted for. If a draft's own dependency could not be created, mark that draft failed too, naming the missing dependency, rather than creating it without the blocker it was supposed to have — then continue with the rest of the plan. This is captain's already-decided plan: create it as given, not as you would have decomposed it yourself — do not re-split, re-merge or reorder drafts on your own judgement. Report the outcome, including any draft that could not be created and why, in your own chat with captain.`
+      ? `- A draft plan was submitted (plan \`${planId}\`): call \`weave_plan_get\` to read it, then create one real ticket for each draft \`creationOrder\` lists — its role, priority and effective tier (the tier override when one is set, else the suggested tier) carried over exactly, and \`blockedBy\` naming the tickets already created from its dependencies. \`creationOrder\` already leaves out any draft whose \`status\` is not \`pending\` — a scout the planner dispatched before submission is one of those, already \`created\` with its own \`createdTicketId\`; use that id directly as a dependent's blocker, and do not create a second ticket for it. Call \`weave_plan_draft_link\` once per draft you do create (or once you know it cannot be created, with why) — never leave a still-\`pending\` one unaccounted for. If a draft's own dependency could not be created, mark that draft failed too, naming the missing dependency, rather than creating it without the blocker it was supposed to have — then continue with the rest of the plan. This is captain's already-decided plan: create it as given, not as you would have decomposed it yourself — do not re-split, re-merge or reorder drafts on your own judgement. Report the outcome, including any draft that could not be created and why, in your own chat with captain.`
       : '- A draft plan was submitted, but its id was missing from the wake payload; call `weave_inbox` for the raw wake.');
+  }
+  // VS-517: a scout draft the planner dispatched before submission finished, and its plan is still
+  // drafting — the report reaches the planner here, never the weaver. Only a planning agent's own
+  // run receives this wake (`propagateTerminal` never targets the weaver with it), so this note is
+  // meaningful only in that agent's own prompt.
+  for (const w of flat) {
+    if (w.source !== 'scout_report') continue;
+    const draftId = typeof w.payload?.draftId === 'string' ? w.payload.draftId : null;
+    notes.push(draftId
+      ? `- A scout draft you dispatched (\`${draftId}\`) has finished: call \`weave_plan_get\` and read that draft's \`report\` — it is included right there, no other tool needed.`
+      : '- A scout draft you dispatched has finished, but its id was missing from the wake payload; call `weave_plan_get` and look for one whose `ticketStatus` is terminal.');
   }
   if (opts.isFirstTurn || opts.sessionStale) {
     let digest = '';

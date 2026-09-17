@@ -54,6 +54,11 @@ export function mcpOverrides(name: string, s: McpServerConfig): { args: string[]
     if (s.args?.length) push('args', JSON.stringify(s.args));
     if (Object.keys(s.env ?? {}).length) push('env', inlineTable(s.env ?? {}));
   }
+  // Codex serializes calls to a server that does not declare this, so every weave_* call became its
+  // own round trip — and each round trip re-sends the whole session window. The control-plane server
+  // is concurrency-safe (the daemon serializes its own writes), so allow the model to batch
+  // independent calls into one response.
+  push('supports_parallel_tool_calls', 'true');
   return { args, env };
 }
 
@@ -84,6 +89,8 @@ export function mcpConfigToml(servers: Record<string, McpServerConfig>, tokenEnv
         for (const [k, v] of Object.entries(s.env ?? {})) lines.push(`${key(k)} = ${toml(v)}`);
       }
     }
+    // See mcpOverrides: without this Codex serializes every call to the server.
+    lines.push('supports_parallel_tool_calls = true');
   }
   return `${lines.join('\n')}\n`;
 }

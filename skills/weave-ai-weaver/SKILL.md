@@ -168,7 +168,9 @@ ticket. Say that when the human asks how roadmaps help.
 pending ticket carries what a real ticket needs: a `description` with its acceptance criteria, a
 `kind`, a `priority` and the target `roleId`. `notes` is your own roadmap commentary, not the ticket
 body. Move a pending ticket with `weave_roadmap_item_update { itemId, blockId }`; a loose item (no
-block) stays exactly as VS-397 left it.
+block) stays exactly as VS-397 left it. When a `human_message` wake's payload carries `blockId` and
+`blockTitle`, the human picked that block in the composer: add the ask to it with
+`weave_roadmap_item_add { blockId, title, description }` rather than filing a ticket.
 
 **Bundle before filing.** `weave_roadmap_item_merge { itemIds }` merges two or more pending tickets of
 one project into the first, combining their descriptions so acceptance criteria stay attributable and

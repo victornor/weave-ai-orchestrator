@@ -262,4 +262,10 @@ describe('roadmap events (VS-397, VS-478)', () => {
     const keys = invalidated(event('roadmap.updated', { entityId: 'rm_1', entityType: 'roadmap', payload: null }));
     expect(keys).toContain(JSON.stringify(qk.roadmapRoot('ws1')));
   });
+
+  it('nests the blocks query under that root, so a block event refreshes the composer\u2019s block strip (VS-491)', () => {
+    const root = qk.roadmapRoot('ws1');
+    // Invalidating the root matches every key with it as a prefix, `roadmapBlocks` included.
+    expect(qk.roadmapBlocks('ws1', 'p1').slice(0, root.length)).toEqual([...root]);
+  });
 });

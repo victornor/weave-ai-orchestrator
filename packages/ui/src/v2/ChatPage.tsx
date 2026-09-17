@@ -31,6 +31,7 @@ import {
   useMessageContext,
   usePostThreadMessage,
   useProjects,
+  useRoadmapBlocks,
   useRunTraces,
   useRuntimes,
   useRuntimeModels,
@@ -284,6 +285,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const { draft, patch, clear } = useDraft(fetchId ? draftKey(ws, `thread:${fetchId}`) : null);
   const messages = useThreadMessages(fetchId);
   const post = usePostThreadMessage();
+  const blocks = useRoadmapBlocks(draft.projectId ?? null);
   const decisions = useDecisions({ status: 'open', owner: 'human', limit: 200 });
   // A second, answered-only read on the same route feeds the conversation's notes (captain,
   // 2026-09-14). Kept separate from the open list so an answered card still leaves the pane
@@ -412,6 +414,17 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const projectsById = useMemo(() => new Map((projects.data ?? []).map((p) => [p.id, p] as const)), [projects.data]);
   /** The workspace's project ids, so a chip's project hue is the same one V1 gives it (VS-149). */
   const projectIds = useMemo(() => (projects.data ?? []).map((p) => p.id), [projects.data]);
+  // The block choices offered for the tagged project (VS-491): the blocks still open to new pending
+  // tickets. A block that is started, done or dropped is not offered, and the query's project key is
+  // what keeps another project's blocks out.
+  const blockChoices = useMemo(() => (blocks.data ?? []).filter((b) => b.reportedStatus === 'open'), [blocks.data]);
+  const blockOptions = useMemo(() => blockChoices.map((b) => ({ id: b.id, title: b.title })), [blockChoices]);
+  // What a send would carry: the chosen block, but only while it is still offered. A draft naming a
+  // block that has since left the offered set is neither shown as chosen nor sent.
+  const effectiveBlockId = useMemo(
+    () => blockChoices.find((b) => b.id === draft.blockId)?.id ?? null,
+    [blockChoices, draft.blockId],
+  );
   // A decision the channel manager pushed to the thread is a message whose card part carries the
   // decision's prose fallback (title + context). It is kept only while a decision it names is known;
   // what renders in its place is decided per width below — an inline answerable card on phone where
@@ -509,11 +522,12 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const conversationRef = useRef<ChatConversationHandle>(null);
   const toBottom = useCallback((): void => { conversationRef.current?.toBottom(); }, []);
   const send = useCallback(
-    (text: string, files: File[], opts: { projectId: string | null; replyToMessageId: string | null; idempotencyKey: string }): void | Promise<void> => {
+    (text: string, files: File[], opts: { projectId: string | null; blockId: string | null; replyToMessageId: string | null; idempotencyKey: string }): void | Promise<void> => {
       if (!fetchId) return;
       const body = {
         body: text,
         ...(opts.projectId ? { projectId: opts.projectId } : {}),
+        ...(opts.blockId ? { blockId: opts.blockId } : {}),
         ...(opts.replyToMessageId ? { replyToMessageId: opts.replyToMessageId } : {}),
         ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
       };
@@ -525,7 +539,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
         if (offline) return Promise.reject(new Error('Attachments cannot be queued offline — reconnect and try again.'));
         setSending(true);
         return withTimeout(
-          post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, files, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId }),
+          post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, blockId: opts.blockId, files, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId }),
           SEND_TIMEOUT_MS,
         )
           .then(() => { setSending(false); clear(); toBottom(); })
@@ -534,7 +548,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
       if (offline) { queueThisMessage(); clear(); return; }
       setSending(true);
       return withTimeout(
-        post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId }),
+        post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, blockId: opts.blockId, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId }),
         SEND_TIMEOUT_MS,
       )
         .then(() => { setSending(false); clear(); toBottom(); })
@@ -739,7 +753,10 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
               <ChatComposer
                 projects={projects.data ?? []}
                 projectId={draft.projectId ?? null}
-                onChangeProject={(id) => patch({ projectId: id })}
+                onChangeProject={(id) => patch({ projectId: id, blockId: null })}
+                blocks={blockOptions}
+                blockId={effectiveBlockId}
+                onChangeBlock={(id) => patch({ blockId: id })}
                 value={draft.text}
                 onChange={(text) => patch({ text })}
                 replyToExcerpt={replyTo?.body ?? null}

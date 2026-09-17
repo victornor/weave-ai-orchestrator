@@ -74,12 +74,16 @@ export interface ChatComposerProps {
   projects: Project[];
   projectId: string | null;
   onChangeProject: (id: string | null) => void;
+  /** The selected project's `open` roadmap blocks, offered once a project is chosen (VS-491). */
+  blocks?: ReadonlyArray<{ id: string; title: string }>;
+  blockId?: string | null;
+  onChangeBlock?: (id: string | null) => void;
   value: string;
   onChange: (text: string) => void;
   replyToExcerpt?: string | null;
   replyToMessageId?: string | null;
   onDismissReply?: () => void;
-  onSubmit: (text: string, files: File[], opts: { projectId: string | null; replyToMessageId: string | null; idempotencyKey: string }) => void | Promise<void>;
+  onSubmit: (text: string, files: File[], opts: { projectId: string | null; blockId: string | null; replyToMessageId: string | null; idempotencyKey: string }) => void | Promise<void>;
   /** The search and plan affordances are chat-only; each button hides when its handler is absent (the plan modal passes neither). */
   onOpenSearch?: () => void;
   onOpenPlan?: () => void;
@@ -112,6 +116,9 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
     projects,
     projectId,
     onChangeProject,
+    blocks = [],
+    blockId = null,
+    onChangeBlock,
     value,
     onChange,
     replyToExcerpt,
@@ -218,7 +225,7 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
     setSubmitting(true);
     setSubmitError(null);
     const idempotencyKey = crypto.randomUUID();
-    Promise.resolve(onSubmit(t, files, { projectId, replyToMessageId, idempotencyKey }))
+    Promise.resolve(onSubmit(t, files, { projectId, blockId, replyToMessageId, idempotencyKey }))
       .then(() => {
         setFiles([]);
         setAttachError(null);
@@ -231,7 +238,7 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
         submittingRef.current = false;
         setSubmitting(false);
       });
-  }, [disabled, files, onSubmit, projectId, replyToMessageId]);
+  }, [disabled, files, onSubmit, projectId, blockId, replyToMessageId]);
   doSubmitRef.current = doSubmit;
 
   // Keep the provider's view of this composer current: its target, whether it may answer the chord,
@@ -335,6 +342,30 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
         ) : null}
         <span className="ac-mono ml-auto flex-none whitespace-nowrap text-nano text-text-3">{dictationHint({ isTouch })}</span>
       </div>
+
+      {showScope && projectId && blocks.length > 0 ? (
+        <div role="group" aria-label="Roadmap block for this message" className="flex items-center gap-1.5 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => onChangeBlock?.(null)}
+            aria-pressed={blockId === null}
+            className={cx('v2-tag flex-none', blockId === null ? 'bg-bg-3 text-text-1' : 'text-text-2')}
+          >
+            Any block
+          </button>
+          {blocks.map((b) => (
+            <button
+              key={b.id}
+              type="button"
+              onClick={() => onChangeBlock?.(b.id === blockId ? null : b.id)}
+              aria-pressed={b.id === blockId}
+              className={cx('v2-tag flex-none', b.id === blockId ? 'bg-bg-3 text-text-1' : 'text-text-2')}
+            >
+              {b.title}
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       {replyToExcerpt ? (
         <div className="flex items-start gap-2 rounded-r4 border-l-2 border-accent bg-bg-2 py-1 pl-2 pr-1">

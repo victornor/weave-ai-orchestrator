@@ -7,7 +7,7 @@
  * hint is platform/input-aware, and a send while dictating waits for an upload-mode transcript so
  * the last words are not lost.
  */
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { dictationHint } from '../lib/dictationHint';
@@ -66,14 +66,18 @@ const PROJECTS = [
   { id: 'p2', workspaceId: 'ws1', slug: 'api', name: 'api' },
 ] as never[];
 
-function Harness({ onSubmit, clearOnSubmit = false }: { onSubmit: (text: string, files: File[], opts: { projectId: string | null; replyToMessageId: string | null; idempotencyKey: string }) => void | Promise<void>; clearOnSubmit?: boolean }): React.ReactElement {
+function Harness({ onSubmit, clearOnSubmit = false, blocks = [], initialProject = null, initialBlock = null }: { onSubmit: (text: string, files: File[], opts: { projectId: string | null; blockId: string | null; replyToMessageId: string | null; idempotencyKey: string }) => void | Promise<void>; clearOnSubmit?: boolean; blocks?: ReadonlyArray<{ id: string; title: string }>; initialProject?: string | null; initialBlock?: string | null }): React.ReactElement {
   const [text, setText] = useState('');
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [projectId, setProjectId] = useState<string | null>(initialProject);
+  const [blockId, setBlockId] = useState<string | null>(initialBlock);
   return (
     <ChatComposer
       projects={PROJECTS}
       projectId={projectId}
-      onChangeProject={setProjectId}
+      onChangeProject={(id) => { setProjectId(id); setBlockId(null); }}
+      blocks={blocks}
+      blockId={blockId}
+      onChangeBlock={setBlockId}
       value={text}
       onChange={setText}
       onSubmit={(t, f, o) => { const r = onSubmit(t, f, o); if (clearOnSubmit) setText(''); return r; }}
@@ -200,6 +204,40 @@ describe('the V2 chat composer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'web' }));
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(onSubmit).toHaveBeenLastCalledWith('x', [], expect.objectContaining({ projectId: 'p1' }));
+  });
+
+  it('offers the tagged project\u2019s open blocks and sends the chosen one as blockId (VS-491)', () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} blocks={[{ id: 'b1', title: 'UI polish' }, { id: 'b2', title: 'Docs' }]} />);
+    // Nothing is offered until a project is chosen.
+    expect(screen.queryByRole('group', { name: 'Roadmap block for this message' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'web' }));
+
+    const strip = screen.getByRole('group', { name: 'Roadmap block for this message' });
+    expect(within(strip).getByRole('button', { name: 'Any block' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(within(strip).getByRole('button', { name: 'UI polish' }));
+    expect(within(strip).getByRole('button', { name: 'UI polish' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onSubmit).toHaveBeenLastCalledWith('x', [], expect.objectContaining({ projectId: 'p1', blockId: 'b1' }));
+  });
+
+  it('sends no block when Any block is active (VS-491)', () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} blocks={[{ id: 'b1', title: 'UI polish' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'web' }));
+    fireEvent.click(screen.getByRole('button', { name: 'UI polish' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Any block' }));
+    fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'x' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onSubmit).toHaveBeenLastCalledWith('x', [], expect.objectContaining({ projectId: 'p1', blockId: null }));
+  });
+
+  it('offers no block strip for a project with no open block (VS-491)', () => {
+    render(<Harness onSubmit={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'web' }));
+    expect(screen.queryByRole('group', { name: 'Roadmap block for this message' })).not.toBeInTheDocument();
   });
 
   it('appends the recognized transcript after the existing text', async () => {

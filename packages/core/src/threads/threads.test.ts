@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createProjectsService } from '../projects/index.js';
+import { createRoadmapService } from '../roadmap/index.js';
 import { createTicketsService } from '../tickets/service.js';
 import { createThreadsService, REPLY_EXCERPT_CHARS } from './service.js';
-import type { Actor, ThreadsService, TicketsService } from '../api.js';
+import type { Actor, RoadmapService, ThreadsService, TicketsService } from '../api.js';
 
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
 const CONDUCTOR: Actor = { kind: 'agent', id: 'conductor', runId: 'run-1' };
@@ -13,6 +14,7 @@ describe('threads', () => {
   let h: TestHarness;
   let threads: ThreadsService;
   let tickets: TicketsService;
+  let roadmap: RoadmapService;
   let wake: ReturnType<typeof fakeWake>;
 
   beforeEach(() => {
@@ -23,6 +25,8 @@ describe('threads', () => {
     h.services.projects = createProjectsService(h.ctx, h.deps);
     tickets = createTicketsService(h.ctx, h.deps);
     h.services.tickets = tickets;
+    roadmap = createRoadmapService(h.ctx, h.deps);
+    h.services.roadmap = roadmap;
     threads = createThreadsService(h.ctx, h.deps);
     h.services.threads = threads;
   });
@@ -204,6 +208,56 @@ describe('threads', () => {
   it('rejects an unknown project, storing no message and waking nobody', async () => {
     const t = threads.bindOrGet('web', 'web-p4', null);
     await expect(threads.inbound(HUMAN, t.id, 'wrong project', { projectId: 'nope' })).rejects.toThrowError(
+      expect.objectContaining({ code: 'not_found' }),
+    );
+    expect(threads.messages(t.id)).toHaveLength(0);
+    expect(wake.calls).toHaveLength(0);
+  });
+
+  it('carries a roadmap block of the message project onto the message and into the wake payload (VS-491)', async () => {
+    const t = threads.bindOrGet('web', 'web-b1', null, 'Victor');
+    const block = roadmap.createBlock(HUMAN, h.projectId, { title: 'UI polish' });
+    const msg = await threads.inbound(HUMAN, t.id, 'add the block picker', { projectId: h.projectId, blockId: block.id });
+
+    expect(msg.blockId).toBe(block.id);
+    expect(threads.messages(t.id).map((m) => m.blockId)).toEqual([block.id]);
+    expect(wake.calls[0]?.input.payload).toEqual(
+      expect.objectContaining({
+        messageId: msg.id, projectId: h.projectId, projectSlug: h.projectSlug,
+        blockId: block.id, blockTitle: 'UI polish',
+      }),
+    );
+  });
+
+  it('reports no block explicitly when a message carries none', async () => {
+    const t = threads.bindOrGet('web', 'web-b2', null);
+    const msg = await threads.inbound(HUMAN, t.id, 'no block here', { projectId: h.projectId });
+    expect(msg.blockId).toBeNull();
+    expect(wake.calls[0]?.input.payload).toEqual(expect.objectContaining({ projectId: h.projectId, blockId: null, blockTitle: null }));
+  });
+
+  it('rejects a block of another project, storing no message and waking nobody', async () => {
+    h.db.insert('projects', {
+      id: 'p-other', workspaceId: h.workspaceId, slug: 'other', name: 'Other', gitUrl: 'git@e:o/o.git',
+      defaultBranch: 'main', clonePath: '/tmp/o', maxWorkers: 4, worktreeProvider: 'git', openspecEnabled: true,
+      policiesJson: {}, status: 'ready', createdAt: 't0', updatedAt: 't0',
+    });
+    const foreign = roadmap.createBlock(HUMAN, 'p-other', { title: 'Other block' });
+    const t = threads.bindOrGet('web', 'web-b3', null);
+    await expect(threads.inbound(HUMAN, t.id, 'wrong block', { projectId: h.projectId, blockId: foreign.id })).rejects.toThrowError(
+      expect.objectContaining({ code: 'not_found' }),
+    );
+    expect(threads.messages(t.id)).toHaveLength(0);
+    expect(wake.calls).toHaveLength(0);
+  });
+
+  it('rejects a block with no project, and an unknown block, as validation and not_found', async () => {
+    const t = threads.bindOrGet('web', 'web-b4', null);
+    const block = roadmap.createBlock(HUMAN, h.projectId, { title: 'UI polish' });
+    await expect(threads.inbound(HUMAN, t.id, 'no project', { blockId: block.id })).rejects.toThrowError(
+      expect.objectContaining({ code: 'validation' }),
+    );
+    await expect(threads.inbound(HUMAN, t.id, 'unknown block', { projectId: h.projectId, blockId: 'nope' })).rejects.toThrowError(
       expect.objectContaining({ code: 'not_found' }),
     );
     expect(threads.messages(t.id)).toHaveLength(0);

@@ -18,7 +18,7 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 5. **Leave durable progress on the ticket** — comment, document, or work product — before the turn ends.
 6. **Finish with the structured final report** as your last message.
 
-**Batch your reads.** When several reads are independent — several files, several greps, several globs — request them together in one step, not one per step. Every extra step re-sends the whole conversation, so a turn that reads one file per step costs far more than one that reads them together.
+**Batch your reads.** When several reads are independent — several files, several greps, several globs, or several Weave calls — request them together in one step, not one per step. Ask for `weave_worktree_status`, `weave_ticket_get`, `weave_ticket_comments` and `weave_ticket_document_get` in one message, and for every file, grep and glob you need at once. Every extra step re-sends the whole conversation, so a turn that reads one thing per step costs far more than one that reads them together.
 
 | Status | What this turn is for | Ends with |
 |---|---|---|

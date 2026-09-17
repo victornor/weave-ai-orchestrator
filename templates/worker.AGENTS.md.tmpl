@@ -68,7 +68,7 @@ Do not add or keep a `mise.toml` (or equivalent) Node pin that makes host CLIs s
 
 ## Token care
 
-- **Batch independent reads into one step.** Several files, several greps, several globs: ask for them together in one call, never one per call. Every extra step re-sends the whole conversation, so reading one file per step costs far more than reading them all at once.
+- **Batch independent reads into one step.** Several files, several greps, several globs, or several Weave calls: ask for them together in one message, never one per message — the runtime runs them together and returns every result at once. Ask for `weave_worktree_status`, `weave_ticket_get`, `weave_ticket_comments` and `weave_ticket_document_get` together. Every extra step re-sends the whole conversation, so reading one thing per step costs far more than reading them all at once.
 
 ## Git
 

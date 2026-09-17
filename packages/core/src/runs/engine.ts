@@ -485,7 +485,9 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       outputSchema: RUN_REPORT_JSON_SCHEMA as unknown as Record<string, unknown>,
       mcpServers,
       env,
-      options: { liveInput: ctx.config.defaults.liveInput },
+      // The runtime's own options (compaction, tool-output limit, extra args, …) ride with the
+      // setting that names the runtime; `liveInput` is the engine's and always wins.
+      options: { ...(setting.options ?? {}), liveInput: ctx.config.defaults.liveInput },
       limits: { timeoutMs: turnTimeoutMs },
       permission: {
         // VS-171: Claude auto-mode can classify away weave_*; skip-permissions is only on for bypass.

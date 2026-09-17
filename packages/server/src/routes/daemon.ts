@@ -3,7 +3,7 @@ import { homedir, hostname } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@weave-ai/shared';
+import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, runtimeOptionErrors, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@weave-ai/shared';
 import { detectHostToolsCached, clearHostToolCache, ensureHostToolPath, getLogger, listScratchTrees, workspaceLoader, type HostTool } from '@weave-ai/core';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { cancelRunningRuns } from '../daemon.js';
@@ -101,7 +101,10 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
     const out = [];
     for (const [id, adapter] of deps.registries.runtimes) {
       const detection = await adapter.detect().catch((e: unknown) => ({ status: 'broken' as const, notes: String(e) }));
-      out.push({ id, displayName: adapter.displayName, detection, capabilities: adapter.capabilities, models: [] as unknown[] });
+      // `configSchema` is the runtime's own declaration of its per-setting options; the Models editor
+      // renders it and the write paths validate against it, so a setting can only carry options the
+      // adapter understands.
+      out.push({ id, displayName: adapter.displayName, detection, capabilities: adapter.capabilities, configSchema: adapter.configSchema(), models: [] as unknown[] });
     }
     return c.json(out);
   });
@@ -338,6 +341,11 @@ async function modelsPut(
   if (input.workerOptions !== undefined) {
     current.workerOptions = input.workerOptions && input.workerOptions.length > 0 ? input.workerOptions : null;
   }
+  const optionErrors = runtimeOptionErrors(
+    (r) => deps.registries.runtimes.get(r)?.configSchema(),
+    [current.weaver, current.workers, ...(current.workerOptions ?? [])],
+  );
+  if (optionErrors.length > 0) throw new OcError('validation', `invalid runtime options: ${optionErrors.join('; ')}`);
   persistDaemonModels(deps, {
     weaver: current.weaver ?? undefined,
     workers: current.workers ?? undefined,

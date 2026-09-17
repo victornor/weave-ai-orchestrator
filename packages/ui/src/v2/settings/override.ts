@@ -8,7 +8,7 @@ import type { DaemonModels, ModelSetting, WorkspaceModelsSource, WorkerModelOpti
 
 export type AgentKind = 'weaver' | 'workers';
 export type OverrideState = 'inherited' | 'overridden';
-export type ModelLike = { runtime: string | null; model: string | null; effort?: string; compaction?: { mode: string; value?: number } };
+export type ModelLike = { runtime: string | null; model: string | null; effort?: string; compaction?: { mode: string; value?: number }; options?: Record<string, unknown> };
 
 function norm(v: string | null | undefined): string {
   return v ?? '';
@@ -36,12 +36,19 @@ export function diffSetting(effective: ModelLike, baseline: ModelLike): string[]
   if (norm(effective.model) !== norm(baseline.model)) out.push(`model ${baseline.model ?? 'default'} → ${effective.model ?? 'default'}`);
   if (norm(effective.effort) !== norm(baseline.effort)) out.push(`thinking ${baseline.effort ?? 'default'} → ${effective.effort ?? 'default'}`);
   if (describeCompaction(effective.compaction) !== describeCompaction(baseline.compaction)) out.push(`auto-compact ${describeCompaction(baseline.compaction)} → ${describeCompaction(effective.compaction)}`);
+  if (stableOptions(effective.options) !== stableOptions(baseline.options)) out.push('options');
   return out;
 }
 
 function describeCompaction(c: { mode: string; value?: number } | undefined): string {
   if (!c || c.mode === 'off') return 'off';
   return `${c.value ?? '?'}${c.mode === 'percent' ? '%' : ' tok'}`;
+}
+
+/** Order-independent form of an options map, so a diff does not fire on key order alone. */
+function stableOptions(options: Record<string, unknown> | undefined): string {
+  if (!options) return '';
+  return JSON.stringify(Object.keys(options).sort().map((k) => [k, options[k]]));
 }
 
 /** The daemon option a workspace option is compared against, matched by id; undefined when the daemon has none. */

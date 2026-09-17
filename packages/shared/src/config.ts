@@ -156,12 +156,24 @@ export function compactionThreshold(compaction: ModelCompaction | undefined, win
   return Math.round(windowTokens * Math.min(99, Math.max(1, compaction.value)) / 100);
 }
 
+/** An option value: the scalar shapes an adapter's `configSchema()` declares, plus string lists (extra args). */
+export const RuntimeOptionValueSchema = z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]);
+export type RuntimeOptionValue = z.infer<typeof RuntimeOptionValueSchema>;
+
 export const ModelSettingSchema = z.object({
   runtime: z.string().min(1).default('claude'),
   model: z.string().nullable().default(null),
   effort: z.string().optional(),
   /** Automatic compaction for an agent on this setting, on top of whatever the CLI does by itself. */
   compaction: ModelCompactionSchema.optional(),
+  /**
+   * Per-runtime options, validated against the adapter's own `configSchema()` (see
+   * `validateRuntimeOptions`). This is where compaction (`compactionPercent`,
+   * `autoCompactTokenLimit`, `contextWindowTokens`), `toolOutputTokenLimit`, `extraArgs` and every
+   * other adapter setting live. Omitted when nothing is set, so an untouched setting stays exactly
+   * the runtime's own defaults.
+   */
+  options: z.record(RuntimeOptionValueSchema).optional(),
 });
 export type ModelSetting = z.infer<typeof ModelSettingSchema>;
 

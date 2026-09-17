@@ -713,7 +713,7 @@ export interface ThreadsService {
   list(filter?: { channelKind?: string; agentId?: string; ticketId?: string }): S.ChannelThread[];
   bindTicket(actor: Actor, threadId: string, ticketId: string | null): S.ChannelThread;
   /** `attachments` bytes are already validated (type/size) by the caller; `inbound` only stores and links them. Rejected with `validation` if the thread is ticket-bound (VS-133 — out of scope there). */
-  inbound(actor: Actor, threadId: string, body: string, opts?: { externalMessageId?: string; parts?: unknown[]; projectId?: string | null; replyToMessageId?: string | null; idempotencyKey?: string; attachments?: Array<{ filename: string; mediaType: S.AttachmentMediaType; bytes: Buffer }> }): Promise<S.ThreadMessage>;  // stores + wakes; a repeated idempotencyKey on this thread returns the existing message
+  inbound(actor: Actor, threadId: string, body: string, opts?: { externalMessageId?: string; parts?: unknown[]; projectId?: string | null; blockId?: string | null; replyToMessageId?: string | null; idempotencyKey?: string; attachments?: Array<{ filename: string; mediaType: S.AttachmentMediaType; bytes: Buffer }> }): Promise<S.ThreadMessage>;  // stores + wakes; a repeated idempotencyKey on this thread returns the existing message
   /**
    * `attachments` (VS-273 — the weaver's reply path only) are already resolved and size-checked by the caller via `resolveOutboundAttachments`; `outbound` only stores and links them, the same posture `inbound` takes for its own attachments.
    *

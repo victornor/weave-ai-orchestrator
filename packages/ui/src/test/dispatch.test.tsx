@@ -5,7 +5,7 @@ import { agent, decision, ticket } from './factories';
 
 function message(over: Partial<ThreadMessage> & Pick<ThreadMessage, 'id'>): ThreadMessage {
   return {
-    threadId: 'th_1', direction: 'outbound', authorKind: 'agent', authorId: 'ag_conductor', runId: 'run_1', projectId: null,
+    threadId: 'th_1', direction: 'outbound', authorKind: 'agent', authorId: 'ag_conductor', runId: 'run_1', projectId: null, blockId: null,
     replyToMessageId: null, replyToMessageIds: [], replyToExcerpt: null,
     body: 'Filed it.', parts: [], externalMessageId: null, deliveryStatus: 'delivered',
     createdAt: '2026-09-01T09:00:00.000Z', ...over,

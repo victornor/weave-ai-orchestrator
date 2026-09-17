@@ -19,6 +19,7 @@ const state = vi.hoisted(() => ({
   traces: [] as RunTrace[],
   tickets: [] as Ticket[],
   workers: [] as Agent[],
+  roadmapBlocks: [] as Array<{ id: string; reportedStatus: string; title: string }>,
   search: [] as Array<{ messageId: string; authorKind: string; authorId: string | null; createdAt: string; snippet: string }>,
   context: [] as ThreadMessage[],
   events: [] as unknown[],
@@ -89,6 +90,7 @@ vi.mock('../api/hooks', () => ({
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
   useWorkers: () => ({ data: state.workers }),
   useProjects: () => ({ data: [{ id: 'p1', workspaceId: 'ws1', slug: 'web', name: 'web' }] }),
+  useRoadmapBlocks: () => ({ data: state.roadmapBlocks }),
   useTickets: () => ({ data: state.tickets }),
   useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: 'claude' }, lastRun: state.lastRun, compacting: state.compacting } }),
   useCompactWeaver: () => ({ mutate: state.compact, isPending: false }),
@@ -144,6 +146,7 @@ function message(over: Partial<ThreadMessage> = {}): ThreadMessage {
     authorId: 'weaver1',
     runId: null,
     projectId: null,
+    blockId: null,
     replyToMessageId: null,
     replyToMessageIds: [],
     replyToExcerpt: null,
@@ -232,6 +235,7 @@ beforeEach(() => {
     agent({ id: 'w1', name: 'Platform Engineer #7', status: 'running', ticketId: null }),
     agent({ id: 'w2', name: 'Plugin Engineer #2', status: 'active', ticketId: null }),
   ];
+  state.roadmapBlocks = [];
   state.search = [];
   state.context = [];
   state.events = [];
@@ -728,5 +732,39 @@ describe('the V2 Chat screen', () => {
     render(<V2ChatPage />);
 
     expect(screen.getByText('Compacting…')).toBeDisabled();
+  });
+
+  it('offers the tagged project\u2019s open blocks and sends the chosen one as blockId (VS-491)', async () => {
+    state.roadmapBlocks = [
+      { id: 'b1', reportedStatus: 'open', title: 'UI polish' },
+      { id: 'b2', reportedStatus: 'dropped', title: 'Abandoned' },
+    ];
+    render(<V2ChatPage />);
+    await screen.findByLabelText('Message the weaver');
+
+    // Nothing is offered until a project is tagged, and only open blocks are.
+    expect(screen.queryByRole('button', { name: 'UI polish' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'web' }));
+    expect(screen.getByRole('button', { name: 'UI polish' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Abandoned' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'UI polish' }));
+    fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'add the picker' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(state.post).toHaveBeenCalled());
+    expect(state.post).toHaveBeenLastCalledWith(expect.objectContaining({ projectId: 'p1', blockId: 'b1' }));
+  });
+
+  it('clears the block choice when the project changes (VS-491)', async () => {
+    state.roadmapBlocks = [{ id: 'b1', reportedStatus: 'open', title: 'UI polish' }];
+    render(<V2ChatPage />);
+    await screen.findByLabelText('Message the weaver');
+
+    fireEvent.click(screen.getByRole('button', { name: 'web' }));
+    fireEvent.click(screen.getByRole('button', { name: 'UI polish' }));
+    expect(screen.getByRole('button', { name: 'UI polish' })).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Auto' }));
+    expect(screen.queryByRole('button', { name: 'UI polish' })).toBeNull();
   });
 });

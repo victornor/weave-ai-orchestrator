@@ -19,6 +19,8 @@ export interface Draft {
   replyToId?: string | null;
   /** The project chosen beside the input; absent means the human has not touched the picker. */
   projectId?: string | null;
+  /** The roadmap block chosen beside the project (VS-491); absent means the human has not touched it. */
+  blockId?: string | null;
 }
 
 export interface DraftHandle {
@@ -39,7 +41,7 @@ export function draftKey(ws: string, thread: string): string {
 
 /** Nothing worth keeping: the entry is removed rather than stored empty. */
 function isEmpty(d: Draft): boolean {
-  return !d.text && !d.replyToId && d.projectId === undefined;
+  return !d.text && !d.replyToId && d.projectId === undefined && d.blockId === undefined;
 }
 
 function parse(raw: string | null): Draft {

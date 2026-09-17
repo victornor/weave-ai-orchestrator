@@ -1468,6 +1468,51 @@ describe('migrations', () => {
     });
   });
 
+  describe('0047_thread_message_block (VS-491)', () => {
+    function seedProject(db: Db, id: string): void {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at)
+         VALUES (?, 'w1', ?, 'API', 'git@e:a/b.git', 'main', '/tmp/p', 4, 'git', 1, '{}', 'ready', 't0', 't0')`, [id, id]);
+    }
+    function seedThread(db: Db, threadId: string): void {
+      db.run(`INSERT INTO channels (id, workspace_id, kind, config_json, status) VALUES ('c1', 'w1', 'web', '{}', 'active')`);
+      db.run(`INSERT INTO channel_threads (id, channel_id, agent_id, is_primary, created_at) VALUES (?, 'c1', 'a1', 1, 't0')`, [threadId]);
+    }
+
+    it('adds a nullable block reference to thread_messages that targets roadmap_blocks', () => {
+      const db = openDb(join(dir, 'thread-block.sqlite'));
+      seedProject(db, 'p1');
+      seedThread(db, 'th1');
+      db.insert('roadmap_blocks', {
+        id: 'b1', projectId: 'p1', title: 'UI polish', notes: '', position: 0, status: 'open', startedAt: null,
+        createdByKind: 'weaver', createdById: null, createdAt: 't0', updatedAt: 't0',
+      });
+      db.run(`INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at) VALUES ('m1', 'th1', 'inbound', 'human', 'hi', 't0')`);
+      db.run(`INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at, block_id) VALUES ('m2', 'th1', 'inbound', 'human', 'there', 't0', 'b1')`);
+      expect(db.get<{ blockId: string | null }>('SELECT block_id FROM thread_messages WHERE id = ?', ['m1'])!.blockId).toBeNull();
+      expect(db.get<{ blockId: string | null }>('SELECT block_id FROM thread_messages WHERE id = ?', ['m2'])!.blockId).toBe('b1');
+      expect(db.all<{ from: string; table: string }>('PRAGMA foreign_key_list(thread_messages)').map((f) => `${f.from}->${f.table}`).sort())
+        .toContain('block_id->roadmap_blocks');
+      db.close();
+    });
+
+    it('leaves a pre-0047 message with no block after the migration', () => {
+      const path = join(dir, 'thread-block-backfill.sqlite');
+      const before = openDbAsOf(path, '0045_session_context.sql');
+      seedProject(before, 'p1');
+      seedThread(before, 'th1');
+      before.run(`INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at) VALUES ('legacy', 'th1', 'inbound', 'human', 'before blocks', 't0')`);
+      before.close();
+
+      const db = openDb(path);
+      expect(db.get<{ blockId: string | null }>('SELECT block_id FROM thread_messages WHERE id = ?', ['legacy'])!.blockId).toBeNull();
+      db.close();
+    });
+  });
+
   describe('0041_plan_drafts (VS-398)', () => {
     const cols = (db: Db, table: string): string[] => db.all<{ name: string }>(`PRAGMA table_info(${table})`).map((c) => c.name);
 

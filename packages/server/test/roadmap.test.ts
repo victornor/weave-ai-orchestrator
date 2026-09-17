@@ -1,5 +1,6 @@
 /** HTTP roadmap (`/projects/:id/roadmap`) — session auth, CRUD, order, project scoping (VS-397). */
 import { afterEach, describe, expect, it } from 'vitest';
+import { createThreadsService } from '@weave-ai/core';
 import type { RoadmapItem } from '@weave-ai/shared';
 import { createApp } from '../src/app.js';
 import { authed, makeHarness, type Harness } from './fakes.js';
@@ -152,5 +153,40 @@ describe('roadmap blocks HTTP (VS-478)', () => {
     }));
     expect(itemPatch.status).toBe(200);
     expect(await itemPatch.json()).toMatchObject({ description: 'body', kind: 'task', priority: 'high' });
+  });
+});
+
+describe('a message can carry a roadmap block (VS-491)', () => {
+  it('round-trips the block on the message and refuses a block of another project', async () => {
+    harness = makeHarness();
+    seedProjects(harness);
+    harness.runtime.services.threads = createThreadsService(harness.runtime.ctx, () => harness!.runtime.services);
+    const app = createApp(harness.deps);
+    const thread = harness.runtime.services.threads.bindOrGet('web', 'web-block-1', null, 'Victor');
+
+    const blockRes = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/projects/${PROJECT}/roadmap/blocks`, {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ title: 'UI polish' }),
+    }));
+    const block = await blockRes.json() as { id: string };
+
+    const sent = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/threads/${thread.id}/messages`, {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ body: 'add the picker', projectId: PROJECT, blockId: block.id }),
+    }));
+    expect(sent.status).toBe(201);
+    expect(await sent.json()).toMatchObject({ projectId: PROJECT, blockId: block.id });
+
+    const read = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/threads/${thread.id}/messages`, { headers: authed() }));
+    expect((await read.json() as Array<{ blockId: string | null }>)[0]).toMatchObject({ blockId: block.id });
+
+    const theirsRes = await app.fetch(new Request('http://127.0.0.1/api/w/ws1/projects/proj2/roadmap/blocks', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ title: 'Theirs' }),
+    }));
+    const theirs = await theirsRes.json() as { id: string };
+    const bad = await app.fetch(new Request(`http://127.0.0.1/api/w/ws1/threads/${thread.id}/messages`, {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ body: 'nope', projectId: PROJECT, blockId: theirs.id }),
+    }));
+    expect(bad.status).toBe(404);
   });
 });

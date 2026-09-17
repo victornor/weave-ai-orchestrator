@@ -162,17 +162,17 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     direction: 'inbound' | 'outbound',
     actor: Actor,
     body: string,
-    opts: { parts?: unknown[]; runId?: string | null; externalMessageId?: string; deliveryStatus?: string; projectId?: string | null; replyToMessageId?: string | null; replyToMessageIds?: string[]; replyToExcerpt?: string | null; idempotencyKey?: string | null } = {},
+    opts: { parts?: unknown[]; runId?: string | null; externalMessageId?: string; deliveryStatus?: string; projectId?: string | null; blockId?: string | null; replyToMessageId?: string | null; replyToMessageIds?: string[]; replyToExcerpt?: string | null; idempotencyKey?: string | null } = {},
   ): ThreadMessage {
     const replyToMessageIds = opts.replyToMessageIds ?? (opts.replyToMessageId ? [opts.replyToMessageId] : []);
     const msg: ThreadMessage = {
       id: newId(), threadId, direction, authorKind: actor.kind, authorId: actor.id, runId: opts.runId ?? actor.runId ?? null,
-      projectId: opts.projectId ?? null, replyToMessageId: opts.replyToMessageId ?? null, replyToMessageIds, replyToExcerpt: opts.replyToExcerpt ?? null,
+      projectId: opts.projectId ?? null, blockId: opts.blockId ?? null, replyToMessageId: opts.replyToMessageId ?? null, replyToMessageIds, replyToExcerpt: opts.replyToExcerpt ?? null,
       body, parts: opts.parts ?? [], externalMessageId: opts.externalMessageId ?? null,
       deliveryStatus: opts.deliveryStatus ?? 'received', createdAt: nowIso(),
     };
     db.insert('thread_messages', {
-      id: msg.id, threadId, direction, authorKind: msg.authorKind, authorId: msg.authorId, runId: msg.runId, projectId: msg.projectId,
+      id: msg.id, threadId, direction, authorKind: msg.authorKind, authorId: msg.authorId, runId: msg.runId, projectId: msg.projectId, blockId: msg.blockId,
       replyToMessageId: msg.replyToMessageId, body,
       partsJson: msg.parts, externalMessageId: msg.externalMessageId, deliveryStatus: msg.deliveryStatus, createdAt: msg.createdAt,
       idempotencyKey: opts.idempotencyKey ?? null,
@@ -267,6 +267,12 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       // Resolved before anything is written, so a reference to a project this workspace does not
       // have stores no message and wakes nobody. `get` takes an id or a slug and is workspace-scoped.
       const project = opts.projectId ? deps().projects.get(opts.projectId) : null;
+      // A block only means something alongside the project it belongs to (VS-491): resolve it through
+      // the roadmap service before anything is written, so a project-less, unknown or foreign block
+      // stores nothing and wakes nobody. `getBlock` throws `not_found` for an unknown id.
+      if (opts.blockId && !project) throw new OcError('validation', 'a roadmap block needs the project it belongs to');
+      const block = opts.blockId ? deps().roadmap.getBlock(opts.blockId) : null;
+      if (block && block.projectId !== project!.id) throw new OcError('not_found', `roadmap block ${opts.blockId} is not in this project`);
       // Same posture for the replied-to message, and scoped to this thread rather than checked against
       // it: the query cannot return a row from another thread, so a reference can never cross a thread
       // — and therefore a workspace — boundary. It is also the read that produces the excerpt.
@@ -289,6 +295,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
         const msg = insertMessage(t.id, 'inbound', human, body, {
           ...opts,
           projectId: project?.id ?? null,
+          blockId: block?.id ?? null,
           replyToMessageId: repliedTo?.id ?? null,
           replyToExcerpt: repliedTo ? excerpt(repliedTo.body) : null,
           deliveryStatus: 'received',
@@ -322,6 +329,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
               payload: {
                 threadId: t.id, messageId: msg.id, body,
                 projectId: project?.id ?? null, projectSlug: project?.slug ?? null,
+                blockId: block?.id ?? null, blockTitle: block?.title ?? null,
                 replyToMessageId: msg.replyToMessageId, replyToExcerpt: msg.replyToExcerpt,
                 ...(attachmentParts.length ? { attachmentIds: attachmentParts.map((p) => p.id) } : {}),
               },

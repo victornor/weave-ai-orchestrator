@@ -73,6 +73,15 @@ describe('drafts', () => {
     expect(box().value).toBe('');
     expect(readDraft(draftKey('acme', 'ticket:tk_1')).text).toBe('in acme');
   });
+
+  it('round-trips a chosen roadmap block and clears it with the rest (VS-491)', () => {
+    writeDraft(draftKey('acme', 'thread:th_1'), { text: '', projectId: 'p1', blockId: 'b1' });
+    expect(readDraft(draftKey('acme', 'thread:th_1'))).toMatchObject({ projectId: 'p1', blockId: 'b1' });
+    // A block-only choice is still a draft worth keeping.
+    expect(stored('acme', 'thread:th_1')).not.toBeNull();
+    writeDraft(draftKey('acme', 'thread:th_1'), { text: '' });
+    expect(stored('acme', 'thread:th_1')).toBeNull();
+  });
 });
 
 describe('seeded prompts (VS-478)', () => {

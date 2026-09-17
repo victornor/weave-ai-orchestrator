@@ -230,7 +230,7 @@ export interface ChannelThread { id: string; channelId: string; agentId: string;
  * contains `replyToMessageId` when that is non-null: the newest target, whose body `replyToExcerpt`
  * renders.
  */
-export interface ThreadMessage { id: string; threadId: string; direction: 'inbound' | 'outbound'; authorKind: string; authorId: string | null; runId: string | null; projectId: string | null; replyToMessageId: string | null; replyToMessageIds: string[]; replyToExcerpt: string | null; body: string; parts: unknown[]; externalMessageId: string | null; deliveryStatus: string; createdAt: string }
+export interface ThreadMessage { id: string; threadId: string; direction: 'inbound' | 'outbound'; authorKind: string; authorId: string | null; runId: string | null; projectId: string | null; /** VS-491: a roadmap block of `projectId` the message was sent with; null when none was chosen. */ blockId: string | null; replyToMessageId: string | null; replyToMessageIds: string[]; replyToExcerpt: string | null; body: string; parts: unknown[]; externalMessageId: string | null; deliveryStatus: string; createdAt: string }
 /** One full-text search hit over a thread's stored messages (VS-320): newest first, with the matched text located by a snippet delimited by `\u0002` / `\u0003` (control characters no message body will ever contain — `[` / `]` collide with markdown links, checkboxes and `[Risk]`-style labels; never raw HTML — the client renders the highlight itself). */
 export interface ThreadSearchResult { messageId: string; authorKind: string; authorId: string | null; createdAt: string; snippet: string }
 /** A file/image attached to a `ThreadMessage` (VS-133). Always written in the same transaction as the message that owns it. */

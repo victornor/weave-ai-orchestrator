@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
@@ -352,6 +353,43 @@ describe('routes', () => {
     const { fetch } = app();
     const res = await fetch('/api/w/ws1/tickets/tk_1', { headers: authed() });
     await expect(res.json()).resolves.toMatchObject({ mergeQueue: { position: null } });
+  });
+
+  it('serves ticket attachment bytes only through the authenticated, ticket-scoped route', async () => {
+    const { h, fetch } = app();
+    const root = mkdtempSync(join(tmpdir(), 'ac-ticket-attachment-route-'));
+    try {
+      const attachmentsDir = join(root, 'attachments');
+      const storageKey = 'stored-image.png';
+      const bytes = Buffer.from('ticket image bytes');
+      mkdirSync(attachmentsDir, { recursive: true });
+      writeFileSync(join(attachmentsDir, storageKey), bytes);
+      (h.runtime.ctx.paths as { attachments: string }).attachments = attachmentsDir;
+
+      const attachment = {
+        id: 'att_1', ticketId: 'tk_1', label: 'screenshot.png', mediaType: 'image/png',
+        byteSize: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex'),
+        storageKey, createdAt: '2026-09-17T00:00:00.000Z',
+      };
+      h.impls.tickets!['attachment'] = (ticketId: string, attachmentId: string) => {
+        if (ticketId !== attachment.ticketId || attachmentId !== attachment.id) throw new OcError('not_found', 'attachment not found');
+        return attachment;
+      };
+
+      const ok = await fetch('/api/w/ws1/tickets/tk_1/attachments/att_1', { headers: authed() });
+      expect(ok.status).toBe(200);
+      expect(ok.headers.get('content-type')).toBe('image/png');
+      expect(ok.headers.get('content-length')).toBe(String(bytes.byteLength));
+      expect(ok.headers.get('content-disposition')).toBe('inline');
+      expect(Buffer.from(await ok.arrayBuffer())).toEqual(bytes);
+
+      const crossTicket = await fetch('/api/w/ws1/tickets/tk_2/attachments/att_1', { headers: authed() });
+      expect(crossTicket.status).toBe(404);
+      const unauthenticated = await fetch('/api/w/ws1/tickets/tk_1/attachments/att_1');
+      expect(unauthenticated.status).toBe(401);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("names a ticket's last worker even after it has retired (VS-106)", async () => {

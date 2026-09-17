@@ -6,7 +6,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import { isActiveRun, openspecArchive, projectLabel, ticketUiStatus, carriesWeaverReview, type Project, type Run, type Ticket } from '@weave-ai/shared';
+import { isActiveRun, openspecArchive, projectLabel, ticketUiStatus, carriesWeaverReview, type Project, type Run, type Ticket, type TicketAttachment } from '@weave-ai/shared';
 import { workerPauseDetail } from '@weave-ai/render';
 import { A, useGo, useSearchParams } from '../../app/link';
 import { useWs } from '../../api/context';
@@ -152,7 +152,7 @@ export function V2TicketScreen(): React.ReactElement {
         ) : active === 'plan' ? (
           <PlanTab ticket={ticket} project={project} />
         ) : (
-          <OverviewPage ticket={ticket} worker={worker} project={project} />
+          <OverviewPage ticket={ticket} worker={worker} project={project} attachments={detail.data.attachments ?? []} />
         )}
       </div>
     </div>
@@ -482,21 +482,42 @@ function OverviewPage({
   ticket,
   worker,
   project,
+  attachments,
 }: {
   ticket: Ticket;
   worker: { id: string; name: string; status: string } | null;
   project: Project | null;
+  attachments: TicketAttachment[];
 }): React.ReactElement {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-7" data-v2-overview-page>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <OverviewPane ticket={ticket} />
+          <OverviewPane ticket={ticket} />
         <ActivityPane ticket={ticket} worker={worker} project={project} />
       </div>
+      <AttachmentsSection attachments={attachments} />
       <WorkSection ticket={ticket} />
       <UsageSection ticketId={ticket.id} />
       <KnowledgeSection ticketId={ticket.id} />
     </div>
+  );
+}
+
+function AttachmentsSection({ attachments }: { attachments: TicketAttachment[] }): React.ReactElement | null {
+  if (!(attachments ?? []).length) return null;
+  return (
+    <section className="flex flex-col gap-3" data-v2-section="attachments">
+      <h2 className="text-head font-semibold text-text-strong">Attachments</h2>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {(attachments ?? []).map((attachment) => (
+          <a key={attachment.id} href={attachment.url} target="_blank" rel="noreferrer" className="v2-card overflow-hidden p-2.5 hover:border-accent-edge">
+            {attachment.mediaType.startsWith('image/') && attachment.url ? <img src={attachment.url} alt={attachment.label} className="mb-2 max-h-56 w-full rounded-r4 object-contain" /> : null}
+            <div className="truncate text-micro text-text-1">{attachment.label}</div>
+            <div className="ac-mono text-nano text-text-3">{attachment.mediaType} · {attachment.byteSize.toLocaleString()} bytes</div>
+          </a>
+        ))}
+      </div>
+    </section>
   );
 }
 

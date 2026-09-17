@@ -19,10 +19,13 @@ import { reconcileProjectKnowledgeFromRepo } from '../knowledge/repoSync.js';
 import { reconcileProjectArtifactsFromRepo } from './artifactRepoSync.js';
 import { SECRET_SHAPED_RE } from '../knowledge/files.js';
 import { effectiveModels } from '../models/resolve.js';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, statSync, unlinkSync } from 'node:fs';
+import { basename, dirname, extname, join } from 'node:path';
 import { flattenWakes } from '../prompts/index.js';
 import type { Wakeup } from '@weave-ai/shared';
+import { ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, guessOutboundMediaType } from '@weave-ai/shared';
+import { assertAttachablePath, resolveOutboundAttachmentRoots } from '../threads/outboundAttachments.js';
+import { sanitizeAttachmentFilename, sha256, writeGeneratedAttachment } from '../threads/attachmentStorage.js';
 
 function ticketBranchFor(t: { identifier: string; title: string }): string {
   const slug = t.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
@@ -1376,6 +1379,51 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     workProducts(id) {
       const t = get(id);
       return db.all<Record<string, unknown>>('SELECT * FROM ticket_work_products WHERE ticket_id = ? ORDER BY created_at', [t.id]);
+    },
+
+    putAttachment(actor, id, input) {
+      const t = get(id);
+      const roots = resolveOutboundAttachmentRoots(ctx);
+      const source = assertAttachablePath(ctx, input.path, roots);
+      const stat = statSync(source);
+      if (stat.size > ATTACHMENT_MAX_OUTBOUND_FILE_BYTES) {
+        throw new OcError('validation', `"${input.path}" cannot be attached: file is ${stat.size} bytes, over the ${ATTACHMENT_MAX_OUTBOUND_FILE_BYTES}-byte per-file cap`, { max: ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, actual: stat.size });
+      }
+      const bytes = readFileSync(source);
+      if (bytes.byteLength > ATTACHMENT_MAX_OUTBOUND_FILE_BYTES) {
+        throw new OcError('validation', `"${input.path}" cannot be attached: file grew beyond the ${ATTACHMENT_MAX_OUTBOUND_FILE_BYTES}-byte per-file cap`, { max: ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, actual: bytes.byteLength });
+      }
+      const mediaType = guessOutboundMediaType(source);
+      const label = sanitizeAttachmentFilename(input.label ?? basename(source));
+      const extension = (extname(label).slice(1) || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12) || 'bin';
+      const stored = writeGeneratedAttachment(ctx, extension, bytes);
+      const createdAt = nowIso();
+      try {
+        tx(db, () => {
+          db.insert('ticket_attachments', {
+            id: stored.id, ticketId: t.id, label, mediaType, byteSize: stored.byteSize,
+            sha256: sha256(bytes), storageKey: stored.storageKey, createdAt,
+          });
+          recordActivity(db, ws, actor, 'ticket.attachment', 'ticket_attachment', stored.id, { label, mediaType, byteSize: stored.byteSize }, t.id);
+          ctx.events.emit('ticket.attachment', 'ticket', t.id, { ticketId: t.id, id: stored.id, label, mediaType, byteSize: stored.byteSize, sha256: sha256(bytes), createdAt });
+        });
+      } catch (e) {
+        try { unlinkSync(join(ctx.paths.attachments, stored.storageKey)); } catch { /* best effort cleanup */ }
+        throw e;
+      }
+      return { id: stored.id, ticketId: t.id, label, mediaType, byteSize: stored.byteSize, sha256: sha256(bytes), storageKey: stored.storageKey, createdAt };
+    },
+
+    attachments(id) {
+      const t = get(id);
+      return db.all<import('@weave-ai/shared').TicketAttachment>('SELECT * FROM ticket_attachments WHERE ticket_id = ? ORDER BY created_at', [t.id]);
+    },
+
+    attachment(id, attachmentId) {
+      const t = get(id);
+      const row = db.get<import('@weave-ai/shared').TicketAttachment>('SELECT * FROM ticket_attachments WHERE ticket_id = ? AND id = ?', [t.id, attachmentId]);
+      if (!row) throw new OcError('not_found', `attachment ${attachmentId} not found`);
+      return row;
     },
 
     // VS-393: the one path a ticket's pull request is opened by, so the draft flag and the work

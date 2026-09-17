@@ -237,6 +237,8 @@ export interface ThreadSearchResult { messageId: string; authorKind: string; aut
 export interface Attachment { id: string; threadId: string; messageId: string; filename: string; mediaType: string; byteSize: number; storageKey: string; createdAt: string }
 /** The `ThreadMessage.parts` shape an attachment is recorded as, so the transcript can render it without a second fetch. */
 export interface AttachmentPart { type: 'attachment'; id: string; filename: string; mediaType: string; byteSize: number }
+/** A binary file made available as context on a ticket (VS-502). */
+export interface TicketAttachment { id: string; ticketId: string; label: string; mediaType: string; byteSize: number; sha256: string; storageKey: string; createdAt: string; url?: string }
 export interface Briefing { needsYou: Array<{ decisionId: string; ticketId: string | null; title: string; kind: string; recommendation: string | null; createdAt: string }>; needsYouTotal?: number; landed: Array<{ ticketId: string; identifier: string; title: string; completedAt: string; prUrl?: string }>; underway: Array<{ workerId: string; workerName: string; workerStatus: string; workerPauseReason: string | null; ticketId: string; identifier: string; title: string; status: string; lastStatus: string | null }>; queued: Array<{ ticketId: string; identifier: string; title: string; reason: string }>; warnings: string[]; generatedAt: string }
 /**
  * A system incident an agent filed (VS-174). Daemon-level: it lives in `daemon.sqlite`, not in a

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-17
+goal: An agent has no way to attach an image except transcribing base64, and it
+  corrupts

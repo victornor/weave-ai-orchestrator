@@ -20,6 +20,7 @@ import type {
   Run,
   RunEvent,
   Ticket,
+  TicketAttachment,
   TicketComment,
   TicketPriority,
   TicketStatus,
@@ -37,6 +38,7 @@ import type {
   AuthSessionKind,
   PresentationConfig,
 } from '@weave-ai/shared';
+export type { TicketAttachment } from '@weave-ai/shared';
 
 export interface Health {
   ok: boolean;
@@ -229,6 +231,7 @@ export interface TicketDetail {
   children: Ticket[];
   documents: Array<{ key: string; revision: number; updatedAt: string; title?: string }>;
   workProducts: WorkProduct[];
+  attachments: TicketAttachment[];
   openspecState: OpenSpecState | null;
   /** Where the ticket stands in its project's merge queue; `position` is null unless it is waiting. */
   mergeQueue: { position: number | null; concurrency: number };

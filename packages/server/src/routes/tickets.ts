@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { isWorkerStalled } from '@weave-ai/core';
+import { isWorkerStalled, readAttachmentBytes } from '@weave-ai/core';
 import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, OcError } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
@@ -62,6 +62,7 @@ export function ticketRoutes(): Hono<AppEnv> {
       workerStalled: workerId ? isWorkerStalled(c.get('ws').ctx, workerId) : false,
       openspecState,
       workProducts: s.tickets.workProducts(ticket.id),
+      attachments: (safe(() => s.tickets.attachments(ticket.id)) ?? []).map((a) => ({ ...a, url: `/api/w/${c.get('ws').id}/tickets/${a.ticketId}/attachments/${a.id}` })),
       // Where this ticket stands in its project's merge queue: null once it is merging or elsewhere.
       mergeQueue: { position: s.tickets.mergeQueue.positionOf(ticket.id), concurrency: s.tickets.mergeQueue.limitFor(ticket.projectId) },
       documents: s.tickets.documents(ticket.id),
@@ -121,6 +122,18 @@ export function ticketRoutes(): Hono<AppEnv> {
 
   app.get('/:id/documents/:key/revisions', (c) => c.json(c.get('ws').services.tickets.documentRevisions(c.req.param('id'), c.req.param('key'))));
   app.get('/:id/work-products', (c) => c.json(c.get('ws').services.tickets.workProducts(c.req.param('id'))));
+
+  app.get('/:id/attachments/:attachmentId', (c) => {
+    requireOperator(c);
+    const s = c.get('ws').services;
+    const attachment = s.tickets.attachment(c.req.param('id'), c.req.param('attachmentId'));
+    const bytes = readAttachmentBytes(c.get('ws').ctx, attachment.storageKey);
+    return new Response(bytes as unknown as ArrayBuffer, { status: 200, headers: {
+      'content-type': attachment.mediaType, 'content-length': String(attachment.byteSize),
+      'content-disposition': attachment.mediaType.startsWith('image/') ? 'inline' : `attachment; filename="${attachment.label.replace(/["\\\r\n]/g, '_')}"`,
+      'x-content-type-options': 'nosniff',
+    }});
+  });
 
   // VS-269: an artifact's raw HTML, verbatim, behind a sandboxing CSP. Human web session only —
   // `/tickets/**` is already excluded from RUN_TOKEN_PATHS (auth.ts), and `requireOperator` here is

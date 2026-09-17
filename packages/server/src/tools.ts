@@ -14,12 +14,12 @@ import {
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
   ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS, ATTACHMENT_MAX_PER_MESSAGE,
   PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, WEAVER_REVIEW_WAITING_ON_MAX,
-  isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent,
+  isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent, validateArtifactImageDataUris,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock, type AgentKind,
 } from '@weave-ai/shared';
 import {
   flattenWakes, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX, ARTIFACT_KIT_CSS, ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks,
-  resolveOutboundAttachments, type OutboundAttachmentInput,
+  resolveOutboundAttachments, readAttachmentBytes, type OutboundAttachmentInput,
   type Actor, type CoreServices, type IncidentsService, type KnowledgeMirror,
 } from '@weave-ai/core';
 import type { RunTokenClaims } from './runtoken.js';
@@ -349,6 +349,12 @@ function validateArtifactHtml(html: string): void {
   if (html.trim().length === 0) throw new OcError('validation', 'artifact body is empty; it must be a single self-contained HTML document');
   if (html.length > ARTIFACT_MAX_CHARS) throw new OcError('validation', `artifact body is ${html.length} characters, over the ${ARTIFACT_MAX_CHARS}-character cap`, { max: ARTIFACT_MAX_CHARS, actual: html.length });
   if (!/<html[\s>]/i.test(html)) throw new OcError('validation', 'artifact body does not look like an HTML document (no `<html>` tag found)');
+  try { validateArtifactImageDataUris(html); }
+  catch (e) { throw new OcError('validation', (e as Error).message); }
+}
+
+function ticketAttachmentView(ctx: ToolCtx, attachment: import('@weave-ai/shared').TicketAttachment): import('@weave-ai/shared').TicketAttachment {
+  return { ...attachment, url: `/api/w/${ctx.ws.id}/tickets/${attachment.ticketId}/attachments/${attachment.id}` };
 }
 
 // ---------- the registry ----------
@@ -396,10 +402,27 @@ export const TOOLS: ToolDef[] = [
     description: 'Read one ticket with its blockers and children. Workers may only read tickets in their own project.',
     handler: (ctx, i) => {
       const ticket = readTicket(ctx, i.id);
-      return {
+      const attachments = (safe(() => svc(ctx).tickets.attachments(ticket.id)) ?? []).map((a) => ticketAttachmentView(ctx, a));
+      const images: McpImageBlock[] = [];
+      for (const attachment of attachments) {
+        if (isAttachmentImageType(attachment.mediaType)) {
+          try { images.push({ type: 'image', data: readAttachmentBytes(ctx.ws.ctx, attachment.storageKey).toString('base64'), mimeType: attachment.mediaType }); } catch { /* metadata remains useful */ }
+        }
+      }
+      const result = {
         ticket, blockers: svc(ctx).tickets.blockers(ticket.id), children: svc(ctx).tickets.children(ticket.id),
         documents: svc(ctx).tickets.documents(ticket.id),
+        attachments,
       };
+      return images.length ? withMcpContent(result, images) : result;
+    },
+  },
+  {
+    name: 'weave_ticket_attachment_put', scope: 'all', input: z.object({ id: ticketId, path: z.string().min(1), label: z.string().max(200).optional() }),
+    description: 'Attach a file by path from the allowed workspace, project, or worker worktree. The daemon reads and stores the bytes; do not transcribe base64.',
+    handler: (ctx, i) => {
+      const attachment = svc(ctx).tickets.putAttachment(ctx.actor, writeTicket(ctx, i.id).id, { path: i.path, label: i.label });
+      return ticketAttachmentView(ctx, attachment);
     },
   },
   {

@@ -631,6 +631,7 @@ Prefix `weave_`. Names are stable API; descriptions carry the rules so skills ca
 Common (all agents):
 - `weave_inbox()` → wakes bundled into this run: messages, ticket events, answered decisions, mentions, steering from the weaver. Call first.
 - `weave_ticket_get(id)`, `weave_ticket_list(filter, includeDescription?)` — list is lean by default (no `description`); pass `includeDescription: true` or call `get` for the body. `weave_ticket_comments(id, after?)`.
+- `weave_ticket_attachment_put({ id, path, label? })` — attach an allowlisted workspace/project/worktree file by path; returns metadata, a ticket-scoped URL, and SHA-256 without sending file bytes through model output (VS-502).
 - `weave_ticket_checkout(id)` → 409 on conflict (never retry). `weave_ticket_release(id, note)`.
 - `weave_ticket_comment(id, body, kind=comment)`; `weave_ticket_document_put(id, key, body)` (revisioned; plan/report); `weave_ticket_document_get(id, key=report, revision?)` (read scope: own project for a worker, everything for the weaver; `not_found` carries the keys that do exist).
 - `weave_ticket_transition(id, to, {note, unblock?: {owner, action}, blockedBy?: [ids]})` → applies guards.

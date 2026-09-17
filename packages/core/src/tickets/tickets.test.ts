@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { newId, nowIso } from '@weave-ai/db';
 import { OcError, TICKET_KINDS, TICKET_STATUSES, TRANSITIONS, NAMED_CARD_OPTION_KEYS, canTransition, type Agent, type TicketKind, type TicketStatus } from '@weave-ai/shared';
 import { makeHarness, fakeWake, fakeSpecs, type TestHarness } from '../testing/context.js';
@@ -52,6 +53,42 @@ describe('tickets', () => {
 
   const make = (over: Partial<Parameters<TicketsService['create']>[1]> = {}) =>
     tickets.create(HUMAN, { kind: 'change', title: 'Add dark mode', projectId: h.projectId, assigneeRoleId: h.roleId, ...over });
+
+  it('stores a real PNG attachment with source size and checksum, and scopes reads', () => {
+    const ticket = make();
+    const other = make({ title: 'Other ticket' });
+    const source = join(h.ctx.paths.projects, 'fixture.png');
+    mkdirSync(h.ctx.paths.projects, { recursive: true });
+    const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAAAAAAAAAAAAAAAAAAAAAAAAElFTkSuQmCC', 'base64');
+    writeFileSync(source, bytes);
+    const attachment = tickets.putAttachment(AGENT, ticket.id, { path: source });
+    expect(attachment.byteSize).toBe(bytes.length);
+    expect(attachment.sha256).toBe(createHash('sha256').update(bytes).digest('hex'));
+    expect(tickets.attachments(ticket.id)).toHaveLength(1);
+    expect(tickets.attachment(ticket.id, attachment.id).storageKey).toBe(attachment.storageKey);
+    expect(() => tickets.attachment(other.id, attachment.id)).toThrow(/not found/);
+  });
+
+  it('rejects .git paths and files above the outbound cap before storing', () => {
+    const ticket = make();
+    const gitPath = join(h.ctx.paths.projects, '.git', 'secret.png');
+    mkdirSync(join(h.ctx.paths.projects, '.git'), { recursive: true });
+    writeFileSync(gitPath, Buffer.from('x'));
+    expect(() => tickets.putAttachment(AGENT, ticket.id, { path: gitPath })).toThrow(/\.git/);
+    const large = join(h.ctx.paths.projects, 'large.bin');
+    writeFileSync(large, Buffer.alloc(10 * 1024 * 1024 + 1));
+    expect(() => tickets.putAttachment(AGENT, ticket.id, { path: large })).toThrow(/per-file cap/);
+    expect(tickets.attachments(ticket.id)).toHaveLength(0);
+  });
+
+  it('removes the generated file when metadata persistence fails', () => {
+    const ticket = make();
+    const source = join(h.ctx.paths.projects, 'write-failure.png');
+    writeFileSync(source, Buffer.from('bytes'));
+    h.db.sqlite.exec("CREATE TRIGGER attachment_write_failure BEFORE INSERT ON ticket_attachments BEGIN SELECT RAISE(ABORT, 'test failure'); END");
+    expect(() => tickets.putAttachment(AGENT, ticket.id, { path: source })).toThrow(/test failure/);
+    expect(readdirSync(h.ctx.paths.attachments)).toEqual([]);
+  });
 
   it('allocates sequential identifiers from the workspace counter', () => {
     const a = make();

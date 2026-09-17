@@ -212,6 +212,7 @@ vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: [{ id: 'p1', workspaceId: 'ws1', slug: 'web', name: 'web' }] }),
   useTickets: () => ({ data: state.tickets }),
   useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: 'claude' }, lastRun: state.lastRun } }),
+  useCompactWeaver: () => ({ mutate: vi.fn(), isPending: false }),
   useRuntimes: () => ({ data: [{ id: 'claude', capabilities: { contextCompactionAt: 0.8 } }] }),
   useRuntimeModels: () => ({ data: [{ id: 'sonnet', contextWindowTokens: 1_000_000 }] }),
   useUsageAccounts: () => ({ data: [] }),

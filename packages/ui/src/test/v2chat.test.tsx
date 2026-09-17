@@ -29,6 +29,7 @@ const state = vi.hoisted(() => ({
   compacting: false,
   answer: vi.fn(),
   post: vi.fn(),
+  compact: vi.fn(),
   go: vi.fn(),
 }));
 
@@ -90,6 +91,7 @@ vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: [{ id: 'p1', workspaceId: 'ws1', slug: 'web', name: 'web' }] }),
   useTickets: () => ({ data: state.tickets }),
   useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: 'claude' }, lastRun: state.lastRun, compacting: state.compacting } }),
+  useCompactWeaver: () => ({ mutate: state.compact, isPending: false }),
   useRuntimes: () => ({ data: [{ id: 'claude', capabilities: { contextCompactionAt: 0.8 } }] }),
   useRuntimeModels: () => ({ data: [{ id: 'sonnet', contextWindowTokens: 1_000_000 }] }),
   useUsageAccounts: () => ({
@@ -240,6 +242,7 @@ beforeEach(() => {
   state.compacting = false;
   state.answer.mockReset();
   state.post.mockReset().mockResolvedValue(undefined);
+  state.compact.mockReset();
   state.go.mockReset();
 });
 
@@ -708,5 +711,22 @@ describe('the V2 Chat screen', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Compacting the conversation');
     // The composer says the same, so a message typed now reads as queued rather than ignored.
     expect(screen.getByText(/Compacting the conversation — your message is queued/)).toBeInTheDocument();
+  });
+
+  it('offers a Compact now action in the status bar that calls the compact endpoint', async () => {
+    state.messages = [message({ id: 'm1', body: 'Hi', createdAt: '2026-09-13T09:00:00.000Z' })];
+    render(<V2ChatPage />);
+
+    const button = screen.getByText('Compact now');
+    fireEvent.click(button);
+    expect(state.compact).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables Compact now while a compaction is already running', async () => {
+    state.messages = [message({ id: 'm1', body: 'Hi', createdAt: '2026-09-13T09:00:00.000Z' })];
+    state.compacting = true;
+    render(<V2ChatPage />);
+
+    expect(screen.getByText('Compacting…')).toBeDisabled();
   });
 });

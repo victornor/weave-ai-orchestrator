@@ -1,5 +1,5 @@
 import { newId, nowIso } from '@weave-ai/db';
-import { OcError, type Agent, type Run, type Wakeup } from '@weave-ai/shared';
+import { OcError, compactionThreshold, type Agent, type Run, type Wakeup } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices, Dispatcher } from '../api.js';
 import { executeRun } from './engine.js';
@@ -64,6 +64,53 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
       "SELECT 1 AS n FROM agent_sessions WHERE agent_id = ? AND status = 'active' AND compacting_at IS NOT NULL LIMIT 1",
       [agentId],
     );
+
+  // A model's window, cached briefly: a percentage policy needs it, and `modelContextWindow` can spawn
+  // a discovery command. Undefined means the runtime cannot state it (OpenCode), so a percentage
+  // cannot apply there — only an absolute `tokens` policy does.
+  const windowCache = new Map<string, { expires: number; value: Promise<number | undefined> }>();
+  const modelWindow = (runtimeId: string, model: string | null): Promise<number | undefined> => {
+    const key = `${runtimeId}\u0000${model ?? ''}`;
+    const hit = windowCache.get(key);
+    if (hit && hit.expires > Date.now()) return hit.value;
+    const adapter = ctx.registries.runtimes.get(runtimeId);
+    const value = adapter?.modelContextWindow
+      ? Promise.resolve(adapter.modelContextWindow(model)).catch(() => undefined)
+      : Promise.resolve(undefined);
+    windowCache.set(key, { expires: Date.now() + 300_000, value });
+    return value;
+  };
+
+  /**
+   * Is this agent's automatic compaction policy due — has the last turn's own context size crossed the
+   * setting's threshold? If so, start a compaction and report borrowed: the wake stays queued and the
+   * `compactingInDb` gate above holds the turn until it finishes. Never throws: a policy that cannot be
+   * evaluated (a percentage with no known window, services absent in a test) simply does not fire.
+   */
+  const compactionDue = async (agent: Agent): Promise<boolean> => {
+    try {
+      const session = ctx.db.get<{ lastContextTokens: number | null }>(
+        "SELECT last_context_tokens AS lastContextTokens FROM agent_sessions WHERE agent_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+        [agent.id],
+      );
+      const tokens = session?.lastContextTokens;
+      if (typeof tokens !== 'number' || tokens <= 0) return false;
+      const ticket = agent.ticketId
+        ? ctx.db.get<{ workerModelId: string | null }>('SELECT worker_model_id AS workerModelId FROM tickets WHERE id = ?', [agent.ticketId])
+        : null;
+      const setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket);
+      if (!setting.compaction || setting.compaction.mode === 'off') return false;
+      const window = setting.compaction.mode === 'percent' ? await modelWindow(setting.runtime, setting.model) : undefined;
+      const threshold = compactionThreshold(setting.compaction, window ?? null);
+      if (threshold === null || tokens < threshold) return false;
+      await deps().workers.compactSession({ kind: 'system', id: null }, agent.id);
+      log.info({ agentId: agent.id, tokens, threshold }, 'automatic compaction due; holding the wake until it finishes');
+      return true;
+    } catch (e) {
+      log.warn({ agentId: agent.id, err: String(e) }, 'automatic compaction check skipped');
+      return false;
+    }
+  };
 
   const projectRunning = (projectId: string): number => {
     let n = 0;
@@ -175,6 +222,7 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
           if ([...state.active.values()].some((r) => r.agentId === agent.id)) continue;
           if (runningInDb(agent.id)) continue;
           if (compactingInDb(agent.id)) continue;
+          if (await compactionDue(agent)) continue;
           if (ctx.isolated && !isEligibleWhileIsolated(agent.id, now)) continue;
           if (agent.projectId) {
             const project = ctx.db.get<{ maxWorkers: number }>('SELECT max_workers FROM projects WHERE id = ?', [agent.projectId]);

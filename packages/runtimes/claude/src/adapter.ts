@@ -128,6 +128,15 @@ export const adapter: RuntimeAdapter = {
     return { displayId: s?.sessionId ?? 'unknown', exists: Boolean(s) };
   },
 
+  /** The model catalog below carries each model's window; resolve the reported id against it, longest prefix first. */
+  async modelContextWindow(model: string | null | undefined): Promise<number | undefined> {
+    if (!model) return undefined;
+    const exact = MODELS.find((m) => m.id === model);
+    if (exact?.contextWindowTokens) return exact.contextWindowTokens;
+    const prefixed = MODELS.filter((m) => m.id.length > 0 && model.startsWith(m.id)).sort((a, b) => b.id.length - a.id.length);
+    return prefixed[0]?.contextWindowTokens;
+  },
+
   /** `claude -p --resume <id> "/compact"`: the CLI's own summarise, triggered out of band. */
   async compactSession(input: CompactSessionInput): Promise<CompactSessionResult> {
     const ref = asClaudeSession(input.ref);

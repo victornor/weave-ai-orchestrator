@@ -46,6 +46,7 @@ function ModelControls({ label, setting, runtimes, recessed, onChange }: {
   const effmode = effortModeFor(effortsForModel(setting.model, known, custom), setting.effort);
   const ctl = cx(inputCx, 'ac-mono', recessed && 'bg-bg-2 text-text-2');
   const col = 'flex flex-col gap-1';
+  const compaction: T.ModelCompaction = setting.compaction ?? { mode: 'off' };
   return (
     <div className="grid gap-2 sm:grid-cols-3">
       <div className={col}>
@@ -91,6 +92,39 @@ function ModelControls({ label, setting, runtimes, recessed, onChange }: {
         ) : (
           <span className="text-micro text-text-3">not configurable</span>
         )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 sm:col-span-3">
+        <span className="ac-label">auto-compact</span>
+        <select
+          aria-label={`${label} auto-compact mode`}
+          className={cx(ctl, 'w-auto')}
+          value={compaction.mode}
+          onChange={(e) => {
+            const mode = e.target.value as T.CompactionMode;
+            onChange({ ...setting, compaction: mode === 'off' ? { mode } : { mode, value: compaction.value ?? (mode === 'percent' ? 60 : 300_000) } });
+          }}
+        >
+          <option value="off">off</option>
+          <option value="percent">percent of window</option>
+          <option value="tokens">exact tokens</option>
+        </select>
+        {compaction.mode !== 'off' ? (
+          <input
+            type="number"
+            aria-label={`${label} auto-compact value`}
+            className={cx(ctl, 'w-28')}
+            min={1}
+            {...(compaction.mode === 'percent' ? { max: 99 } : {})}
+            value={compaction.value ?? ''}
+            onChange={(e) => {
+              const v = e.target.value === '' ? undefined : Number(e.target.value);
+              onChange({ ...setting, compaction: { mode: compaction.mode, ...(v !== undefined ? { value: v } : {}) } });
+            }}
+          />
+        ) : null}
+        <span className="text-nano text-text-3">
+          {compaction.mode === 'off' ? 'the runtime compacts on its own' : compaction.mode === 'percent' ? '% of the model window' : "the last request's size in tokens"}
+        </span>
       </div>
     </div>
   );
@@ -268,7 +302,7 @@ function OptionRow({ option, runtimes, open, onToggle, onSave, onRemove }: {
           </div>
           <ModelControls label={option.id} setting={{ runtime: option.runtime ?? runtimes[0]?.id ?? 'claude', model: option.model, ...(option.effort !== undefined ? { effort: option.effort } : {}) }}
             runtimes={runtimes} recessed={!configured}
-            onChange={(next) => patch({ ...option, runtime: next.runtime, model: next.model, effort: next.effort })} />
+            onChange={(next) => patch({ ...option, runtime: next.runtime, model: next.model, effort: next.effort, compaction: next.compaction })} />
           <div className="flex justify-end">
             <Button size="sm" variant="danger" onClick={onRemove}>Remove</Button>
           </div>
@@ -284,7 +318,7 @@ function NewOption({ runtimes, existing, onAdd, onCancel }: {
   const [id, setId] = useState('');
   const [description, setDescription] = useState('');
   const [setting, setSetting] = useState<T.ModelSetting>({ runtime: runtimes[0]?.id ?? 'claude', model: null });
-  const candidate = { id: id.trim(), description: description.trim(), runtime: setting.runtime, model: setting.model, ...(setting.effort ? { effort: setting.effort } : {}) };
+  const candidate = { id: id.trim(), description: description.trim(), runtime: setting.runtime, model: setting.model, ...(setting.effort ? { effort: setting.effort } : {}), ...(setting.compaction ? { compaction: setting.compaction } : {}) };
   const field = WorkerModelOptionSchema.safeParse(candidate);
   const list = WorkerOptionsArraySchema.safeParse([...existing, candidate]);
   const valid = field.success && list.success;

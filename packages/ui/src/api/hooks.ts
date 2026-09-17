@@ -998,6 +998,16 @@ export function useWeaver(wsOverride?: string): UseQueryResult<T.WorkerDetail> {
   return useQuery({ queryKey: qk.weaver(ws), queryFn: () => api.ws<unknown>(ws, '/weaver').then(workerDetail), enabled: Boolean(ws) });
 }
 
+/** Start an out-of-band compaction of the weaver's session; the `session.compaction` frame reports it finishing. */
+export function useCompactWeaver(): UseMutationResult<{ started: boolean; runtime: string }, Error, void> {
+  const ws = useHookWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.ws<{ started: boolean; runtime: string }>(ws, '/weaver/compact', { method: 'POST' }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: qk.weaver(ws) }); },
+  });
+}
+
 export function useWeaverMany(ids: readonly string[]): UseQueryResult<T.WorkerDetail>[] {
   return useQueries({
     queries: ids.map((id) => ({

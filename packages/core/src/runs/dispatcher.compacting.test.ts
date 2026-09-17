@@ -11,6 +11,7 @@ import { makeHarness, type TestHarness } from '../testing/context.js';
 import { createWakeService } from '../wake/index.js';
 import { createRunsService } from './index.js';
 import { createDispatcher, type CoreDispatcher } from './dispatcher.js';
+import { createWorkersService } from '../workers/index.js';
 
 const idle = { structured: { state: 'idle', summary: 'nothing to do', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } };
 
@@ -69,5 +70,51 @@ describe('dispatcher holds an agent whose session is compacting', () => {
 
     expect(runCountFor(workerId)).toBe(1);
     expect(wakeStatus(w.id)).not.toBe('queued');
+  });
+
+  it('starts the policy compaction when the last context size crosses an exact-token threshold', async () => {
+    setup();
+    h.services.workers = createWorkersService(h.ctx, h.deps);
+    const compacted: unknown[] = [];
+    (runtime as unknown as { compactSession: (i: unknown) => Promise<unknown> }).compactSession = async (i: unknown) => { compacted.push(i); return { ok: true, via: 'command' }; };
+    h.ctx.config.models = { weaver: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null, compaction: { mode: 'tokens', value: 100_000 } }, workerOptions: [] };
+    const workerId = h.addWorker(seedTicket(), { runtimeId: 'fake', worktreePath: null });
+    const now = nowIso();
+    h.db.insert('agent_sessions', {
+      id: newId(), agentId: workerId, runtimeId: 'fake', status: 'active', turnCount: 1,
+      sessionRefJson: JSON.stringify({ threadId: 't-1' }), cumulativeUsageJson: {}, lastContextTokens: 150_000, createdAt: now, updatedAt: now,
+    });
+    const w = h.services.wake!.enqueue(workerId, { source: 'ticket_comment', reason: 'human asked a follow-up', payload: {} });
+
+    await dispatcher.tick();
+    await dispatcher.drain();
+    await new Promise((r) => setImmediate(r));
+
+    // The policy started a compaction instead of a turn; the wake is held.
+    expect(compacted).toHaveLength(1);
+    expect(runCountFor(workerId)).toBe(0);
+    expect(wakeStatus(w.id)).toBe('queued');
+    expect(h.db.get<{ n: number }>('SELECT COUNT(*) n FROM agent_sessions WHERE agent_id = ? AND compacting_at IS NOT NULL', [workerId])!.n).toBe(0); // finished and cleared
+  });
+
+  it('does not compact when the setting is off or the context is under the threshold', async () => {
+    setup();
+    h.services.workers = createWorkersService(h.ctx, h.deps);
+    const compacted: unknown[] = [];
+    (runtime as unknown as { compactSession: (i: unknown) => Promise<unknown> }).compactSession = async (i: unknown) => { compacted.push(i); return { ok: true }; };
+    h.ctx.config.models = { weaver: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null, compaction: { mode: 'tokens', value: 500_000 } }, workerOptions: [] };
+    const workerId = h.addWorker(seedTicket(), { runtimeId: 'fake', worktreePath: null });
+    const now = nowIso();
+    h.db.insert('agent_sessions', {
+      id: newId(), agentId: workerId, runtimeId: 'fake', status: 'active', turnCount: 1,
+      sessionRefJson: JSON.stringify({ threadId: 't-1' }), cumulativeUsageJson: {}, lastContextTokens: 150_000, createdAt: now, updatedAt: now,
+    });
+    h.services.wake!.enqueue(workerId, { source: 'ticket_comment', reason: 'a follow-up', payload: {} });
+
+    await dispatcher.tick();
+    await dispatcher.drain();
+
+    expect(compacted).toHaveLength(0);
+    expect(runCountFor(workerId)).toBe(1);
   });
 });

@@ -25,6 +25,7 @@ import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import {
   ACCOUNTS_REFRESH_MS,
   useAnswerDecision,
+  useCompactWeaver,
   useCreateThread,
   useDecisions,
   useMessageContext,
@@ -95,10 +96,14 @@ function ChatStatusBar({
   running,
   needs,
   session,
+  compacting,
+  onCompact,
 }: {
   running: number;
   needs: number;
   session: { label: string; percent: number; resetsIn: string | null } | null;
+  compacting: boolean;
+  onCompact: () => void;
 }): React.ReactElement {
   return (
     <header className="flex h-[38px] flex-none items-center gap-2.5 overflow-x-auto border-b border-line-1 bg-bg-0 px-4">
@@ -116,6 +121,16 @@ function ChatStatusBar({
             {session.resetsIn ? <span className="ac-mono whitespace-nowrap text-nano text-text-3">{session.resetsIn}</span> : null}
           </span>
         ) : null}
+        <button
+          type="button"
+          data-weaver-compact-now
+          className="flex-none text-nano text-text-3 hover:text-text-1 disabled:opacity-50"
+          disabled={compacting}
+          onClick={onCompact}
+          title="Summarise the conversation now, freeing context for what comes next"
+        >
+          {compacting ? 'Compacting…' : 'Compact now'}
+        </button>
         <A to="/needs" className="flex-none text-nano text-text-3 hover:text-text-1">Needs you</A>
       </div>
     </header>
@@ -297,6 +312,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const conductorModels = useRuntimeModels(conductorRuntime);
   const accounts = useUsageAccounts({ refetchIntervalMs: ACCOUNTS_REFRESH_MS });
   const queuedCount = useQueueCount('thread');
+  const compactNow = useCompactWeaver();
 
   const [sending, setSending] = useState(false);
   // The weaver's session being compacted out of band. While it is, the daemon holds its wakes, so a
@@ -667,6 +683,8 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
         running={running}
         needs={openDecisionCount}
         session={sessionStrip?.meter ? { label: sessionStrip.meter.label, percent: sessionStrip.meter.percent, resetsIn: sessionStrip.meter.resetsIn } : null}
+        compacting={compacting}
+        onCompact={() => compactNow.mutate()}
       />
 
       <div className="flex min-h-0 flex-1 items-stretch" ref={shellRef}>

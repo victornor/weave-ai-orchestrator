@@ -113,8 +113,10 @@ export interface UpgradeStatusResponse { upgrade: Upgrade | null; waitingFor: Wa
 export interface RuntimeModel { id: string; label: string; provider?: string; source?: 'detected' | 'static'; tier?: string; notes?: string; contextWindowTokens?: number; efforts?: string[] }
 
 /** One of the two model settings a workspace holds (VS-77): `GET`/`PUT /models`. */
-export interface ModelSetting { runtime: string; model: string | null; effort?: string }
-export interface WorkerModelOption { id: string; description: string; runtime: string | null; model: string | null; effort?: string }
+export type CompactionMode = 'off' | 'percent' | 'tokens';
+export interface ModelCompaction { mode: CompactionMode; value?: number }
+export interface ModelSetting { runtime: string; model: string | null; effort?: string; compaction?: ModelCompaction }
+export interface WorkerModelOption { id: string; description: string; runtime: string | null; model: string | null; effort?: string; compaction?: ModelCompaction }
 /** Where an effective control comes from (VS-356): stored on this workspace, a filled daemon overlay, or the schema default. */
 export type ModelSource = 'workspace' | 'daemon' | 'default';
 export interface WorkspaceModelsSource { weaver: ModelSource; workers: ModelSource; workerOptions: ModelSource }

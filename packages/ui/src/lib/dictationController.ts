@@ -3,13 +3,12 @@
  *
  * The V2 chat composer and the shell-level dictation session both drive the same lifecycle: start a
  * session, stream the transcript into a draft, discard a result of five words or fewer (VS-439),
- * reveal a long insert (VS-425), and send the settled draft through the same queued path the send
- * arrow uses (VS-282, VS-416, VS-435). Keeping it in one hook means the in-chat composer and the
- * off-chat floating bar cannot drift.
+ * reveal a long insert (VS-425), cancel on Escape (VS-489), and send the settled draft through the
+ * same queued path the send arrow uses (VS-282, VS-416) — which only an explicit send invokes.
+ * Keeping it in one hook means the in-chat composer and the off-chat floating bar cannot drift.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDictation, isDictationTooShort, type Dictation } from './dictation';
-import { useDictationAutoSend } from './dictationAutoSend';
 import { REVEAL_MS, REVEAL_STEP_MS, revealedCount, usePrefersReducedMotion } from './streamReveal';
 
 export interface DictationReveal {
@@ -28,6 +27,11 @@ export interface DictationController {
   dictated: React.MutableRefObject<boolean>;
   start: () => void;
   stop: () => void;
+  /**
+   * Abandon the session without sending: clear any queued send, discard the transcript and restore
+   * the draft that was there before the mic opened (VS-489). Escape uses this.
+   */
+  cancel: () => void;
   requestSend: () => void;
 }
 
@@ -56,6 +60,8 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
 
   const base = useRef('');
   const discarded = useRef(false);
+  /** True when the session was abandoned (Escape): restore `base` when it settles, never send. */
+  const cancelled = useRef(false);
   const sessionTranscript = useRef('');
   const sessionRan = useRef(false);
   const listeningRef = useRef(false);
@@ -66,7 +72,6 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
   const [pendingSend, setPendingSend] = useState(false);
   const pendingSendRef = useRef(false);
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
-  const autoSend = useDictationAutoSend();
 
   const stopReveal = useCallback((): void => {
     if (revealTimer.current !== null) clearInterval(revealTimer.current);
@@ -125,6 +130,7 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
 
   const start = useCallback((): void => {
     base.current = opts.value;
+    cancelled.current = false;
     // Assume too short until the transcript proves otherwise: a session that produces no words at
     // all is discarded too (VS-439).
     discarded.current = true;
@@ -134,17 +140,27 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
     dictation.start();
   }, [dictation, opts.value]);
 
-  // Every way a session ends — the hotkey's release or toggle-off, and the mic button — routes
-  // through here. With the setting on, it arms the existing queued send before stopping, so the
-  // transcript goes out through the same path as a queued arrow press. `requestSend()` stops the raw
-  // session so a manual send is never armed twice (VS-435).
+  // Every dictation-ending gesture — the mic button, the bar's Stop, and the hotkey's release or
+  // toggle-off — routes through here. It ends the session and leaves the transcript in the composer;
+  // it never sends (VS-489). Only an explicit send (the send keybinding or the Send button) submits,
+  // through `requestSend()` below, which stops the raw session itself so a manual send is never
+  // armed twice.
   const stop = useCallback((): void => {
-    if (autoSend && canSubmit.current() && !pendingSendRef.current) {
-      pendingSendRef.current = true;
-      setPendingSend(true);
-    }
     dictation.stop();
-  }, [autoSend, dictation]);
+  }, [dictation]);
+
+  // Escape means "abandon the dictation and send nothing" (VS-489). It never arms the queued send,
+  // and it drops any send that was already queued, so auto-send cannot fire. The restore of the
+  // pre-dictation draft happens below once the attempt settles, the same place the VS-439 discard
+  // lives, so a long cancelled transcript is put back too.
+  const cancel = useCallback((): void => {
+    cancelled.current = true;
+    pendingSendRef.current = false;
+    setPendingSend(false);
+    setPendingNotice(null);
+    stopReveal();
+    dictation.cancel();
+  }, [dictation, stopReveal]);
 
   // Send means "finish the dictation and send it". The transcript lands only after `stop()` —
   // synchronously-late for Web Speech, as a daemon response for Voxtype — so the send queues and
@@ -170,13 +186,15 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
     if (reveal && opts.value !== `${reveal.prefix}${reveal.piece}`) stopReveal();
   }, [opts.value, reveal, stopReveal]);
 
-  // A session's outcome of five words or fewer never lands (VS-439): once the attempt settles, put
-  // the draft back exactly as it was before the mic opened. Declared before the queued send below,
-  // so the two run in the same commit in that order.
+  // A session's outcome of five words or fewer never lands (VS-439), and a cancelled session never
+  // lands whatever its length (VS-489): once the attempt settles, put the draft back exactly as it
+  // was before the mic opened. Declared before the queued send below, so the two run in the same
+  // commit in that order.
   useEffect(() => {
     if (!dictation.settled || !sessionRan.current) return;
     sessionRan.current = false;
-    if (!isDictationTooShort(sessionTranscript.current)) return;
+    if (!cancelled.current && !isDictationTooShort(sessionTranscript.current)) return;
+    cancelled.current = false;
     stopReveal();
     writeValue.current(base.current);
   }, [dictation.settled, stopReveal]);
@@ -202,5 +220,5 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
     void submit.current(t);
   }, [pendingSend, dictation.settled, dictation.error, opts.value]);
 
-  return { dictation, reveal, pendingSend, pendingNotice, dictated, start, stop, requestSend };
+  return { dictation, reveal, pendingSend, pendingNotice, dictated, start, stop, cancel, requestSend };
 }

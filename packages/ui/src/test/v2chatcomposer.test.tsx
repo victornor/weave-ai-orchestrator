@@ -8,11 +8,10 @@
  * the last words are not lost.
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { dictationHint } from '../lib/dictationHint';
 import { DICTATION_HOLD_MS } from '../lib/dictationHotkey';
-import { writeDictationAutoSend } from '../lib/dictationAutoSend';
 
 const dict = vi.hoisted(() => ({
   onText: null as ((text: string, final: boolean) => void) | null,
@@ -527,149 +526,91 @@ describe('the V2 composer send while dictating (VS-416)', () => {
 });
 
 /**
- * VS-435: with "Send automatically when dictation ends" on, a session that ends — a hold released,
- * a toggle pressed off, the mic button — arms the existing queued send, so the settled transcript
- * goes out through the same path as a pressed send arrow. Off by default; an empty or failed
- * transcript submits nothing; the queued cue is visible and a second press never double-sends.
+ * VS-489: ending a dictation is not sending it. The mic button, the bar's Stop and the chord's
+ * release or toggle-off all end the session and leave the transcript in the composer, submitting
+ * nothing — the opt-in auto-send of VS-435 is retired. Only an explicit send (the send button or the
+ * send keybinding) submits, through the queued VS-282/VS-416 path.
  */
-describe('the V2 composer sends when dictation ends (VS-435)', () => {
-  beforeEach(() => localStorage.removeItem('conductor.dictationAutoSend'));
-  afterEach(() => localStorage.removeItem('conductor.dictationAutoSend'));
-
-  it('sends nothing when the setting is off', () => {
+describe('the V2 composer never sends when dictation ends (VS-489)', () => {
+  it('leaves the transcript and sends nothing when the mic button stops it', async () => {
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} />);
 
     dictate();
-    act(() => dict.onText?.('say this', true));
+    act(() => dict.onText?.('mic words that stay in the box', true));
     fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    finishSpeech('say this');
+    finishSpeech('mic words that stay in the box');
 
+    await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue('mic words that stay in the box'));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('sends on the mic button, once the transcript lands', () => {
-    writeDictationAutoSend(true);
-    const onSubmit = vi.fn();
-    render(<Harness onSubmit={onSubmit} />);
-
-    dictate();
-    act(() => dict.onText?.('mic words that will be sent now', true));
-    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    expect(onSubmit).not.toHaveBeenCalled();
-
-    finishSpeech('mic words that will be sent now');
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith('mic words that will be sent now', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
-  });
-
-  it('sends on a hold release', () => {
-    writeDictationAutoSend(true);
+  it('leaves the transcript and sends nothing when a hold is released', async () => {
     const onSubmit = vi.fn();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
     try {
       render(<Harness onSubmit={onSubmit} />);
       fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
-      act(() => dict.onText?.('held words that will be sent now', true));
+      act(() => dict.onText?.('held words that stay in the box', true));
       clock.mockReturnValue(DICTATION_HOLD_MS);
       fireEvent.keyUp(window, { key: ' ', code: 'Space' });
-      expect(onSubmit).not.toHaveBeenCalled();
+      finishSpeech('held words that stay in the box');
 
-      finishSpeech('held words that will be sent now');
-      expect(onSubmit).toHaveBeenCalledTimes(1);
-      expect(onSubmit).toHaveBeenCalledWith('held words that will be sent now', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
+      await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue('held words that stay in the box'));
+      expect(onSubmit).not.toHaveBeenCalled();
     } finally {
       clock.mockRestore();
     }
   });
 
-  it('sends when a toggle session is pressed off', () => {
-    writeDictationAutoSend(true);
+  it('leaves the transcript and sends nothing when a toggle is pressed off', async () => {
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} />);
 
     fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
     fireEvent.keyUp(window, { key: ' ', code: 'Space' });
-    act(() => dict.onText?.('toggle words that will be sent now', true));
+    act(() => dict.onText?.('toggle words that stay in the box', true));
     fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    finishSpeech('toggle words that stay in the box');
 
-    finishSpeech('toggle words that will be sent now');
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith('toggle words that will be sent now', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
-  });
-
-  it('shows the queued cue while it waits for an upload transcript', () => {
-    dict.mode = 'upload';
-    writeDictationAutoSend(true);
-    const onSubmit = vi.fn();
-    render(<Harness onSubmit={onSubmit} />);
-
-    dictate();
-    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    expect(screen.getByRole('button', { name: 'Send queued' })).toBeDisabled();
-
-    finishTranscribe('last words that will be sent now');
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith('last words that will be sent now', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
-  });
-
-  it('sends nothing when the transcript comes back empty', () => {
-    dict.mode = 'upload';
-    writeDictationAutoSend(true);
-    const onSubmit = vi.fn();
-    render(<Harness onSubmit={onSubmit} />);
-
-    dictate();
-    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    finishTranscribe('');
-
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByRole('status')).toHaveTextContent('Nothing was recognized, so nothing was sent.');
-  });
-
-  it('sends nothing when the attempt errors', () => {
-    dict.mode = 'upload';
-    writeDictationAutoSend(true);
-    const onSubmit = vi.fn();
-    render(<Harness onSubmit={onSubmit} />);
-
-    dictate();
-    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    act(() => {
-      dict.error = 'Transcription failed on the daemon. Type instead, or retry.';
-      dict.setSettled?.(true);
-    });
-
+    await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue('toggle words that stay in the box'));
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('does not double-send when the queued control is pressed again', () => {
+  it('keeps the upload transcript in the box and queues nothing', async () => {
     dict.mode = 'upload';
-    writeDictationAutoSend(true);
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} />);
 
     dictate();
     fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    const queued = screen.getByRole('button', { name: 'Send queued' });
-    expect(queued).toBeDisabled();
-    fireEvent.click(queued);
+    finishTranscribe('last words that stay in the box');
 
-    finishTranscribe('once and then again here now');
+    await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue('last words that stay in the box'));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Send queued' })).not.toBeInTheDocument();
+  });
+
+  it('still submits the settled transcript on an explicit Send press (VS-282/VS-416)', () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+
+    dictate();
+    act(() => dict.onText?.('explicitly sent words land here now', true));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    finishSpeech('explicitly sent words land here now');
+
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith('once and then again here now', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
+    expect(onSubmit).toHaveBeenCalledWith('explicitly sent words land here now', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
   });
 });
 
 /**
  * VS-439: a session that ends with five words or fewer is discarded — the draft goes back exactly
- * as it was, nothing is inserted, the reveal never starts, and neither a queued send (VS-282) nor
- * an auto-send (VS-435) submits the old draft.
+ * as it was, nothing is inserted, the reveal never starts, and a queued send (VS-282) submits
+ * nothing.
  */
 describe('the V2 composer discards a transcript of five words or fewer (VS-439)', () => {
-  beforeEach(() => localStorage.removeItem('conductor.dictationAutoSend'));
-  afterEach(() => localStorage.removeItem('conductor.dictationAutoSend'));
-
   it('restores the draft and inserts nothing when the speech outcome is five words', () => {
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} />);
@@ -719,19 +660,6 @@ describe('the V2 composer discards a transcript of five words or fewer (VS-439)'
     expect(screen.queryByRole('button', { name: 'Send queued' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Message the weaver')).toHaveValue('typed first');
     expect(screen.getByRole('status')).toHaveTextContent(/too short/);
-  });
-
-  it('auto-sends nothing and clears the armed state when the outcome is discarded', () => {
-    writeDictationAutoSend(true);
-    const onSubmit = vi.fn();
-    render(<Harness onSubmit={onSubmit} />);
-
-    dictate();
-    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    finishSpeech('one two three four five');
-
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: 'Send queued' })).not.toBeInTheDocument();
   });
 });
 

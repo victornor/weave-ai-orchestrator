@@ -11,7 +11,6 @@
  * session posts the draft to the target thread itself.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { useRouterState } from '@tanstack/react-router';
 import { api, NetworkError } from '../api/client';
 import { qk } from '../api/keys';
 import { useStreamQueryClient } from '../api/streams';
@@ -68,7 +67,6 @@ function sameTarget(a: DictationTarget | null, b: DictationTarget | null): boole
 
 export function DictationSessionProvider({ children }: { children: ReactNode }): React.ReactElement {
   const qc = useStreamQueryClient();
-  const path = useRouterState({ select: (s) => s.location.pathname });
   const [target, setTarget] = useState<DictationTarget | null>(null);
   const [attachmentsDropped, setAttachmentsDropped] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
@@ -134,13 +132,21 @@ export function DictationSessionProvider({ children }: { children: ReactNode }):
     hasFiles: () => (composerGetter.current?.()?.stagedFiles ?? 0) > 0,
   });
 
+  // "Active" is the whole attempt, not just the mic or the upload: the gap between stopping and the
+  // transcript landing is when a queued send is waiting, so the bar must stay through it (VS-450).
+  const active = !controller.dictation.settled;
   const [startToken, setStartToken] = useState(0);
+  const [composerToken, setComposerToken] = useState(0);
   const startSession = useCallback((): void => {
+    // A session is already running: do not retarget it — that would move its transcript to another
+    // pane. Stopping it is what the chord and the mic do; only the focused composer can start the
+    // next one (VS-489).
+    if (active) return;
     const c = composerGetter.current?.() ?? null;
     if (c && !c.disabled) setTarget(c.target);
     else if (!target) return;
     setStartToken((n) => n + 1);
-  }, [target]);
+  }, [active, target]);
 
   // Start after the target (and so `value`, the draft of the new target) has rendered, so `base` is
   // the right thread's draft.
@@ -153,9 +159,6 @@ export function DictationSessionProvider({ children }: { children: ReactNode }):
 
   // The shared chord controls the session from any page (VS-432); on the target chat the composer
   // announces itself so the chord starts there, off-chat a live session is stopped or toggled.
-  // "Active" is the whole attempt, not just the mic or the upload: the gap between stopping and the
-// transcript landing is when a queued send is waiting, so the bar must stay through it (VS-450).
-const active = !controller.dictation.settled;
   useDictationHotkey({
     enabled: !(typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches) && (active || hotkeyAllowed),
     listening: controller.dictation.listening,
@@ -163,14 +166,33 @@ const active = !controller.dictation.settled;
     stop: controller.stop,
   });
 
+  // Escape abandons a running dictation without sending (VS-489). It is bound only while a session
+  // is active, so every existing Escape meaning is unchanged when no dictation is running. The
+  // latest cancel is read through a ref so the listener is not re-subscribed on every render.
+  const cancelRef = useRef(controller.cancel);
+  cancelRef.current = controller.cancel;
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      cancelRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [active]);
+
   const registerComposer = useCallback((getter: () => ComposerRegistration | null): (() => void) => {
     composerGetter.current = getter;
     setAttachmentsDropped(0);
+    // Bump so the bar's visibility recomputes when a composer registers or unregisters, even when
+    // `attachmentsDropped` was already 0 and setState would otherwise bail out (VS-489).
+    setComposerToken((n) => n + 1);
     return () => {
       if (composerGetter.current !== getter) return;
       const last = getter();
       composerGetter.current = null;
       if (last && last.stagedFiles > 0) setAttachmentsDropped(last.stagedFiles);
+      setComposerToken((n) => n + 1);
     };
   }, []);
 
@@ -178,10 +200,16 @@ const active = !controller.dictation.settled;
     setHotkeyAllowedState((cur) => (cur === allowed ? cur : allowed));
   }, []);
 
-  const onTargetChat = target !== null && path === `/w/${encodeURIComponent(target.ws)}/chat`;
+  // The bar exists for a session whose target composer is not on screen: off the chat page, or in
+  // the multi-chat view once focus has moved off the target pane. While the target composer is
+  // registered (focused and mounted) its own in-composer UI shows the session and the bar stays
+  // hidden — including on the multi-chat view, which path equality got wrong (VS-489).
+  void composerToken;
+  const registered = composerGetter.current?.() ?? null;
+  const targetComposerHere = target !== null && registered !== null && sameTarget(registered.target, target);
   // A send confirmation (or a "nothing was recognized" notice) has to be visible on the page the
   // human is on, so the bar lingers for it even after the attempt settles (VS-450).
-  const visible = !onTargetChat && (active || controller.pendingNotice !== null || notice !== null);
+  const visible = !targetComposerHere && (active || controller.pendingNotice !== null || notice !== null);
 
   const session: DictationSessionValue = useMemo(
     () => ({

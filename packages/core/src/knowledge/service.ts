@@ -12,7 +12,7 @@ import { requestKnowledgeRepoPr } from './repoDelivery.js';
 import { createEmbeddingIndex, type EmbeddingIndexOptions } from './embeddings.js';
 import { tx } from '../tickets/tx.js';
 import {
-  CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, MAX_DUPLICATE_ENTRIES, MAX_DUPLICATE_PAIRS, SECRET_SHAPED_RE, appendEntry, budgetOf, countWords, docFolderOf, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
+  CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, MAX_DUPLICATE_ENTRIES, MAX_DUPLICATE_PAIRS, SECRET_SHAPED_RE, appendEntry, budgetOf, countWords, docFolderOf, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection, isDuplicateCandidate, isHubSectionPointer, isRedirectStub,
   isDocPath, isHubStub, normalize, parseDoc, parseLinks, readMirrorFile, relPathFor, renderDoc, repoKnowledgePath, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated, type Entry,
 } from './files.js';
 
@@ -844,7 +844,10 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         const f = knowledgeRow(raw) as unknown as FileRow;
         const abs = join(ctx.paths.knowledge, f.path);
         if (!existsSync(abs)) continue;
-        for (const e of entriesOf(readBody(abs))) entries.push({ entry: e, file: f });
+        for (const e of entriesOf(readBody(abs))) {
+          if (!isDuplicateCandidate(e.text) || isHubSectionPointer(f.path, e.text)) continue;
+          entries.push({ entry: e, file: f });
+        }
       }
       const entryCapped = entries.length > MAX_DUPLICATE_ENTRIES;
       const considered = entries.slice(0, MAX_DUPLICATE_ENTRIES);
@@ -856,7 +859,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       let pairCapped = false;
       for (let i = 0; i < considered.length && !pairCapped; i++) {
         for (let j = i + 1; j < considered.length; j++) {
-          const score = similarity(considered[i]!.entry.normalized, considered[j]!.entry.normalized);
+          const score = similarity(considered[i]!.entry.normalized, considered[j]!.entry.normalized, { containment: false });
           if (score < DUPLICATE_THRESHOLD) continue;
           pairs.push({ score, a: view(considered[i]!.file, considered[i]!.entry), b: view(considered[j]!.file, considered[j]!.entry) });
           if (pairs.length >= MAX_DUPLICATE_PAIRS) { pairCapped = true; break; }
@@ -896,7 +899,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
 
       const docs = service.listDocs(projectId !== undefined && projectId !== null ? { projectId } : {});
       const staleBefore = Date.now() - DOCUMENT_STALE_MS;
-      const orphans = docs.filter((d) => d.backlinks === 0);
+      const orphans = docs.filter((d) => d.backlinks === 0 && !isRedirectStub(readBody(join(ctx.paths.knowledge, d.path))));
       const stale = docs.filter((d) => Date.parse(d.updatedAt) < staleBefore);
 
       // VS-492: a fifth measure, derived from the read events the context-accounting service already

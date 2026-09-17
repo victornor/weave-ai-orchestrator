@@ -13,7 +13,8 @@ The daemon SHALL be able to report, for the workspace and for any one of its pro
 stored record:
 
 - every hub file's current size against its configured budget;
-- every linked document with no other page linking to it;
+- every linked document with no other page linking to it, excluding documents explicitly identified as
+  redirects to another document;
 - every linked document not written to in 90 days;
 - every linked document that no run has read within the never-read window defined by
   `knowledge/scheduled-curation`, and that has existed at least as long as that window;
@@ -25,8 +26,13 @@ before it is requested.
 
 #### Scenario: An orphan document
 
-- **WHEN** a project has a linked document that no other page links to
+- **WHEN** a project has a linked document that no other page links to and that is not an explicit redirect
 - **THEN** the health view for that project lists it among the documents with no backlink
+
+#### Scenario: A redirect document without a backlink
+
+- **WHEN** a linked document explicitly identifies another document slug as its canonical destination and no other page links to it
+- **THEN** the health view does not list it among the documents with no backlink
 
 #### Scenario: A stale document
 
@@ -35,7 +41,7 @@ before it is requested.
 
 #### Scenario: A never-read document
 
-- **WHEN** a project has a linked document older than the never-read window that no run has read
+- **WHEN** a linked document is older than the never-read window that no run has read
 - **THEN** the health view for that project lists it as never read
 
 #### Scenario: A document read within the window
@@ -45,8 +51,7 @@ before it is requested.
 
 #### Scenario: An unresolved link
 
-- **WHEN** a knowledge file or document contains a `[[slug]]` that names no page in its resolvable
-  scopes
+- **WHEN** a knowledge file or document contains a `[[slug]]` that names no page in its resolvable scopes
 - **THEN** the health view lists that link as unresolved, naming the page it appears in
 
 #### Scenario: A hub file's size
@@ -87,12 +92,14 @@ A project with none of an issue SHALL show that plainly rather than omitting the
 
 The daemon SHALL periodically compare a project's current health measures against what they were at
 the last comparison. When a new orphan, a new unresolved link, a document newly qualifying as a
-never-read document, a newly appearing likely-duplicate pair, or a hub file newly past 80% of its
-budget appears, or when the total number of open issues for that project reaches a fixed threshold,
-the daemon SHALL wake the conductor naming the project and the issues found.
+never-read document, a newly appearing actionable likely-duplicate pair, or a hub file newly past 80%
+of its budget appears, or when the total number of open issues for that project reaches a fixed
+threshold, the daemon SHALL wake the conductor naming the project and the issues found.
 
 A likely-duplicate pair SHALL be reported to the conductor with both entries named and the file each
-sits in, so the curator can decide what to merge. Reporting a pair SHALL NOT change it or any file.
+sits in, so the curator can decide what to merge. Hub-file section-pointer lines and pairs failing
+the duplicate candidate rules SHALL not contribute an issue or wake. Reporting a pair SHALL NOT
+change it or any file.
 
 This signal SHALL be raised on the same periodic sweep that already watches hub files for curation,
 not only in response to a write that was rejected for being over budget. A hub file crossing 80% of
@@ -100,43 +107,50 @@ its budget SHALL reach the conductor through this signal whether or not anyone w
 before the next sweep.
 
 The first time a project's health is compared, no prior state SHALL be assumed empty: existing
-issues at that first comparison SHALL be recorded as the starting point and SHALL NOT, by
-themselves, wake the conductor.
+issues at that first comparison SHALL be recorded as the starting point and SHALL NOT, by themselves,
+wake the conductor. If filtering leaves no open issues, the sweep SHALL NOT wake the conductor.
 
 #### Scenario: A new orphan appears
 
-- **WHEN** a project's knowledge health is swept and a document that had a backlink at the previous
-  sweep now has none
+- **WHEN** a project's knowledge health is swept and a document that had a backlink at the previous sweep now has none
 - **THEN** the conductor is woken, naming the project and the new orphan
 
 #### Scenario: A document becomes a never-read document
 
-- **WHEN** a project's knowledge health is swept and a linked document that was read within the
-  window at the previous sweep is no longer read within it, and has reached the window's age
+- **WHEN** a project's knowledge health is swept and a linked document that was read within the window at the previous sweep is no longer read within it, and has reached the window's age
 - **THEN** the conductor is woken, naming the project and the never-read document
 
 #### Scenario: A likely-duplicate pair appears
 
-- **WHEN** a project's knowledge health is swept and two of its existing entries are now at or above
-  the duplicate threshold
+- **WHEN** a project's knowledge health is swept and two existing entries pass the duplicate candidate rules and are at or above the duplicate threshold
 - **THEN** the conductor is woken with both entries named and the file each sits in
+
+#### Scenario: A hub pointer is repeated across sections
+
+- **WHEN** the same `[[slug]] — one-line summary` hub pointer appears in both the `Landmines` and `Documents` sections
+- **THEN** it contributes no duplicate issue and does not wake the conductor
+
+#### Scenario: A short boilerplate fragment matches unrelated prose
+
+- **WHEN** a one-word `**Status:**` entry is compared with an unrelated project knowledge paragraph
+- **THEN** it contributes no duplicate issue and does not wake the conductor
 
 #### Scenario: A hub file crosses its threshold with no rejected write
 
-- **WHEN** a project's knowledge base crosses 80% of its configured budget between sweeps, with no
-  write to it having been rejected
+- **WHEN** a project's knowledge base crosses 80% of its configured budget between sweeps, with no write to it having been rejected
 - **THEN** the conductor is woken about that project before any write to it is rejected
 
 #### Scenario: The first sweep of a project
 
-- **WHEN** a project's knowledge health is swept for the first time and it already has an orphan
-  document
+- **WHEN** a project's knowledge health is swept for the first time and it already has an orphan document
 - **THEN** that orphan is recorded as the starting point and the conductor is not woken for it
 
 ### Requirement: An unchanged or improving network stays silent
 
 When a project's health measures at a sweep are the same as, or better than, the last comparison,
-the daemon SHALL NOT wake the conductor about that project's knowledge health.
+the daemon SHALL NOT wake the conductor about that project's knowledge health. Resolved duplicate
+false positives, excluded hub pointers and excluded redirect documents SHALL not remain in the
+open-issue signature.
 
 #### Scenario: Nothing changed
 
@@ -146,5 +160,9 @@ the daemon SHALL NOT wake the conductor about that project's knowledge health.
 #### Scenario: An issue was fixed
 
 - **WHEN** a document that was orphaned at the last sweep now has a backlink
-- **THEN** the conductor is not woken, and the fixed document is no longer counted at the next
-  comparison
+- **THEN** the conductor is not woken, and the fixed document is no longer counted at the next comparison
+
+#### Scenario: All apparent issues are filtered
+
+- **WHEN** a sweep contains only short boilerplate matches, repeated hub pointers and redirect documents with no backlinks
+- **THEN** the health issue count is zero and the conductor is not woken

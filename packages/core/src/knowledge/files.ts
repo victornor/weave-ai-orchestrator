@@ -235,11 +235,11 @@ export function normalize(text: string): string {
     .trim();
 }
 
-/** Dice coefficient over word bigrams, with a whole-string containment shortcut. */
-export function similarity(a: string, b: string): number {
+/** Dice coefficient over word bigrams, with an optional whole-string containment shortcut. */
+export function similarity(a: string, b: string, options: { containment?: boolean } = {}): number {
   if (!a || !b) return 0;
   if (a === b) return 1;
-  if (a.includes(b) || b.includes(a)) return 0.95;
+  if (options.containment !== false && (a.includes(b) || b.includes(a))) return 0.95;
   const wa = a.split(' ').filter(Boolean);
   const wb = b.split(' ').filter(Boolean);
   if (wa.length < 2 || wb.length < 2) {
@@ -262,6 +262,9 @@ export function similarity(a: string, b: string): number {
 }
 
 export const DUPLICATE_THRESHOLD = 0.8;
+/** The smallest useful entry for the periodic duplicate sweep (VS-501). */
+export const MIN_DUPLICATE_WORDS = 2;
+export const MIN_DUPLICATE_NONSPACE_CHARS = 12;
 /**
  * VS-492: the bounds on the duplicate-entry sweep. The number of entries compared within a scope is
  * capped, so the pairwise cost is `O(min(N, 1500)²)` — a constant worst case that does not grow with
@@ -273,6 +276,13 @@ export const MAX_DUPLICATE_PAIRS = 100;
 
 export function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Whether an entry has enough content to be worth comparing in the periodic duplicate sweep. */
+export function isDuplicateCandidate(text: string): boolean {
+  const normalized = normalize(text);
+  return countWords(normalized) >= MIN_DUPLICATE_WORDS
+    && normalized.replace(/\s/g, '').length >= MIN_DUPLICATE_NONSPACE_CHARS;
 }
 
 /** Per-section token usage plus the sections over their fair share of the budget. */
@@ -351,6 +361,25 @@ export function docPathFor(scope: KnowledgeScope, slug: string, projectSlug?: st
 /** Is this knowledge path a linked document (as opposed to one of the four hub files)? Any folder depth (VS-265). */
 export function isDocPath(rel: string): boolean {
   return /\/docs\/(?:[^/]+\/)*[^/]+\.md$/.test(rel) || /^workspace\/shared\/(?:[^/]+\/)*[^/]+\.md$/.test(rel);
+}
+
+/** A hub entry that indexes a linked document rather than recording a knowledge claim (VS-501). */
+export function isHubSectionPointer(path: string, text: string): boolean {
+  if (isDocPath(path)) return false;
+  return /^\[\[[a-z0-9][a-z0-9-]{1,63}(?:\|[^\]]+)?\]\](?:\s*(?:—|:|-)\s*.*)?$/i.test(text.trim());
+}
+
+/**
+ * A document deliberately retained as a compatibility redirect. The heading form matches the real
+ * design-contract redirect; the one-line body form keeps simple legacy stubs intentional too.
+ */
+export function isRedirectStub(body: string): boolean {
+  const heading = body.split('\n').find((line) => /^#\s+/.test(line.trim()))?.trim() ?? '';
+  if (/\bmoved\s+to\s+\[\[[a-z0-9][a-z0-9-]{1,63}\]\]/i.test(heading)) return true;
+  const content = body.split('\n').map((line) => line.trim())
+    .filter((line) => line && !/^#{1,6}\s+/.test(line) && !/^<!--.*-->$/.test(line));
+  return content.length === 1
+    && /^(?:the\s+)?(?:real|canonical)\s+document\s+(?:is|lives\s+at)\s+\[\[[a-z0-9][a-z0-9-]{1,63}\]\]\.?$/i.test(content[0]!);
 }
 
 export function docSlugOf(rel: string): string | null {

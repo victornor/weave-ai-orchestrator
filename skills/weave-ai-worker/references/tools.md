@@ -39,7 +39,7 @@ Workers may also call `weave_ticket_create` for **child tickets inside their own
 
 | Tool | Input |
 |---|---|
-| `weave_ticket_create` | `{projectId?, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?, workerModelId?}` — file, assign and prioritize in this one call: `assigneeRoleId` routes the ticket and spawns its worker. `autoMerge` only when the human asked for it in the same request; `summary` is a one-line why (VS-146) |
+| `weave_ticket_create` | `{projectId?, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?, workerModelId?}` — file, assign and prioritize in this one call: `assigneeRoleId` routes the ticket and spawns its worker. `autoMerge` only when the human asked for it in the same request; `summary` is a one-line why (VS-146). When the workspace has a configured worker option, `workerModelId` is required (VS-514) and omitting it is refused with every configured option listed; omit it only when the catalog is empty or fully unconfigured |
 | `weave_ticket_assign` | `id`, `roleId`, `workerModelId?` — re-route an existing ticket, or assign one after a hire activates; not needed when `weave_ticket_create` already named the role |
 | `weave_ticket_set_priority` | `id`, `priority` — change an existing ticket's priority |
 | `weave_role_list` | — |

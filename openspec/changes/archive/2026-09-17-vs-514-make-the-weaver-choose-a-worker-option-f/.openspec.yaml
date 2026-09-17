@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-17
+goal: Make the weaver choose a worker option for every ticket instead of falling
+  back to a default

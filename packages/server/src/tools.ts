@@ -15,6 +15,7 @@ import {
   ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS, ATTACHMENT_MAX_PER_MESSAGE,
   PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, WEAVER_REVIEW_WAITING_ON_MAX,
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent, validateArtifactImageDataUris,
+  isWorkerOptionConfigured,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock, type AgentKind,
 } from '@weave-ai/shared';
 import {
@@ -112,6 +113,34 @@ function leanTicket(t: Ticket): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const k of TICKET_LIST_LEAN) out[k] = t[k];
   return out;
+}
+
+/**
+ * VS-514: the worker-option choice an agent filing or routing work must make. When the effective
+ * catalog holds at least one configured option, omitting the id is a validation error that names
+ * every configured option with its description, so the next call is an informed one rather than a
+ * retry with a guess. When nothing is configured to choose from — an empty catalog, or every option
+ * still without a runtime — the caller's default is preserved, since a required field that cannot
+ * be satisfied would block all filing. An id not in the catalog is refused naming the valid ids; an
+ * id that exists but has no runtime is left to `resolveWorkerModelId`'s `model_unconfigured`.
+ */
+function chooseWorkerModel(ctx: ToolCtx, requested: string | null | undefined): string | null {
+  const all = svc(ctx).models.get().workerOptions ?? [];
+  const configured = all.filter(isWorkerOptionConfigured);
+  const id = requested?.trim() ? requested.trim() : null;
+  if (!configured.length) return id;
+  if (!id) {
+    const lines = configured.map((o) => `- ${o.id}: ${o.description}`).join('\n');
+    throw new OcError(
+      'validation',
+      `workerModelId is required — this workspace has configured worker options, so choose the one this ticket should run on:\n${lines}`,
+      { options: configured.map((o) => ({ id: o.id, description: o.description })) },
+    );
+  }
+  if (!all.some((o) => o.id === id)) {
+    throw new OcError('validation', `unknown worker model option '${id}'; valid options are ${all.map((o) => `'${o.id}'`).join(', ')}`);
+  }
+  return id;
 }
 
 // ---------- scope enforcement (PLAN §9.1) ----------
@@ -837,13 +866,17 @@ export const TOOLS: ToolDef[] = [
       landingBranch: z.string().nullish(),
       workerModelId: z.string().nullish(),
     }),
-    description: "Create a ticket. Set autoMerge only when the human asked for it in the same request. Set landingBranch only when the human asked this ticket's work to land somewhere other than its project's own landing branch (VS-119) — never inferred from a PR base. Set summary to a one-line why (VS-146) shown on plan-approval cards. Set workerModelId to a catalog option from weave_worker_models (VS-162); omit it to use the workspace workers default. Workers may only create tickets in their own project.",
-    handler: (ctx, i) => svc(ctx).tickets.create(ctx.actor, { ...i, projectId: isConductor(ctx) ? (i.projectId ?? null) : ctx.claims.projectId }),
+    description: "Create a ticket. Set autoMerge only when the human asked for it in the same request. Set landingBranch only when the human asked this ticket's work to land somewhere other than its project's own landing branch (VS-119) — never inferred from a PR base. Set summary to a one-line why (VS-146) shown on plan-approval cards. Set workerModelId to a catalog option from weave_worker_models (VS-162) — when the workspace's catalog has a configured option this is required (VS-514), and omitting it is refused with every configured option listed; it may be omitted only when the catalog is empty or every option is unconfigured, and then the workspace workers default is used. Workers may only create tickets in their own project.",
+    handler: (ctx, i) => svc(ctx).tickets.create(ctx.actor, { ...i, workerModelId: chooseWorkerModel(ctx, i.workerModelId), projectId: isConductor(ctx) ? (i.projectId ?? null) : ctx.claims.projectId }),
   },
   {
     name: 'weave_ticket_assign', scope: 'weaver', input: z.object({ id: ticketId, roleId: z.string().nullable(), workerModelId: z.string().nullish() }),
-    description: 'Assign a ticket to a role. The daemon spawns a worker as soon as the role has a free slot. workerModelId (VS-162) may be set only while the ticket has no worker.',
-    handler: (ctx, i) => svc(ctx).tickets.assign(ctx.actor, i.id, i.roleId, i.workerModelId),
+    description: 'Assign a ticket to a role. The daemon spawns a worker as soon as the role has a free slot. workerModelId (VS-162) may be set only while the ticket has no worker; when the workspace catalog has a configured option and this assign attaches a role to a ticket that names none, workerModelId is required (VS-514) and omitting it is refused with every configured option listed.',
+    handler: (ctx, i) => {
+      const t = svc(ctx).tickets.get(i.id);
+      const workerModelId = i.roleId && !t.workerModelId && !t.workerId ? chooseWorkerModel(ctx, i.workerModelId) : i.workerModelId;
+      return svc(ctx).tickets.assign(ctx.actor, i.id, i.roleId, workerModelId);
+    },
   },
   {
     name: 'weave_session_take_ticket', scope: 'session', input: z.object({
@@ -853,7 +886,7 @@ export const TOOLS: ToolDef[] = [
       parentId: z.string().nullish(), blockedBy: z.array(z.string()).optional(), autoMerge: z.boolean().optional(),
       landingBranch: z.string().nullish(), workerModelId: z.string().nullish(),
     }),
-    description: "A persistent session takes a ticket as its own work — never on your own judgement, only when the human asked for it. Pass ticketId to take an existing, unassigned ticket, or the ticket-creation fields to file a new one assigned to your own role; either way you become its worker and are given a worktree for it, exactly like a transient worker's ticket, with the same plan-approval and merge-approval gates. Refused if you already hold a ticket, or if the given ticket already has a worker or belongs to a different role.",
+    description: "A persistent session takes a ticket as its own work — never on your own judgement, only when the human asked for it. Pass ticketId to take an existing, unassigned ticket, or the ticket-creation fields to file a new one assigned to your own role; either way you become its worker and are given a worktree for it, exactly like a transient worker's ticket, with the same plan-approval and merge-approval gates. When filing a new ticket and the workspace catalog has a configured option, workerModelId is required (VS-514) and omitting it is refused with every configured option listed. Refused if you already hold a ticket, or if the given ticket already has a worker or belongs to a different role.",
     handler: async (ctx, i) => {
       const sessionId = requireOwnSession(ctx);
       if (i.ticketId) return svc(ctx).workers.takeTicketForSession(ctx.actor, sessionId, { ticketId: i.ticketId });
@@ -861,7 +894,7 @@ export const TOOLS: ToolDef[] = [
       return svc(ctx).workers.takeTicketForSession(ctx.actor, sessionId, {
         projectId: ctx.claims.projectId, kind: i.kind, title: i.title, description: i.description,
         summary: i.summary, priority: i.priority, parentId: i.parentId, blockedBy: i.blockedBy,
-        autoMerge: i.autoMerge, landingBranch: i.landingBranch, workerModelId: i.workerModelId,
+        autoMerge: i.autoMerge, landingBranch: i.landingBranch, workerModelId: chooseWorkerModel(ctx, i.workerModelId),
       });
     },
   },

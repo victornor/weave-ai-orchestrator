@@ -6,7 +6,7 @@ import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
 import { scheduledWake } from '../inspect.js';
 
-const ListQuery = z.object({ status: csv.optional(), project: z.string().optional(), role: z.string().optional(), includeRetired: z.string().optional() });
+const ListQuery = z.object({ status: csv.optional(), kind: csv.optional(), project: z.string().optional(), role: z.string().optional(), includeRetired: z.string().optional() });
 
 export function workerRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -14,7 +14,9 @@ export function workerRoutes(): Hono<AppEnv> {
   app.get('/', (c) => {
     const q = query(c, ListQuery);
     const ws = c.get('ws');
-    const workers = ws.services.workers.list({ status: q.status as never, projectId: q.project, roleId: q.role, includeRetired: q.includeRetired === 'true' });
+    // VS-525: `kind` (csv) lets the web app read a role's `session` agents to show whether its chat
+    // already exists; omitting it keeps the worker-only list every other caller relies on.
+    const workers = ws.services.workers.list({ status: q.status as never, kinds: q.kind as never, projectId: q.project, roleId: q.role, includeRetired: q.includeRetired === 'true' });
     // A worker's own row carries no ticket data; mark which ones are interactive sessions (VS-101)
     // so the list is where they are visible, not only a per-worker detail fetch.
     const ticketIds = [...new Set(workers.map((w) => w.ticketId).filter((id): id is string => Boolean(id)))];

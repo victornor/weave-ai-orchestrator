@@ -1057,6 +1057,27 @@ describe('workers', () => {
     });
   });
 
+  describe('list kind filter (VS-525)', () => {
+    beforeEach(() => {
+      h.services.threads = createThreadsService(h.ctx, h.deps);
+    });
+
+    it('defaults to worker-kind agents, leaving a role session out', async () => {
+      h.addWorker(null);
+      await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+
+      expect(workers.list().map((a) => a.kind)).toEqual(['worker']);
+      expect(workers.list({ kinds: ['session'] }).map((a) => a.kind)).toEqual(['session']);
+    });
+
+    it('narrows sessions by project and role', async () => {
+      await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+
+      expect(workers.list({ kinds: ['session'], projectId: h.projectId, roleId: h.roleId })).toHaveLength(1);
+      expect(workers.list({ kinds: ['session'], roleId: 'nope' })).toHaveLength(0);
+    });
+  });
+
   describe('ensureSession (VS-495)', () => {
     beforeEach(() => {
       h.services.threads = createThreadsService(h.ctx, h.deps);

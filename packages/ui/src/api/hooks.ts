@@ -877,14 +877,23 @@ export type WorkerListItem = Agent & {
   tests?: WorkerActivitySummary['tests'];
 };
 
-export function useWorkers(params: { status?: string; project?: string; role?: string; includeRetired?: boolean } = {}, wsOverride?: string): UseQueryResult<WorkerListItem[]> {
+export function useWorkers(params: { status?: string; kind?: string; project?: string; role?: string; includeRetired?: boolean } = {}, wsOverride?: string): UseQueryResult<WorkerListItem[]> {
   const ws = useHookWs(wsOverride);
   return useQuery({ queryKey: [...qk.workers(ws), params], queryFn: () => api.ws<WorkerListItem[]>(ws, `/workers${qs(params)}`), enabled: Boolean(ws) });
 }
 
+/**
+ * VS-525: a project's (or the whole workspace's) persistent-session agents, so a role's chat can
+ * show whether its conversation already exists before it is opened. Reads the same list route with
+ * `kind=session`; the default worker list is untouched.
+ */
+export function useSessions(project?: string, wsOverride?: string): UseQueryResult<WorkerListItem[]> {
+  return useWorkers({ kind: 'session', ...(project ? { project } : {}) }, wsOverride);
+}
+
 export function useWorkersMany(
   ids: readonly string[],
-  params: { status?: string; project?: string; role?: string; includeRetired?: boolean } = {},
+  params: { status?: string; kind?: string; project?: string; role?: string; includeRetired?: boolean } = {},
 ): UseQueryResult<WorkerListItem[]>[] {
   return useQueries({
     queries: ids.map((id) => ({

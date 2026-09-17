@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-17
+goal: Escalating a worker's question must not supersede the worker's own
+  decision, so the human's answer can be relayed back onto it.

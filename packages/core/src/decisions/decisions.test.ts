@@ -104,6 +104,73 @@ describe('decisions', () => {
     expect(decisions.create(AGENT, { ticketId: t.id, kind: 'gate_finding', title: 'y', askedByAgentId: h.conductorId, correlationKey: newId() }).owner).toBe('weaver');
   });
 
+  // VS-519: the documented escalation flow — the weaver raises its own ask to the human about a
+  // worker's ask, then relays the human's answer back onto the worker's decision. Before this change
+  // both asks derived `question:<ticketId>`, so the escalation superseded the worker's card and the
+  // relay failed with `wrong_status`. The derived bucket is now owner-scoped.
+  describe('escalating a worker ask leaves its decision answerable (VS-519)', () => {
+    it('a worker question and the conductor escalation coexist', () => {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      const worker = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'Which store?', askedByAgentId: workerId });
+      const escalation = decisions.create(conductor(), { ticketId: t.id, kind: 'question', title: 'Which store should the worker use?' });
+
+      expect(worker.owner).toBe('weaver');
+      expect(escalation.owner).toBe('human');
+      expect(decisions.get(worker.id).status).toBe('open');
+      expect(decisions.get(escalation.id).status).toBe('open');
+    });
+
+    it('a worker concern and the conductor escalation coexist', () => {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      const worker = decisions.create(AGENT, { ticketId: t.id, kind: 'concern', title: 'The stated fix does not close it', askedByAgentId: workerId });
+      const escalation = decisions.create(conductor(), { ticketId: t.id, kind: 'concern', title: 'The stated fix does not close it' });
+
+      expect(decisions.get(worker.id).status).toBe('open');
+      expect(decisions.get(escalation.id).status).toBe('open');
+    });
+
+    it('a worker gate_finding survives an escalation that reaches the human through another kind', () => {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      const finding = decisions.create(AGENT, { ticketId: t.id, kind: 'gate_finding', title: 'Spec implies dropping a legacy table', askedByAgentId: workerId });
+      const escalation = decisions.create(conductor(), { ticketId: t.id, kind: 'question', title: 'Drop the legacy table?' });
+
+      expect(finding.owner).toBe('weaver');
+      expect(escalation.owner).toBe('human');
+      expect(decisions.get(finding.id).status).toBe('open');
+      expect(decisions.get(escalation.id).status).toBe('open');
+    });
+
+    it('relays the human answer onto the worker decision and wakes the worker', async () => {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      const worker = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'Which store?', askedByAgentId: workerId });
+      const escalation = decisions.create(conductor(), { ticketId: t.id, kind: 'question', title: 'Which store?', options: [{ key: 'sqlite', label: 'SQLite' }] });
+
+      await decisions.answer(HUMAN, escalation.id, { key: 'sqlite', text: 'use sqlite' });
+      const relayed = await decisions.answer(conductor(), worker.id, { text: 'Use SQLite.' });
+
+      expect(relayed.status).toBe('answered');
+      const w = wake.calls.find((c) => c.agentId === workerId && c.input.source === 'decision_answered');
+      expect(w?.input.payload).toMatchObject({ decisionId: worker.id, answer: { text: 'Use SQLite.' } });
+    });
+
+    it('a repeat ask by the same owner still supersedes, but a same-kind ask by the other owner does not', () => {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      const first = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'q1', askedByAgentId: workerId });
+      const second = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'q2', askedByAgentId: workerId });
+      expect(decisions.get(first.id).status).toBe('superseded');
+      expect(decisions.get(second.id).status).toBe('open');
+
+      const humanOwned = decisions.create(conductor(), { ticketId: t.id, kind: 'question', title: 'escalation' });
+      expect(decisions.get(second.id).status).toBe('open');
+      expect(decisions.get(humanOwned.id).status).toBe('open');
+    });
+  });
+
   it('records the answer verbatim and wakes the asking agent', async () => {
     const t = ticket();
     const workerId = h.addWorker(t.id);
@@ -429,7 +496,7 @@ describe('decisions', () => {
   it('creates workspace-level decisions without a ticket', () => {
     const d = decisions.create(HUMAN, { kind: 'approval', title: 'Add a project?' });
     expect(d.ticketId).toBeNull();
-    expect(decisions.get(d.id).correlationKey).toBe('approval:workspace');
+    expect(decisions.get(d.id).correlationKey).toBe('approval:human:workspace');
     expect(newId()).toBeTruthy();
   });
 
@@ -445,7 +512,7 @@ describe('decisions', () => {
     expect(d.status).toBe('open');
     expect(d.ticketId).toBeNull();
     expect(d.projectId).toBe(h.projectId);
-    expect(d.correlationKey).toBe(`question:${t.id}`);
+    expect(d.correlationKey).toBe(`question:human:${t.id}`);
     // The ask stays legitimate: it is answerable, not refused.
     expect((await decisions.answer(HUMAN, d.id, { text: 'the thing' })).status).toBe('answered');
   });
@@ -454,7 +521,7 @@ describe('decisions', () => {
     const t = ticket();
     const d = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'Which store?' });
     expect(d.ticketId).toBe(t.id);
-    expect(d.correlationKey).toBe(`question:${t.id}`);
+    expect(d.correlationKey).toBe(`question:human:${t.id}`);
   });
 
   it('keeps an archive-backfill merge approval attached to a finished ticket (VS-389)', async () => {
@@ -484,7 +551,7 @@ describe('decisions', () => {
     const workspaceQ = decisions.create(HUMAN, { kind: 'question', title: 'workspace question' });
     const detached = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'follow-up on the finished ticket' });
     expect(detached.ticketId).toBeNull();
-    expect(detached.correlationKey).toBe(`question:${t.id}`);
+    expect(detached.correlationKey).toBe(`question:human:${t.id}`);
     // Occupying its own bucket, the detached card must not have killed the workspace question.
     expect(decisions.get(workspaceQ.id).status).toBe('open');
 

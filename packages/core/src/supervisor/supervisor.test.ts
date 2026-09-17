@@ -1779,6 +1779,78 @@ describe('bounded stall recovery and escalation (VS-498)', () => {
 });
 
 /**
+ * VS-516: a worker waiting for merge-queue admission is not a stall — the queue is what wakes it when
+ * a slot frees. A worker that holds the slot is a stall exactly as before (the VS-391 shape).
+ */
+describe('a merge-queue wait is not a stall (VS-516)', () => {
+  let h: TestHarness;
+  let supervisor: Supervisor;
+  let decisions: ReturnType<typeof createDecisionsService>;
+
+  beforeEach(() => {
+    h = makeHarness();
+    const wake = createWakeService(h.ctx, h.deps);
+    decisions = createDecisionsService(h.ctx, h.deps);
+    h.services.wake = wake as never;
+    h.services.decisions = decisions as never;
+    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.tickets = { livenessViolations: () => [] } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
+    h.ctx.config.defaults.stalledWorkerTimeoutSec = 60;
+    h.ctx.config.defaults.stalledWorkerMaxAutoRecoverAttempts = 2;
+    supervisor = createSupervisor(h.ctx, h.deps);
+  });
+  afterEach(() => { vi.useRealTimers(); supervisor.stop(); h.cleanup(); });
+
+  const oldTimestamp = () => new Date(Date.now() - 120_000).toISOString();
+  const recoveryWakes = (agentId: string) =>
+    h.db.all<{ idempotencyKey: string }>(
+      'SELECT idempotency_key AS idempotencyKey FROM wakeups WHERE agent_id = ? AND idempotency_key LIKE ?',
+      [agentId, `stall-recovery:${agentId}:%`],
+    );
+
+  it('a queued-but-not-admitted worker gets no nudge, no finding and no stalled fact', async () => {
+    const ticketId = seedTicket(h, { status: 'merging', mergeQueuedAt: oldTimestamp() });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+
+    await supervisor.tick();
+
+    expect(h.events.some((e) => e.type === 'worker.stalled' && e.entityId === agentId)).toBe(false);
+    expect(recoveryWakes(agentId)).toHaveLength(0);
+    expect(h.db.get('SELECT 1 FROM worker_stall_state WHERE agent_id = ?', [agentId])).toBeUndefined();
+    expect(isWorkerStalled(h.ctx, agentId)).toBe(false);
+    expect(decisions.list({ ticketId, status: ['open'] })).toHaveLength(0);
+  });
+
+  it('a slot-holding worker that ended a turn with work left and no wake is still nudged', async () => {
+    const ticketId = seedTicket(h, { status: 'merging', mergeQueuedAt: oldTimestamp(), mergeStartedAt: oldTimestamp() });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+
+    await supervisor.tick();
+
+    expect(h.events.some((e) => e.type === 'worker.stalled' && e.entityId === agentId)).toBe(true);
+    expect(h.db.get<{ attempts: number }>('SELECT attempts FROM worker_stall_state WHERE agent_id = ?', [agentId])?.attempts).toBe(1);
+    expect(recoveryWakes(agentId).some((w) => w.idempotencyKey === `stall-recovery:${agentId}:1`)).toBe(true);
+  });
+
+  it('clears a carried stalled fact when the worker enters the merge-queue wait', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    await supervisor.tick();
+    expect(isWorkerStalled(h.ctx, agentId)).toBe(true);
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(Date.now() + 61_000));
+    h.db.update('tickets', ticketId, { status: 'merging', mergeQueuedAt: nowIso(), mergeStartedAt: null });
+    await supervisor.tick();
+
+    expect(h.db.get('SELECT 1 FROM worker_stall_state WHERE agent_id = ?', [agentId])).toBeUndefined();
+    expect(isWorkerStalled(h.ctx, agentId)).toBe(false);
+  });
+});
+
+/**
  * VS-245: a finished run's stored report summary reaches the conductor in its digest wake, capped,
  * attributed to the agent, explicit when there is no report, and bounded across a burst of runs.
  * See `worker-supervision/conductor-digest`.

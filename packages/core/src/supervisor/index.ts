@@ -575,6 +575,13 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
    * worker legitimately waiting with none of the other exclusions above in play — and this sweep now
    * drives bounded automatic recovery and escalation from its result, so a worker correctly blocked
    * must never enter that path.
+   *
+   * VS-516: also excludes a ticket waiting for merge-queue admission — `merging` with no
+   * `merge_started_at`. Such a worker has no queued wake only because the queue itself will enqueue
+   * one (and stamp the admission) when a slot frees, so it is a live action path even though no
+   * `wakeups` row exists yet. This is the same condition `spawnPending()` uses to leave a queued
+   * ticket unstaffed; the exclusion is deliberately narrow, never the whole `merging` status, so a
+   * worker that *holds* the slot and goes quiet is still detected (the VS-391 shape).
    */
   function stalledWorkers(): StalledAgentRow[] {
     const timeoutMs = (ctx.config.defaults.stalledWorkerTimeoutSec ?? 300) * 1000;
@@ -591,6 +598,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         WHERE a.workspace_id = ? AND a.kind = 'worker' AND a.status != 'retired'
           AND t.status NOT IN (${excludedPlaceholders})
           AND t.interactive_session = 0
+          AND NOT (t.status = 'merging' AND t.merge_started_at IS NULL)
           AND a.last_run_at IS NOT NULL AND a.last_run_at < ?
           AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.agent_id = a.id AND r.status IN ('queued','running'))
           AND NOT EXISTS (
@@ -635,6 +643,23 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
    */
   function stallRecoveryResetPass(): void {
     for (const state of allWorkerStallStates(ctx)) {
+      // VS-516: a worker whose ticket is waiting for merge-queue admission is not stalled — the queue
+      // will wake it when a slot frees. Clear any row it was carrying so the reads stop showing it as
+      // stalled, and withdraw a stale escalation for the same reason.
+      const ticket = ctx.db.get<{ status: string; mergeStartedAt: string | null }>(
+        'SELECT status, merge_started_at AS mergeStartedAt FROM tickets WHERE id = ?', [state.ticketId]);
+      if (ticket?.status === 'merging' && !ticket.mergeStartedAt) {
+        if (state.escalationDecisionId) {
+          try {
+            const d = deps().decisions.list({ ticketId: state.ticketId }).find((x) => x.id === state.escalationDecisionId);
+            if (d && d.status === 'open') deps().decisions.withdraw(SYSTEM, d.id, 'the worker is waiting for merge-queue admission');
+          } catch (e) { log.warn({ agentId: state.agentId, err: String(e) }, 'could not withdraw a stall escalation decision'); }
+        }
+        deleteWorkerStallState(ctx, state.agentId);
+        log.info({ agentId: state.agentId, ticketId: state.ticketId }, 'worker is waiting for merge-queue admission, not stalled');
+        ctx.events.emit('worker.stalled', 'agent', state.agentId, { ticketId: state.ticketId, reason: 'merge_queue_wait', state: 'recovered' });
+        continue;
+      }
       const since = state.lastAttemptAt ?? state.firstDetectedAt;
       const progressed = ctx.db
         .all<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'succeeded' AND finished_at > ? ORDER BY finished_at", [state.agentId, since])

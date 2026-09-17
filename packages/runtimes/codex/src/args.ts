@@ -119,6 +119,10 @@ export function buildArgs(input: TurnInput, opts: CodexBuildOpts = {}): CodexBui
     const sandbox = input.permission.mode === 'restricted' ? 'read-only' : 'workspace-write';
     if (mode === 'new') args.push('--sandbox', sandbox);
     else args.push('-c', `sandbox_mode=${toml(sandbox)}`);
+    // Codex defaults headless invocations to approval_policy="never".  `auto` is
+    // the sandboxed worker posture, not the bypass posture, so it also needs the
+    // matching automatic approval policy to let its run-scoped MCP server answer.
+    if (input.permission.mode === 'auto') args.push('-c', `approval_policy=${toml('on-request')}`);
   }
 
   const model = str(input.model) ?? str(input.options?.['model']);

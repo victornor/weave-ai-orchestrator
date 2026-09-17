@@ -140,10 +140,20 @@ export function createCodexParser(opts: { resumed: boolean; baseline?: CodexUsag
   }
 
   function toolCall(it: Json, ts: string): RuntimeEvent | null {
-    const id = str(it['id']) ?? '';
+    const id = str(it['id']);
+    const server = str(it['server']);
+    const name = str(it['tool']);
+    if (!id || !server || !name) {
+      const missing = [!id && 'id', !server && 'server', !name && 'tool'].filter(Boolean);
+      return {
+        ts,
+        type: 'error',
+        payload: { message: `codex emitted malformed mcp_tool_call: missing ${missing.join(', ')}` },
+      };
+    }
     if (id && toolCalls.has(id)) return null;
-    if (id) toolCalls.add(id);
-    return { ts, type: 'tool.call', payload: { id, server: str(it['server']), name: str(it['tool']), input: it['arguments'] } };
+    toolCalls.add(id);
+    return { ts, type: 'tool.call', payload: { id, server, name, input: it['arguments'] } };
   }
 
   function raw(originalType: string, payload: unknown, ts = new Date().toISOString()): RuntimeEvent {

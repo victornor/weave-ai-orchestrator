@@ -372,6 +372,10 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   let result: TurnResult | null = null;
   let failure: { code: string; family: RunErrorFamily; message: string } | null = null;
   let promptOptions: TurnPromptOptions = { ...(opts.promptOptions ?? {}) };
+  // VS-518: set when this turn's runtime reports compacting the session on its own. It keeps the
+  // turn's possibly pre-compaction `usage.contextTokens` out of `last_context_tokens` (the adapter
+  // already reset the conversation) and tells finalize to release a mark left standing.
+  let adapterCompacted = false;
 
   try {
     // 1. prepare home
@@ -529,7 +533,27 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
             if (entry) entry.pid = info.pid;
             record('turn.started', { pid: info.pid }, 'system');
           },
-          onEvent: (ev: RuntimeEvent) => record(ev.type, ev.payload ?? {}),
+          onEvent: (ev: RuntimeEvent) => {
+            record(ev.type, ev.payload ?? {});
+            // VS-518: the runtime decided to compact the conversation itself (no auto-compaction
+            // policy in play). Give it the same session state and notification the daemon's
+            // out-of-band path writes, so the composer banner appears and clears and the dispatch
+            // gate is consistent — and consume the context observation so the automatic policy can
+            // never fire on the pre-compaction number the runtime has already replaced.
+            if (ev.type === 'session.compaction.started') {
+              adapterCompacted = true;
+              const at = nowIso();
+              sessions.setCompacting(turnSession.session.id, at);
+              ctx.events.broadcast('session.compaction', 'agent', agent.id, { agentId: agent.id, compacting: true, at, origin: 'adapter' });
+              log.info({ agentId: agent.id, origin: 'adapter' }, 'runtime compaction started');
+            } else if (ev.type === 'session.compaction.completed') {
+              adapterCompacted = true;
+              const postTokens = typeof ev.payload['postTokens'] === 'number' ? ev.payload['postTokens'] : null;
+              sessions.noteCompactionEnd(turnSession.session.id, postTokens);
+              ctx.events.broadcast('session.compaction', 'agent', agent.id, { agentId: agent.id, compacting: false, ok: true, error: null, origin: 'adapter' });
+              log.info({ agentId: agent.id, origin: 'adapter', postTokens }, 'runtime compaction completed');
+            }
+          },
           onRaw: () => { /* raw stream is the runtime adapter's own concern; normalized events are recorded above */ },
         },
         (handle: TurnHandle) => {
@@ -564,6 +588,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     durationMs: Date.now() - started,
     sessionId: sessions.active(agent.id)?.id ?? null,
     cancelled: state.active.get(runId)?.cancelled ?? null,
+    compactedInTurn: adapterCompacted,
     record,
   });
   await afterTurnHooks(ctx, deps, agent, ticket);
@@ -595,6 +620,8 @@ interface FinalizeInput {
   run: Run; agent: Agent; role: Role | null; project: Project | null; ticket: Ticket | null; wakes: Wakeup[];
   result: TurnResult | null; failure: { code: string; family: RunErrorFamily; message: string } | null; report: RunReport | null;
   durationMs: number; sessionId: string | null; cancelled: { mode: 'interrupt' | 'kill'; cause?: 'message' } | null;
+  /** VS-518: this turn's runtime reported compacting the session, so its context observation is not trustworthy. */
+  compactedInTurn?: boolean;
   record: (type: RunEvent['type'], payload: Record<string, unknown>, stream?: 'stdout' | 'stderr' | 'runtime' | 'system', level?: string) => void;
 }
 
@@ -678,8 +705,14 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
         runId,
         error: status === 'succeeded' ? null : errorCode,
         usage: usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cachedInputTokens: usage.cachedInputTokens } : null,
-        contextTokens: usage?.contextTokens ?? null,
+        // VS-518: when the runtime compacted the session itself, the turn's reported context size
+        // may predate the compaction. Keep what the compaction boundary recorded (the post size, or
+        // null) rather than re-arming the automatic policy with a stale number.
+        contextTokens: f.compactedInTurn ? undefined : (usage?.contextTokens ?? null),
       });
+      // A `started` with no `completed` (the turn was cut mid-compaction) still releases the mark,
+      // so the dispatcher is not held on a dead flag; a completion already cleared it.
+      if (f.compactedInTurn) sessions.setCompacting(f.sessionId, null, null);
     }
 
     // Terminal cleanup marks a worker done before the run finalizes. Re-read both rows because the

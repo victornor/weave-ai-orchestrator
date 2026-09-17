@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-17
+goal: Surface adapter-initiated compaction through the same banner and session
+  state as daemon-initiated compaction

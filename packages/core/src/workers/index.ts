@@ -930,7 +930,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const configHome = join(ctx.paths.runtimesHome, setting.runtime);
       const startedAt = nowIso();
       sessions.setCompacting(sessionId, startedAt, null);
-      ctx.events.broadcast('session.compaction', 'agent', id, { agentId: id, compacting: true, at: startedAt });
+      ctx.events.broadcast('session.compaction', 'agent', id, { agentId: id, compacting: true, at: startedAt, origin: 'daemon' });
       recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.compact_session', 'agent', id, { runtime: setting.runtime });
       log.info({ agentId: id, runtime: setting.runtime }, 'session compaction requested');
 
@@ -947,7 +947,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
           message = `compaction threw: ${String(e)}`;
         }
         sessions.setCompacting(sessionId, null, ok ? null : message);
-        ctx.events.broadcast('session.compaction', 'agent', id, { agentId: id, compacting: false, ok, error: ok ? null : message });
+        ctx.events.broadcast('session.compaction', 'agent', id, { agentId: id, compacting: false, ok, error: ok ? null : message, origin: 'daemon' });
         log[ok ? 'info' : 'warn']({ agentId: id, via, error: ok ? undefined : message }, ok ? 'session compacted' : 'session compaction failed');
       })();
 

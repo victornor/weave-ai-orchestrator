@@ -518,6 +518,8 @@ export interface KnowledgeService {
   requestCuration(actor: Actor, scope: S.KnowledgeScope, projectId?: string | null): Promise<{ ticketId?: string; wakeId?: string }>;
   search(query: string, projectId?: string | null, limit?: number): Array<{ kind: string; projectId: string | null; ref: string; title: string; snippet: string }>;
   reindex(): void;
+  /** Recompute every row's stored token count from the file on disk, without reindex's revisions/links. */
+  recountSizes(): void;
   bootstrapDigest(agentId: string): { text: string; tokens: number; truncated: boolean; parts: KnowledgeBootstrapPart[] };
   appendDecision(decision: S.Decision): void;
   /** Linked documents (PLAN §13): topic pages under a scope that link to each other with [[slug]]. */

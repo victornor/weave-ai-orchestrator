@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { carriesWeaverReview, estimateTokens, landingBranchOf, projectLabel, yoloEnabled } from '@weave-ai/shared';
+import { carriesWeaverReview, estimateTokens, landingBranchOf, projectLabel, sliceToTokens, yoloEnabled } from '@weave-ai/shared';
 import { formatAge } from '@weave-ai/render';
 import type * as S from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
@@ -112,10 +112,15 @@ function pickSections(body: string, names: readonly string[]): string {
   return out.join('\n\n');
 }
 
-/** `text` in at most `budget` tokens, with a pointer to what the cut left out. */
+/**
+ * `text` in at most `budget` tokens, with a pointer to what the cut left out. The cut is made at
+ * the tokenizer, not at `budget * 3.5` characters, and the pointer's own tokens are reserved out of
+ * the budget so the result really fits it.
+ */
 function boundedTokens(text: string, budget: number): string {
   if (estimateTokens(text) <= budget) return text;
-  return `${text.slice(0, Math.max(0, Math.floor(budget * 3.5)))}\n\n(truncated; call \`weave_knowledge_get\` for the full text)`;
+  const pointer = '\n\n(truncated; call `weave_knowledge_get` for the full text)';
+  return `${sliceToTokens(text, Math.max(0, budget - estimateTokens(pointer)))}${pointer}`;
 }
 
 /** The bounded shared + project knowledge a worker's AGENTS.md inlines (VS-161 without the full dump). */

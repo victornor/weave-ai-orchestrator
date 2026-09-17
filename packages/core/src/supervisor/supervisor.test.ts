@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
-import type { Run, Ticket } from '@weave-ai/shared';
+import { estimateTokens, type Run, type Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createSupervisor } from './index.js';
 import { createKnowledgeService } from '../knowledge/service.js';
@@ -287,6 +287,20 @@ describe('supervisor scheduled passes', () => {
       vi.setSystemTime(new Date(Date.now() + 86_400_000));
       await supervisor.tick();
       expect(requestCuration).not.toHaveBeenCalled();
+    });
+
+    it('recounts a byte-ratio size from disk before deriving the over-budget verdict (VS-488)', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      const real = createKnowledgeService(h.ctx, h.deps);
+      h.services.knowledge = { ...real, requestCuration } as never;
+      // A row left by the old heuristic: an absurd byte-ratio size for a tiny file on disk.
+      const id = seedKnowledgeFile({ tokenEstimate: 999_999, curationPending: 0, updatedAt: new Date().toISOString() });
+      await supervisor.tick();
+      // The verdict and the stored count follow the tokenizer, so a tiny file is neither curated
+      // nor left over budget on the strength of a stale number.
+      expect(requestCuration).not.toHaveBeenCalled();
+      const row = h.db.get<{ tokenEstimate: number }>('SELECT token_estimate AS tokenEstimate FROM knowledge_files WHERE id = ?', [id])!;
+      expect(row.tokenEstimate).toBe(estimateTokens('# Knowledge\n'));
     });
 
     it('asks at most once per file per day and persists the request in meta', async () => {

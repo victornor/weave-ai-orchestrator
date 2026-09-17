@@ -762,6 +762,9 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
    * re-derived here from the current size against the configured budget, and the row is repaired.
    */
   async function curationPass(): Promise<void> {
+    // The stored size may predate token counting (it used to be a byte ratio): recount it from the
+    // file on disk before deriving any over-budget verdict or curation_pending cache from it.
+    try { deps().knowledge.recountSizes(); } catch (e) { log.warn({ err: String(e) }, 'knowledge recount before curation failed'); }
     const rows = ctx.db.all<KnowledgeFileRow>(
       'SELECT id, path, scope, project_id, token_estimate, budget_tokens, last_curated_at, curation_pending, updated_at FROM knowledge_files WHERE workspace_id = ?',
       [ctx.workspaceId],

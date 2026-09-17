@@ -20,4 +20,4 @@ export * from './channels.js';
 export * from './attachments.js';
 export * from './test-summary.js';
 export * from './daemon-shutdown.js';
-export { estimateTokens } from './tokens.js';
+export { estimateTokens, sliceToTokens } from './tokens.js';

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, append
 import { dirname, join } from 'node:path';
 import { knowledgeRow, newId, nowIso, type Db } from '@weave-ai/db';
 import {
-  estimateTokens, OcError, projectLabel,
+  estimateTokens, OcError, projectLabel, sliceToTokens,
   type Decision, type KnowledgeRevisionReason, type KnowledgeScope,
 } from '@weave-ai/shared';
 import type { Actor, CoreServices, KnowledgeBootstrapPart, KnowledgeDocDetail, KnowledgeDocSummary, KnowledgeMirror, KnowledgeService } from '../api.js';
@@ -111,10 +111,17 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       row = fileRow(rel)!;
       indexFile(row, body);
     }
-    // The column mirrors the configured budget so events, the API and the database agree with it.
+    // The count column carries a byte-ratio leftover until this recomputes it, and the budget column
+    // mirrors the configured budget: both are refreshed when they disagree, so events, the API,
+    // health and the supervisor read numbers the tokenizer produced. `updatedAt` is left alone on a
+    // pure recount — it is the staleness reference for a file that was never curated.
+    const tokens = estimateTokens(body);
     const budget = budgetOfRow(row);
-    if (row.budgetTokens !== budget) {
-      db.update('knowledge_files', row.id, { budgetTokens: budget, updatedAt: nowIso() });
+    const patch: Record<string, unknown> = {};
+    if (row.tokenEstimate !== tokens) patch.tokenEstimate = tokens;
+    if (row.budgetTokens !== budget) { patch.budgetTokens = budget; patch.updatedAt = nowIso(); }
+    if (Object.keys(patch).length) {
+      db.update('knowledge_files', row.id, patch);
       row = fileRow(rel)!;
     }
     return { row, abs, body };
@@ -559,7 +566,10 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
           db.update('knowledge_files', row.id, { tokenEstimate: estimateTokens(body), hash: sha256(body), updatedAt: nowIso() });
           indexFile(fileRow(row.path)!, body);
         } else {
-          // The body is unchanged but the link parser may have: re-derive the links either way.
+          // The body is unchanged but the link parser may have, and the count may be a byte-ratio
+          // leftover: re-derive the links and refresh the count either way.
+          const tokens = estimateTokens(body);
+          if (row.tokenEstimate !== tokens) db.update('knowledge_files', row.id, { tokenEstimate: tokens });
           indexLinks(row, body);
         }
       }
@@ -573,6 +583,22 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         } catch (e) {
           log.warn({ err: e, scope: s.scope, projectId: s.projectId }, 'knowledge reindex skipped a file');
         }
+      }
+    },
+
+    /**
+     * Recompute every row's stored size with the tokenizer, from the file on disk, without the
+     * revisions and link work `reindex()` does. The supervisor's curation sweep reads
+     * `knowledge_files` directly and would otherwise derive its over-budget verdict from a
+     * byte-ratio number recorded before token counting existed.
+     */
+    recountSizes() {
+      for (const raw of db.all<Record<string, unknown>>('SELECT * FROM knowledge_files WHERE workspace_id = ?', [ws])) {
+        const row = knowledgeRow(raw) as unknown as FileRow;
+        const abs = join(ctx.paths.knowledge, row.path);
+        if (!existsSync(abs)) continue;
+        const tokens = estimateTokens(readBody(abs));
+        if (row.tokenEstimate !== tokens) db.update('knowledge_files', row.id, { tokenEstimate: tokens });
       }
     },
 
@@ -629,9 +655,10 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         truncated = true;
       }
       if (estimateTokens(text) > budget) {
-        // Hard cap: keep the head, which is SHARED.md and the rules, and say so.
-        const limit = Math.floor(budget * 3.5);
-        text = `${text.slice(0, limit)}\n\n(truncated, call weave_knowledge_get)\n`;
+        // Hard cap: keep the head, which is SHARED.md and the rules, and say so. The cut is made at
+        // the tokenizer, and the pointer's tokens are reserved out of the budget so it really fits.
+        const pointer = '\n\n(truncated, call weave_knowledge_get)\n';
+        text = `${sliceToTokens(text, Math.max(0, budget - estimateTokens(pointer)))}${pointer}`;
       }
       return { text, tokens: estimateTokens(text), truncated, parts: usage };
     },

@@ -246,6 +246,21 @@ describe('knowledge', () => {
     expect(workers.spawnCurator).toHaveBeenCalled();
   });
 
+  it('recomputes a stored size that predates token counting', () => {
+    const body = knowledge.get('project', h.projectId).body;
+    const real = estimateTokens(body);
+    const id = h.db.get<{ id: string }>('SELECT id FROM knowledge_files WHERE path = ?', ['projects/api/PROJECT.md'])!.id;
+    // A row as the byte-ratio heuristic left it: a size far from the tokenizer's count.
+    for (const report of [
+      () => knowledge.get('project', h.projectId).tokenEstimate,
+      () => knowledge.lint().find((r) => r.path === 'projects/api/PROJECT.md')!.tokenEstimate,
+      () => knowledge.health(h.projectId).hubs.find((x) => x.path === 'projects/api/PROJECT.md')!.tokenEstimate,
+    ]) {
+      h.db.update('knowledge_files', id, { tokenEstimate: 999_999 });
+      expect(report()).toBe(real);
+    }
+  });
+
   it('derives the health view\'s four measures from a project with one of each, and reports empty arrays for a clean one (VS-102)', () => {
     // a hub past 80% of its share
     const body = `# API\n\n## Learnings\n${Array.from({ length: 10 }, (_, i) => `- 2026-01-01 · durable fact number ${i} about the project internals`).join('\n')}\n`;
@@ -451,9 +466,13 @@ describe('knowledge', () => {
 
   it('carries full-size knowledge bases into a worker digest without truncating', () => {
     const workerId = h.addWorker(null);
-    const lines = (tokens: number) => {
+    // Grow the section until the tokenizer says it is at least `target` tokens — the fixture is
+    // measured with the same counter the service enforces, never a byte-ratio line count.
+    const lines = (target: number) => {
       const line = '- 2026-01-01 · durable fact about the project internals worth keeping in the knowledge base';
-      return Array.from({ length: Math.floor((tokens * 3.5) / (line.length + 1)) }, () => line).join('\n');
+      let body = '';
+      while (estimateTokens(body) < target) body = body ? `${body}\n${line}` : line;
+      return body;
     };
     knowledge.replace(HUMAN, 'shared', `# Shared knowledge\n\n## Conventions\n${lines(budgets().shared)}\n`, 'human');
     knowledge.replace(HUMAN, 'project', `# API\n\n## Learnings\n${lines(budgets().project)}\n`, 'human', h.projectId);

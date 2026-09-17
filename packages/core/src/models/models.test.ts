@@ -9,6 +9,7 @@ import { createModelsService, demaskWorkspaceModels, deriveModelSettings, hasMod
 import { effectiveModels, modelSettingFor } from './resolve.js';
 import type { ModelsService } from '../api.js';
 import { OcError, type Decision } from '@weave-ai/shared';
+import { FakeRuntime } from '@weave-ai/runtime-sdk';
 
 const HUMAN = { kind: 'human' as const, id: 'victor' };
 const role = (runtimeId: string, model: string | null = null, effort: string | null = null) => ({ runtimeId, model, effort });
@@ -46,6 +47,22 @@ describe('modelSettingFor', () => {
     expect(modelSettingFor(withOpts, 'worker', { workerModelId: 'gone' })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
     expect(modelSettingFor(withOpts, 'worker', { workerModelId: null })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
     expect(modelSettingFor(withOpts, 'weaver', { workerModelId: 'cheap' })).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
+  });
+
+  it('takes a snapshot of the selected option for a turn', () => {
+    const withOpts = {
+      models: {
+        weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
+        workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' },
+        workerOptions: [
+          { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6', effort: 'low' },
+        ],
+      },
+    };
+    const running = modelSettingFor(withOpts, 'worker', { workerModelId: 'cheap' });
+    withOpts.models.workerOptions[0]!.model = 'new-model';
+    expect(running).toEqual({ runtime: 'opencode', model: 'glm-4.6', effort: 'low' });
+    expect(modelSettingFor(withOpts, 'worker', { workerModelId: 'cheap' })).toMatchObject({ model: 'new-model' });
   });
 
   it('refuses an unconfigured catalog option rather than falling back to claude (VS-236)', () => {
@@ -268,6 +285,8 @@ describe('the models service', () => {
 
   beforeEach(() => {
     h = makeHarness();
+    const opencode = Object.assign(new FakeRuntime(), { id: 'opencode' });
+    h.ctx.registries.runtimes.set('opencode', opencode);
     raised = [];
     h.services.decisions = createDecisionsService(h.ctx, h.deps);
     h.services.workers = { ensureConductor: vi.fn(async () => ({})) } as never;
@@ -298,6 +317,15 @@ describe('the models service', () => {
     expect(kept.workerOptions).toEqual([cheap]);
     const cleared = await models.set(HUMAN, { weaver: { runtime: 'claude', model: null }, workers: { runtime: 'claude', model: null }, workerOptions: [] });
     expect(cleared.workerOptions).toEqual([]);
+  });
+
+  it('rejects an unknown option runtime without changing the existing catalog', async () => {
+    const original = { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6', effort: 'low' };
+    await models.set(HUMAN, { workerOptions: [original] });
+    await expect(models.set(HUMAN, {
+      workerOptions: [{ ...original, runtime: 'missing', model: 'new-model' }],
+    })).rejects.toMatchObject({ code: 'validation', message: expect.stringContaining("runtime 'missing'") });
+    expect(models.get().workerOptions).toEqual([original]);
   });
 
   it('writes only the control it names, leaving the other agent inherited (VS-356)', async () => {

@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createCore, initLogger } from '@weave-ai/core';
 import { DaemonConfigSchema } from '@weave-ai/shared';
+import { FakeRuntime } from '@weave-ai/runtime-sdk';
 import { makeHarness } from '../../core/src/testing/context.js';
 import { reconcileProjectArtifactsFromRepo } from '../../core/src/tickets/artifactRepoSync.js';
 import { git } from '../../core/src/util/git.js';
@@ -22,6 +23,8 @@ afterEach(() => { cleanup?.(); cleanup = null; });
 
 function boot(): { deps: AppDeps; runtime: WorkspaceRuntime; harness: ReturnType<typeof makeHarness> } {
   const harness = makeHarness();
+  harness.ctx.registries.runtimes.set('claude', Object.assign(new FakeRuntime(), { id: 'claude' }));
+  harness.ctx.registries.runtimes.set('opencode', Object.assign(new FakeRuntime(), { id: 'opencode' }));
   cleanup = harness.cleanup;
   const services = createCore(harness.ctx);
   const runtime: WorkspaceRuntime = { id: harness.workspaceId, ctx: harness.ctx, services, channels: null, webhooks: null, push: null };

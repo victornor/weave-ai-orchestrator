@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { describe, expect, it, afterEach } from 'vitest';
 import { OcError, type Agent } from '@weave-ai/shared';
 import { clearHostToolCache } from '@weave-ai/core';
+import { FakeRuntime } from '@weave-ai/runtime-sdk';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import { authed, makeHarness, ticket, type Harness } from './fakes.js';
@@ -1148,7 +1149,8 @@ describe('daemon model overlays (VS-185)', () => {
   });
 
   it('round-trips worker options with runtime null and persists a later adapter (VS-236)', async () => {
-    const { fetch } = app();
+    const { h, fetch } = app();
+    h.deps.registries.runtimes.set('claude', Object.assign(new FakeRuntime(), { id: 'claude' }));
     const tiers = [
       { id: 'quick', description: 'Fastest.', runtime: null, model: null },
       { id: 'standard', description: 'Default for specified work.', runtime: null, model: null },
@@ -1172,6 +1174,25 @@ describe('daemon model overlays (VS-185)', () => {
     await expect(next.json()).resolves.toMatchObject({
       workerOptions: [configured, tiers[1], tiers[2]],
     });
+  });
+
+  it('rejects an unknown option runtime and keeps the previous overlay', async () => {
+    const { h, fetch } = app();
+    h.deps.registries.runtimes.set('claude', Object.assign(new FakeRuntime(), { id: 'claude' }));
+    const original = { id: 'deep', description: 'Hard tickets.', runtime: 'claude', model: 'opus' };
+    const first = await fetch('/api/daemon/models', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ workerOptions: [original] }),
+    });
+    expect(first.status).toBe(200);
+    const rejected = await fetch('/api/daemon/models', {
+      method: 'PUT', headers: { ...authed(), 'content-type': 'application/json' },
+      body: JSON.stringify({ workerOptions: [{ ...original, runtime: 'missing', model: 'new-model' }] }),
+    });
+    expect(rejected.status).toBe(400);
+    await expect(rejected.json()).resolves.toMatchObject({ error: { code: 'validation', message: expect.stringContaining("runtime 'missing'") } });
+    const got = await fetch('/api/daemon/models', { headers: authed() });
+    await expect(got.json()).resolves.toMatchObject({ workerOptions: [original] });
   });
 });
 

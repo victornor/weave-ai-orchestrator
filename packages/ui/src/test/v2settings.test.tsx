@@ -248,6 +248,46 @@ describe('the workspace model overrides', () => {
     expect(state.modelWrites.at(-1)).toEqual({ workerOptions: null });
   });
 
+  it('edits an option description and model while preserving its other fields', () => {
+    const option = {
+      id: 'deep', description: 'Hard tickets.', runtime: 'claude', model: 'old-model', effort: 'high',
+      compaction: { mode: 'percent', value: 60 }, options: { extraArgs: ['--verbose'] },
+    };
+    state.workspaceModels = {
+      weaver: { runtime: 'claude', model: 'opus' },
+      workers: { runtime: 'claude', model: 'sonnet' },
+      workerOptions: [option],
+      source: { weaver: 'workspace', workers: 'workspace', workerOptions: 'workspace' },
+    };
+    state.search = { scope: 'acme', section: 'models' };
+    render(<V2Settings />);
+    fireEvent.click(screen.getByText('deep'));
+    const description = screen.getByLabelText('deep description');
+    fireEvent.change(description, { target: { value: 'Heavy tickets.' } });
+    fireEvent.blur(description);
+    expect(state.modelWrites.at(-1)).toEqual({ workerOptions: [{ ...option, description: 'Heavy tickets.' }] });
+    fireEvent.change(screen.getByLabelText('deep model'), { target: { value: '' } });
+    expect(state.modelWrites.at(-1)).toEqual({ workerOptions: [{ ...option, model: null }] });
+  });
+
+  it('lets an option be explicitly unset and reports an empty description', () => {
+    const option = { id: 'deep', description: 'Hard tickets.', runtime: 'claude', model: null };
+    state.workspaceModels = {
+      weaver: { runtime: 'claude', model: 'opus' },
+      workers: { runtime: 'claude', model: 'sonnet' },
+      workerOptions: [option],
+      source: { weaver: 'workspace', workers: 'workspace', workerOptions: 'workspace' },
+    };
+    state.search = { scope: 'acme', section: 'models' };
+    render(<V2Settings />);
+    fireEvent.click(screen.getByText('deep'));
+    fireEvent.change(screen.getByLabelText('deep runtime'), { target: { value: '' } });
+    expect(state.modelWrites.at(-1)).toEqual({ workerOptions: [{ ...option, runtime: '' }] });
+    const description = screen.getByLabelText('deep description');
+    fireEvent.change(description, { target: { value: '' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('Description is required.');
+  });
+
   it('starts a catalog when the daemon has none, writing only on the first option (VS-356 review)', () => {
     // The default daemon has no worker options, so Override must enter local editing rather than
     // write an empty catalog that would just clear again.

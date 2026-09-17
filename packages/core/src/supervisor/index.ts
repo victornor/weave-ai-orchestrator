@@ -10,7 +10,7 @@ import { runState } from '../runs/active.js';
 import { parkForHuman } from '../runs/engine.js';
 import { ungateRuntime } from '../runs/authgate.js';
 import { archivedDirFor } from '../openspec/index.js';
-import { CURATION_BUDGET_FRACTION, budgetOf, isDocPath } from '../knowledge/files.js';
+import { CURATION_BUDGET_FRACTION, budgetOf, docSlugOf, isDocPath } from '../knowledge/files.js';
 import { sh } from '../util/exec.js';
 import { sessionActivitySignal } from '../workers/activity-signal.js';
 import { handoverCommentBody, reconcileHandover, type HandoverSnapshot } from '../workers/handover-reconcile.js';
@@ -771,6 +771,14 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     );
     const budgets = ctx.config.defaults.knowledgeBudgetTokens;
     const staleBefore = Date.now() - CURATION_STALE_MS;
+    // VS-492: the never-read documents of the whole workspace, fetched once per pass. A failure here
+    // leaves the budget/age verdict exactly as it was rather than failing the pass.
+    const neverReadBefore = Date.now() - ctx.config.defaults.knowledgeNeverReadDays * DAY_MS;
+    let neverReadKeys = new Set<string>();
+    try {
+      const refs = deps().knowledgeUsage.neverRead({ since: new Date(neverReadBefore).toISOString() });
+      neverReadKeys = new Set(refs.map((r) => `${r.scope}:${r.projectId ?? ''}:${r.slug}`));
+    } catch (e) { log.warn({ err: String(e) }, 'never-read sweep before curation failed'); }
     for (const f of rows) {
       // A row whose file is gone — deleted, archived, renamed, never materialised — has nothing to
       // curate, however old it looks.
@@ -787,16 +795,20 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       }
       const reference = Date.parse(f.lastCuratedAt ?? f.updatedAt ?? '');
       const stale = Number.isFinite(reference) && reference < staleBefore;
-      if (!stale && !overBudget) continue;
+      const neverRead = isDocPath(f.path)
+        && neverReadKeys.has(`${f.scope}:${f.projectId ?? ''}:${docSlugOf(f.path)}`)
+        && Date.parse(f.updatedAt) < neverReadBefore;
+      if (!stale && !overBudget && !neverRead) continue;
 
       const key = `supervisor:curation_requested:${f.path}`;
       const asked = Date.parse(meta(key) ?? '');
       if (Number.isFinite(asked) && Date.now() - asked < CURATION_REQUEST_COOLDOWN_MS) continue;
       setMeta(key, nowIso());
-      const reason = overBudget ? 'over_budget' : 'stale';
+      const reason = overBudget ? 'over_budget' : stale ? 'stale' : 'never_read';
       const fields = {
         path: f.path, scope: f.scope, reason, tokenEstimate: f.tokenEstimate, budgetTokens: budget,
         lastCuratedAt: f.lastCuratedAt, since: f.lastCuratedAt ?? f.updatedAt,
+        neverReadBefore,
       };
       try {
         await deps().knowledge.requestCuration(SYSTEM, f.scope as KnowledgeScope, f.projectId);
@@ -813,10 +825,12 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
    * A project's (or the workspace's) knowledge health, as a sorted set of issue keys — comparable
    * across sweeps without caring which specific measure changed.
    */
-  function healthSignature(h: { orphans: Array<{ path: string }>; stale: Array<{ path: string }>; unresolvedLinks: Array<{ fromPath: string; toSlug: string }>; hubs: Array<{ path: string; nearBudget: boolean }> }): string[] {
+  function healthSignature(h: { orphans: Array<{ path: string }>; stale: Array<{ path: string }>; neverRead?: Array<{ path: string }>; unresolvedLinks: Array<{ fromPath: string; toSlug: string }>; hubs: Array<{ path: string; nearBudget: boolean }> }, duplicateKeys: string[] = []): string[] {
     return [
       ...h.orphans.map((d) => `orphan:${d.path}`),
       ...h.stale.map((d) => `stale:${d.path}`),
+      ...(h.neverRead ?? []).map((d) => `never-read:${d.path}`),
+      ...duplicateKeys,
       ...h.unresolvedLinks.map((l) => `link:${l.fromPath}->${l.toSlug}`),
       ...h.hubs.filter((hub) => hub.nearBudget).map((hub) => `budget:${hub.path}`),
     ].sort();
@@ -839,7 +853,18 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       try { health = deps().knowledge.health(scope.projectId); }
       catch (e) { log.warn({ err: String(e), scope: scope.key }, 'knowledge health sweep failed'); continue; }
 
-      const signature = healthSignature(health);
+      // VS-492: the bounded duplicate sweep rides this pass, which is the daemon's one channel for
+      // telling the conductor the knowledge network got worse. Read-only; a failure leaves the pass
+      // otherwise as it was.
+      let duplicateKeys: string[] = [];
+      let duplicatePairs: Array<{ a: string; b: string; pathA: string; pathB: string; score: number }> = [];
+      try {
+        const dup = deps().knowledge.duplicates(scope.projectId ? { projectId: scope.projectId } : {});
+        duplicateKeys = dup.pairs.map((p) => `duplicate:${p.a.path}#${p.a.line}~${p.b.path}#${p.b.line}`);
+        duplicatePairs = dup.pairs.map((p) => ({ a: p.a.text, b: p.b.text, pathA: p.a.path, pathB: p.b.path, score: Number(p.score.toFixed(3)) }));
+      } catch (e) { log.warn({ err: String(e), scope: scope.key }, 'duplicate sweep failed'); }
+
+      const signature = healthSignature(health, duplicateKeys);
       const metaKey = `supervisor:knowledge_health:${scope.key}`;
       const previousRaw = meta(metaKey);
       setMeta(metaKey, JSON.stringify(signature));
@@ -866,6 +891,8 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
           kind: 'knowledge_health', projectId: scope.projectId,
           orphans: cap(health.orphans.map((d) => d.path)), unresolvedLinks: cap(health.unresolvedLinks.map((l) => `${l.fromPath} -> [[${l.toSlug}]]`)),
           staleDocs: cap(health.stale.map((d) => d.path)), nearBudgetHubs: cap(health.hubs.filter((hub) => hub.nearBudget).map((hub) => hub.path)),
+          neverReadDocs: cap((health.neverRead ?? []).map((d) => d.path)),
+          duplicatePairs: duplicatePairs.slice(0, 10),
         },
         requestedBy: SYSTEM,
       });

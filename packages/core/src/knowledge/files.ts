@@ -262,6 +262,14 @@ export function similarity(a: string, b: string): number {
 }
 
 export const DUPLICATE_THRESHOLD = 0.8;
+/**
+ * VS-492: the bounds on the duplicate-entry sweep. The number of entries compared within a scope is
+ * capped, so the pairwise cost is `O(min(N, 1500)²)` — a constant worst case that does not grow with
+ * the corpus rather than a function of it. At most 100 pairs are returned, so a wake payload or a
+ * reviewer is never handed an unbounded list. When either bound bites, the sweep reports it.
+ */
+export const MAX_DUPLICATE_ENTRIES = 1500;
+export const MAX_DUPLICATE_PAIRS = 100;
 
 export function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length;

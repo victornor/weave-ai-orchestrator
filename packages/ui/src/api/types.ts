@@ -521,6 +521,8 @@ export interface KnowledgeHealth {
   hubs: Array<{ path: string; scope: string; projectId: string | null; projectSlug: string | null; tokenEstimate: number; budgetTokens: number; pct: number; nearBudget: boolean; curationPending: boolean; lastCuratedAt: string | null }>;
   orphans: KnowledgeDocSummary[];
   stale: KnowledgeDocSummary[];
+  /** VS-492: documents no run has read within the configured never-read window. */
+  neverRead: KnowledgeDocSummary[];
   unresolvedLinks: Array<{ fromPath: string; fromTitle: string; toSlug: string }>;
 }
 
@@ -543,6 +545,8 @@ export interface KnowledgeRevision {
   /** Which ticket produced this revision (VS-102); null for a human edit or a daemon seed, or a revision recorded before provenance existed. */
   ticketId: string | null;
   ticketIdentifier: string | null;
+  /** VS-492: the existing claims this revision recorded as superseded, empty when it recorded none. */
+  superseded: string[];
 }
 
 export interface SearchHit {

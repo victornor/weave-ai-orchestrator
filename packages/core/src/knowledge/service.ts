@@ -5,14 +5,14 @@ import {
   estimateTokens, OcError, projectLabel, sliceToTokens,
   type Decision, type KnowledgeRevisionReason, type KnowledgeScope,
 } from '@weave-ai/shared';
-import type { Actor, CoreServices, KnowledgeBootstrapPart, KnowledgeDocDetail, KnowledgeDocSummary, KnowledgeMirror, KnowledgeService } from '../api.js';
+import type { Actor, CoreServices, KnowledgeBootstrapPart, KnowledgeDocDetail, KnowledgeDocSummary, KnowledgeDuplicateEntry, KnowledgeDuplicatePair, KnowledgeMirror, KnowledgeService, KnowledgeUsageService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { requestKnowledgeRepoPr } from './repoDelivery.js';
 import { tx } from '../tickets/tx.js';
 import {
-  CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, SECRET_SHAPED_RE, appendEntry, budgetOf, countWords, docFolderOf, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
-  isDocPath, isHubStub, normalize, parseDoc, parseLinks, readMirrorFile, relPathFor, renderDoc, repoKnowledgePath, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated,
+  CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, MAX_DUPLICATE_ENTRIES, MAX_DUPLICATE_PAIRS, SECRET_SHAPED_RE, appendEntry, budgetOf, countWords, docFolderOf, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
+  isDocPath, isHubStub, normalize, parseDoc, parseLinks, readMirrorFile, relPathFor, renderDoc, repoKnowledgePath, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated, type Entry,
 } from './files.js';
 
 /** VS-358: `write()`'s own mirror parameter — the target plus the fully-computed content to write there. */
@@ -252,6 +252,8 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
      * content was never derived from ambient workspace state in the first place.
      */
     repoBody?: (current: string) => string,
+    /** VS-492: the entries of the pre-replacement file this revision supersedes, matched originals. */
+    superseded: string[] = [],
   ): number {
     const budget = budgetOfRow(row);
     const body = isDocPath(row.path) ? next : withBudgetStated(next, budget);
@@ -264,7 +266,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       const tokens = estimateTokens(body);
       db.insert('knowledge_revisions', {
         id: newId(), fileId: row.id, revision, body, authorKind: actor.kind, authorId: actor.id, runId: actor.runId ?? null,
-        ticketId, reason, removedEntriesJson: removed, createdAt: nowIso(),
+        ticketId, reason, removedEntriesJson: removed, supersededEntriesJson: superseded, createdAt: nowIso(),
       });
       const patch: Record<string, unknown> = { tokenEstimate: tokens, hash: sha256(body), budgetTokens: budget, updatedAt: nowIso() };
       if (reason === 'curation') { patch.lastCuratedAt = nowIso(); patch.curationPending = false; }
@@ -464,28 +466,37 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       return { remainingTokens: budget - tokens, revision };
     },
 
-    replace(actor, scope, body, reason, projectId, removed, mirror) {
+    replace(actor, scope, body, reason, projectId, removed, mirror, supersedes) {
       const { row, abs, body: before } = ensure(scope, projectId);
       const beforeEntries = entriesOf(before);
+      // VS-492: match each named claim to an entry of the file being replaced before anything is
+      // written or archived, so a supersession that names nothing is refused with no side effect.
+      const superseded: string[] = [];
+      for (const claim of supersedes ?? []) {
+        const wanted = normalize(claim);
+        const hit = wanted ? beforeEntries.find((e) => e.normalized.includes(wanted)) : undefined;
+        if (!hit) throw new OcError('validation', `superseded claim not found in ${row.path}: ${claim}`, { claim, path: row.path });
+        if (!superseded.includes(hit.line.trim())) superseded.push(hit.line.trim());
+      }
       const afterNorm = new Set(entriesOf(body).map((e) => e.normalized));
       const gone = beforeEntries.filter((e) => !afterNorm.has(e.normalized)).map((e) => `${e.section}: ${e.line.trim()}`);
       const all = [...new Set([...gone, ...(removed ?? [])])];
       archiveEntries(row, abs, all, reason);
       const normalized = body.endsWith('\n') ? body : `${body}\n`;
-      const revision = write(actor, row, abs, normalized, reason, all, mirrorFor(mirror, () => normalized));
+      const revision = write(actor, row, abs, normalized, reason, all, mirrorFor(mirror, () => normalized), undefined, superseded);
       const tokens = estimateTokens(body);
       if (reason !== 'curation' && tokens > budgetOfRow(row)) fireCuration(scope, projectId);
-      return { revision };
+      return { revision, superseded };
     },
 
     revisions(scope, projectId) {
       const { row } = ensure(scope, projectId);
-      return db.all<{ revision: number; authorKind: string; reason: string; createdAt: string; ticketId: string | null; ticketIdentifier: string | null }>(
-        `SELECT r.revision, r.author_kind, r.reason, r.created_at, r.ticket_id, t.identifier AS ticket_identifier
+      return db.all<{ revision: number; authorKind: string; reason: string; createdAt: string; ticketId: string | null; ticketIdentifier: string | null; supersededEntries: string[] }>(
+        `SELECT r.revision, r.author_kind, r.reason, r.created_at, r.ticket_id, t.identifier AS ticket_identifier, r.superseded_entries_json
            FROM knowledge_revisions r LEFT JOIN tickets t ON t.id = r.ticket_id
           WHERE r.file_id = ? ORDER BY r.revision DESC`,
         [row.id],
-      );
+      ).map(({ supersededEntries, ...r }) => ({ ...r, superseded: supersededEntries ?? [] }));
     },
 
     revert(actor, scope, revision, projectId) {
@@ -803,6 +814,46 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       return { nodes, edges };
     },
 
+    duplicates(filter = {}) {
+      // VS-492: the same entries the write-time check compares a new note against, compared with each
+      // other. Read-only by construction — every operation below is a read; there is no write path.
+      const params: string[] = [ws];
+      let sql = 'SELECT * FROM knowledge_files WHERE workspace_id = ?';
+      if (filter.scope) { sql += ' AND scope = ?'; params.push(filter.scope); }
+      if (filter.projectId) {
+        const p = projectOf(filter.projectId);
+        sql += " AND (project_id = ? OR scope = 'shared')";
+        params.push(p.id);
+      } else if (filter.projectId === null) {
+        sql += ' AND project_id IS NULL';
+      }
+      const entries: Array<{ entry: Entry; file: FileRow }> = [];
+      for (const raw of db.all<Record<string, unknown>>(sql, params)) {
+        const f = knowledgeRow(raw) as unknown as FileRow;
+        const abs = join(ctx.paths.knowledge, f.path);
+        if (!existsSync(abs)) continue;
+        for (const e of entriesOf(readBody(abs))) entries.push({ entry: e, file: f });
+      }
+      const entryCapped = entries.length > MAX_DUPLICATE_ENTRIES;
+      const considered = entries.slice(0, MAX_DUPLICATE_ENTRIES);
+      const view = (file: FileRow, entry: Entry): KnowledgeDuplicateEntry => ({
+        path: file.path, scope: file.scope, projectId: file.projectId, slug: docSlugOf(file.path),
+        section: entry.section, text: entry.text, line: entry.line,
+      });
+      const pairs: KnowledgeDuplicatePair[] = [];
+      let pairCapped = false;
+      for (let i = 0; i < considered.length && !pairCapped; i++) {
+        for (let j = i + 1; j < considered.length; j++) {
+          const score = similarity(considered[i]!.entry.normalized, considered[j]!.entry.normalized);
+          if (score < DUPLICATE_THRESHOLD) continue;
+          pairs.push({ score, a: view(considered[i]!.file, considered[i]!.entry), b: view(considered[j]!.file, considered[j]!.entry) });
+          if (pairs.length >= MAX_DUPLICATE_PAIRS) { pairCapped = true; break; }
+        }
+      }
+      pairs.sort((a, b) => b.score - a.score);
+      return { pairs, scanned: considered.length, capped: entryCapped || pairCapped };
+    },
+
     health(projectId) {
       // A hub scope this call cares about has to exist to be reported on — a project nobody has
       // read or written to yet still gets a health view, not an omission.
@@ -836,6 +887,26 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       const orphans = docs.filter((d) => d.backlinks === 0);
       const stale = docs.filter((d) => Date.parse(d.updatedAt) < staleBefore);
 
+      // VS-492: a fifth measure, derived from the read events the context-accounting service already
+      // records — a document no run has read within the configured window, and old enough that
+      // "nothing has read it yet" is a signal rather than a document newer than the window. The
+      // usage service is optional here so a knowledge-only harness still gets a view.
+      const neverReadBefore = Date.now() - ctx.config.defaults.knowledgeNeverReadDays * 24 * 60 * 60 * 1000;
+      let neverRead = [] as KnowledgeDocSummary[];
+      try {
+        const usage = deps().knowledgeUsage as KnowledgeUsageService | undefined;
+        if (usage) {
+          const refs = usage.neverRead({
+            ...(projectId !== undefined && projectId !== null ? { projectId } : {}),
+            since: new Date(neverReadBefore).toISOString(),
+          });
+          const keys = new Set(refs.map((r) => `${r.scope}:${r.projectId ?? ''}:${r.slug}`));
+          neverRead = docs.filter((d) => keys.has(`${d.scope}:${d.projectId ?? ''}:${d.slug}`) && Date.parse(d.updatedAt) < neverReadBefore);
+        }
+      } catch (e) {
+        log.debug({ err: String(e) }, 'never-read measure unavailable');
+      }
+
       const unresolvedLinks = db
         .all<{ fromPath: string; toSlug: string }>('SELECT from_path, to_slug FROM knowledge_links WHERE workspace_id = ? AND to_path IS NULL', [ws])
         .filter((l) => visiblePaths.has(l.fromPath))
@@ -844,7 +915,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
           fromTitle: db.get<{ title: string }>("SELECT title FROM knowledge_search WHERE kind = 'knowledge' AND ref = ?", [l.fromPath])?.title ?? l.fromPath,
         }));
 
-      return { hubs, orphans, stale, unresolvedLinks };
+      return { hubs, orphans, stale, neverRead, unresolvedLinks };
     },
 
     appendDecision(decision: Decision) {

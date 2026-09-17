@@ -655,11 +655,11 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
-    name: 'weave_knowledge_replace', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), body: z.string(), projectId: z.string().optional() }),
-    description: 'Rewrite a whole knowledge file. Only valid inside a curation run; otherwise use weave_knowledge_note.',
+    name: 'weave_knowledge_replace', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), body: z.string(), projectId: z.string().optional(), supersedes: z.array(z.string().min(1)).max(50).optional() }),
+    description: 'Rewrite a whole knowledge file. Only valid inside a curation run; otherwise use weave_knowledge_note. `supersedes` names the specific existing entries this rewrite corrects — quote a distinctive fragment of each; the revision records them so the change reads as a correction, not a quiet removal. A claim that matches no existing entry is rejected and nothing is written.',
     handler: (ctx, i) => {
       const projectId = knowledgeScope(ctx, i.scope, i.projectId);
-      return svc(ctx).knowledge.replace(ctx.actor, i.scope, i.body, 'curation', projectId, undefined, mirrorTargetFor(ctx, i.scope, projectId));
+      return svc(ctx).knowledge.replace(ctx.actor, i.scope, i.body, 'curation', projectId, undefined, mirrorTargetFor(ctx, i.scope, projectId), i.supersedes);
     },
   },
   {

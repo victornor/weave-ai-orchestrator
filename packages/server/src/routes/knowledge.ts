@@ -8,7 +8,7 @@ const scopeParam = z.enum(KNOWLEDGE_SCOPES);
 const project = (c: { req: { query(k: string): string | undefined } }): string | null => c.req.query('project') ?? null;
 
 /** `project`/`window` for the knowledge-context rollups (VS-110) — same window vocabulary as `/usage`. */
-const KnowledgeUsageQuery = z.object({ project: z.string().optional(), window: z.enum(USAGE_WINDOWS).default('all') });
+const KnowledgeUsageQuery = z.object({ project: z.string().optional(), window: z.enum(USAGE_WINDOWS).default('all'), since: z.string().optional() });
 
 export function knowledgeRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -25,7 +25,7 @@ export function knowledgeRoutes(): Hono<AppEnv> {
   });
   app.get('/usage/never-read', (c) => {
     const q = query(c, KnowledgeUsageQuery);
-    return c.json(c.get('ws').services.knowledgeUsage.neverRead({ projectId: q.project, window: q.window }));
+    return c.json(c.get('ws').services.knowledgeUsage.neverRead({ projectId: q.project, window: q.window, ...(q.since ? { since: q.since } : {}) }));
   });
   // Linked documents and the graph come before `/:scope` so "docs" and "graph" are not parsed as scopes.
   app.get('/docs', (c) => {

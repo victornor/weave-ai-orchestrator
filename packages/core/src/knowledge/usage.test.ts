@@ -115,6 +115,19 @@ describe('topDocuments / neverRead', () => {
     expect(never.map((d) => d.slug)).toEqual(['unread-doc']);
   });
 
+  it('honours an explicit since lower bound instead of the window vocabulary (VS-492)', () => {
+    knowledge.putDoc(HUMAN, 'project', 'recent-read', '# Recent read\n\nOpened this season.\n', h.projectId);
+    knowledge.putDoc(HUMAN, 'project', 'old-read', '# Old read\n\nOpened years ago.\n', h.projectId);
+    usage.recordRead({ runId: 'run-recent', agentId: h.conductorId, ticketId: null, scope: 'project', projectId: h.projectId, slug: 'recent-read', tokens: 10 });
+    usage.recordRead({ runId: 'run-old', agentId: h.conductorId, ticketId: null, scope: 'project', projectId: h.projectId, slug: 'old-read', tokens: 10 });
+    h.db.run('UPDATE knowledge_usage_events SET occurred_at = ? WHERE run_id = ?', ['2020-01-01T00:00:00.000Z', 'run-old']);
+    h.db.run('UPDATE knowledge_usage_events SET occurred_at = ? WHERE run_id = ?', ['2025-06-01T00:00:00.000Z', 'run-recent']);
+
+    const never = usage.neverRead({ projectId: h.projectId, since: '2024-01-01T00:00:00.000Z' });
+    expect(never.map((d) => d.slug)).toContain('old-read');
+    expect(never.map((d) => d.slug)).not.toContain('recent-read');
+  });
+
   it('still counts a document read outside the queried window as never read within it', () => {
     knowledge.putDoc(HUMAN, 'project', 'old-read', '# Old read\n\nRead a long time ago.\n', h.projectId);
     usage.recordRead({ runId: 'run-a', agentId: h.conductorId, ticketId: null, scope: 'project', projectId: h.projectId, slug: 'old-read', tokens: 10 });

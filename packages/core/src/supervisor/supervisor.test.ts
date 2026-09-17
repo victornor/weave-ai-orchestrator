@@ -324,10 +324,38 @@ describe('supervisor scheduled passes', () => {
       expect(requestCuration).not.toHaveBeenCalled();
       expect(h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:curation_at'])!.value).toBe(at);
     });
+
+    // VS-492: never-read is a third curation condition, additive to budget and age.
+    function seedNeverReadDoc(): void {
+      const now = Date.now();
+      seedKnowledgeFile({
+        path: 'projects/api/docs/never-read-doc.md', scope: 'project', projectId: h.projectId,
+        lastCuratedAt: new Date(now).toISOString(), tokenEstimate: 100,
+        updatedAt: new Date(now - 120 * 86_400_000).toISOString(),
+      });
+    }
+
+    it('asks for curation on a document nobody has read within the window (VS-492)', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration, recountSizes: vi.fn() } as never;
+      h.services.knowledgeUsage = { neverRead: vi.fn(() => [{ scope: 'project', projectId: h.projectId, slug: 'never-read-doc', title: null, tokenEstimate: 10 }]) } as never;
+      seedNeverReadDoc();
+      await supervisor.tick();
+      expect(requestCuration).toHaveBeenCalledWith({ kind: 'system', id: null }, 'project', h.projectId);
+    });
+
+    it('does not ask for curation when the document was read within the window (VS-492)', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration, recountSizes: vi.fn() } as never;
+      h.services.knowledgeUsage = { neverRead: vi.fn(() => []) } as never;
+      seedNeverReadDoc();
+      await supervisor.tick();
+      expect(requestCuration).not.toHaveBeenCalled();
+    });
   });
 
   describe('knowledge health (VS-102)', () => {
-    const emptyHealth = { hubs: [{ path: 'workspace/WORKSPACE.md', scope: 'workspace', projectId: null, projectSlug: null, tokenEstimate: 100, budgetTokens: 10_000, pct: 1, nearBudget: false, curationPending: false, lastCuratedAt: null }], orphans: [] as Array<{ path: string }>, stale: [] as Array<{ path: string }>, unresolvedLinks: [] as Array<{ fromPath: string; toSlug: string }> };
+    const emptyHealth = { hubs: [{ path: 'workspace/WORKSPACE.md', scope: 'workspace', projectId: null, projectSlug: null, tokenEstimate: 100, budgetTokens: 10_000, pct: 1, nearBudget: false, curationPending: false, lastCuratedAt: null }], orphans: [] as Array<{ path: string }>, stale: [] as Array<{ path: string }>, neverRead: [] as Array<{ path: string }>, unresolvedLinks: [] as Array<{ fromPath: string; toSlug: string }> };
     /** Forces both the knowledge-health gate and the curation gate open again, so a test can drive two sweeps. */
     const reopenGates = (): void => { h.db.run("DELETE FROM meta WHERE key IN ('supervisor:knowledge_health_at', 'supervisor:curation_at')"); };
 
@@ -384,6 +412,46 @@ describe('supervisor scheduled passes', () => {
       await supervisor.tick();
       // Reappearing is "new" relative to the now-clean signature, so it wakes again — it is not remembered forever.
       expect(wake.calls.some((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'knowledge_health')).toBe(true);
+    });
+
+    // VS-492: the never-read measure rides the same compared signature and wake.
+    it('wakes the conductor when a document becomes never-read between sweeps (VS-492)', async () => {
+      const health = vi.fn(() => ({ ...emptyHealth }));
+      h.services.knowledge = { requestCuration: vi.fn(async () => ({})), health } as never;
+      await supervisor.tick(); // first sweep: seeds, clean
+      reopenGates();
+      health.mockReturnValue({ ...emptyHealth, neverRead: [{ path: 'projects/api/docs/unread.md' }] });
+      await supervisor.tick();
+      const woken = wake.calls.find((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'knowledge_health');
+      expect(woken).toBeDefined();
+      expect((woken!.input as { payload: { neverReadDocs: string[] } }).payload.neverReadDocs).toContain('projects/api/docs/unread.md');
+    });
+
+    // VS-492: the bounded duplicate sweep surfaces pairs through the same wake, and a persisting pair
+    // does not re-wake because the pair key is part of the compared signature.
+    it('wakes the conductor on a new likely-duplicate pair and stays silent while it persists (VS-492)', async () => {
+      const health = vi.fn(() => ({ ...emptyHealth }));
+      const duplicates = vi.fn((): { pairs: unknown[]; scanned: number; capped: boolean } => ({ pairs: [], scanned: 0, capped: false }));
+      h.services.knowledge = { requestCuration: vi.fn(async () => ({})), health, duplicates } as never;
+      const pair = {
+        score: 0.9,
+        a: { path: 'projects/api/PROJECT.md', scope: 'project', projectId: h.projectId, slug: null, section: 'Learnings', text: 'Retries are idempotent.', line: '- Retries are idempotent.' },
+        b: { path: 'projects/api/docs/x.md', scope: 'project', projectId: h.projectId, slug: 'x', section: 'Learnings', text: 'Idempotent retries.', line: '- Idempotent retries.' },
+      };
+      const healthWakes = (): number => wake.calls.filter((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'knowledge_health').length;
+      await supervisor.tick(); // first sweep: seeds
+      const before = healthWakes();
+      reopenGates();
+      duplicates.mockReturnValue({ pairs: [pair], scanned: 2, capped: false });
+      await supervisor.tick();
+      const afterNew = healthWakes();
+      expect(afterNew).toBeGreaterThan(before);
+      const woken = wake.calls.find((c) => (c.input as { payload?: { kind?: string } }).payload?.kind === 'knowledge_health')!;
+      const payload = (woken.input as { payload: { duplicatePairs: Array<{ a: string; b: string; pathA: string }> } }).payload;
+      expect(payload.duplicatePairs[0]).toMatchObject({ a: 'Retries are idempotent.', b: 'Idempotent retries.', pathA: 'projects/api/PROJECT.md' });
+      reopenGates();
+      await supervisor.tick(); // the same pair: not new, so no further wake
+      expect(healthWakes()).toBe(afterNew);
     });
   });
 

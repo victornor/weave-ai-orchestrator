@@ -46,7 +46,7 @@ A curation turn is triggered when a file crosses 80% of its budget, 14 days afte
 
 **You may merge, move, tighten, archive and remove. You may never add a fact.** Full procedure: `references/curation.md`.
 
-Submit the rewritten file with `weave_knowledge_replace(scope, body)`. The daemon diffs it, archives every removed entry with its provenance, and records the diff on the ticket so the human can review or revert. Then comment on the ticket listing every removed entry with its reason, and transition to `done`.
+Submit the rewritten file with `weave_knowledge_replace(scope, body, supersedes)`. `supersedes` names the specific existing entries the rewrite corrects — a distinctive fragment of each; a claim that matches no entry is rejected. The daemon diffs it, archives every removed entry with its provenance, records the superseded claims on the revision, and records the diff on the ticket so the human can review or revert. Then comment on the ticket listing every removed entry with its reason, and transition to `done`.
 
 ## References
 

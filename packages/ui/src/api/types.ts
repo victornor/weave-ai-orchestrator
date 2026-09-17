@@ -373,6 +373,9 @@ export interface WorkerDetail {
   input: { midTurn: boolean; interrupts?: boolean; reason?: string };
   /** Whether this worker's *next* turn would resume its existing session rather than start fresh (VS-106). */
   sessionResumable: boolean;
+  /** True while the session is being compacted out of band: wakes are held, so a message sent now is queued. */
+  compacting: boolean;
+  compactingError: string | null;
 }
 
 /**

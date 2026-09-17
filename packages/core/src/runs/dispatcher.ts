@@ -54,6 +54,17 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
   const runningInDb = (agentId: string): boolean =>
     !!ctx.db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [agentId]);
 
+  /**
+   * A session mid-compaction is busy: a turn started now would race the CLI rewriting the same
+   * session. Whatever woke the agent stays `queued` and is claimed once compaction clears the flag,
+   * which is exactly the "your message is held until the conversation is compacted" behaviour.
+   */
+  const compactingInDb = (agentId: string): boolean =>
+    !!ctx.db.get<{ n: number }>(
+      "SELECT 1 AS n FROM agent_sessions WHERE agent_id = ? AND status = 'active' AND compacting_at IS NOT NULL LIMIT 1",
+      [agentId],
+    );
+
   const projectRunning = (projectId: string): number => {
     let n = 0;
     for (const entry of state.active.values()) {
@@ -163,6 +174,7 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
           if (state.active.has(agent.id)) continue;
           if ([...state.active.values()].some((r) => r.agentId === agent.id)) continue;
           if (runningInDb(agent.id)) continue;
+          if (compactingInDb(agent.id)) continue;
           if (ctx.isolated && !isEligibleWhileIsolated(agent.id, now)) continue;
           if (agent.projectId) {
             const project = ctx.db.get<{ maxWorkers: number }>('SELECT max_workers FROM projects WHERE id = ?', [agent.projectId]);

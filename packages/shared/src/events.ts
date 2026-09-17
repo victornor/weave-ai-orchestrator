@@ -26,6 +26,6 @@ export type EventType = (typeof EVENT_TYPES)[number];
  * workspace stream instead of opening a per-run `EventSource`. `worker.activity` (VS-328) is the
  * per-worker activity summary.
  */
-export const EPHEMERAL_EVENT_TYPES = ['worker.activity', 'run.event'] as const;
+export const EPHEMERAL_EVENT_TYPES = ['worker.activity', 'run.event', 'session.compaction'] as const;
 export type EphemeralEventType = (typeof EPHEMERAL_EVENT_TYPES)[number];
 export interface WorkspaceEvent<T = unknown> { seq: number; workspaceId: string; type: EventType; entityType: string; entityId: string; payload: T; createdAt: string }

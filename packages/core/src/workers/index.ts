@@ -764,6 +764,56 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.reset_session', 'agent', id, { reason });
     },
 
+    /**
+     * Start an out-of-band compaction of this agent's session. Marks the session compacting first —
+     * which is what holds the agent's queued wakes (its next message waits) and keeps the dispatcher
+     * off it — then lets the CLI summarise in the background and clears the mark when it answers.
+     * Returns as soon as the mark is set, never after the compaction itself.
+     */
+    async compactSession(actor: Actor, id: string): Promise<{ started: boolean; runtime: string }> {
+      const agent = get(id);
+      if (sessions.compacting(id)) throw new OcError('wrong_status', `${agent.name}'s session is already compacting`);
+      const running = ctx.db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [id]);
+      if (running) throw new OcError('wrong_status', `${agent.name} has a turn running; wait for it or cancel first`);
+      const session = sessions.active(id);
+      if (!session?.sessionRef) throw new OcError('validation', `${agent.name} has no resumable session to compact`);
+
+      const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;
+      let setting;
+      try { setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket); }
+      catch (e) { throw new OcError('model_unconfigured', `cannot resolve a runtime for ${agent.name}: ${(e as Error).message}`); }
+      const adapter = ctx.registries.runtimes.get(setting.runtime);
+      if (!adapter?.compactSession) throw new OcError('validation', `runtime ${setting.runtime} cannot compact a session externally`);
+
+      const sessionId = session.id;
+      const ref = session.sessionRef;
+      const configHome = join(ctx.paths.runtimesHome, setting.runtime);
+      const startedAt = nowIso();
+      sessions.setCompacting(sessionId, startedAt, null);
+      ctx.events.broadcast('session.compaction', 'agent', id, { agentId: id, compacting: true, at: startedAt });
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.compact_session', 'agent', id, { runtime: setting.runtime });
+      log.info({ agentId: id, runtime: setting.runtime }, 'session compaction requested');
+
+      void (async () => {
+        let ok = false;
+        let via: string | undefined;
+        let message = 'compaction failed';
+        try {
+          const result = await adapter.compactSession!({ ref, cwd: agent.homePath, configHome, model: setting.model ?? null });
+          ok = result.ok;
+          via = result.via;
+          message = result.error?.message ?? (ok ? '' : 'compaction failed');
+        } catch (e) {
+          message = `compaction threw: ${String(e)}`;
+        }
+        sessions.setCompacting(sessionId, null, ok ? null : message);
+        ctx.events.broadcast('session.compaction', 'agent', id, { agentId: id, compacting: false, ok, error: ok ? null : message });
+        log[ok ? 'info' : 'warn']({ agentId: id, via, error: ok ? undefined : message }, ok ? 'session compacted' : 'session compaction failed');
+      })();
+
+      return { started: true, runtime: setting.runtime };
+    },
+
     handoverCommand(id: string): HandoverStartResult {
       const agent = get(id);
       const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;

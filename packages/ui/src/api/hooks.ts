@@ -73,6 +73,8 @@ function workerDetail(v: unknown): T.WorkerDetail {
     scheduledWake: (r['scheduledWake'] as T.WorkerScheduledWake | undefined) ?? null,
     input: (r['input'] as T.WorkerDetail['input'] | undefined) ?? { midTurn: false },
     sessionResumable: Boolean(r['sessionResumable']),
+    compacting: Boolean(r['compacting']),
+    compactingError: (r['compactingError'] as string | null | undefined) ?? null,
   };
 }
 

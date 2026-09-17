@@ -651,8 +651,8 @@ Common (all agents):
 - `weave_artifact_kit()` → the AC Artifact Kit on demand: `{ css, tokens, components, playbooks }` — the drift-checked CSS for a self-contained HTML artifact (§ artifact-kit), its parsed token set (`dark`/`light`/`scale`), the semantic component classes with descriptions, and the `weave-ai-artifacts` skill's playbook reference material. No input, no scoping — every agent gets the same result.
 
 Weaver only:
-- `weave_ticket_create({projectId?, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?})` — `autoMerge` only when the human asked for it in the same request. `summary` is a one-line why (VS-146, max 200), shown on plan-approval cards.
-- `weave_ticket_assign(id, roleId)` → the daemon spawns a worker when a slot is free; `weave_ticket_set_priority`.
+- `weave_ticket_create({projectId?, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?, workerModelId?})` — `autoMerge` only when the human asked for it in the same request. `summary` is a one-line why (VS-146, max 200), shown on plan-approval cards. `workerModelId` names a catalog option from `weave_worker_models` (VS-162); when the effective catalog has a configured option it is **required** (VS-514) and omitting it is refused with every configured option listed, while an empty or fully-unconfigured catalog keeps the workers default. The human HTTP/CLI create path keeps the optional default.
+- `weave_ticket_assign(id, roleId, workerModelId?)` → the daemon spawns a worker when a slot is free; when it attaches a role to a ticket that names no worker option and the catalog has a configured option, `workerModelId` is required (VS-514). `weave_ticket_set_priority`.
 - `weave_role_list()`, `weave_role_get(id)` (spec, charter, scope, status, live workers, recent outcomes).
 - `weave_role_hire(spec)` → §10.4; returns a `pending_activation` role, or `active` when `hireApproval=none`.
 - `weave_role_update_charter(id, {charter, reason, applyToRunning?})` → new role revision.

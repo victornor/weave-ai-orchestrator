@@ -117,10 +117,27 @@ describe('tickets', () => {
     expect(make().workerModelId).toBeNull();
     h.ctx.config.models.workerOptions = [
       { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },
+      { id: 'deep', description: 'Cause unknown.', runtime: 'claude', model: 'opus' },
     ];
     expect(make({ workerModelId: 'cheap' }).workerModelId).toBe('cheap');
     expect(() => make({ workerModelId: 'nope' })).toThrow(OcError);
-    try { make({ workerModelId: 'nope' }); } catch (e) { expect((e as OcError).code).toBe('validation'); }
+    try { make({ workerModelId: 'nope' }); } catch (e) {
+      expect((e as OcError).code).toBe('validation');
+      // VS-514: the error names the valid options, so a typo teaches as well as an omission.
+      expect((e as OcError).message).toContain("'cheap'");
+      expect((e as OcError).message).toContain("'deep'");
+    }
+  });
+
+  it('keeps the workers default when the id is omitted, even with a configured catalog (VS-514)', () => {
+    h.ctx.config.models.workerOptions = [
+      { id: 'cheap', description: 'Scouts.', runtime: 'opencode', model: 'glm-4.6' },
+    ];
+    // The service stays permissive so the system and human paths (project scout, curation, import,
+    // HTTP/CLI) keep today's default; only the agent-facing tools require the choice.
+    expect(make().workerModelId).toBeNull();
+    expect(tickets.create(SYSTEM, { kind: 'task', title: 'Curate knowledge', projectId: h.projectId }).workerModelId).toBeNull();
+    expect(tickets.create(HUMAN, { kind: 'task', title: 'Human filed', projectId: h.projectId }).workerModelId).toBeNull();
   });
 
   it('rejects an unconfigured worker option id (VS-236)', () => {

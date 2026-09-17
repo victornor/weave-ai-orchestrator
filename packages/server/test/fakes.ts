@@ -216,8 +216,8 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
           .filter(([k]) => k.startsWith(prefix))
           .map(([k, revisions]) => ({ key: k.slice(prefix.length), revision: revisions.length, updatedAt: '2026-09-01T00:00:00.000Z' }));
       },
-      create: (_actor: Actor, input: { title: string; kind: Ticket['kind']; projectId?: string | null }) => {
-        const created = ticket({ id: `tk_${tickets.size + 1}`, identifier: `ACME-${43 + tickets.size}`, title: input.title, kind: input.kind, projectId: input.projectId ?? null, status: 'backlog' });
+      create: (_actor: Actor, input: { title: string; kind: Ticket['kind']; projectId?: string | null; workerModelId?: string | null }) => {
+        const created = ticket({ id: `tk_${tickets.size + 1}`, identifier: `ACME-${43 + tickets.size}`, title: input.title, kind: input.kind, projectId: input.projectId ?? null, workerModelId: input.workerModelId ?? null, status: 'backlog' });
         tickets.set(created.id, created);
         bus.emit('ticket.created', 'ticket', created.id, created);
         return created;

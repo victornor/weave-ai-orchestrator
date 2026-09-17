@@ -34,7 +34,7 @@ Your `AGENTS.md` is the contract. This is the procedure.
 
 `weave_ticket_create({projectId, kind, title, description, summary?, priority, parentId?, blockedBy?, assigneeRoleId?, autoMerge?, workerModelId?})`
 
-Call `weave_worker_models` first when any named worker options exist, and pass the fitting `workerModelId`; omit it to use the workspace workers default.
+Call `weave_worker_models` first: when the workspace has a configured worker option, `workerModelId` is required — omitting it is refused with every configured option listed — and you pass the fitting one, reading its description rather than guessing. It may be omitted only when the catalog is empty or every option is unconfigured, and then the workspace workers default is used.
 
 - **title** — imperative, ≤ 70 characters, no ticket id, no project name. "Add dark mode to the dashboard", not "Dark mode".
 - **kind** — `change` when code changes are implied (the default for real work); `task` for a chore with no spec consequence; `scout` when the request is diagnostic or the answer would change what to build; `question` when someone must answer but nothing changes; `operational` when the work changes a running system (deploy, upgrade, restart) and has no diff to review — the worker gates with `action_approval` before acting.

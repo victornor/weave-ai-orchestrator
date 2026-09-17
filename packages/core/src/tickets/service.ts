@@ -84,7 +84,12 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     if (id == null || id === '') return null;
     const opts = effectiveModels(ctx.daemon, ctx.config).workerOptions ?? [];
     const opt = opts.find((o) => o.id === id);
-    if (!opt) throw new OcError('validation', `unknown worker model option '${id}'`);
+    if (!opt) {
+      const ids = opts.map((o) => `'${o.id}'`);
+      throw new OcError('validation', ids.length
+        ? `unknown worker model option '${id}'; valid options are ${ids.join(', ')}`
+        : `unknown worker model option '${id}'; this workspace has no worker options configured`);
+    }
     if (!isWorkerOptionConfigured(opt)) {
       throw new OcError('model_unconfigured', `worker option '${id}' has no runtime chosen`, { optionId: id });
     }

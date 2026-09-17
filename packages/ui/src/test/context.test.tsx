@@ -4,8 +4,9 @@
  */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
-import { WorkspaceProvider } from '../api/context';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { FanInStreams, WorkspaceProvider } from '../api/context';
+import { resetGlobalStream } from '../api/streams';
 
 interface Opened { url: string; closed: boolean }
 const opened: Opened[] = [];
@@ -28,6 +29,7 @@ beforeEach(() => {
   localStorage.clear();
   (globalThis as unknown as { EventSource: unknown }).EventSource = TrackingEventSource;
 });
+afterEach(() => resetGlobalStream());
 
 const shell = (ws: string): React.ReactElement => (
   <QueryClientProvider client={new QueryClient()}>
@@ -108,6 +110,19 @@ describe('the live prop (VS-199)', () => {
     expect(opened[0]?.closed).toBe(false);
 
     view.rerender(withLive(false));
+    expect(opened[0]?.closed).toBe(true);
+  });
+});
+
+describe('global fan-in (VS-509)', () => {
+  it('opens exactly one daemon-wide stream for any number of workspaces', () => {
+    const view = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <FanInStreams ids={Array.from({ length: 10 }, (_, i) => `ws${i}`)} />
+      </QueryClientProvider>,
+    );
+    expect(opened.map((o) => o.url)).toEqual(['/api/events']);
+    view.unmount();
     expect(opened[0]?.closed).toBe(true);
   });
 });

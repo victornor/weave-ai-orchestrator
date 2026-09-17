@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app.js';
+import { encodeGlobalCursor } from '../src/routes/events.js';
 import { authed, makeHarness, ticket, type Harness } from './fakes.js';
 
 let harness: Harness | null = null;
@@ -91,5 +92,51 @@ describe('workspace SSE', () => {
     expect(ephemeral).not.toContain('id:');
     // The replay cursor was not disturbed: the persisted frame after `after` still arrived by seq.
     expect(text).toContain(`id: ${second!.seq}`);
+  });
+});
+
+describe('global SSE', () => {
+  it('requires a session and multiplexes loaded workspaces', async () => {
+    harness = makeHarness();
+    const second = makeHarness({ workspaceId: 'ws2' });
+    harness.deps.workspaces.set('ws2', second.runtime);
+    const app = createApp(harness.deps);
+    expect((await app.fetch(new Request('http://127.0.0.1/api/events'))).status).toBe(401);
+
+    harness.bus.emit('ticket.created', 'ticket', 'tk_1', ticket());
+    second.bus.emit('worker.spawned', 'agent', 'ag_2', { id: 'ag_2' });
+    const res = await app.fetch(new Request('http://127.0.0.1/api/events?after=' + encodeGlobalCursor(new Map([['ws1', 0], ['ws2', 0]])), { headers: authed() }));
+    const text = await readFrames(res, 2);
+    expect(text).toContain('event: ticket.created');
+    expect(text).toContain('event: worker.spawned');
+    await second.close();
+  });
+
+  it('replays each workspace from its cursor and encodes the updated map in ids', async () => {
+    harness = makeHarness();
+    const second = makeHarness({ workspaceId: 'ws2' });
+    harness.deps.workspaces.set('ws2', second.runtime);
+    harness.bus.emit('ticket.created', 'ticket', 'tk_1', ticket());
+    harness.bus.emit('ticket.comment', 'ticket', 'tk_1', { id: 'c1' });
+    second.bus.emit('worker.spawned', 'agent', 'ag_2', { id: 'ag_2' });
+    const first = harness.bus.since(0)[0]!;
+    const res = await createApp(harness.deps).fetch(new Request('http://127.0.0.1/api/events?after=' + encodeGlobalCursor(new Map([['ws1', first.seq], ['ws2', 0]])), { headers: authed() }));
+    const text = await readFrames(res, 2);
+    expect(text).toContain('event: ticket.comment');
+    expect(text).toContain('event: worker.spawned');
+    expect(text).toMatch(/id: [A-Za-z0-9_-]+/);
+    expect(text).not.toContain('event: ticket.created');
+    await second.close();
+  });
+
+  it('forwards ephemeral frames without moving the per-workspace cursor', async () => {
+    harness = makeHarness();
+    const cursor = encodeGlobalCursor(new Map([['ws1', 0]]));
+    const res = await createApp(harness.deps).fetch(new Request('http://127.0.0.1/api/events?after=' + cursor, { headers: authed() }));
+    const pending = readUntil(res, 'worker.activity');
+    setTimeout(() => harness!.bus.broadcast('worker.activity', 'worker', 'ag_1', { agentId: 'ag_1', ticketId: null, activity: null, tests: null }), 20);
+    const text = await pending;
+    const frame = text.split('\n\n').find((f) => f.includes('event: worker.activity'))!;
+    expect(frame).not.toContain('id:');
   });
 });

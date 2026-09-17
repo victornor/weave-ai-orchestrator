@@ -21,8 +21,8 @@ import type { RunEvent } from '@weave-ai/shared';
 import { useHookWs } from './context';
 import { useRunEvents } from './hooks';
 import { qk } from './keys';
-import type { EventStream, ConnectionStatus } from './events';
-import { acquireWorkspaceStream, releaseWorkspaceStream, useStreamQueryClient } from './streams';
+import type { EventStream, GlobalEventStream, ConnectionStatus } from './events';
+import { acquireGlobalStream, acquireWorkspaceStream, releaseGlobalStream, releaseWorkspaceStream, useStreamQueryClient } from './streams';
 
 export interface RunEventStream {
   events: RunEvent[];
@@ -51,7 +51,7 @@ export function mergeRunEvents(persisted: readonly RunEvent[], live: readonly Ru
   return out.sort((a, b) => a.seq - b.seq);
 }
 
-export function useRunEventStream(runId: string | null, { live = true, newest = false, ws: wsOverride }: { live?: boolean; newest?: boolean; ws?: string } = {}): RunEventStream {
+export function useRunEventStream(runId: string | null, { live = true, newest = false, ws: wsOverride, global = false }: { live?: boolean; newest?: boolean; ws?: string; global?: boolean } = {}): RunEventStream {
   const ws = useHookWs(wsOverride);
   const qc = useStreamQueryClient();
   const persisted = useRunEvents(runId ?? '', 0, wsOverride, { newest });
@@ -59,7 +59,7 @@ export function useRunEventStream(runId: string | null, { live = true, newest = 
   /** Highest seq rendered, so a reconnect asks the read for everything after it. */
   const seq = useRef(0);
   const [status, setStatus] = useState<ConnectionStatus>({ state: 'connecting', capturedAt: null, attempts: 0 });
-  const streamRef = useRef<EventStream | null>(null);
+  const streamRef = useRef<(EventStream | GlobalEventStream) | null>(null);
 
   useEffect(() => {
     setTail([]);
@@ -71,7 +71,7 @@ export function useRunEventStream(runId: string | null, { live = true, newest = 
       streamRef.current = null;
       return;
     }
-    const stream = acquireWorkspaceStream(ws, qc);
+    const stream = global ? acquireGlobalStream(qc) : acquireWorkspaceStream(ws, qc);
     streamRef.current = stream;
     setStatus(stream.getStatus());
     let connectedBefore = false;
@@ -85,7 +85,7 @@ export function useRunEventStream(runId: string | null, { live = true, newest = 
       connectedBefore = true;
     });
     const offFrame = stream.onEvent((e) => {
-      if (String(e.type) !== 'run.event') return;
+      if (String(e.type) !== 'run.event' || (global && e.workspaceId !== ws)) return;
       const p = e.payload as { runId?: string; event?: RunEvent } | null;
       const evt = p?.event;
       if (!evt || (p.runId && p.runId !== runId) || typeof evt.seq !== 'number') return;
@@ -96,9 +96,10 @@ export function useRunEventStream(runId: string | null, { live = true, newest = 
       offStatus();
       offFrame();
       streamRef.current = null;
-      releaseWorkspaceStream(ws);
+      if (global) releaseGlobalStream();
+      else releaseWorkspaceStream(ws);
     };
-  }, [runId, ws, live, qc]);
+  }, [runId, ws, live, qc, global]);
 
   const events = useMemo(() => mergeRunEvents(persisted.data ?? [], tail), [persisted.data, tail]);
 

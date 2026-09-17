@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { EPHEMERAL_EVENT_TYPES, type WorkspaceEvent } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
+import type { AppDeps } from '../types.js';
 import { HEARTBEAT_MS, Pump, heartbeat } from '../sse.js';
 
 /** A live-only frame (VS-328): forwarded to clients but never replayed, and it must not move the cursor. */
@@ -48,6 +49,83 @@ export function eventRoutes(): Hono<AppEnv> {
         }
       } finally {
         unsubscribe();
+      }
+    });
+  });
+  return app;
+}
+
+const MAX_CURSOR_BYTES = 8_192;
+
+type GlobalFrame = { workspaceId: string; event: WorkspaceEvent };
+
+/** Encode the independent workspace positions carried by a daemon-wide stream. */
+export function encodeGlobalCursor(cursor: ReadonlyMap<string, number>): string {
+  const value: Record<string, number> = {};
+  for (const [workspaceId, seq] of cursor) value[workspaceId] = seq;
+  return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+}
+
+function parseGlobalCursor(raw: string | undefined, workspaces: ReadonlyMap<string, unknown>): Map<string, number> | null {
+  if (!raw || raw.length > MAX_CURSOR_BYTES) return null;
+  try {
+    const value: unknown = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const cursor = new Map<string, number>();
+    for (const [workspaceId, seq] of Object.entries(value)) {
+      if (!workspaces.has(workspaceId)) continue;
+      if (typeof seq !== 'number' || !Number.isSafeInteger(seq) || seq < 0) return null;
+      cursor.set(workspaceId, seq);
+    }
+    return cursor;
+  } catch {
+    return null;
+  }
+}
+
+/** `GET /api/events?after=<base64url cursor map>` — one SSE connection for all loaded workspaces. */
+export function globalEventRoutes(deps: AppDeps): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
+  app.get('/', (c) => {
+    const workspaces = [...deps.workspaces.values()];
+    const supplied = parseGlobalCursor(c.req.query('after'), deps.workspaces);
+    const cursor = supplied ?? new Map<string, number>();
+    for (const workspace of workspaces) {
+      if (!cursor.has(workspace.id)) cursor.set(workspace.id, workspace.ctx.events.lastSeq());
+    }
+
+    return streamSSE(c, async (stream) => {
+      const pump = new Pump<GlobalFrame>();
+      const unsubscribers = workspaces.map((workspace) => workspace.ctx.events.on((event) => pump.push({ workspaceId: workspace.id, event })));
+      stream.onAbort(() => pump.close());
+      const send = async ({ workspaceId, event }: GlobalFrame): Promise<void> => {
+        if (isEphemeral(event.type)) {
+          await stream.writeSSE({ event: event.type, data: JSON.stringify(event) });
+          return;
+        }
+        const current = cursor.get(workspaceId) ?? 0;
+        if (event.seq <= current) return;
+        cursor.set(workspaceId, event.seq);
+        await stream.writeSSE({ id: encodeGlobalCursor(cursor), event: event.type, data: JSON.stringify(event) });
+      };
+      try {
+        // Every bus is subscribed before any replay starts, so an event emitted during replay is
+        // queued and the cursor filter above prevents it being sent twice.
+        for (const workspace of workspaces) {
+          let batch: WorkspaceEvent[];
+          do {
+            batch = workspace.ctx.events.since(cursor.get(workspace.id) ?? 0, 500);
+            for (const event of batch) await send({ workspaceId: workspace.id, event });
+          } while (batch.length === 500 && !pump.done);
+        }
+        while (!pump.done) {
+          await pump.wait(HEARTBEAT_MS);
+          const pending = pump.drain().filter(({ workspaceId, event }) => isEphemeral(event.type) || event.seq > (cursor.get(workspaceId) ?? 0));
+          for (const frame of pending) await send(frame);
+          if (!pending.length && !pump.done) await heartbeat(stream);
+        }
+      } finally {
+        for (const unsubscribe of unsubscribers) unsubscribe();
       }
     });
   });

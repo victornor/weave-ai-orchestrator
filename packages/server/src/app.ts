@@ -16,7 +16,7 @@ import { pushRoutes } from './push.js';
 import { authRoutes } from './routes/auth.js';
 import { daemonRoutes, type WorkspaceAdmin } from './routes/daemon.js';
 import { workspaceRoutes } from './routes/workspace.js';
-import { eventRoutes } from './routes/events.js';
+import { eventRoutes, globalEventRoutes } from './routes/events.js';
 import { modelRoutes } from './routes/models.js';
 import { projectRoutes } from './routes/projects.js';
 import { jobRoutes } from './routes/jobs.js';
@@ -53,6 +53,7 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   // ---- daemon level ----
   app.route('/api/auth', authRoutes(deps));
   app.route('/api', daemonRoutes(deps, admin));
+  app.route('/api/events', globalEventRoutes(deps));
 
   // ---- one workspace ----
   const ws = new Hono<AppEnv>();

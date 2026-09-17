@@ -140,7 +140,7 @@ function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optio
         <span className="min-w-0 flex-1 truncate text-micro text-text-3">{ticket?.title ?? ''}</span>
         {optionName ? <span className="v2-tag flex-none text-text-3">{optionName}</span> : null}
       </div>
-      <WorkerFeed agentId={cell.id} ws={cell.ws} bodyHeight={bodyHeight} showChrome={false} label={`${cell.name} live feed`} />
+      <WorkerFeed agentId={cell.id} ws={cell.ws} global bodyHeight={bodyHeight} showChrome={false} label={`${cell.name} live feed`} />
       {resize ? (
         <ResizeGrip
           height={resize.height}

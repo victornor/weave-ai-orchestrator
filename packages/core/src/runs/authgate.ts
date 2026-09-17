@@ -243,7 +243,7 @@ export function releaseLoginPausesForAbandonedRuntimes(ctx: WorkspaceContext, de
       : null;
     let target: string;
     try {
-      target = modelSettingFor(modelsFor(ctx), a.kind, ticket).runtime;
+      target = modelSettingFor(modelsFor(ctx), a.kind, ticket, a).runtime;
     } catch (e) {
       if (!(e instanceof OcError) || e.code !== 'model_unconfigured') throw e;
       continue;

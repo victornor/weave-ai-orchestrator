@@ -54,15 +54,43 @@ export function modelsSource(
   };
 }
 
+/**
+ * VS-526: validate a caller-supplied worker-options id against the effective catalog — the single
+ * resolver both a ticket (create/assign) and a persistent session (open/change) use, so an unknown
+ * id is a `validation` error and an option with no runtime chosen is `model_unconfigured`, never a
+ * silently-ignored value.
+ */
+export function resolveWorkerModelId(models: EffectiveModels, id: string | null | undefined): string | null {
+  if (id == null || id === '') return null;
+  const opts = models.workerOptions ?? [];
+  const opt = opts.find((o) => o.id === id);
+  if (!opt) {
+    const ids = opts.map((o) => `'${o.id}'`);
+    throw new OcError('validation', ids.length
+      ? `unknown worker model option '${id}'; valid options are ${ids.join(', ')}`
+      : `unknown worker model option '${id}'; this workspace has no worker options configured`);
+  }
+  if (!isWorkerOptionConfigured(opt)) {
+    throw new OcError('model_unconfigured', `worker option '${id}' has no runtime chosen`, { optionId: id });
+  }
+  return id;
+}
+
 /** The setting that governs an agent of this kind, optionally given a worker's ticket. VS-398: a planner runs on the weaver's own setting — there is no separate per-workspace planner model. */
 export function modelSettingFor(
   config: { models: EffectiveModels },
   kind: AgentKind,
   ticket?: { workerModelId?: string | null } | null,
+  /**
+   * VS-526: the worker option a persistent session was opened with or last changed to. A ticketless
+   * session has no ticket, so its own option is what decides its runtime, model and effort; the
+   * session's ticket (once it takes one) still wins when it names an option.
+   */
+  session?: { workerModelId?: string | null } | null,
 ): ModelSetting {
   const models = config.models;
   if (kind === 'weaver' || kind === 'planner') return models.weaver;
-  const id = ticket?.workerModelId;
+  const id = ticket?.workerModelId ?? session?.workerModelId;
   if (id) {
     const opt = (models.workerOptions ?? []).find((o) => o.id === id);
     if (opt) {

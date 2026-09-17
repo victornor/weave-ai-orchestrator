@@ -1,6 +1,6 @@
 import { newId, nowIso, ticketRow, type Db } from '@weave-ai/db';
 import {
-  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, landingBranchOf, yoloEnabled, isWorkerOptionConfigured,
+  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, landingBranchOf, yoloEnabled,
   type CommentKind, type Decision, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
 } from '@weave-ai/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
@@ -18,7 +18,7 @@ import { git } from '../util/git.js';
 import { reconcileProjectKnowledgeFromRepo } from '../knowledge/repoSync.js';
 import { reconcileProjectArtifactsFromRepo } from './artifactRepoSync.js';
 import { SECRET_SHAPED_RE } from '../knowledge/files.js';
-import { effectiveModels } from '../models/resolve.js';
+import { effectiveModels, resolveWorkerModelId as resolveWorkerModelOption } from '../models/resolve.js';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { flattenWakes } from '../prompts/index.js';
@@ -80,21 +80,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   /** One delivery landing at a time per project: it mutates the clone every ticket shares (§11.4). */
   const serialize = landLock;
 
-  function resolveWorkerModelId(id: string | null | undefined): string | null {
-    if (id == null || id === '') return null;
-    const opts = effectiveModels(ctx.daemon, ctx.config).workerOptions ?? [];
-    const opt = opts.find((o) => o.id === id);
-    if (!opt) {
-      const ids = opts.map((o) => `'${o.id}'`);
-      throw new OcError('validation', ids.length
-        ? `unknown worker model option '${id}'; valid options are ${ids.join(', ')}`
-        : `unknown worker model option '${id}'; this workspace has no worker options configured`);
-    }
-    if (!isWorkerOptionConfigured(opt)) {
-      throw new OcError('model_unconfigured', `worker option '${id}' has no runtime chosen`, { optionId: id });
-    }
-    return id;
-  }
+  // VS-526: shared with the persistent-session option (models/resolve.ts), so both accept exactly
+  // the same ids and reject the same two ways.
+  const resolveWorkerModelId = (id: string | null | undefined): string | null => resolveWorkerModelOption(effectiveModels(ctx.daemon, ctx.config), id);
 
   function claimedWakesForRun(runId: string): Wakeup[] {
     const run = db.get<{ wakeupIds: string[] }>('SELECT wakeup_ids_json FROM runs WHERE id = ?', [runId]);

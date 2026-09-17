@@ -74,6 +74,8 @@ function workerDetail(v: unknown): T.WorkerDetail {
     scheduledWake: (r['scheduledWake'] as T.WorkerScheduledWake | undefined) ?? null,
     input: (r['input'] as T.WorkerDetail['input'] | undefined) ?? { midTurn: false },
     sessionResumable: Boolean(r['sessionResumable']),
+    // VS-526: how many turns the current session has taken; 0 marks a fresh conversation.
+    sessionTurns: typeof r['sessionTurns'] === 'number' ? r['sessionTurns'] : null,
     compacting: Boolean(r['compacting']),
     compactingError: (r['compactingError'] as string | null | undefined) ?? null,
   };
@@ -1010,14 +1012,29 @@ export function useStartSession(): UseMutationResult<Agent, Error, { ticketId: s
 
 /**
  * VS-495: a role's persistent, no-ticket session — idempotent, returns the role's existing live
- * session and its thread if it already has one rather than creating a second.
+ * session and its thread if it already has one rather than creating a second. VS-526: `workerModelId`
+ * is the catalog option the session runs on; omit it for the workspace's workers setting.
  */
-export function usePersistentSession(): UseMutationResult<{ agent: Agent; thread: ChannelThread }, Error, { projectId: string; roleId: string }> {
+export function usePersistentSession(): UseMutationResult<{ agent: Agent; thread: ChannelThread }, Error, { projectId: string; roleId: string; workerModelId?: string | null }> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body) => api.ws<{ agent: Agent; thread: ChannelThread }>(ws, '/workers/persistent-session', { method: 'POST', body }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: qk.workers(ws) }),
+  });
+}
+
+/**
+ * VS-526: change (or clear) the worker option a persistent session runs on. The caller must have
+ * shown the human what the change does to the conversation first — a change that moves the session
+ * to a different runtime retires it and starts a fresh conversation on the next turn.
+ */
+export function useSetSessionOption(id: string): UseMutationResult<Agent, Error, { workerModelId: string | null }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => api.ws<Agent>(ws, `/workers/${id}/session-option`, { method: 'POST', body }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: qk.worker(ws, id) }); void qc.invalidateQueries({ queryKey: qk.workers(ws) }); },
   });
 }
 

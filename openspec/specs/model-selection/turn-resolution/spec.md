@@ -12,13 +12,16 @@ and every run records what it actually ran on.
 Before a turn is launched the system SHALL resolve the runtime, the model and the effort it will
 use from exactly one source: the effective conductor setting for a turn of the conductor; for a
 turn of a worker, the worker option named by that worker's ticket when that option still exists in
-the effective catalog and has a runtime chosen, otherwise the effective workers setting. The
-effective setting or catalog SHALL be the workspace's own stored value when it has configured one,
-otherwise the daemon overlay when that overlay is filled, otherwise the schema's built-in default.
-It SHALL NOT read a runtime, a model or an effort from the role, the project or the agent row to
-make that choice, and there SHALL be no fallback chain behind that source other than letting the
-runtime choose the model when the resolved setting names none, and falling back to the effective
-workers setting when the ticket names an option that is no longer in the effective catalog.
+the effective catalog and has a runtime chosen, otherwise the effective workers setting; for a turn
+of a persistent session, the worker option the session was opened with or last changed to, when that
+option still exists in the effective catalog and has a runtime chosen, otherwise the effective
+workers setting. The effective setting or catalog SHALL be the workspace's own stored value when it
+has configured one, otherwise the daemon overlay when that overlay is filled, otherwise the schema's
+built-in default. It SHALL NOT read a runtime, a model or an effort from the role, the project or
+the agent row to make that choice, and there SHALL be no fallback chain behind that source other
+than letting the runtime choose the model when the resolved setting names none, and falling back to
+the effective workers setting when the ticket or the session names an option that is no longer in
+the effective catalog.
 
 A named option that still exists but has no runtime SHALL NOT fall back to the workers setting
 and SHALL NOT launch any runtime. That turn SHALL fail as specified in
@@ -40,6 +43,17 @@ another one.
   the catalog and has a runtime chosen
 - **THEN** it is launched on that option's runtime, model and effort, not the workers setting
 
+#### Scenario: A ticketless session runs on the workers setting
+
+- **WHEN** a persistent session's turn is launched and the session names no worker option
+- **THEN** it is launched on the runtime, model and effort of the workers setting
+
+#### Scenario: A session runs on its chosen option
+
+- **WHEN** a persistent session's turn is launched and the session names a worker option that still
+  exists in the catalog and has a runtime chosen
+- **THEN** it is launched on that option's runtime, model and effort, not the workers setting
+
 #### Scenario: The conductor runs on the conductor setting
 
 - **WHEN** the conductor's turn is launched
@@ -55,6 +69,11 @@ another one.
 
 - **WHEN** a setting's runtime or model is changed and the agent it governs takes its next turn
 - **THEN** that turn is launched on the new runtime and model
+
+#### Scenario: Changing a session's option changes its next launch
+
+- **WHEN** a persistent session's worker option is changed and the session takes its next turn
+- **THEN** that turn is launched on the new option's runtime, model and effort
 
 #### Scenario: A setting naming an unregistered runtime
 
@@ -76,6 +95,12 @@ restarted.
 
 Changing only the model or the effort SHALL NOT retire the session.
 
+For a persistent session, the same rule applies when its worker option moves it to a different
+
+runtime: the session is retired and a new one is started, and its surface states before the change
+is applied that the conversation will restart. Moving a session back to a runtime it used before
+that retirement is a new start on that runtime, never a resume of the retired thread.
+
 #### Scenario: The runtime changes under a running agent
 
 - **WHEN** a setting's runtime is changed and the agent it governs takes its next turn
@@ -87,6 +112,17 @@ Changing only the model or the effort SHALL NOT retire the session.
 
 - **WHEN** a setting's model or effort is changed but its runtime is not
 - **THEN** the agent's session is kept and resumed as usual
+
+#### Scenario: A session option change across runtimes retires the session
+
+- **WHEN** a persistent session's worker option is changed to one on a different runtime
+- **THEN** the current session is retired and the next turn starts a new session on the new runtime
+
+#### Scenario: Changing back does not resume the retired thread
+
+- **WHEN** a persistent session that was retired by a runtime change is moved back to the runtime it
+  used before
+- **THEN** a new session is started on that runtime rather than the retired thread being resumed
 
 ### Requirement: A run records what it actually ran on
 

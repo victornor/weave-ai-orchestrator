@@ -72,4 +72,14 @@ describe('V2 Run detail', () => {
     render(<RunBody runId="run_1" />);
     expect((document.querySelector('[data-v2-run-meta]') as HTMLElement).textContent).toContain('Started by a wake (2)');
   });
+
+  it('shows the runtime\u2019s own reason when a run failed with no summary (VS-526)', () => {
+    state.run = makeRun({
+      id: 'run_1', agentId: 'a1', status: 'failed', summary: null, errorCode: 'runtime_error',
+      lastError: 'Not inside a trusted directory and --skip-git-repo-check was not specified.',
+      startedAt: '2026-09-01T09:00:00.000Z', finishedAt: '2026-09-01T09:00:01.000Z',
+    });
+    render(<RunBody runId="run_1" />);
+    expect(document.querySelector('[data-v2-run-error]')?.textContent).toContain('--skip-git-repo-check was not specified');
+  });
 });

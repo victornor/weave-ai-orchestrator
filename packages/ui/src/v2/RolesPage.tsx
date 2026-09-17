@@ -23,6 +23,7 @@ import { A, useGo } from '../app/link';
 import { useWs } from '../api/context';
 import {
   useCreateThread,
+  useModels,
   usePersistentSession,
   usePostThreadMessage,
   useProjects,
@@ -308,12 +309,18 @@ function RoleCard({
   const [starting, setStarting] = useState(false);
   const go = useGo();
   const persistentSession = usePersistentSession();
+  // VS-526: the worker option a newly opened session starts on; changeable afterwards on its page.
+  const sessionModels = useModels();
+  const chatOptions = (sessionModels.data?.workerOptions ?? []).filter((o) => o.runtime);
+  const [chatOption, setChatOption] = useState('');
 
   // VS-495: opens (creating on first use) the role's one persistent, no-ticket session and navigates
   // to it — distinct from "Start session" above, which always creates or resumes a ticket-bound one.
+  // VS-526: the chosen option only applies when the session is created (the endpoint is idempotent,
+  // so re-opening never clobbers an existing session's option).
   const onChat = (): void => {
     persistentSession.mutate(
-      { projectId: role.projectId, roleId: role.id },
+      { projectId: role.projectId, roleId: role.id, ...(chatOption ? { workerModelId: chatOption } : {}) },
       { onSuccess: ({ agent }) => go('/w/$ws/workers/$workerId', { params: { ws, workerId: agent.id } }) },
     );
   };
@@ -330,6 +337,18 @@ function RoleCard({
         <button type="button" onClick={() => onOpenCharter(role.id)} className="flex-none text-micro text-text-2 hover:text-text-1">
           Charter
         </button>
+        {chatOptions.length > 0 ? (
+          <select
+            aria-label={`Worker option for ${role.name}'s session`}
+            value={chatOption}
+            onChange={(e) => setChatOption(e.target.value)}
+            data-role-chat-option={role.id}
+            className="ac-input ac-mono flex-none py-0.5 text-nano"
+          >
+            <option value="">workers setting</option>
+            {chatOptions.map((o) => (<option key={o.id} value={o.id}>{o.id}</option>))}
+          </select>
+        ) : null}
         <button
           type="button"
           disabled={persistentSession.isPending}

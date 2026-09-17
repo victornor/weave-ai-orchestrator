@@ -98,7 +98,7 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
       const ticket = agent.ticketId
         ? ctx.db.get<{ workerModelId: string | null }>('SELECT worker_model_id AS workerModelId FROM tickets WHERE id = ?', [agent.ticketId])
         : null;
-      const setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket);
+      const setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket, agent);
       if (!setting.compaction || setting.compaction.mode === 'off') return false;
       const window = setting.compaction.mode === 'percent' ? await modelWindow(setting.runtime, setting.model) : undefined;
       const threshold = compactionThreshold(setting.compaction, window ?? null);
@@ -160,7 +160,7 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
         : null;
       let setting;
       try {
-        setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket);
+        setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket, agent);
       } catch (e) {
         if (!(e instanceof OcError) || e.code !== 'model_unconfigured') throw e;
         // Placeholder for the queued row; the engine fails the turn before any runtime starts.

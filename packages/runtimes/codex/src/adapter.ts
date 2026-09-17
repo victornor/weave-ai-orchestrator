@@ -4,7 +4,7 @@ import type {
   AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
   RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@weave-ai/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, launchCommand, runTmpDir, spawnLines, writeFiles } from '@weave-ai/runtime-sdk';
+import { classifyError, detectBinary, installBundleFiles, launchCommand, runTmpDir, spawnLines, truncate, writeFiles } from '@weave-ai/runtime-sdk';
 import { extractReport } from '@weave-ai/shared';
 import { describeCodexAccount } from './account.js';
 import { buildArgs, mcpConfigToml, resumeCommand } from './args.js';
@@ -13,6 +13,24 @@ import { createCodexParser } from './events.js';
 import { listModels as listCodexModels, modelContextWindow } from './models.js';
 import { readThreadContextTokens, readThreadUsage } from './usage.js';
 import { asCodexSession, type CodexSessionRef } from './session.js';
+
+/** Written before the turn starts, not a reason it failed: PATH-alias and MCP-transport noise. */
+const STARTER_NOISE = [/^WARNING:/, /\bERROR\s+rmcp::/, /^\s*$/];
+
+/**
+ * VS-526: the first line of a failed turn's stderr that is a reason, not startup noise. `codex exec
+ * --json` writes its fatal reasons (`Not inside a trusted directory and --skip-git-repo-check was
+ * not specified.`) to stderr and exits with no JSON on stdout, so the parser never sees them — the
+ * adapter has to carry the words out or the run records a bare `exit_1`.
+ */
+export function firstStderrReason(stderr: string): string | null {
+  for (const line of stderr.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || STARTER_NOISE.some((re) => re.test(trimmed))) continue;
+    return trimmed;
+  }
+  return null;
+}
 
 export const capabilities: RuntimeCapabilities = {
   resumableSessions: true,
@@ -137,13 +155,29 @@ export const adapter: RuntimeAdapter = {
     if (input.outputSchema && finalText) { try { structured = JSON.parse(finalText); } catch { structured = undefined; } }
     if (structured === undefined) structured = extractReport(finalText) ?? undefined;
 
-    if (!st.completed && !st.errorMessage) st.errorMessage = 'codex exited without completing the turn';
+    const silentFailure = !st.completed && !st.errorMessage;
     const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError || !st.completed;
-    const error = failed
+    // VS-526: `codex exec --json` writes a startup failure to stderr and exits without any JSON, so
+    // the parser produces nothing and the classifier is handed `exit_1` — which it returns as the
+    // code, with no message. When the stream carried no reason, take the first real line of stderr
+    // so the run row, the error event and the surface all name the cause.
+    const stderrReason = firstStderrReason(outcome.stderr);
+    const fallbackMessage = silentFailure
+      ? (stderrReason ?? `codex exited without completing the turn (status ${outcome.exitCode ?? outcome.signal ?? 'unknown'})`)
+      : (st.errorMessage ?? 'codex turn failed');
+    let error = failed
       ? classifyError(outcome.exitCode === 0 ? 1 : outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) ?? {
-        code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'codex turn failed',
+        code: 'runtime_error', family: 'unknown' as const, message: fallbackMessage,
       }
       : undefined;
+    // A bare `exit_N` is the classifier's catch-all and carries no reason; prefer the runtime's own
+    // words (stderr) or, when it wrote none, a message that at least names the status.
+    if (error && /^exit_/.test(error.code)) error = { ...error, message: fallbackMessage };
+    if (error) {
+      // The engine records this as the run's `error` event, which sets its failure reason — the
+      // reason a later turn or the session surface reads. Emitted only on failure.
+      sink.onEvent({ ts: new Date().toISOString(), type: 'error', payload: { message: truncate(error.message, 4000), code: error.code } });
+    }
     const contextTokens = readThreadContextTokens(input.configHome, st.threadId ?? built.threadId);
 
     return {

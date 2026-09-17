@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
 import { OcError, TICKET_KINDS, TICKET_STATUSES, TRANSITIONS, NAMED_CARD_OPTION_KEYS, canTransition, type Agent, type TicketKind, type TicketStatus } from '@weave-ai/shared';
 import { makeHarness, fakeWake, fakeSpecs, type TestHarness } from '../testing/context.js';
-import { createTicketsService, TICKET_COMMENT_WAKE_BODY_CHARS } from './service.js';
+import { createTicketsService } from './service.js';
 import { GitWorktreeProvider } from '../worktrees/git.js';
 import { git } from '../util/git.js';
 import type { Actor, TicketsService } from '../api.js';
@@ -932,32 +932,23 @@ describe('tickets', () => {
       expect(wake.calls.some((c) => c.agentId === h.conductorId)).toBe(false);
     });
 
-    // VS-246: a comment over the bound used to be sliced silently into the wake payload. Every
-    // payload site now carries VS-242's `truncated`/`bodyLength` marker, and a reader is pointed at
-    // `weave_ticket_comments` for the full body.
-    describe('ticket comment truncation (VS-246)', () => {
+    // A human's comment is a human's words: it rides in the wake payload whole, however long. Only
+    // the one-line prose excerpts (the relaunch note, the no-role reason) are cut, and they point at
+    // `weave_ticket_comments` for the rest.
+    describe('a human comment reaches the wake whole (VS-242)', () => {
       const tick = () => new Promise((r) => setImmediate(r));
 
-      it('marks an over-bound comment with the original length and points at the read tool', () => {
+      it('carries a human comment whole, however long, with no truncation fields', () => {
         const t = make();
         h.addWorker(t.id);
-        const body = 'z'.repeat(TICKET_COMMENT_WAKE_BODY_CHARS + 1);
+        const body = 'q'.repeat(9000);
         tickets.comment(HUMAN, t.id, body);
         const call = wake.calls[0]!;
         const payload = call.input.payload as { body: string; truncated?: boolean; bodyLength?: number };
-        expect(payload.body).toHaveLength(TICKET_COMMENT_WAKE_BODY_CHARS);
-        expect(payload.truncated).toBe(true);
-        expect(payload.bodyLength).toBe(body.length);
-        expect(call.input.reason).toContain('weave_ticket_comments');
-      });
-
-      it('reproduces bodyLength 9000 for a 9,000-character comment', () => {
-        const t = make();
-        h.addWorker(t.id);
-        tickets.comment(HUMAN, t.id, 'q'.repeat(9000));
-        const payload = wake.calls[0]!.input.payload as { truncated?: boolean; bodyLength?: number };
-        expect(payload.truncated).toBe(true);
-        expect(payload.bodyLength).toBe(9000);
+        expect(payload.body).toBe(body);
+        expect(payload).not.toHaveProperty('truncated');
+        expect(payload).not.toHaveProperty('bodyLength');
+        expect(call.input.reason).toBe(`new comment on ${t.identifier}`);
       });
 
       it('leaves a within-bound comment unchanged, with no truncation fields and an unchanged reason', () => {
@@ -973,16 +964,13 @@ describe('tickets', () => {
         expect(call.input.reason).toBe(`new comment on ${t.identifier}`);
       });
 
-      it('marks the follow-up payload a spawned worker receives', async () => {
+      it('carries the whole body to the worker a follow-up spawns', async () => {
         const t = make();
-        const body = 'w'.repeat(TICKET_COMMENT_WAKE_BODY_CHARS + 10);
+        const body = 'w'.repeat(9000);
         tickets.comment(HUMAN, t.id, body);
         await tick();
         const call = wake.calls.find((c) => c.input.source === 'ticket_comment');
-        const payload = call?.input.payload as { body: string; truncated?: boolean; bodyLength?: number };
-        expect(payload.truncated).toBe(true);
-        expect(payload.bodyLength).toBe(body.length);
-        expect(call?.input.reason).toContain('weave_ticket_comments');
+        expect((call?.input.payload as { body: string }).body).toBe(body);
       });
 
       it('marks the relaunch note when the reply is longer than its excerpt, and leaves a short one alone', async () => {
@@ -1008,14 +996,12 @@ describe('tickets', () => {
 
       it('points the conductor at the full comment when a workerless ticket has no role', async () => {
         const t = make({ assigneeRoleId: null });
-        const body = 'n'.repeat(TICKET_COMMENT_WAKE_BODY_CHARS + 5);
+        const body = 'n'.repeat(9000);
         tickets.comment(HUMAN, t.id, body);
         await tick();
         const call = wake.calls.find((c) => c.agentId === h.conductorId);
         expect(call?.input.reason).toContain('weave_ticket_comments');
-        const payload = call?.input.payload as { truncated?: boolean; bodyLength?: number };
-        expect(payload.truncated).toBe(true);
-        expect(payload.bodyLength).toBe(body.length);
+        expect((call?.input.payload as { body: string }).body).toBe(body);
       });
     });
 

@@ -661,7 +661,7 @@ describe('workers', () => {
       expect(wake.calls).toHaveLength(1);
     });
 
-    it("bounds a live-interrupt message's wake body at 8,000 chars, marking the cut (VS-254)", async () => {
+    it("carries a live-interrupt message whole in the wake body (VS-254)", async () => {
       const ticket = seedTicket();
       const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
       wake.calls.length = 0;
@@ -673,9 +673,10 @@ describe('workers', () => {
       expect(outcome.delivery).toBe('interrupted');
       const call = wake.calls[0]!;
       const input = call.input as { reason: string; payload: Record<string, unknown> };
-      expect(input.payload).toMatchObject({ truncated: true, bodyLength: 8500, message: 'x'.repeat(8000) });
-      expect(input.reason).toContain('truncated; full message via weave_ticket_comments');
-      // The full, untruncated body is still on the ticket regardless of the wake's bound.
+      expect(input.reason).toBe(longBody);
+      expect(input.payload).toMatchObject({ message: longBody });
+      expect(input.payload).not.toHaveProperty('truncated');
+      // The same untruncated body is on the ticket too.
       expect(h.services.tickets!.comment).toHaveBeenCalledWith(expect.anything(), ticket.id, longBody, 'relay', 'trusted');
     });
 

@@ -356,6 +356,27 @@ export async function buildTurnPrompt(
   parts.push('\n## Why you were woken');
   parts.push(bounded(flat, 12, wakeLine, 'call `weave_inbox` for the rest'));
 
+  // A human's own words ride in the wake payload whole — never cut, because no part of a message the
+  // human chose to send is unimportant. Render them here so the common case does not need a
+  // `weave_inbox` round trip, which re-sends the whole session for text the daemon already had.
+  // `live_interrupt` is absent on purpose: its reason above is the message. `weave_inbox` still adds
+  // thread context, attachments and anything past the twelfth entry.
+  const spoken = flat.filter((w) => (w.source === 'human_message' || w.source === 'ticket_comment')
+    && typeof w.payload.body === 'string' && w.payload.body.length > 0);
+  if (spoken.length) {
+    parts.push('\n## What was said');
+    for (const w of spoken.slice(0, 12)) {
+      const label = w.source === 'human_message'
+        ? `Message from the human${typeof w.payload.projectSlug === 'string' ? ` about \`${w.payload.projectSlug}\`` : ''}`
+        : `Comment on ${w.payload.ticketId ? (ticket(ctx, String(w.payload.ticketId))?.identifier ?? String(w.payload.ticketId)) : 'a ticket'}`;
+      const attachments = Array.isArray(w.payload.attachmentIds) && w.payload.attachmentIds.length > 0
+        ? `\n\n_${w.payload.attachmentIds.length} attachment(s) — read them with \`weave_inbox\`._`
+        : '';
+      parts.push(`\n### ${label}\n\n${String(w.payload.body)}${attachments}`);
+    }
+    if (spoken.length > 12) parts.push(`\n(${spoken.length - 12} more — call \`weave_inbox\`)`);
+  }
+
   let workerTicket: S.Ticket | null = null;
   if (agent.kind === 'worker' && agent.ticketId) {
     const t = ticket(ctx, agent.ticketId);

@@ -391,6 +391,8 @@ function MoreList({
   projects,
   plugins,
   update,
+  theme,
+  onTheme,
   onNavigate,
 }: {
   scope: V2Scope;
@@ -401,42 +403,54 @@ function MoreList({
   projects: Project[];
   plugins: WorkspacePlugin[];
   update: UpdateEntry | null;
+  theme: V2Theme;
+  onTheme: (t: V2Theme) => void;
   onNavigate: () => void;
 }): React.ReactElement {
   const wsScope: V2Scope = scope.kind === 'workspace' ? scope : { kind: 'workspace', ws: fallbackWs };
   const projectWs = wsScope.kind === 'workspace' ? wsScope.ws : fallbackWs;
   const siblingIds = projects.map((p) => p.id);
   return (
-    <div className="flex flex-col gap-4">
-      {update ? <UpdateRailEntry update={update} onNavigate={onNavigate} /> : null}
-      <MoreGroup title="Everywhere">
-        {[...V2_EVERYWHERE, ...V2_KEPT.filter((d) => d.scopeKind === 'everywhere')].map((d) => (
-          <MoreRow key={d.key} dest={d} scope={scope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} onNavigate={onNavigate} />
-        ))}
-      </MoreGroup>
-      <MoreGroup title={workspaces.find((w) => w.id === (scope.kind === 'workspace' ? scope.ws : ''))?.name ?? 'Workspace'}>
-        {[...V2_WORKSPACE, ...V2_KEPT.filter((d) => d.scopeKind === 'workspace'), ...plugins.map(pluginDest)].map((d) => (
-          <MoreRow key={d.key} dest={d} scope={wsScope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} onNavigate={onNavigate} />
-        ))}
-      </MoreGroup>
-      {/* The rail is hidden at phone width, so projects get their own group here (VS-478) — each with
-          the same Roadmap child row the rail shows, so the page is reachable on a phone. */}
-      {projects.length > 0 ? (
-        <MoreGroup title="Projects">
-          {projects.map((p) => (
-            <ProjectRow
-              key={p.id}
-              ws={projectWs}
-              project={p}
-              siblingIds={siblingIds}
-              active={activeKey === projectRowKey(p.slug)}
-              onNavigate={onNavigate}
-              tall
-            />
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
+        {update ? <UpdateRailEntry update={update} onNavigate={onNavigate} /> : null}
+        <MoreGroup title="Everywhere">
+          {[...V2_EVERYWHERE, ...V2_KEPT.filter((d) => d.scopeKind === 'everywhere')].map((d) => (
+            <MoreRow key={d.key} dest={d} scope={scope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} onNavigate={onNavigate} />
           ))}
         </MoreGroup>
-      ) : null}
-      <div className="border-t border-line-1 pt-3">
+        <MoreGroup title={workspaces.find((w) => w.id === (scope.kind === 'workspace' ? scope.ws : ''))?.name ?? 'Workspace'}>
+          {[...V2_WORKSPACE, ...V2_KEPT.filter((d) => d.scopeKind === 'workspace'), ...plugins.map(pluginDest)].map((d) => (
+            <MoreRow key={d.key} dest={d} scope={wsScope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} onNavigate={onNavigate} />
+          ))}
+        </MoreGroup>
+        {/* The rail is hidden at phone width, so projects get their own group here (VS-478) — each with
+            the same Roadmap child row the rail shows, so the page is reachable on a phone. */}
+        {projects.length > 0 ? (
+          <MoreGroup title="Projects">
+            {projects.map((p) => (
+              <ProjectRow
+                key={p.id}
+                ws={projectWs}
+                project={p}
+                siblingIds={siblingIds}
+                active={activeKey === projectRowKey(p.slug)}
+                onNavigate={onNavigate}
+                tall
+              />
+            ))}
+          </MoreGroup>
+        ) : null}
+      </div>
+      {/* The rail footer carries the in-app theme switch on desktop, but the rail is `md:`-only, so
+          the More sheet carries the same switch on a phone (VS-490). It is the same component and the
+          same `theme`/`onTheme`, so the two surfaces cannot disagree. It sits below the scroll region
+          like the rail footer's `mt-auto` block, so it is visible without scrolling the groups. */}
+      <div className="flex-none border-t border-line-1 p-3">
+        <div className="flex h-12 items-center justify-between px-3">
+          <span className="text-ui text-text-2">Theme</span>
+          <ThemeSwitch theme={theme} onTheme={onTheme} variant="expanded" />
+        </div>
         <A to="/" onClick={onNavigate} className="flex h-12 items-center px-3 text-ui text-text-2 hover:bg-bg-2">
           Open V1
         </A>
@@ -650,7 +664,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
           style={{ background: 'var(--overlay)' }}
         >
           <button type="button" className="flex-1 md:hidden" aria-label="Close" onClick={() => setMoreOpen(false)} />
-          <div className="v2-anim-sheet max-h-[75vh] overflow-y-auto rounded-t-r8 border border-line-1 bg-bg-1 p-3 md:max-h-[80vh] md:w-[360px] md:rounded-r8 md:shadow-sheet">
+          <div className="v2-anim-sheet flex max-h-[75vh] flex-col overflow-hidden rounded-t-r8 border border-line-1 bg-bg-1 md:max-h-[80vh] md:w-[360px] md:rounded-r8 md:shadow-sheet">
             <MoreList
               scope={scope}
               fallbackWs={fallbackWs}
@@ -660,6 +674,8 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
               projects={projectsByWs[fallbackWs]?.projects ?? []}
               plugins={pluginsByWs[fallbackWs] ?? []}
               update={update}
+              theme={theme}
+              onTheme={onTheme}
               onNavigate={() => setMoreOpen(false)}
             />
           </div>

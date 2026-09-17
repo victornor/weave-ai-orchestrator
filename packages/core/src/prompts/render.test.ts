@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
 import type { Agent, RoleSpec } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
-import { buildTurnPrompt, humanName, renderBrief, renderCharter, renderConductorInstructions, renderWorkerInstructions } from './index.js';
+import { buildTurnPrompt, humanName, renderBrief, renderCharter, renderConductorInstructions, renderSessionInstructions, renderWorkerInstructions } from './index.js';
 
 const SHIPPED_TEMPLATES = fileURLToPath(new URL('../../../../templates', import.meta.url));
 
@@ -68,6 +68,34 @@ describe('prompt rendering', () => {
 
   it('includes the relaunch note in the brief when one is given', () => {
     expect(renderBrief(h.ctx, h.deps, worker, { relaunchNote: 'you stopped responding' })).toContain('you stopped responding');
+  });
+
+  describe('renderSessionInstructions (VS-495)', () => {
+    it('gives a ticketless session the conversational template, not the worker delivery-phase one', () => {
+      const sessionId = h.addWorker(null, { kind: 'session', worktreePath: null, branch: null });
+      const session = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [sessionId])!;
+      const out = renderSessionInstructions(h.ctx, h.deps, session);
+      expect(out).toContain('persistent session for Backend Engineer');
+      expect(out).toContain('Owns the api service.');
+      expect(out).toContain('offer to set up a ticket and a worktree');
+      expect(out).not.toContain('TST-42');
+      expect(out).not.toMatch(/\{\{|\}\}/);
+    });
+
+    it('gives a ticketed session exactly the same instructions as an ordinary worker on that ticket', () => {
+      const sessionId = h.addWorker(ticketId, { kind: 'session', branch: 'ac/tst-42-add-dark-mode', worktreePath: null });
+      const session = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [sessionId])!;
+      expect(renderSessionInstructions(h.ctx, h.deps, session)).toBe(renderWorkerInstructions(h.ctx, h.deps, session));
+    });
+
+    it('renders the shipped session.AGENTS.md.tmpl with no leftover placeholders', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const sessionId = h.addWorker(null, { kind: 'session', worktreePath: null, branch: null });
+      const session = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [sessionId])!;
+      const out = renderSessionInstructions(h.ctx, h.deps, session);
+      expect(out).toContain('persistent session for Backend Engineer');
+      expect(out).not.toMatch(/\{\{|\}\}/);
+    });
   });
 
   describe('mentions work/AGENTS.md and work/openspec/config.yaml only when the worktree has them (VS-211)', () => {

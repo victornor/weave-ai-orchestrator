@@ -460,6 +460,21 @@ describe('merge queue', () => {
       expect(mergeWakes(b.id)).toBe(1);
     });
 
+    it('wakes a persistent session already on the ticket instead of spawning a second, worker-kind agent (VS-495)', async () => {
+      const a = approved('First');
+      const b = approved('Second', { worker: false });
+      const sessionId = h.addWorker(b.id, { kind: 'session' });
+      await approve(a);
+      await approve(b);
+
+      await tickets.mergeDone(AGENT, a.id, { mergeCommit: 'abc1234' });
+
+      expect(workers.spawnForTicket).not.toHaveBeenCalled();
+      expect(tickets.get(b.id).workerId).toBe(sessionId);
+      expect(tickets.get(b.id).mergeStartedAt).not.toBeNull();
+      expect(mergeWakes(b.id)).toBe(1);
+    });
+
     it('holds the head of the queue when no worker can be brought', async () => {
       const a = approved('First');
       const b = approved('Second', { worker: false });

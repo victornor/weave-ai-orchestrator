@@ -23,6 +23,7 @@ import { A, useGo } from '../app/link';
 import { useWs } from '../api/context';
 import {
   useCreateThread,
+  usePersistentSession,
   usePostThreadMessage,
   useProjects,
   usePutCharter,
@@ -305,6 +306,17 @@ function RoleCard({
   const action = useRoleAction();
   const [menu, setMenu] = useState(false);
   const [starting, setStarting] = useState(false);
+  const go = useGo();
+  const persistentSession = usePersistentSession();
+
+  // VS-495: opens (creating on first use) the role's one persistent, no-ticket session and navigates
+  // to it — distinct from "Start session" above, which always creates or resumes a ticket-bound one.
+  const onChat = (): void => {
+    persistentSession.mutate(
+      { projectId: role.projectId, roleId: role.id },
+      { onSuccess: ({ agent }) => go('/w/$ws/workers/$workerId', { params: { ws, workerId: agent.id } }) },
+    );
+  };
 
   return (
     <div className="v2-card overflow-hidden" data-role-card={role.id}>
@@ -317,6 +329,14 @@ function RoleCard({
         </span>
         <button type="button" onClick={() => onOpenCharter(role.id)} className="flex-none text-micro text-text-2 hover:text-text-1">
           Charter
+        </button>
+        <button
+          type="button"
+          disabled={persistentSession.isPending}
+          onClick={onChat}
+          className="flex-none text-micro text-accent-link hover:text-text-1 disabled:opacity-40"
+        >
+          Chat
         </button>
         <button
           type="button"

@@ -36,10 +36,16 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
   function conductorId(): string | null {
     return db.get<{ id: string }>("SELECT id FROM agents WHERE workspace_id = ? AND kind = 'weaver'", [ws])?.id ?? null;
   }
-  /** Whether the agent asking is a worker (VS-127) — a worker's ask is never the human's to answer. */
+  /**
+   * Whether the agent asking is a worker (VS-127) — a worker's ask is never the human's to answer.
+   * VS-495: a persistent session's ask counts the same way while it holds a ticket (its turns are
+   * then indistinguishable from a worker's); ticketless, its ask stays the human's, the same as the
+   * weaver's own — there is no ticket-delivery reason to route it away from the direct conversation.
+   */
   function askedByWorker(askedByAgentId: string | null | undefined): boolean {
     if (!askedByAgentId) return false;
-    return db.get<{ kind: string }>('SELECT kind FROM agents WHERE id = ?', [askedByAgentId])?.kind === 'worker';
+    const agent = db.get<{ kind: string; ticketId: string | null }>('SELECT kind, ticket_id AS ticketId FROM agents WHERE id = ?', [askedByAgentId]);
+    return agent?.kind === 'worker' || (agent?.kind === 'session' && agent.ticketId != null);
   }
   function wake(agentId: string | null | undefined, source: Parameters<CoreServices['wake']['enqueue']>[1]['source'], reason: string, payload: Record<string, unknown> = {}, idempotencyKey?: string): void {
     if (!agentId) return;

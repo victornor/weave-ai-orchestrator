@@ -109,6 +109,31 @@ describe('POST /workers/start-session (VS-101)', () => {
   });
 });
 
+describe('POST /workers/persistent-session (VS-495)', () => {
+  it('opens a role\'s persistent session and returns it with its thread', async () => {
+    const { h, fetch } = app();
+    const ensureSession = vi.fn(async () => ({ agent: worker({ id: 'ag_session', kind: 'session', ticketId: null }), thread: { id: 'th_1', channelKind: 'web', agentId: 'ag_session' } }));
+    h.impls.workers!['ensureSession'] = ensureSession;
+
+    const res = await fetch('/api/w/ws1/workers/persistent-session', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ projectId: 'proj1', roleId: 'role1' }),
+    });
+    expect(res.status).toBe(200);
+    const out = await res.json();
+    expect(out.agent.id).toBe('ag_session');
+    expect(out.thread.id).toBe('th_1');
+    expect(ensureSession).toHaveBeenCalledWith(expect.anything(), 'proj1', 'role1');
+  });
+
+  it('refuses a body missing projectId or roleId', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/workers/persistent-session', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ projectId: 'proj1' }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe('GET /workers/:id — input.midTurn (VS-99)', () => {
   it('names the reason for a runtime that cannot take mid-turn input at all', async () => {
     const { h, fetch } = app();

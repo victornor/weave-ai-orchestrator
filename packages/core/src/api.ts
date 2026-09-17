@@ -367,6 +367,22 @@ export interface WorkersService {
   /** Retires the plan's planning agent and removes its worktree. A no-op if the plan has none. */
   retirePlanner(planId: string): Promise<void>;
   /**
+   * VS-495: a role's persistent session — one live `kind='session'` agent per role, no ticket, no
+   * worktree until it takes one. Returns the existing session and its thread if the role already has
+   * a live one (never creates a second), otherwise creates both.
+   */
+  ensureSession(actor: Actor, projectId: string, roleId: string): Promise<{ agent: S.Agent; thread: S.ChannelThread }>;
+  /**
+   * VS-495: a persistent session takes a ticket as its own — assigning it to its own role and
+   * binding `tickets.worker_id` to itself atomically (no `await` between the two writes; see the
+   * implementation's comment on why), then provisioning the same worktree a spawned worker would
+   * get. Never goes through `spawn()` — no second, `kind='worker'` agent is created. Refused (`wrong_status`) if the session already holds a ticket, and (`conflict`/`validation`) if the
+   * given ticket already has a worker or belongs to a different role.
+   */
+  takeTicketForSession(actor: Actor, sessionId: string, input: TicketCreateInput | { ticketId: string }): Promise<{ agent: S.Agent; ticket: S.Ticket }>;
+  /** VS-495: called when a persistent session's ticket reaches a terminal status — clears the session's ticket/worktree binding and returns it to ticketless conversation. Never retires the agent. A no-op if the given agent is not a session, or holds no ticket. */
+  releaseSessionTicket(actor: Actor, sessionId: string): Promise<void>;
+  /**
    * VS-477: create a fresh drafting plan for the project — its own thread and its own planner — and
    * return both, independent of any other drafting plan the project already holds.
    */

@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { z, type ZodTypeAny } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import {
-  COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, PLANNER_TOOLS, FIRST_TURN_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
+  COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS, SESSION_ONLY_TOOLS, PLANNER_TOOLS, FIRST_TURN_TOOLS, OcError, ok, fail, RoleSpecSchema, landingBranchOf,
   SELF_WAKE_MAX_DELAY_MS, SELF_WAKE_MIN_DELAY_MS,
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES, ROADMAP_STATUSES, ROADMAP_BLOCK_STATUSES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
@@ -90,6 +90,11 @@ function requirePlanId(ctx: ToolCtx, input: string | null | undefined): string {
 function requireOwnPlanner(ctx: ToolCtx): string {
   if (ctx.claims.agentKind !== 'planner' || !ctx.claims.planId) throw new OcError('forbidden', 'not a planning agent');
   return ctx.claims.planId;
+}
+/** VS-495: only a persistent session's own run may take a ticket for itself — never inferred from a caller-supplied agent id. */
+function requireOwnSession(ctx: ToolCtx): string {
+  if (ctx.claims.agentKind !== 'session') throw new OcError('forbidden', 'not a persistent session');
+  return ctx.claims.agentId;
 }
 /** VS-398: a draft-editing tool call is refused unless the draft belongs to the calling planner's own plan. */
 function requireOwnDraft(ctx: ToolCtx, draftId: string): void {
@@ -818,6 +823,26 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx, i) => svc(ctx).tickets.assign(ctx.actor, i.id, i.roleId, i.workerModelId),
   },
   {
+    name: 'weave_session_take_ticket', scope: 'session', input: z.object({
+      ticketId: z.string().nullish(),
+      kind: z.enum(TICKET_KINDS).optional(), title: z.string().min(1).optional(), description: z.string().default(''),
+      summary: z.string().max(200).nullish(), priority: z.enum(TICKET_PRIORITIES).default('medium'),
+      parentId: z.string().nullish(), blockedBy: z.array(z.string()).optional(), autoMerge: z.boolean().optional(),
+      landingBranch: z.string().nullish(), workerModelId: z.string().nullish(),
+    }),
+    description: "A persistent session takes a ticket as its own work — never on your own judgement, only when the human asked for it. Pass ticketId to take an existing, unassigned ticket, or the ticket-creation fields to file a new one assigned to your own role; either way you become its worker and are given a worktree for it, exactly like a transient worker's ticket, with the same plan-approval and merge-approval gates. Refused if you already hold a ticket, or if the given ticket already has a worker or belongs to a different role.",
+    handler: async (ctx, i) => {
+      const sessionId = requireOwnSession(ctx);
+      if (i.ticketId) return svc(ctx).workers.takeTicketForSession(ctx.actor, sessionId, { ticketId: i.ticketId });
+      if (!i.kind || !i.title) throw new OcError('validation', 'kind and title are required to file a new ticket');
+      return svc(ctx).workers.takeTicketForSession(ctx.actor, sessionId, {
+        projectId: ctx.claims.projectId, kind: i.kind, title: i.title, description: i.description,
+        summary: i.summary, priority: i.priority, parentId: i.parentId, blockedBy: i.blockedBy,
+        autoMerge: i.autoMerge, landingBranch: i.landingBranch, workerModelId: i.workerModelId,
+      });
+    },
+  },
+  {
     name: 'weave_ticket_set_priority', scope: 'weaver', input: z.object({ id: ticketId, priority: z.enum(TICKET_PRIORITIES) }),
     description: 'Change a ticket priority. Priority orders the dispatch queue, nothing else.',
     handler: (ctx, i) => svc(ctx).tickets.update(ctx.actor, i.id, { priority: i.priority }),
@@ -1307,7 +1332,10 @@ export function toolNamesFor(kind: AgentKind, ws?: WorkspaceRuntime, firstTurn =
   // VS-462: an interactive session's opening turn is scoped to reading its ticket and posting one
   // comment, ahead of and instead of its kind's ordinary surface — a narrowing, never a widening.
   if (firstTurn) return [...FIRST_TURN_TOOLS];
-  const core = kind === 'weaver' ? [...COMMON_TOOLS, ...WEAVER_TOOLS] : kind === 'planner' ? [...PLANNER_TOOLS] : [...COMMON_TOOLS, ...WORKER_ONLY_TOOLS];
+  const core = kind === 'weaver' ? [...COMMON_TOOLS, ...WEAVER_TOOLS]
+    : kind === 'planner' ? [...PLANNER_TOOLS]
+      : kind === 'session' ? [...COMMON_TOOLS, ...WORKER_ONLY_TOOLS, ...SESSION_ONLY_TOOLS]
+        : [...COMMON_TOOLS, ...WORKER_ONLY_TOOLS];
   if (!ws) return core;
   const pluginNames = ws.ctx.plugins.tools.filter((t) => t.scope === 'all' || t.scope === kind).map((t) => t.name);
   return [...core, ...pluginNames];

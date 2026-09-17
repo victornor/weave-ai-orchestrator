@@ -47,6 +47,9 @@ export function workerRoutes(): Hono<AppEnv> {
     return c.json({
       worker,
       ticket: worker.ticketId ? safe(() => s.tickets.get(worker.ticketId!)) : null,
+      // VS-495: a persistent session's own conversation thread, so a ticketless view knows what to
+      // fetch/post against without a second round trip. Null for every other kind.
+      thread: worker.kind === 'session' ? (safe(() => s.threads.list({ agentId: worker.id })[0]) ?? null) : null,
       lastRun: runs?.items[0] ?? null,
       usage: safe(() => s.usage.series({ scope: `worker:${worker.id}`, window: '7d' })),
       // VS-328: the same live activity line and last test tally the worker list carries.
@@ -73,6 +76,16 @@ export function workerRoutes(): Hono<AppEnv> {
       z.object({ projectId: z.string().min(1), roleId: z.string().min(1), kind: z.enum(TICKET_KINDS), title: z.string().min(1), description: z.string().optional() }),
     ]));
     return c.json(await c.get('ws').services.workers.startInteractiveSession(c.get('actor'), input), 201);
+  });
+
+  /**
+   * VS-495: a role's persistent session — no ticket, distinct from `/start-session` above (always
+   * ticket-bound). Idempotent: returns the role's existing live session and its thread if it has one.
+   */
+  app.post('/persistent-session', async (c) => {
+    const { projectId, roleId } = await body(c, z.object({ projectId: z.string().min(1), roleId: z.string().min(1) }));
+    const { agent, thread } = await c.get('ws').services.workers.ensureSession(c.get('actor'), projectId, roleId);
+    return c.json({ agent, thread });
   });
 
   app.get('/:id/brief', (c) => c.text(c.get('ws').services.workers.brief(c.req.param('id'))));

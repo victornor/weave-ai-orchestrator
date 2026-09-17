@@ -10,6 +10,7 @@ import { createWorkersService, ticketBranch, branchSlug } from './index.js';
 import { createRolesService } from '../roles/index.js';
 import { createPlanningService } from '../planning/index.js';
 import { createThreadsService } from '../threads/service.js';
+import { createTicketsService } from '../tickets/service.js';
 import { GitWorktreeProvider } from '../worktrees/git.js';
 import { git } from '../util/git.js';
 import { runState } from '../runs/active.js';
@@ -93,6 +94,19 @@ describe('workers', () => {
       expect(row.compactingAt).toBeNull();
       expect(row.compactingError).toBeNull();
       expect(row.lastContextTokens).toBeNull();
+    });
+
+    it('compacts a persistent session exactly like a worker — the service is already generic over any agent id (VS-495)', async () => {
+      h.services.threads = createThreadsService(h.ctx, h.deps);
+      const { agent: session } = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+      h.db.run('UPDATE agent_sessions SET session_ref_json = ? WHERE agent_id = ?', [JSON.stringify({ sessionId: 'sess-2' }), session.id]);
+      const seen = withCompactor();
+
+      expect(await workers.compactSession(HUMAN, session.id)).toEqual({ started: true, runtime: 'claude' });
+      await new Promise((r) => setImmediate(r));
+
+      expect(seen).toHaveLength(1);
+      expect((seen[0] as { ref: unknown }).ref).toEqual({ sessionId: 'sess-2' });
     });
 
     it('records the failure message when the runtime refuses', async () => {
@@ -1006,6 +1020,122 @@ describe('workers', () => {
     it('retiring a plan with no planner is a no-op', async () => {
       const plan = startPlan();
       await expect(workers.retirePlanner(plan.id)).resolves.toBeUndefined();
+    });
+  });
+
+  describe('ensureSession (VS-495)', () => {
+    beforeEach(() => {
+      h.services.threads = createThreadsService(h.ctx, h.deps);
+    });
+
+    it('opens a persistent session for the role: no ticket, no worktree, its own thread, a persistent session policy', async () => {
+      const { agent, thread } = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+
+      expect(agent.kind).toBe('session');
+      expect(agent.status).toBe('active');
+      expect(agent.ticketId).toBeNull();
+      expect(agent.worktreePath).toBeNull();
+      expect(agent.branch).toBeNull();
+      expect(agent.roleId).toBe(h.roleId);
+      expect(existsSync(join(agent.homePath, 'AGENTS.md'))).toBe(true);
+      expect(h.db.get<{ n: number }>('SELECT COUNT(*) n FROM worktrees WHERE agent_id = ?', [agent.id])!.n).toBe(0);
+      expect(thread.agentId).toBe(agent.id);
+      // No first-turn wake — a persistent session waits for the human to say something, like the planner.
+      expect(wake.calls).toHaveLength(0);
+    });
+
+    it('resumes the same session and thread on a second open, rather than creating a second one', async () => {
+      const first = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+      const second = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+
+      expect(second.agent.id).toBe(first.agent.id);
+      expect(second.thread.id).toBe(first.thread.id);
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM agents WHERE role_id = ? AND kind = 'session'", [h.roleId])!.n).toBe(1);
+    });
+
+    it('is never counted by a spawn against the project worker cap', async () => {
+      h.db.run('UPDATE projects SET max_workers = 0 WHERE id = ?', [h.projectId]);
+      await expect(workers.ensureSession(HUMAN, h.projectId, h.roleId)).resolves.toMatchObject({ agent: { kind: 'session' } });
+    });
+  });
+
+  describe('takeTicketForSession (VS-495)', () => {
+    beforeEach(() => {
+      h.services.threads = createThreadsService(h.ctx, h.deps);
+      h.services.tickets = createTicketsService(h.ctx, h.deps);
+    });
+
+    it('files a fresh ticket assigned to its own role, binds itself as the worker, and gets a worktree — no separate worker agent', async () => {
+      const { agent: session } = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+
+      const { agent, ticket } = await workers.takeTicketForSession(HUMAN, session.id, {
+        projectId: h.projectId, kind: 'task', title: 'Wire up the new endpoint', description: 'Do it.',
+      });
+
+      expect(agent.id).toBe(session.id);
+      expect(agent.kind).toBe('session');
+      expect(agent.ticketId).toBe(ticket.id);
+      expect(existsSync(join(agent.worktreePath!, 'README.md'))).toBe(true);
+      expect(ticket.assigneeRoleId).toBe(h.roleId);
+      expect(ticket.workerId).toBe(session.id);
+      expect(ticket.status).toBe('todo');
+      expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM agents WHERE kind = 'worker'")!.n).toBe(0);
+      const wt = h.db.get<{ agentId: string; ticketId: string }>('SELECT agent_id AS agentId, ticket_id AS ticketId FROM worktrees WHERE agent_id = ?', [session.id])!;
+      expect(wt).toMatchObject({ agentId: session.id, ticketId: ticket.id });
+      expect(wake.calls.some((c) => c.agentId === session.id && c.input.source === 'ticket_assigned')).toBe(true);
+    });
+
+    it('takes an existing, unassigned ticket instead of creating a new one', async () => {
+      const { agent: session } = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+      const existing = seedTicket({ number: 5, identifier: 'TST-5', assigneeRoleId: null, status: 'backlog' });
+
+      const { ticket } = await workers.takeTicketForSession(HUMAN, session.id, { ticketId: existing.id });
+
+      expect(ticket.id).toBe(existing.id);
+      expect(ticket.assigneeRoleId).toBe(h.roleId);
+      expect(ticket.workerId).toBe(session.id);
+    });
+
+    it('refuses to take a second ticket while already holding one', async () => {
+      const { agent: session } = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+      await workers.takeTicketForSession(HUMAN, session.id, { projectId: h.projectId, kind: 'task', title: 'First' });
+
+      await expect(workers.takeTicketForSession(HUMAN, session.id, { projectId: h.projectId, kind: 'task', title: 'Second' }))
+        .rejects.toMatchObject({ code: 'wrong_status' });
+    });
+
+    it('refuses a ticket that already has a worker', async () => {
+      const { agent: session } = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+      const taken = seedTicket({ number: 6, identifier: 'TST-6', workerId: 'someone-else' });
+
+      await expect(workers.takeTicketForSession(HUMAN, session.id, { ticketId: taken.id })).rejects.toMatchObject({ code: 'conflict' });
+    });
+
+    it('refuses a ticket already assigned to a different role', async () => {
+      const { agent: session } = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+      const otherRoleId = newId();
+      h.db.insert('roles', {
+        id: otherRoleId, workspaceId: h.workspaceId, projectId: h.projectId, slug: 'frontend', name: 'Frontend',
+        charterSummary: 'Owns the UI.', scopeText: 'Frontend work.', sessionPolicy: 'per_ticket', maxWorkers: 2,
+        status: 'active', specRevision: 1, createdBy: 'weaver', createdAt: nowIso(), updatedAt: nowIso(),
+      });
+      const elsewhere = seedTicket({ number: 7, identifier: 'TST-7', assigneeRoleId: otherRoleId });
+
+      await expect(workers.takeTicketForSession(HUMAN, session.id, { ticketId: elsewhere.id })).rejects.toMatchObject({ code: 'validation' });
+    });
+
+    it('never leaves the ticket in the shape supervisor.spawnPending() sweeps for (VS-495 race)', async () => {
+      // supervisor.spawnPending()'s own query, reproduced here: a ticket with a role assigned and no
+      // worker is exactly what it spawns a transient worker for. If takeTicketForSession ever left
+      // that gap open past its own synchronous call, this would find the ticket and a real worker
+      // could be spawned on it behind the session's back.
+      const sweepWouldSpawnFor = (ticketId: string): boolean =>
+        !!h.db.get<{ id: string }>("SELECT id FROM tickets WHERE id = ? AND assignee_role_id IS NOT NULL AND worker_id IS NULL", [ticketId]);
+
+      const { agent: session } = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+      const { ticket } = await workers.takeTicketForSession(HUMAN, session.id, { projectId: h.projectId, kind: 'task', title: 'Race check' });
+
+      expect(sweepWouldSpawnFor(ticket.id)).toBe(false);
     });
   });
 

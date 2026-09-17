@@ -2,11 +2,12 @@ import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 
 import { dirname, join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
 import {
-  HANDOVER_PAUSE_CODE, OcError, TERMINAL_TICKET_STATUSES, heldByHuman, landingBranchOf, projectLabel, waitingOnRuntimeLogin, type Agent, type Plan, type Project, type Role, type Ticket, type TicketStatus,
+  HANDOVER_PAUSE_CODE, OcError, TERMINAL_TICKET_STATUSES, heldByHuman, landingBranchOf, projectLabel, waitingOnRuntimeLogin,
+  type Agent, type ChannelThread, type Plan, type Project, type Role, type Ticket, type TicketStatus,
 } from '@weave-ai/shared';
 import type { WorktreeProvider } from '@weave-ai/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
-import type { Actor, CoreServices, HandoverEndResult, HandoverStartResult, WorkerMessageOutcome, WorkersService } from '../api.js';
+import type { Actor, CoreServices, HandoverEndResult, HandoverStartResult, TicketCreateInput, WorkerMessageOutcome, WorkersService } from '../api.js';
 import { recordActivity } from '../events.js';
 import { recordHumanInputEvent, runState } from '../runs/active.js';
 import { renderHome } from './home.js';
@@ -110,9 +111,46 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
   const liveInProject = (projectId: string): number =>
     ctx.db.get<{ n: number }>(`SELECT COUNT(*) n FROM agents WHERE project_id = ? AND kind = 'worker' AND status IN ${LIVE}`, [projectId])?.n ?? 0;
 
+  /**
+   * VS-495: the worktree a ticket's own agent works in — factored out of `spawn()` so
+   * `takeTicketForSession` can give a session's agent the same worktree a spawned worker would get,
+   * without going through `spawn()` itself (which creates a second, `kind='worker'` agent).
+   */
+  async function provisionTicketWorktree(agentId: string, home: string, project: Project, ticket: Ticket, branch: string): Promise<{ path: string; branch: string; worktreeRowId: string }> {
+    const provider = providerFor(project);
+    const targetPath = join(home, 'work');
+    const info = await provider.create({
+      repoPath: project.clonePath, branch, base: landingBranchOf(project, ticket), targetPath,
+      setupCommand: project.setupCommand ?? undefined, warmPaths: (project as unknown as { warmPaths?: string[] }).warmPaths ?? [],
+      configPath: ctx.paths.wtConfig,
+    });
+    const worktreeRowId = newId();
+    const now = nowIso();
+    const resolvedBranch = info.branch || branch;
+    ctx.db.insert('worktrees', {
+      id: worktreeRowId, projectId: project.id, ticketId: ticket.id, agentId, provider: provider.id,
+      path: info.path, branch: resolvedBranch, status: 'active', createdAt: now, lastVerifiedAt: now,
+    });
+    ctx.db.update('agents', agentId, { worktreePath: info.path, branch: resolvedBranch, updatedAt: nowIso() });
+    return { path: info.path, branch: resolvedBranch, worktreeRowId };
+  }
+
+  /** Rolls back a `provisionTicketWorktree` call (or a plain checkout on the same branch) that must not survive — same shape `spawn()`'s and `takeTicketForSession`'s failure handlers both need. */
+  async function removeTicketWorktree(home: string, project: Project, branch: string, worktreeRowId: string | null): Promise<void> {
+    try {
+      const provider = providerFor(project);
+      await provider.remove({ repoPath: project.clonePath, path: join(home, 'work'), branch, deleteBranch: true, force: true, configPath: ctx.paths.wtConfig }).catch(() => undefined);
+    } catch { /* best effort */ }
+    if (worktreeRowId) ctx.db.run('DELETE FROM worktrees WHERE id = ?', [worktreeRowId]);
+  }
+
   async function spawn(actor: Actor, ticketId: string, opts: { noWorktree?: boolean; spawnReason?: string } = {}): Promise<Agent> {
     const ticket = ticketOf(ticketId);
-    const existing = ctx.db.get<Agent>(`SELECT * FROM agents WHERE ticket_id = ? AND kind = 'worker' AND status IN ${LIVE}`, [ticket.id]);
+    // VS-495: a persistent session already holding this ticket counts as "already spawned" too — the
+    // caller (retry, the merge queue, the escalation sweep) wants *an* agent to hand the ticket back
+    // to, and creating a second, kind='worker' agent on a session's own ticket would be a duplicate,
+    // not a recovery.
+    const existing = ctx.db.get<Agent>(`SELECT * FROM agents WHERE ticket_id = ? AND kind IN ('worker','session') AND status IN ${LIVE}`, [ticket.id]);
     if (existing) return existing;
     if (!ticket.assigneeRoleId) throw new OcError('validation', `ticket ${ticket.identifier} is not assigned to a role`);
     const role = ctx.db.get<Role>('SELECT * FROM roles WHERE id = ?', [ticket.assigneeRoleId]);
@@ -141,19 +179,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     try {
       mkdirSync(home, { recursive: true });
       if (!opts.noWorktree) {
-        const provider = providerFor(project);
-        const targetPath = join(home, 'work');
-        const info = await provider.create({
-          repoPath: project.clonePath, branch, base: landingBranchOf(project, ticket), targetPath,
-          setupCommand: project.setupCommand ?? undefined, warmPaths: (project as unknown as { warmPaths?: string[] }).warmPaths ?? [],
-          configPath: ctx.paths.wtConfig,
-        });
-        worktreeRowId = newId();
-        ctx.db.insert('worktrees', {
-          id: worktreeRowId, projectId: project.id, ticketId: ticket.id, agentId: id, provider: provider.id,
-          path: info.path, branch: info.branch || branch, status: 'active', createdAt: now, lastVerifiedAt: now,
-        });
-        ctx.db.update('agents', id, { worktreePath: info.path, branch: info.branch || branch, updatedAt: nowIso() });
+        ({ worktreeRowId } = await provisionTicketWorktree(id, home, project, ticket, branch));
       }
 
       // Bind the ticket to this worker (TicketsService has no setter for worker_id).
@@ -174,13 +200,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     } catch (e) {
       // Roll back the row, the home and the worktree; nothing half-created is left behind.
       log.error({ err: String(e), ticketId: ticket.id }, 'worker spawn failed; rolling back');
-      try {
-        if (!opts.noWorktree) {
-          const provider = providerFor(project);
-          await provider.remove({ repoPath: project.clonePath, path: join(home, 'work'), branch, deleteBranch: true, force: true, configPath: ctx.paths.wtConfig }).catch(() => undefined);
-        }
-      } catch { /* best effort */ }
-      if (worktreeRowId) ctx.db.run('DELETE FROM worktrees WHERE id = ?', [worktreeRowId]);
+      if (!opts.noWorktree) await removeTicketWorktree(home, project, branch, worktreeRowId);
       ctx.db.run('DELETE FROM wakeups WHERE agent_id = ?', [id]);
       ctx.db.run('DELETE FROM agent_sessions WHERE agent_id = ?', [id]);
       ctx.db.run('UPDATE tickets SET worker_id = NULL WHERE worker_id = ?', [id]);
@@ -346,6 +366,136 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       ctx.db.run('DELETE FROM wakeups WHERE agent_id = ?', [agent.id]);
       deps().planning.setAgent(planId, null);
       ctx.events.emit('worker.retired', 'agent', agent.id, { kind: 'planner', planId });
+    },
+
+    /**
+     * VS-495: a role's persistent session — long-lived, no ticket, no worktree until the human asks
+     * for one (see `takeTicketForSession`). Returns the existing live session for the role if there
+     * is one (mirrors `ensurePlanner`'s "do not create a second agent"), otherwise creates it.
+     */
+    async ensureSession(actor: Actor, projectId: string, roleId: string): Promise<{ agent: Agent; thread: ChannelThread }> {
+      const project = projectOf(projectId);
+      const role = ctx.db.get<Role>('SELECT * FROM roles WHERE id = ?', [roleId]);
+      if (!role || role.projectId !== project.id) throw new OcError('not_found', `role ${roleId} not found in project ${project.slug}`);
+      const existing = ctx.db.get<Agent>(`SELECT * FROM agents WHERE role_id = ? AND kind = 'session' AND status IN ${LIVE}`, [roleId]);
+      if (existing) {
+        const thread = deps().threads.list({ agentId: existing.id })[0];
+        if (!thread) throw new OcError('internal', `session ${existing.id} has no thread`);
+        return { agent: existing, thread };
+      }
+
+      const id = newId();
+      const home = join(ctx.paths.workers, id);
+      const now = nowIso();
+      const spawnedBy = actor.kind === 'human' ? 'human' : actor.kind === 'agent' ? 'weaver' : 'system';
+      const thread = deps().threads.createOwned(id, { humanLabel: `${role.name} — persistent session` });
+
+      ctx.db.insert('agents', {
+        id, workspaceId: ctx.workspaceId, kind: 'session', projectId: project.id, roleId: role.id, roleRevision: role.specRevision,
+        ticketId: null, name: `${role.name} — session`, runtimeId: modelSettingFor(modelsFor(ctx), 'session').runtime,
+        status: 'provisioning', homePath: home, worktreePath: null, branch: null,
+        turnEpoch: 0, turnCount: 0, spawnedBy, spawnReason: `role ${role.id}`,
+        briefRevision: 1, createdAt: now, updatedAt: now,
+      });
+      mkdirSync(home, { recursive: true });
+      const agent = get(id);
+      await renderHome(ctx, deps, agent);
+      ctx.db.update('agents', id, { status: 'active', updatedAt: nowIso() });
+      const setting = modelSettingFor(modelsFor(ctx), 'session');
+      sessions.forTurn({ id, kind: 'session', runtimeId: setting.runtime }, 'persistent');
+
+      const created = get(id);
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.spawn', 'agent', id, { roleId: role.id, projectId: project.id, kind: 'session' });
+      ctx.events.emit('worker.spawned', 'agent', id, { name: created.name, kind: 'session', roleId: role.id, projectId: project.id });
+      log.info({ sessionAgentId: id, roleId: role.id }, 'persistent session opened');
+      return { agent: created, thread };
+    },
+
+    async takeTicketForSession(actor: Actor, sessionId: string, input: TicketCreateInput | { ticketId: string }): Promise<{ agent: Agent; ticket: Ticket }> {
+      const session = get(sessionId);
+      if (session.kind !== 'session') throw new OcError('validation', `${sessionId} is not a persistent session`);
+      if (session.ticketId) throw new OcError('wrong_status', `session ${sessionId} already holds a ticket ${session.ticketId}`);
+      if (!session.roleId || !session.projectId) throw new OcError('internal', `session ${sessionId} has no role or project`);
+
+      // VS-495: `supervisor.spawnPending()` sweeps every tick for a ticket with `assignee_role_id`
+      // set and `worker_id` NULL, and its `liveWorkerFor()` guard only recognises `kind='worker'`
+      // agents — invisible to this session. Assigning the role and binding `worker_id` must happen
+      // synchronously, with no `await` between them, or that sweep can spawn a competing transient
+      // worker on this exact ticket before this function reaches the `await` below. `tickets.create`
+      // and `tickets.assign` are both plain synchronous DB calls (`tx()`), so this is safe as written
+      // — do not introduce an `await` between either of them and the `worker_id` UPDATE.
+      let ticket: Ticket;
+      if ('ticketId' in input) {
+        ticket = ticketOf(input.ticketId);
+        if (ticket.workerId) throw new OcError('conflict', `ticket ${ticket.identifier} already has a worker`);
+        if (ticket.assigneeRoleId && ticket.assigneeRoleId !== session.roleId) {
+          throw new OcError('validation', `ticket ${ticket.identifier} is assigned to a different role`, { roleId: ticket.assigneeRoleId });
+        }
+        if (!ticket.assigneeRoleId) ticket = deps().tickets.assign(actor, ticket.id, session.roleId);
+        ctx.db.run('UPDATE tickets SET worker_id = ?, updated_at = ? WHERE id = ?', [session.id, nowIso(), ticket.id]);
+      } else {
+        ticket = deps().tickets.create(actor, { ...input, assigneeRoleId: session.roleId });
+        ctx.db.run('UPDATE tickets SET worker_id = ?, updated_at = ? WHERE id = ?', [session.id, nowIso(), ticket.id]);
+      }
+      // Everything from here on may freely `await` — the ticket is already bound to this session's
+      // agent id, so `spawnPending()`'s own `worker_id IS NULL` filter already excludes it.
+      ticket = ticketOf(ticket.id);
+
+      const role = ctx.db.get<Role>('SELECT * FROM roles WHERE id = ?', [session.roleId]);
+      if (!role) throw new OcError('not_found', `role ${session.roleId} not found`);
+      const project = projectOf(session.projectId);
+      const branch = ticketBranch(ticket);
+      ctx.db.update('agents', session.id, { ticketId: ticket.id, updatedAt: nowIso() });
+
+      let worktreeRowId: string | null = null;
+      try {
+        ({ worktreeRowId } = await provisionTicketWorktree(session.id, session.homePath, project, ticket, branch));
+        if (ticket.kind === 'change' && project.openspecEnabled && !ticket.openspecChangeName) {
+          ctx.db.run('UPDATE tickets SET openspec_change_name = ? WHERE id = ?', [openspecChangeName(ticket), ticket.id]);
+        }
+        if (ticket.status === 'backlog') {
+          try { await deps().tickets.transition({ kind: 'system', id: null }, ticket.id, { to: 'todo', note: 'persistent session took the ticket' }); }
+          catch { ctx.db.run("UPDATE tickets SET status = 'todo', updated_at = ? WHERE id = ?", [nowIso(), ticket.id]); }
+        }
+        const agent = get(session.id);
+        await renderHome(ctx, deps, agent);
+        deps().wake.enqueue(session.id, { source: 'ticket_assigned', reason: `${ticket.identifier}: ${ticket.title}`, payload: { ticketId: ticket.id }, requestedBy: actor });
+      } catch (e) {
+        log.error({ err: String(e), ticketId: ticket.id, sessionId }, 'session take-ticket failed; rolling back');
+        await removeTicketWorktree(session.homePath, project, branch, worktreeRowId);
+        ctx.db.run('UPDATE tickets SET worker_id = NULL, updated_at = ? WHERE id = ?', [nowIso(), ticket.id]);
+        ctx.db.update('agents', session.id, { ticketId: null, worktreePath: null, branch: null, updatedAt: nowIso() });
+        throw e instanceof OcError ? e : new OcError('internal', `session take-ticket failed: ${String(e)}`);
+      }
+
+      const finalTicket = ticketOf(ticket.id);
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.spawn', 'agent', session.id, { ticketId: ticket.id, roleId: role.id, branch }, ticket.id);
+      log.info({ sessionAgentId: session.id, ticket: finalTicket.identifier }, 'persistent session took a ticket');
+      return { agent: get(session.id), ticket: finalTicket };
+    },
+
+    /**
+     * VS-495: called when a persistent session's ticket reaches a terminal status — the session is
+     * NOT retired (unlike a worker on a terminal ticket): it returns to being an idle, ticketless
+     * session, ready for its next conversation turn or its next ticket. The worktree is marked
+     * `dirty` rather than removed: whether it is safe to delete (has the branch actually landed?) is
+     * exactly what `retireIfLanded` exists to determine for a worker, and reusing that judgement here
+     * is future work, not something to approximate by deleting a worktree that might hold uncommitted
+     * or unlanded changes.
+     */
+    async releaseSessionTicket(actor: Actor, sessionId: string): Promise<void> {
+      const session = get(sessionId);
+      if (session.kind !== 'session' || !session.ticketId) return;
+      try { deps().wake.cancelForAgent(session.id, `${session.ticketId}: ticket reached a terminal status`); }
+      catch (e) { log.warn({ err: String(e), sessionId }, 'cancelling wakes for a terminal session ticket failed'); }
+      const running = ctx.db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [session.id]);
+      if (running) { const runId = running.id; void deps().runs.cancel(actor, runId, 'interrupt').catch(() => undefined); }
+      ctx.db.run("UPDATE worktrees SET status = 'dirty' WHERE agent_id = ? AND status = 'active'", [session.id]);
+      ctx.db.update('agents', session.id, { ticketId: null, worktreePath: null, branch: null, updatedAt: nowIso() });
+      const agent = get(session.id);
+      await renderHome(ctx, deps, agent);
+      ctx.events.emit('worker.status', 'agent', session.id, { status: 'active', reason: 'returned to ticketless conversation' });
+      log.info({ sessionAgentId: session.id }, 'persistent session returned to ticketless conversation');
     },
 
     async createPlan(actor: Actor, projectId: string, opts: { title?: string | null } = {}): Promise<{ plan: Plan; agent: Agent }> {

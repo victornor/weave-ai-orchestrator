@@ -6,7 +6,7 @@ import type * as S from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { renderTemplate } from './template.js';
-import { BRIEF_TMPL, CHARTER_TMPL, PLANNER_TMPL, WEAVER_TMPL, WORKER_TMPL } from './defaults.js';
+import { BRIEF_TMPL, CHARTER_TMPL, PLANNER_TMPL, SESSION_TMPL, WEAVER_TMPL, WORKER_TMPL } from './defaults.js';
 import { worktreeState } from '../util/git.js';
 
 export { renderTemplate, truthy } from './template.js';
@@ -263,6 +263,32 @@ export function renderPlannerInstructions(ctx: WorkspaceContext, deps: () => Cor
     planner: { name: agent.name },
     project: { id: project?.slug ?? '?' },
     plan: { title: plan?.title ?? null },
+  });
+}
+
+/**
+ * VS-495: a role's persistent session. Ticketed, its turns are indistinguishable from an ordinary
+ * worker's on that ticket — same phase instructions, same gates — so a ticketed session just gets
+ * `renderWorkerInstructions` unchanged. Ticketless, it gets the standing conversational posture and
+ * the offer-a-worktree-and-ticket instruction (`SESSION_TMPL` / `session.AGENTS.md.tmpl`), never the
+ * ordinary worker delivery-phase instructions.
+ */
+export function renderSessionInstructions(ctx: WorkspaceContext, deps: () => CoreServices, agent: S.Agent, opts: { charter?: string; relaunchNote?: string | null } = {}): string {
+  if (agent.ticketId) return renderWorkerInstructions(ctx, deps, agent, opts);
+  const r = role(ctx, agent.roleId);
+  const p = project(ctx, agent.projectId);
+  let charter = opts.charter ?? '';
+  if (!charter && agent.roleId) {
+    try { charter = deps().roles.charter(agent.roleId); } catch { charter = ''; }
+  }
+  const tmpl = loadTemplate(ctx, 'session.AGENTS.md.tmpl', SESSION_TMPL);
+  return renderTemplate(tmpl, {
+    workspace: { name: ctx.config.name, id: ctx.config.id },
+    human: { name: humanName(ctx) },
+    session: { name: agent.name, id: agent.id },
+    role: { id: r?.id ?? '', name: r?.name ?? 'Role' },
+    project: { id: p?.slug ?? '' },
+    charter,
   });
 }
 

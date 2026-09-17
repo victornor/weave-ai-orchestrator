@@ -119,10 +119,18 @@ export function createMergeQueue(ctx: WorkspaceContext, deps: () => CoreServices
     };
   }
 
-  /** The worker that will perform the merge, spawning one when the ticket has none. */
+  /**
+   * The agent that will perform the merge, spawning a worker when the ticket has none.
+   *
+   * VS-495: `kind IN ('worker','session')`, not `= 'worker'` — a persistent session holding its own
+   * ticket is that ticket's agent exactly as a spawned worker would be. Filtering to `'worker'` alone
+   * would find nothing for a session's ticket and spawn a *second*, `kind='worker'` agent bound to
+   * the same ticket to perform the merge, which nothing prevents (the one-agent-per-ticket unique
+   * index is itself `kind='worker'`-scoped) — a genuine duplicate-agent bug, not a hypothetical one.
+   */
   async function workerFor(ticket: Ticket): Promise<string | null> {
     const live = db.get<{ id: string }>(
-      "SELECT id FROM agents WHERE ticket_id = ? AND kind = 'worker' AND status NOT IN ('retired','done') ORDER BY created_at DESC LIMIT 1",
+      "SELECT id FROM agents WHERE ticket_id = ? AND kind IN ('worker','session') AND status NOT IN ('retired','done') ORDER BY created_at DESC LIMIT 1",
       [ticket.id],
     );
     if (live) return live.id;

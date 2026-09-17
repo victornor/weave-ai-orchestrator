@@ -4,12 +4,14 @@ function makeEnum<const T extends readonly string[]>(values: T) {
   return { values, ...obj } as const;
 }
 
-/** VS-398 adds `planner`: a read-only, pre-ticket planning agent, never the weaver and never a ticket-bound worker. */
-export const AGENT_KINDS = ['weaver', 'worker', 'planner'] as const;
+/** VS-398 adds `planner`: a read-only, pre-ticket planning agent, never the weaver and never a ticket-bound worker.
+ *  VS-495 adds `session`: a long-lived, per-role, no-ticket agent a human can hold a standing conversation with,
+ *  exempt from the project's transient-worker cap by not being `worker`. */
+export const AGENT_KINDS = ['weaver', 'worker', 'planner', 'session'] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
 /** Who filed a system incident (VS-174). Same values as AgentKind; a separate name so a call site cannot mix them up with an agent's live kind. */
-export const INCIDENT_REPORTER_KINDS = ['weaver', 'worker', 'planner'] as const;
+export const INCIDENT_REPORTER_KINDS = ['weaver', 'worker', 'planner', 'session'] as const;
 export type IncidentReporterKind = (typeof INCIDENT_REPORTER_KINDS)[number];
 
 /** `weave_incident_list`'s `status` filter (VS-271); `list()` itself applies no default. */

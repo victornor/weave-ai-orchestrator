@@ -4,7 +4,7 @@ import type { Agent, AgentKind, Role } from '@weave-ai/shared';
 import type { RuntimeAdapter } from '@weave-ai/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
-import { renderBrief, renderConductorInstructions, renderPlannerInstructions, renderWorkerInstructions } from '../prompts/index.js';
+import { renderBrief, renderConductorInstructions, renderPlannerInstructions, renderSessionInstructions, renderWorkerInstructions } from '../prompts/index.js';
 
 const MARKER = '.ac-render.json';
 
@@ -15,6 +15,8 @@ const PLANNER_SKILLS = ['weave-ai-planning'];
 
 /** Skill packages shipped with the daemon, filtered to the ones this agent kind loads. */
 export function skillsFor(ctx: WorkspaceContext, kind: AgentKind): Array<{ name: string; dir: string }> {
+  // VS-495: a session's skills follow whichever posture its turn is in — the same worker skills once
+  // it holds a ticket, none of the planner's read-only restriction either way.
   const wanted = kind === 'weaver' ? WEAVER_SKILLS : kind === 'planner' ? PLANNER_SKILLS : WORKER_SKILLS;
   if (!ctx.skillsDir || !existsSync(ctx.skillsDir)) return [];
   let entries: string[] = [];
@@ -41,9 +43,13 @@ export async function renderHome(ctx: WorkspaceContext, deps: () => CoreServices
     ? renderConductorInstructions(ctx, deps)
     : agent.kind === 'planner'
       ? renderPlannerInstructions(ctx, deps, agent)
-      : renderWorkerInstructions(ctx, deps, agent, opts);
+      : agent.kind === 'session'
+        ? renderSessionInstructions(ctx, deps, agent, opts)
+        : renderWorkerInstructions(ctx, deps, agent, opts);
   writeFileSync(join(home, 'AGENTS.md'), instructions, 'utf8');
-  if (agent.kind === 'worker') {
+  // A ticketed session works exactly like a worker and gets the same brief.md/notes.md; a ticketless
+  // one has neither — there is no ticket to brief it on yet.
+  if (agent.kind === 'worker' || (agent.kind === 'session' && agent.ticketId)) {
     writeFileSync(join(home, 'brief.md'), renderBrief(ctx, deps, agent, opts), 'utf8');
     const notes = join(home, 'notes.md');
     if (!existsSync(notes)) writeFileSync(notes, `# Notes — ${agent.name}\n\nScratch space. Nothing here is injected anywhere; it is archived with the worker.\n`, 'utf8');

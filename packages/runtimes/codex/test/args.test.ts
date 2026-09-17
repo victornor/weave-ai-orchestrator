@@ -83,8 +83,13 @@ describe('codex buildArgs', () => {
 
   it('mcpOverrides/mcpConfigToml handle stdio servers', () => {
     const o = mcpOverrides('local', { type: 'stdio', command: 'node', args: ['server.js'], env: { A: '1' } });
-    expect(s(o.args)).toBe('-c mcp_servers.local.command="node" -c mcp_servers.local.args=["server.js"] -c mcp_servers.local.env={A="1"}');
+    expect(s(o.args)).toBe('-c mcp_servers.local.command="node" -c mcp_servers.local.args=["server.js"] -c mcp_servers.local.env={A="1"} -c mcp_servers.local.supports_parallel_tool_calls=true');
     expect(mcpConfigToml({ local: { type: 'stdio', command: 'node', args: ['server.js'] } })).toContain('command = "node"');
+  });
+
+  it('lets the model batch calls to a server by declaring it parallel-capable', () => {
+    expect(s(mcpOverrides('weave-ai', { type: 'http', url: 'http://h/mcp' }).args)).toContain('mcp_servers.weave-ai.supports_parallel_tool_calls=true');
+    expect(mcpConfigToml({ 'weave-ai': { type: 'http', url: 'http://h/mcp' } })).toContain('supports_parallel_tool_calls = true');
   });
 });
 

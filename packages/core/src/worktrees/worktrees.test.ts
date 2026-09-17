@@ -1,11 +1,11 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GitWorktreeProvider } from './git.js';
 import { landedWorkTest, unlandedCommitCount } from './landed.js';
 import { renderWtConfig } from './wtconfig.js';
-import { git } from '../util/git.js';
+import { configureGitWorktreeIdentity, git, readGitIdentity } from '../util/git.js';
 import { projectKeyFromUrl } from '../util/git.js';
 
 const tmps: string[] = [];
@@ -14,7 +14,10 @@ function tmpDir(prefix = 'ac-wt-'): string {
   tmps.push(d);
   return d;
 }
-afterEach(() => { while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true }); });
+afterEach(() => {
+  vi.unstubAllEnvs();
+  while (tmps.length) rmSync(tmps.pop()!, { recursive: true, force: true });
+});
 
 async function initRepo(): Promise<string> {
   const dir = tmpDir();
@@ -34,6 +37,42 @@ async function commit(repo: string, file: string, body: string, message: string)
   await git(['add', '.'], repo);
   await git(['commit', '-m', message], repo);
 }
+
+describe('git identity', () => {
+  it('reads a complete, partial, and absent identity using Git config precedence', async () => {
+    const repo = await initRepo();
+    await expect(readGitIdentity(repo)).resolves.toEqual({ identity: { name: 'Test', email: 'test@example.com' }, missing: [] });
+
+    await git(['config', '--local', '--unset', 'user.name'], repo);
+    await expect(readGitIdentity(repo)).resolves.toEqual({ identity: null, missing: ['user.name'] });
+
+    await git(['config', '--local', '--unset', 'user.email'], repo);
+    await expect(readGitIdentity(repo)).resolves.toEqual({ identity: null, missing: ['user.name', 'user.email'] });
+  });
+
+  it('keeps identity available to commit and rebase with an isolated HOME', async () => {
+    const repo = await initRepo();
+    const target = join(tmpDir(), 'work');
+    await new GitWorktreeProvider().create({ repoPath: repo, branch: 'ac/tst-git-identity', base: 'main', targetPath: target });
+    const identity = (await readGitIdentity(repo)).identity!;
+    await configureGitWorktreeIdentity(repo, target, identity);
+
+    expect((await git(['config', '--get', 'user.name'], repo)).stdout.trim()).toBe('Test');
+    expect((await git(['config', '--get', '--worktree', 'user.name'], target)).stdout.trim()).toBe('Test');
+
+    vi.stubEnv('HOME', tmpDir('ac-git-home-'));
+    vi.stubEnv('GIT_CONFIG_GLOBAL', join(tmpDir('ac-git-global-'), 'config'));
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+
+    await commit(target, 'feature.txt', 'feature\n', 'feat: feature');
+    await commit(repo, 'main.txt', 'main\n', 'feat: main');
+    const rebased = await git(['rebase', 'main'], target);
+    expect(rebased.ok).toBe(true);
+
+    const metadata = await git(['show', '-s', '--format=%an|%ae|%cn|%ce', 'HEAD'], target);
+    expect(metadata.stdout.trim()).toBe('Test|test@example.com|Test|test@example.com');
+  });
+});
 
 describe('git worktree provider', () => {
   it('creates a worktree on a new branch, lists it and removes it with the branch', async () => {

@@ -1,8 +1,55 @@
 import { sh, type ExecResult, type OnLine } from './exec.js';
+import { OcError } from '@weave-ai/shared';
 
 /** `input` feeds a command that reads stdin, such as `git patch-id`; `onLine` mirrors its output live. */
 export async function git(args: string[], cwd: string, timeoutMs = 60_000, input?: string, onLine?: OnLine): Promise<ExecResult> {
   return sh('git', args, { cwd, timeoutMs, env: { GIT_TERMINAL_PROMPT: '0' }, input, onLine });
+}
+
+export interface GitIdentity { name: string; email: string }
+export type GitIdentityKey = 'user.name' | 'user.email';
+export interface GitIdentityResolution { identity: GitIdentity | null; missing: GitIdentityKey[] }
+
+/** Reads the identity Git would use in `cwd`, including its normal config precedence. */
+export async function readGitIdentity(cwd: string): Promise<GitIdentityResolution> {
+  const values = new Map<GitIdentityKey, string>();
+  for (const key of ['user.name', 'user.email'] as const) {
+    const result = await git(['config', '--get', key], cwd, 15_000);
+    const value = result.ok ? result.stdout.trim() : '';
+    if (value) values.set(key, value);
+  }
+  const missing = (['user.name', 'user.email'] as const).filter((key) => !values.has(key));
+  return {
+    identity: missing.length === 0 ? { name: values.get('user.name')!, email: values.get('user.email')! } : null,
+    missing,
+  };
+}
+
+/** Requires a complete Git identity before provisioning an isolated worker checkout. */
+export async function requireGitIdentity(cwd: string): Promise<GitIdentity> {
+  const result = await readGitIdentity(cwd);
+  if (!result.identity) {
+    throw new OcError(
+      'validation',
+      `Git identity is not configured for ${cwd}; set ${result.missing.join(' and ')}`,
+      { cwd, missing: result.missing },
+    );
+  }
+  return result.identity;
+}
+
+/** Stores the source repo's identity in the linked worktree config, independent of HOME. */
+export async function configureGitWorktreeIdentity(repoPath: string, worktreePath: string, identity: GitIdentity): Promise<void> {
+  const enable = await git(['config', 'extensions.worktreeConfig', 'true'], repoPath, 15_000);
+  if (!enable.ok) {
+    throw new OcError('validation', `Could not enable Git worktree config for ${repoPath}: ${enable.stderr.trim() || 'git config failed'}`);
+  }
+  for (const [key, value] of [['user.name', identity.name], ['user.email', identity.email] ] as const) {
+    const result = await git(['config', '--worktree', key, value], worktreePath, 15_000);
+    if (!result.ok) {
+      throw new OcError('validation', `Could not configure ${key} in worker worktree ${worktreePath}: ${result.stderr.trim() || 'git config failed'}`);
+    }
+  }
 }
 
 export interface WorktreeState { exists: boolean; dirty: boolean; changedFiles: number; branch: string | null; ahead: number; behind: number; head: string | null }

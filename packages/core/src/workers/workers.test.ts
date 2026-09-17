@@ -64,7 +64,10 @@ describe('workers', () => {
     workers = createWorkersService(h.ctx, h.deps);
     await seedRepo();
   });
-  afterEach(() => h.cleanup());
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    h.cleanup();
+  });
 
   describe('compactSession', () => {
     /** Seed a resumable ref on the worker's active session and swap in an adapter that records the call. */
@@ -278,6 +281,22 @@ describe('workers', () => {
     h.ctx.registries.worktreeProviders.set('git', failing);
     const ticket = seedTicket();
     await expect(workers.spawnForTicket(SYSTEM, ticket.id)).rejects.toThrow(/disk on fire/);
+    expect(h.db.all("SELECT * FROM agents WHERE kind = 'worker'")).toHaveLength(0);
+    expect(h.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [ticket.id])!.workerId).toBeNull();
+    expect(h.db.all('SELECT * FROM worktrees')).toHaveLength(0);
+  });
+
+  it('refuses to provision a worker before creating a worktree when Git identity is missing', async () => {
+    await git(['config', '--local', '--unset', 'user.name'], clonePath);
+    await git(['config', '--local', '--unset', 'user.email'], clonePath);
+    vi.stubEnv('GIT_CONFIG_GLOBAL', join(h.ctx.paths.root, 'missing-global-gitconfig'));
+    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+    const ticket = seedTicket();
+
+    await expect(workers.spawnForTicket(SYSTEM, ticket.id)).rejects.toMatchObject({
+      code: 'validation',
+      message: expect.stringContaining('user.name and user.email'),
+    });
     expect(h.db.all("SELECT * FROM agents WHERE kind = 'worker'")).toHaveLength(0);
     expect(h.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [ticket.id])!.workerId).toBeNull();
     expect(h.db.all('SELECT * FROM worktrees')).toHaveLength(0);
@@ -994,6 +1013,21 @@ describe('workers', () => {
       const second = await workers.ensurePlanner(HUMAN, plan.id);
       expect(second.id).toBe(first.id);
       expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM agents WHERE plan_id = ? AND kind = 'planner'", [plan.id])!.n).toBe(1);
+    });
+
+    it('refuses to provision a planner when Git identity is missing', async () => {
+      await git(['config', '--local', '--unset', 'user.name'], clonePath);
+      await git(['config', '--local', '--unset', 'user.email'], clonePath);
+      vi.stubEnv('GIT_CONFIG_GLOBAL', join(h.ctx.paths.root, 'missing-global-gitconfig'));
+      vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+      const plan = startPlan();
+
+      await expect(workers.ensurePlanner(HUMAN, plan.id)).rejects.toMatchObject({
+        code: 'validation',
+        message: expect.stringContaining('user.name and user.email'),
+      });
+      expect(h.db.all("SELECT * FROM agents WHERE kind = 'planner'")).toHaveLength(0);
+      expect(h.db.all('SELECT * FROM worktrees')).toHaveLength(0);
     });
 
     it('runs the planner on the weaver\'s own model, not a worker option (VS-398)', async () => {

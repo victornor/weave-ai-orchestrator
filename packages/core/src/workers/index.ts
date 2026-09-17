@@ -15,7 +15,7 @@ import { renderBrief } from '../prompts/index.js';
 import { createSessions } from '../sessions/index.js';
 import { modelSettingFor, modelsFor } from '../models/resolve.js';
 import { landedWorkTest, worktreeChanges } from '../worktrees/landed.js';
-import { git, worktreeState } from '../util/git.js';
+import { configureGitWorktreeIdentity, git, requireGitIdentity, worktreeState } from '../util/git.js';
 import { buildHandoverCommand } from './resume-command.js';
 import { sessionActivitySignal } from './activity-signal.js';
 import { handoverCommentBody, reconcileHandover, type HandoverSnapshot } from './handover-reconcile.js';
@@ -117,6 +117,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
    * without going through `spawn()` itself (which creates a second, `kind='worker'` agent).
    */
   async function provisionTicketWorktree(agentId: string, home: string, project: Project, ticket: Ticket, branch: string): Promise<{ path: string; branch: string; worktreeRowId: string }> {
+    const identity = await requireGitIdentity(project.clonePath);
     const provider = providerFor(project);
     const targetPath = join(home, 'work');
     const info = await provider.create({
@@ -124,6 +125,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       setupCommand: project.setupCommand ?? undefined, warmPaths: (project as unknown as { warmPaths?: string[] }).warmPaths ?? [],
       configPath: ctx.paths.wtConfig,
     });
+    await configureGitWorktreeIdentity(project.clonePath, info.path, identity);
     const worktreeRowId = newId();
     const now = nowIso();
     const resolvedBranch = info.branch || branch;
@@ -314,6 +316,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       let worktreeRowId: string | null = null;
       try {
         mkdirSync(home, { recursive: true });
+        const identity = await requireGitIdentity(project.clonePath);
         const provider = providerFor(project);
         const targetPath = join(home, 'work');
         // VS-398: a disposable checkout, never the project's shared clone — isolated from concurrent
@@ -321,6 +324,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         const info = await provider.create({
           repoPath: project.clonePath, branch, base: landingBranchOf(project), targetPath, configPath: ctx.paths.wtConfig,
         });
+        await configureGitWorktreeIdentity(project.clonePath, info.path, identity);
         worktreeRowId = newId();
         ctx.db.insert('worktrees', {
           id: worktreeRowId, projectId: project.id, ticketId: null, agentId: id, provider: provider.id,

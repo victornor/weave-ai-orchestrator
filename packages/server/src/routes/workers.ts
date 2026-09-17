@@ -78,6 +78,10 @@ export function workerRoutes(): Hono<AppEnv> {
     return c.json({ delivery: outcome.delivery, runId: outcome.runId, wakeId: outcome.wake?.id ?? null }, 202);
   });
 
+  app.post('/:id/compact', async (c) => {
+    return c.json(await c.get('ws').services.workers.compactSession(c.get('actor'), c.req.param('id')));
+  });
+
   app.post('/:id/relaunch', async (c) => {
     const { note } = await body(c, z.object({ note: z.string().min(1) }));
     return c.json(await c.get('ws').services.workers.relaunch(c.get('actor'), c.req.param('id'), note));
@@ -135,13 +139,25 @@ export function conductorRoutes(): Hono<AppEnv> {
     const s = c.get('ws').services;
     const worker = s.workers.conductor();
     const runs = safe(() => s.runs.list({ agentId: worker.id, limit: 1 }));
+    const session = c.get('ws').ctx.db.get<{ compactingAt: string | null; compactingError: string | null }>(
+      "SELECT compacting_at AS compactingAt, compacting_error AS compactingError FROM agent_sessions WHERE agent_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+      [worker.id],
+    );
     return c.json({
       worker,
       ticket: worker.ticketId ? safe(() => s.tickets.get(worker.ticketId!)) : null,
       lastRun: runs?.items[0] ?? null,
       usage: safe(() => s.usage.series({ scope: `worker:${worker.id}`, window: '7d' })),
+      compacting: Boolean(session?.compactingAt),
+      compactingError: session?.compactingError ?? null,
     });
   });
+  /** The weaver's own compaction — what the chat banner is about. */
+  app.post('/compact', async (c) => {
+    const s = c.get('ws').services;
+    return c.json(await s.workers.compactSession(c.get('actor'), s.workers.conductor().id));
+  });
+
   app.post('/reset-session', async (c) => {
     const s = c.get('ws').services;
     const { reason } = await body(c, z.object({ reason: z.string().default('reset by operator') }));

@@ -8,6 +8,8 @@ export interface SessionRow {
   id: string; agentId: string; runtimeId: string; sessionRef: SessionRef | null; displayId: string | null;
   status: 'active' | 'stale' | 'closed'; turnCount: number; lastRunId: string | null; lastError: string | null;
   cumulativeUsage: Record<string, number> | null; createdAt: string; updatedAt: string;
+  /** ISO while an out-of-band compaction is running; null otherwise. Set on the session, never `agents.status`. */
+  compactingAt?: string | null; compactingError?: string | null;
 }
 
 export interface TurnSession { session: SessionRow; ref: SessionRef | null; isFirstTurn: boolean; stale: boolean; policy: SessionPolicy }
@@ -19,6 +21,10 @@ export interface SessionsService {
   reset(agentId: string, reason: string): SessionRow;
   close(agentId: string): void;
   markStaleIfIdle(agentId: string, maxIdleDays: number): boolean;
+  /** Mark the session compacting (or clear it). While set, the dispatcher leaves this agent's wakes queued. */
+  setCompacting(sessionId: string, at: string | null, error?: string | null): void;
+  /** True while this agent's active session is compacting — what the chat banner and the dispatch gate read. */
+  compacting(agentId: string): boolean;
 }
 
 /** PLAN §7.4: one session per agent — persistent for the conductor, per ticket for a worker, `fresh` never resumes. */
@@ -108,6 +114,17 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
       if (idleDays <= maxIdleDays) return false;
       ctx.db.update('agent_sessions', cur.id, { status: 'stale', updatedAt: nowIso() });
       return true;
+    },
+
+    setCompacting(sessionId, at, error = null) {
+      ctx.db.update('agent_sessions', sessionId, { compactingAt: at, compactingError: error, updatedAt: nowIso() });
+    },
+
+    compacting(agentId) {
+      return !!ctx.db.get(
+        "SELECT 1 FROM agent_sessions WHERE agent_id = ? AND status = 'active' AND compacting_at IS NOT NULL LIMIT 1",
+        [agentId],
+      );
     },
   };
   return service;

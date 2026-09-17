@@ -26,6 +26,7 @@ const state = vi.hoisted(() => ({
   runStreams: [] as Array<{ id: string | null; live: boolean }>,
   runState: 'connected' as 'connected' | 'offline' | 'unreachable',
   lastRun: null as { id: string; status: string } | null,
+  compacting: false,
   answer: vi.fn(),
   post: vi.fn(),
   go: vi.fn(),
@@ -88,7 +89,7 @@ vi.mock('../api/hooks', () => ({
   useWorkers: () => ({ data: state.workers }),
   useProjects: () => ({ data: [{ id: 'p1', workspaceId: 'ws1', slug: 'web', name: 'web' }] }),
   useTickets: () => ({ data: state.tickets }),
-  useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: 'claude' }, lastRun: state.lastRun } }),
+  useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: 'claude' }, lastRun: state.lastRun, compacting: state.compacting } }),
   useRuntimes: () => ({ data: [{ id: 'claude', capabilities: { contextCompactionAt: 0.8 } }] }),
   useRuntimeModels: () => ({ data: [{ id: 'sonnet', contextWindowTokens: 1_000_000 }] }),
   useUsageAccounts: () => ({
@@ -236,6 +237,7 @@ beforeEach(() => {
   state.runStreams = [];
   state.runState = 'connected';
   state.lastRun = null;
+  state.compacting = false;
   state.answer.mockReset();
   state.post.mockReset().mockResolvedValue(undefined);
   state.go.mockReset();
@@ -696,5 +698,15 @@ describe('the V2 Chat screen', () => {
     // ...and it arrives shortly after, with the history line never having changed.
     expect(await screen.findByText('A brand new reply')).toBeInTheDocument();
     expect(screen.getByText('History line')).toBeInTheDocument();
+  });
+
+  it('shows a compaction banner and queues the message while the weaver session compacts', async () => {
+    state.messages = [message({ id: 'm1', body: 'Hi', createdAt: '2026-09-13T09:00:00.000Z' })];
+    state.compacting = true;
+    render(<V2ChatPage />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Compacting the conversation');
+    // The composer says the same, so a message typed now reads as queued rather than ignored.
+    expect(screen.getByText(/Compacting the conversation — your message is queued/)).toBeInTheDocument();
   });
 });

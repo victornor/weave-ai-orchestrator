@@ -65,6 +65,63 @@ describe('workers', () => {
   });
   afterEach(() => h.cleanup());
 
+  describe('compactSession', () => {
+    /** Seed a resumable ref on the worker's active session and swap in an adapter that records the call. */
+    function withCompactor(): unknown[] {
+      const seen: unknown[] = [];
+      const rt = new FakeRuntime();
+      (rt as unknown as { compactSession: (i: unknown) => Promise<unknown> }).compactSession = async (i: unknown) => { seen.push(i); return { ok: true, via: 'command' }; };
+      h.ctx.registries.runtimes.set('claude', rt);
+      return seen;
+    }
+
+    it('marks the session compacting, calls the runtime, then clears the mark', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      h.db.run('UPDATE agent_sessions SET session_ref_json = ? WHERE agent_id = ?', [JSON.stringify({ sessionId: 'sess-1' }), worker.id]);
+      const seen = withCompactor();
+
+      expect(await workers.compactSession(HUMAN, worker.id)).toEqual({ started: true, runtime: 'claude' });
+      await new Promise((r) => setImmediate(r));
+
+      expect(seen).toHaveLength(1);
+      expect((seen[0] as { ref: unknown; configHome: string }).ref).toEqual({ sessionId: 'sess-1' });
+      expect((seen[0] as { configHome: string }).configHome).toContain('claude');
+      const row = h.db.get<{ compactingAt: string | null; compactingError: string | null }>(
+        'SELECT compacting_at AS compactingAt, compacting_error AS compactingError FROM agent_sessions WHERE agent_id = ?', [worker.id],
+      )!;
+      expect(row.compactingAt).toBeNull();
+      expect(row.compactingError).toBeNull();
+    });
+
+    it('records the failure message when the runtime refuses', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      h.db.run('UPDATE agent_sessions SET session_ref_json = ? WHERE agent_id = ?', [JSON.stringify({ sessionId: 'sess-1' }), worker.id]);
+      const rt = new FakeRuntime();
+      (rt as unknown as { compactSession: () => Promise<unknown> }).compactSession = async () => ({ ok: false, error: { code: 'x', message: 'nope' } });
+      h.ctx.registries.runtimes.set('claude', rt);
+
+      await workers.compactSession(HUMAN, worker.id);
+      await new Promise((r) => setImmediate(r));
+      expect(h.db.get<{ compactingError: string | null }>('SELECT compacting_error AS compactingError FROM agent_sessions WHERE agent_id = ?', [worker.id])!.compactingError).toBe('nope');
+    });
+
+    it('refuses while a turn is running', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      h.db.run('UPDATE agent_sessions SET session_ref_json = ? WHERE agent_id = ?', [JSON.stringify({ sessionId: 'sess-1' }), worker.id]);
+      h.db.insert('runs', { id: 'r-active', workspaceId: h.workspaceId, agentId: worker.id, runtimeId: 'claude', status: 'running', turnEpoch: 1, cwd: '/tmp', createdAt: nowIso() });
+      await expect(workers.compactSession(HUMAN, worker.id)).rejects.toThrow(/turn running/);
+    });
+
+    it('refuses when the session has no resumable ref', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      await expect(workers.compactSession(HUMAN, worker.id)).rejects.toThrow(/no resumable session/);
+    });
+  });
+
   it('derives the ticket branch and change name from the identifier and title', () => {
     const t = { identifier: 'TST-42', title: 'Add dark mode to the dashboard!' } as Ticket;
     expect(ticketBranch(t)).toBe('ac/tst-42-add-dark-mode-to-the-dashboard');

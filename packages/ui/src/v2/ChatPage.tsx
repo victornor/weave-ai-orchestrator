@@ -299,6 +299,10 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const queuedCount = useQueueCount('thread');
 
   const [sending, setSending] = useState(false);
+  // The weaver's session being compacted out of band. While it is, the daemon holds its wakes, so a
+  // message sent now is queued and answered the moment compaction finishes. Seeded from the detail
+  // (so a reload still shows it) and kept live by the `session.compaction` frame.
+  const [compacting, setCompacting] = useState(false);
   // `fromStart` is true only for a run this screen saw begin (`run.started`), not one resumed from
   // `weaver.lastRun`; the live trace mounts on it before the run's first event so that line streams
   // (VS-440), while a resumed run still waits for its events so the ones already there stay whole.
@@ -340,9 +344,18 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
     if (last && isActiveRun(last.status)) setLive((cur) => cur ?? { id: last.id, running: true, fromStart: false });
   }, [weaver.data?.lastRun]);
 
+  useEffect(() => { setCompacting(Boolean(weaver.data?.compacting)); }, [weaver.data?.compacting]);
+
   useWorkspaceEvents(
     useCallback(
       (e) => {
+        // `session.compaction` is an ephemeral frame; the shared `WorkspaceEvent['type']` union is the
+        // durable set, so compare through a string. The frame is forwarded (it is in the stream's TRACKED list).
+        if ((e.type as string) === 'session.compaction') {
+          const p = e.payload as { agentId?: string; compacting?: boolean } | null;
+          if (conductorId && p?.agentId === conductorId) setCompacting(Boolean(p.compacting));
+          return;
+        }
         if (e.type !== 'run.started' && e.type !== 'run.finished') return;
         const p = e.payload as { agentId?: string } | null;
         if (!conductorId || p?.agentId !== conductorId) return;
@@ -697,6 +710,14 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
 
           <div className="flex-none border-t border-line-1 bg-bg-0 px-4 py-3">
             <div className="mx-auto w-full max-w-[720px]">
+              {compacting ? (
+                <div role="status" data-v2-compacting-banner className="mb-2 flex items-start gap-2 rounded-r4 border border-line-1 bg-working/10 px-2.5 py-1.5">
+                  <span className="mt-1 size-1.5 flex-none animate-pulse rounded-full bg-working" aria-hidden />
+                  <span className="text-micro text-text-2">
+                    Compacting the conversation… anything you send now is queued and answered as soon as it finishes.
+                  </span>
+                </div>
+              ) : null}
               <ChatComposer
                 projects={projects.data ?? []}
                 projectId={draft.projectId ?? null}
@@ -711,7 +732,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                 onOpenPlan={() => setPlanOpen(true)}
                 hotkey={!planOpen}
                 dictationTarget={fetchId ? { ws, threadId: fetchId, projectId: draft.projectId ?? null, replyToMessageId: draft.replyToId ?? null } : null}
-                queuedReason={offline ? 'Offline — your message is queued' : working ? 'Weaver is replying — your message is queued' : null}
+                queuedReason={compacting ? 'Compacting the conversation — your message is queued until it finishes' : offline ? 'Offline — your message is queued' : working ? 'Weaver is replying — your message is queued' : null}
                 queuedCount={queuedCount}
               />
             </div>

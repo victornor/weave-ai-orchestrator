@@ -409,6 +409,8 @@ export interface WorkersService {
   sessionResumable(id: string): boolean;
   brief(workerId: string): string;
   resetSession(actor: Actor, id: string, reason: string): Promise<void>;
+  /** Start an out-of-band compaction of the agent's session; resolves once the compacting mark is set, not when it finishes. */
+  compactSession(actor: Actor, id: string): Promise<{ started: boolean; runtime: string }>;
   /**
    * The resume command a worker would offer right now, without taking it (VS-249): read-only, safe
    * to call on every render of a worker or a decision raised for one. `startHandover` calls this

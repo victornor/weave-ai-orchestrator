@@ -198,6 +198,9 @@ const TRACKED: (EventType | EphemeralEventType)[] = [
   // fired and no V2 card could update live. It is forwarded to component listeners and invalidates
   // no query (the frame is applied by the listener).
   'worker.activity',
+  // An out-of-band compaction starting/finishing on the weaver's session; drives the chat banner and
+  // the composer's queued note without a query refetch.
+  'session.compaction',
   'ticket.created',
   'ticket.updated',
   'ticket.assigned',

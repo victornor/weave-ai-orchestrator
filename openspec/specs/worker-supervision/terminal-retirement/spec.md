@@ -12,9 +12,13 @@ When a ticket reaches `done` or `cancelled`, every worker still bound to that ti
 live statuses (`provisioning`, `active`, `running`) in that same transition, not on a later
 supervisor pass. Wakes queued for that worker SHALL be cancelled so it does not take another turn.
 
-The worker SHALL be `retired` when its worktree can be removed (work has landed, or there is no
-worktree). When the worktree is unlanded, the worker SHALL be `done` and the worktree SHALL stay
-until the work lands or is discarded, matching a human cancelling that worker.
+If the transition is performed by the worker's currently executing run, that run SHALL be allowed to
+return its runtime result and final report. The daemon SHALL NOT interrupt or retire that current run
+before finalization. The worker SHALL remain out of the live set while its run finalizes, and SHALL be
+retired when its worktree can be removed (work has landed, or there is no worktree). A run owned by a
+different actor that is still active when the ticket becomes terminal SHALL be interrupted as before.
+When the worktree is unlanded, the worker SHALL be `done` and the worktree SHALL stay until the work
+lands or is discarded, matching a human cancelling that worker.
 
 A worker that is already `retired` or `done` SHALL be left as it is. A ticket with no worker SHALL
 not fail the transition.
@@ -38,6 +42,16 @@ not fail the transition.
 
 - **WHEN** a ticket reaches `done` and its worker is already `retired`
 - **THEN** that worker stays `retired`
+
+#### Scenario: A worker can finish the run that closed its ticket
+
+- **WHEN** a worker's active run transitions its own ticket to `done` and then returns a valid final report
+- **THEN** the run is recorded as succeeded with its report and summary, the ticket remains `done`, and the worker is not recorded as interrupted
+
+#### Scenario: An external terminal transition still interrupts another active run
+
+- **WHEN** a different actor transitions a ticket to `cancelled` while its worker has an active run
+- **THEN** that active run is interrupted and the worker remains out of the live set
 
 ### Requirement: Untracked leftovers do not block retirement once the work has landed
 
@@ -117,7 +131,7 @@ query every tick.
 
 #### Scenario: An unreachable forge does not decide either way
 
-- **WHEN** the forge cannot be reached while deciding a terminal ticket's worker
+- **WHEN** the forge cannot be reached while deciding a terminal worker's retirement
 - **THEN** the stored record is unchanged and the decision uses the evidence already recorded
 
 #### Scenario: Repeated retirement attempts do not hammer the forge

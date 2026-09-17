@@ -513,10 +513,16 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       const running = db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [w.id]);
       if (running) {
         const runId = running.id;
-        schedule(0, 'interrupt run for terminal ticket', () => deps().runs.cancel(actor, runId, 'interrupt'));
+        // A worker can close its own ticket as the last operation in its turn. Cancelling that run
+        // here races the runtime's successful result and records the completed work as interrupted.
+        // The finalizer will retire the worker after preserving the terminal state; other active runs
+        // still take the existing interruption path.
+        if (runId !== actor.runId) schedule(0, 'interrupt run for terminal ticket', () => deps().runs.cancel(actor, runId, 'interrupt'));
       }
       const workerId = w.id;
-      schedule(50, 'retire worker for terminal ticket', () => deps().workers.retireIfLanded(actor, workerId));
+      // Let the self-closing run finish before attempting retirement. Supervisor/terminal cleanup
+      // will retire the already-done worker once the run leaves the active set.
+      if (!running || running.id !== actor.runId) schedule(50, 'retire worker for terminal ticket', () => deps().workers.retireIfLanded(actor, workerId));
     }
   }
 

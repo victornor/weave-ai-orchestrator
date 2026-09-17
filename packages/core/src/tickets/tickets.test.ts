@@ -1190,6 +1190,25 @@ describe('tickets', () => {
       h.db.update('tickets', t.id, { status: 'in_progress' });
       expect((await tickets.transition(AGENT, t.id, { to: 'done', note: 'ending: nothing to land' })).status).toBe('done');
     });
+
+    it('interrupts a different active run, but not the run that performs the terminal transition (VS-512)', async () => {
+      const t = make({ kind: 'task' });
+      const workerId = h.addWorker(t.id);
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      const cancel = vi.fn();
+      const cancelWakes = vi.fn();
+      wake.cancelForAgent = cancelWakes;
+      h.services.runs = { cancel } as never;
+      h.db.insert('runs', {
+        id: 'run-other', workspaceId: h.workspaceId, agentId: workerId, ticketId: t.id, runtimeId: 'claude',
+        status: 'running', turnEpoch: 1, cwd: '/tmp', createdAt: nowIso(),
+      });
+
+      await tickets.transition({ kind: 'agent', id: workerId, runId: 'run-self' }, t.id, { to: 'done', note: 'ending: nothing to land' });
+      await new Promise<void>((resolve) => setTimeout(resolve, 10));
+      expect(cancelWakes).toHaveBeenCalledWith(workerId, expect.stringContaining('TST-'));
+      expect(cancel).toHaveBeenCalledWith({ kind: 'agent', id: workerId, runId: 'run-self' }, 'run-other', 'interrupt');
+    });
   });
 
   describe('a terminal ticket returns its persistent session, not its worker, to ticketless (VS-495)', () => {

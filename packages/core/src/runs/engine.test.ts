@@ -142,6 +142,30 @@ describe('run engine', () => {
     expect(h.events.filter((e) => e.type === 'run.finished')).toHaveLength(1);
   });
 
+  it('records a successful run when the worker closes its own ticket (VS-512)', async () => {
+    h.services.tickets = createTicketsService(h.ctx, h.deps);
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+    runtime.queue.push(resultFor(workerId, async (input) => {
+      await h.services.tickets!.transition(
+        { kind: 'agent', id: workerId, runId: input.runId },
+        ticketId,
+        { to: 'done', note: 'ending: completed the deliverable' },
+      );
+      return { structured: { state: 'done', summary: 'completed the deliverable', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } };
+    }));
+    h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'finish the deliverable' });
+
+    const run = await runOnce(workerId);
+    expect(run.status).toBe('succeeded');
+    expect(run.errorCode).toBeNull();
+    expect(run.liveness).toBe('advanced');
+    expect(run.summary).toBe('completed the deliverable');
+    expect(run.result).toMatchObject({ state: 'done', summary: 'completed the deliverable' });
+    expect(h.services.tickets!.get(ticketId).status).toBe('done');
+    expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('done');
+  });
+
   it('times exactly the phases RECORDED_RUN_PHASES declares, in that order', async () => {
     // Anything deriving "which phase is this run in" from `run.phase.timing` walks that list, so a
     // phase added to or dropped from the engine has to move the list with it. `RUN_PHASES` is wider:

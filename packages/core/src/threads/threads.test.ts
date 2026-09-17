@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createProjectsService } from '../projects/index.js';
 import { createTicketsService } from '../tickets/service.js';
-import { createThreadsService, HUMAN_MESSAGE_WAKE_BODY_CHARS, REPLY_EXCERPT_CHARS } from './service.js';
+import { createThreadsService, REPLY_EXCERPT_CHARS } from './service.js';
 import type { Actor, ThreadsService, TicketsService } from '../api.js';
 
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
@@ -121,47 +121,22 @@ describe('threads', () => {
     expect((wake.calls[0]?.input.payload as { body: string }).body).toBe(body);
   });
 
-  it('carries a body at or under the wake payload bound with no truncation fields', async () => {
-    const t = threads.bindOrGet('web', 'web-trunc-1', null);
-    const body = 'x'.repeat(HUMAN_MESSAGE_WAKE_BODY_CHARS);
-    await threads.inbound(HUMAN, t.id, body);
+  it('carries a human message whole, however long, with no truncation fields', async () => {
+    const t = threads.bindOrGet('web', 'web-whole', null);
+    const body = 'Delegated to the CLI; daemon never compacts and only Claude declares a compaction. '.repeat(200).slice(0, 20_000);
+    const msg = await threads.inbound(HUMAN, t.id, body);
 
+    expect(msg.body).toBe(body);
+    expect(threads.message(t.id, msg.id).body).toBe(body);
     const payload = wake.calls[0]?.input.payload as { body: string; truncated?: boolean; bodyLength?: number };
     expect(payload.body).toBe(body);
     expect(payload).not.toHaveProperty('truncated');
     expect(payload).not.toHaveProperty('bodyLength');
   });
 
-  it('marks a wake payload over the bound as truncated, with the original length', async () => {
-    const t = threads.bindOrGet('web', 'web-trunc-2', null);
-    const body = 'y'.repeat(HUMAN_MESSAGE_WAKE_BODY_CHARS + 1);
-    const msg = await threads.inbound(HUMAN, t.id, body);
-
-    // The stored message keeps the full body; only the wake payload is cut.
-    expect(msg.body).toBe(body);
-    expect(threads.message(t.id, msg.id).body).toBe(body);
-
-    const payload = wake.calls[0]?.input.payload as { body: string; truncated: boolean; bodyLength: number };
-    expect(payload.body).toHaveLength(HUMAN_MESSAGE_WAKE_BODY_CHARS);
-    expect(payload.truncated).toBe(true);
-    expect(payload.bodyLength).toBe(body.length);
-  });
-
-  it('reproduces the truncation marker for an 11,064-character message', async () => {
-    const t = threads.bindOrGet('web', 'web-trunc-3', null);
-    const body = 'Delegated to the CLI; daemon never compacts and only Claude declares a compaction. '.repeat(200).slice(0, 11064);
-    expect(body).toHaveLength(11064);
-    await threads.inbound(HUMAN, t.id, body);
-
-    const payload = wake.calls[0]?.input.payload as { body: string; truncated: boolean; bodyLength: number };
-    expect(payload.truncated).toBe(true);
-    expect(payload.bodyLength).toBe(11064);
-    expect(payload.body).toHaveLength(HUMAN_MESSAGE_WAKE_BODY_CHARS);
-  });
-
   it('reads the full stored body of a message by id, scoped to its thread', async () => {
     const t = threads.bindOrGet('web', 'web-msg-1', null);
-    const body = 'z'.repeat(HUMAN_MESSAGE_WAKE_BODY_CHARS + 500);
+    const body = 'z'.repeat(8_500);
     const msg = await threads.inbound(HUMAN, t.id, body);
 
     const full = threads.message(t.id, msg.id);

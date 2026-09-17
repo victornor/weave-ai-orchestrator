@@ -53,18 +53,6 @@ function archivedComment(archivePath: string, workerId: string, files: string[])
 
 
 /**
- * Same bound as threads' `HUMAN_MESSAGE_WAKE_BODY_CHARS` and tickets' `TICKET_COMMENT_WAKE_BODY_CHARS`
- * (VS-242/VS-246): a human's own words flowing into a stored wake payload and a rendered prompt line
- * get the same treatment everywhere, not a fourth number.
- */
-const LIVE_INTERRUPT_WAKE_BODY_CHARS = 8000;
-
-function liveInterruptWakeBody(body: string): { body: string; truncated?: true; bodyLength?: number } {
-  if (body.length <= LIVE_INTERRUPT_WAKE_BODY_CHARS) return { body };
-  return { body: body.slice(0, LIVE_INTERRUPT_WAKE_BODY_CHARS), truncated: true, bodyLength: body.length };
-}
-
-/**
  * VS-375: whether this worker already has the resume a relaunch would create. A shut-down cut leaves
  * the run's own wakes `queued` (`engine.finalize`'s preserve branch) with the run recorded
  * `interrupted_by_shutdown`, so the dispatcher will claim them. Read from the records rather than a
@@ -496,14 +484,12 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       // A message the running turn already has must not also be queued — that would deliver it twice.
       let wake: ReturnType<CoreServices['wake']['enqueue']> | null = null;
       if (delivery === 'interrupted') {
-        const wb = liveInterruptWakeBody(body);
-        // Naming `weave_ticket_comments` as the full-text pointer is safe here specifically: the
-        // `tickets.comment(...)` call above already recorded the untruncated `body` as a ticket
-        // comment before any delivery was attempted, regardless of how this send turns out.
-        const reason = wb.truncated ? `${wb.body} (truncated; full message via weave_ticket_comments)` : wb.body;
+        // A human's words ride whole — the reason carries the entire message, so the turn prompt
+        // needs no `weave_inbox` round trip to read it. `tickets.comment(...)` above already recorded
+        // the same untruncated body as a ticket comment, whatever becomes of this delivery.
         wake = deps().wake.enqueue(workerId, {
-          source: 'live_interrupt', reason,
-          payload: { ticketId: agent.ticketId, message: wb.body, ...(wb.truncated ? { truncated: true as const, bodyLength: wb.bodyLength } : {}), interruptedRunId: runId },
+          source: 'live_interrupt', reason: body,
+          payload: { ticketId: agent.ticketId, message: body, interruptedRunId: runId },
           requestedBy: actor,
         });
       } else if (delivery === 'queued') {

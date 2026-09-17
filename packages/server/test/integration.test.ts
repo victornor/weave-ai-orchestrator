@@ -430,7 +430,7 @@ describe('real core services over HTTP', () => {
   });
 
   describe('weave_thread_message_get', () => {
-    it('returns the full body of a message a wake payload truncated (VS-242)', async () => {
+    it('returns the full body of a message the wake already carried whole (VS-242)', async () => {
       const { deps, harness } = boot();
       const app = createApp(deps);
       const services = deps.workspaces.get(harness.workspaceId)!.services;
@@ -438,8 +438,8 @@ describe('real core services over HTTP', () => {
       const body = 'z'.repeat(9000);
       const msg = await services.threads.inbound({ kind: 'human', id: null }, thread.id, body);
       const wakes = services.wake.listForAgent(harness.conductorId, ['queued']).filter((w) => (w.payload as { messageId?: string }).messageId === msg.id);
-      expect((wakes[0]?.payload as { truncated?: boolean; bodyLength?: number }).truncated).toBe(true);
-      expect((wakes[0]?.payload as { truncated?: boolean; bodyLength?: number }).bodyLength).toBe(9000);
+      expect((wakes[0]?.payload as { body?: string; truncated?: boolean }).body).toBe(body);
+      expect(wakes[0]?.payload).not.toHaveProperty('truncated');
 
       const token = await signRunToken(runTokenSecret(harness.ctx.db), {
         workspaceId: harness.workspaceId, runId: 'run_msg', agentId: harness.conductorId, agentKind: 'weaver', projectId: null, ticketId: null, roleId: null,

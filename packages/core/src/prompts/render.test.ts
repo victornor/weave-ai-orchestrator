@@ -470,6 +470,24 @@ describe('prompt rendering', () => {
     expect(recorded).toEqual([['run-1', worker.id, ticketId, []]]);
   });
 
+  it('puts a human message body in the prompt whole, so reading it needs no weave_inbox round trip', async () => {
+    const body = `Please rework the login flow.\n\n${'detail line\n'.repeat(1500)}`;
+    const wake = { id: 'w-human', workspaceId: h.workspaceId, agentId: worker.id, source: 'human_message', reason: 'message from Victor', payload: { threadId: 't1', messageId: 'm1', body, projectSlug: 'api' }, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).toContain('## What was said');
+    expect(prompt).toContain('Message from the human about `api`');
+    expect(prompt).toContain(body);
+  });
+
+  it('puts a human ticket comment body in the prompt too', async () => {
+    const body = 'Follow-up: also cover the expired-token edge case.';
+    const wake = { id: 'w-cmt', workspaceId: h.workspaceId, agentId: worker.id, source: 'ticket_comment', reason: 'new comment on TST-42', payload: { ticketId, commentId: 'c1', body }, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).toContain('## What was said');
+    expect(prompt).toContain('Comment on TST-42');
+    expect(prompt).toContain(body);
+  });
+
   it('still pastes the bootstrap digest into the weaver first-turn prompt (VS-161)', async () => {
     const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
     const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [{ id: 'w2', source: 'system', reason: 'digest', payload: {} } as never], { isFirstTurn: true });

@@ -3,6 +3,7 @@ export * from './errors.js';
 export * from './transitions.js';
 export * from './ui-status.js';
 export * from './config.js';
+export * from './runtime-options.js';
 export * from './report.js';
 export * from './tools.js';
 export * from './self-wake.js';

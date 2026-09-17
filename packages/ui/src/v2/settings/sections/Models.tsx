@@ -4,7 +4,7 @@
  * with their tag, diff footer and reset.
  */
 import { useEffect, useState } from 'react';
-import { DEFAULT_MODEL_SETTING, WorkerModelOptionSchema, WorkerOptionsArraySchema } from '@weave-ai/shared';
+import { DEFAULT_MODEL_SETTING, WorkerModelOptionSchema, WorkerOptionsArraySchema, runtimeOptionProperties, type RuntimeOptionProperty } from '@weave-ai/shared';
 import { useDaemonModels, useModels, useRuntimeModels, useRuntimes, useSetDaemonModels, useSetModels } from '../../../api/hooks';
 import type * as T from '../../../api/types';
 import { Button } from '../../../components/Button';
@@ -35,7 +35,82 @@ function CommitInput({ value, ariaLabel, placeholder, className, onCommit }: {
   );
 }
 
-/** One agent's runtime / model / thinking, side by side in one row. */
+/** One generated control for a runtime option the adapter declares; shape comes from its configSchema. */
+function OptionControl({ prop, value, onChange }: {
+  prop: RuntimeOptionProperty; value: unknown; onChange: (v: T.RuntimeOptionValue | undefined) => void;
+}): React.ReactElement {
+  const empty = value === undefined || value === null || value === '';
+  if (prop.type === 'boolean') {
+    return (
+      <label className="flex items-center gap-2 text-micro text-text-2">
+        <input type="checkbox" aria-label={prop.description ?? 'option'} checked={value === true} onChange={(e) => onChange(e.target.checked)} />
+        {prop.default !== undefined ? <span className="text-text-3">default {String(prop.default)}</span> : null}
+      </label>
+    );
+  }
+  if (prop.enum && prop.enum.length > 0) {
+    return (
+      <select className={cx(inputCx, 'ac-mono')} value={empty ? '' : String(value)} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)}>
+        <option value="">default{prop.default !== undefined ? ` (${String(prop.default)})` : ''}</option>
+        {prop.enum.map((v) => <option key={String(v)} value={String(v)}>{String(v)}</option>)}
+      </select>
+    );
+  }
+  if (prop.type === 'integer' || prop.type === 'number') {
+    return (
+      <input type="number" className={cx(inputCx, 'ac-mono')} value={empty ? '' : String(value)}
+        placeholder={prop.default !== undefined ? String(prop.default) : ''} min={prop.minimum} max={prop.maximum}
+        onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />
+    );
+  }
+  if (prop.type === 'array') {
+    const lines = Array.isArray(value) ? value.join('\n') : '';
+    return (
+      <textarea className={cx(inputCx, 'ac-mono h-16 py-1.5')} value={lines} placeholder="one per line"
+        onChange={(e) => onChange(e.target.value.split('\n').map((l) => l.trim()).filter(Boolean))} />
+    );
+  }
+  return (
+    <input className={cx(inputCx, 'ac-mono')} value={empty ? '' : String(value)}
+      placeholder={prop.default !== undefined ? String(prop.default) : ''}
+      onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} />
+  );
+}
+
+/**
+ * A runtime's own options (compaction, tool-output limit, extra args, …), generated from the
+ * adapter's `configSchema()` the daemon returns on `/runtimes`. `model`/`effort` are left to the
+ * first-class controls beside this; the rest are editable here, per setting, so a workspace can run
+ * the weaver and its workers on different compaction without touching the daemon default.
+ */
+function RuntimeOptionsEditor({ runtime, runtimes, options, onChange }: {
+  runtime: string; runtimes: T.RuntimeInfo[]; options: T.RuntimeOptions | undefined; onChange: (next: T.RuntimeOptions) => void;
+}): React.ReactElement | null {
+  const fields = runtimeOptionProperties(runtimes.find((r) => r.id === runtime)?.configSchema);
+  if (fields.length === 0) return null;
+  const set = (key: string, value: T.RuntimeOptionValue | undefined): void => {
+    const next = { ...(options ?? {}) };
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+    onChange(next);
+  };
+  return (
+    <details className="v2-recessed rounded-r4 border border-line-1 px-3 py-2">
+      <summary className="cursor-pointer text-micro text-text-2">Options</summary>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {fields.map(([key, prop]) => (
+          <label key={key} className="flex flex-col gap-1">
+            <span className="ac-label">{key}</span>
+            <OptionControl prop={prop} value={options?.[key]} onChange={(v) => set(key, v)} />
+            {prop.description ? <span className="text-nano text-text-3">{prop.description}</span> : null}
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+/** One agent's runtime / model / thinking, side by side in one row, with its runtime options beneath. */
 function ModelControls({ label, setting, runtimes, recessed, onChange }: {
   label: string; setting: T.ModelSetting; runtimes: T.RuntimeInfo[]; recessed?: boolean; onChange: (next: T.ModelSetting) => void;
 }): React.ReactElement {
@@ -48,7 +123,8 @@ function ModelControls({ label, setting, runtimes, recessed, onChange }: {
   const col = 'flex flex-col gap-1';
   const compaction: T.ModelCompaction = setting.compaction ?? { mode: 'off' };
   return (
-    <div className="grid gap-2 sm:grid-cols-3">
+    <div className="flex flex-col gap-2">
+      <div className="grid gap-2 sm:grid-cols-3">
       <div className={col}>
         <span className="ac-label">runtime</span>
         <select aria-label={`${label} runtime`} className={ctl} value={setting.runtime}
@@ -126,6 +202,9 @@ function ModelControls({ label, setting, runtimes, recessed, onChange }: {
           {compaction.mode === 'off' ? 'the runtime compacts on its own' : compaction.mode === 'percent' ? '% of the model window' : "the last request's size in tokens"}
         </span>
       </div>
+      </div>
+      <RuntimeOptionsEditor runtime={setting.runtime} runtimes={runtimes} options={setting.options}
+        onChange={(options) => onChange({ ...setting, options })} />
     </div>
   );
 }
@@ -300,9 +379,9 @@ function OptionRow({ option, runtimes, open, onToggle, onSave, onRemove }: {
               <span className={cx('ac-mono text-nano', over ? 'text-failed' : 'text-text-3')}>{draft.trim().length} / {max ?? 200}</span>
             </div>
           </div>
-          <ModelControls label={option.id} setting={{ runtime: option.runtime ?? runtimes[0]?.id ?? 'claude', model: option.model, ...(option.effort !== undefined ? { effort: option.effort } : {}) }}
+          <ModelControls label={option.id} setting={{ runtime: option.runtime ?? runtimes[0]?.id ?? 'claude', model: option.model, ...(option.effort !== undefined ? { effort: option.effort } : {}), ...(option.compaction ? { compaction: option.compaction } : {}), ...(option.options ? { options: option.options } : {}) }}
             runtimes={runtimes} recessed={!configured}
-            onChange={(next) => patch({ ...option, runtime: next.runtime, model: next.model, effort: next.effort, compaction: next.compaction })} />
+            onChange={(next) => patch({ ...option, runtime: next.runtime, model: next.model, effort: next.effort, compaction: next.compaction, options: next.options })} />
           <div className="flex justify-end">
             <Button size="sm" variant="danger" onClick={onRemove}>Remove</Button>
           </div>
@@ -318,7 +397,7 @@ function NewOption({ runtimes, existing, onAdd, onCancel }: {
   const [id, setId] = useState('');
   const [description, setDescription] = useState('');
   const [setting, setSetting] = useState<T.ModelSetting>({ runtime: runtimes[0]?.id ?? 'claude', model: null });
-  const candidate = { id: id.trim(), description: description.trim(), runtime: setting.runtime, model: setting.model, ...(setting.effort ? { effort: setting.effort } : {}), ...(setting.compaction ? { compaction: setting.compaction } : {}) };
+  const candidate = { id: id.trim(), description: description.trim(), runtime: setting.runtime, model: setting.model, ...(setting.effort ? { effort: setting.effort } : {}), ...(setting.compaction ? { compaction: setting.compaction } : {}), ...(setting.options ? { options: setting.options } : {}) };
   const field = WorkerModelOptionSchema.safeParse(candidate);
   const list = WorkerOptionsArraySchema.safeParse([...existing, candidate]);
   const valid = field.success && list.success;

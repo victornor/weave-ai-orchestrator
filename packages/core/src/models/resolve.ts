@@ -69,7 +69,11 @@ export function modelSettingFor(
       if (!isWorkerOptionConfigured(opt)) {
         throw new OcError('model_unconfigured', `worker option '${id}' has no runtime chosen`, { optionId: id });
       }
-      return { runtime: opt.runtime, model: opt.model, ...(opt.effort !== undefined ? { effort: opt.effort } : {}) };
+      return {
+        runtime: opt.runtime, model: opt.model,
+        ...(opt.effort !== undefined ? { effort: opt.effort } : {}),
+        ...(opt.options ? { options: opt.options } : {}),
+      };
     }
   }
   return models.workers;

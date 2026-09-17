@@ -115,8 +115,11 @@ export interface RuntimeModel { id: string; label: string; provider?: string; so
 /** One of the two model settings a workspace holds (VS-77): `GET`/`PUT /models`. */
 export type CompactionMode = 'off' | 'percent' | 'tokens';
 export interface ModelCompaction { mode: CompactionMode; value?: number }
-export interface ModelSetting { runtime: string; model: string | null; effort?: string; compaction?: ModelCompaction }
-export interface WorkerModelOption { id: string; description: string; runtime: string | null; model: string | null; effort?: string; compaction?: ModelCompaction }
+/** Mirrors shared's `RuntimeOptionValueSchema` — the value shapes a runtime option may hold. */
+export type RuntimeOptionValue = string | number | boolean | string[];
+export type RuntimeOptions = Record<string, RuntimeOptionValue>;
+export interface ModelSetting { runtime: string; model: string | null; effort?: string; compaction?: ModelCompaction; options?: RuntimeOptions }
+export interface WorkerModelOption { id: string; description: string; runtime: string | null; model: string | null; effort?: string; compaction?: ModelCompaction; options?: RuntimeOptions }
 /** Where an effective control comes from (VS-356): stored on this workspace, a filled daemon overlay, or the schema default. */
 export type ModelSource = 'workspace' | 'daemon' | 'default';
 export interface WorkspaceModelsSource { weaver: ModelSource; workers: ModelSource; workerOptions: ModelSource }
@@ -171,6 +174,8 @@ export interface RuntimeInfo {
    */
   detection: { status: 'available' | 'missing_binary' | 'broken' | 'unsupported'; version?: string | null; path?: string | null; notes?: string | null };
   capabilities: Record<string, unknown>;
+  /** The runtime's own JSON Schema for its per-setting options (`ModelSetting.options`). */
+  configSchema?: Record<string, unknown>;
   models?: string[];
 }
 

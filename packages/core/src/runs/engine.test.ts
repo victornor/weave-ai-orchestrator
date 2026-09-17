@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
-import { FakeRuntime, type TurnInput, type TurnSink, type TurnResult } from '@weave-ai/runtime-sdk';
+import { FakeRuntime, type RuntimeEvent, type TurnHandle, type TurnInput, type TurnSink, type TurnResult } from '@weave-ai/runtime-sdk';
 import { RECORDED_RUN_PHASES, RUN_PHASES, type Decision, type Run, type Wakeup } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import type { Actor } from '../api.js';
@@ -2220,6 +2220,124 @@ describe('dispatcher', () => {
     expect(claimed.status).not.toBe('queued');
     expect(claimed.runId).toBe(runs[0]!.id);
     expect(claimed.reason).toBe('check the sweep');
+  });
+
+  /**
+   * VS-518: when the runtime compacts the session itself, the engine must write the same session
+   * state and broadcast the same `session.compaction` frame the daemon's out-of-band path does, and
+   * must not leave the pre-compaction context observation behind for the automatic policy.
+   */
+  describe('adapter-initiated compaction', () => {
+    class AdapterCompactionRuntime extends FakeRuntime {
+      compactionEvents: Array<Pick<RuntimeEvent, 'type' | 'payload'>> = [];
+      /** Called from inside the turn, right after the started event — to observe the live session state. */
+      onStarted: (() => void) | null = null;
+      override async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
+        for (const e of this.compactionEvents) {
+          sink.onEvent({ ts: nowIso(), type: e.type, payload: e.payload });
+          if (e.type === 'session.compaction.started') this.onStarted?.();
+        }
+        return super.runTurn(input, sink, onHandle);
+      }
+    }
+
+    function useRuntime(): AdapterCompactionRuntime {
+      const rt = new AdapterCompactionRuntime();
+      h.ctx.registries.runtimes.set('fake', rt);
+      h.ctx.config.models = { weaver: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null }, workerOptions: [] };
+      return rt;
+    }
+
+    /** A turn here is one dispatcher tick plus a drain (this describe owns its own dispatcher). */
+    async function runOnce(): Promise<void> {
+      await dispatcher.tick();
+      await dispatcher.drain();
+    }
+
+    function sessionRow(agentId: string): { compactingAt: string | null; lastContextTokens: number | null } {
+      return h.db.get<{ compactingAt: string | null; lastContextTokens: number | null }>(
+        'SELECT compacting_at AS compactingAt, last_context_tokens AS lastContextTokens FROM agent_sessions WHERE agent_id = ?',
+        [agentId],
+      )!;
+    }
+
+    const done: Partial<TurnResult> = { structured: { state: 'done', summary: 'done', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } };
+
+    function frames(): Array<Record<string, unknown>> {
+      return h.events.filter((e) => (e.type as string) === 'session.compaction').map((e) => e.payload as Record<string, unknown>);
+    }
+
+    it('marks the session compacting mid-turn and broadcasts the running frame', async () => {
+      const rt = useRuntime();
+      rt.compactionEvents = [{ type: 'session.compaction.started', payload: {} }];
+      rt.queue.push({ ...done, usage: { inputTokens: 100, outputTokens: 10, basis: 'per_turn' } });
+      let midTurn: string | null = 'unread';
+      rt.onStarted = () => { midTurn = sessionRow(h.conductorId).compactingAt; };
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'compact it' });
+
+      await runOnce();
+
+      expect(midTurn).toBeTruthy();
+      expect(frames()).toContainEqual(expect.objectContaining({ agentId: h.conductorId, compacting: true, origin: 'adapter' }));
+      // A started with no completion still releases the mark when the turn ends.
+      expect(sessionRow(h.conductorId).compactingAt).toBeNull();
+    });
+
+    it("keeps the compaction boundary's post size and does not re-arm on the turn's stale context", async () => {
+      const rt = useRuntime();
+      rt.compactionEvents = [
+        { type: 'session.compaction.started', payload: {} },
+        { type: 'session.compaction.completed', payload: { trigger: 'auto', preTokens: 812_345, postTokens: 12_000 } },
+      ];
+      // The turn's own last request predates the compaction: if finalize overwrote the observation
+      // with this, the policy could fire on an already-compacted session (the VS-500 livelock shape).
+      rt.queue.push({ ...done, usage: { inputTokens: 900_000, outputTokens: 10, basis: 'per_turn', contextTokens: 812_345 } });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'compact it' });
+
+      await runOnce();
+
+      expect(sessionRow(h.conductorId)).toMatchObject({ compactingAt: null, lastContextTokens: 12_000 });
+      expect(frames()).toContainEqual(expect.objectContaining({ agentId: h.conductorId, compacting: false, origin: 'adapter' }));
+    });
+
+    it('clears the observation when the runtime reports no post-compaction size', async () => {
+      const rt = useRuntime();
+      rt.compactionEvents = [
+        { type: 'session.compaction.started', payload: {} },
+        { type: 'session.compaction.completed', payload: { trigger: 'auto' } },
+      ];
+      rt.queue.push({ ...done, usage: { inputTokens: 900_000, outputTokens: 10, basis: 'per_turn', contextTokens: 812_345 } });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'compact it' });
+
+      await runOnce();
+
+      expect(sessionRow(h.conductorId)).toMatchObject({ compactingAt: null, lastContextTokens: null });
+    });
+
+    it('does not let the automatic policy re-fire after an adapter compaction', async () => {
+      const rt = useRuntime();
+      rt.compactionEvents = [
+        { type: 'session.compaction.started', payload: {} },
+        { type: 'session.compaction.completed', payload: { trigger: 'auto', postTokens: 12_000 } },
+      ];
+      rt.queue.push({ ...done, usage: { inputTokens: 900_000, outputTokens: 10, basis: 'per_turn', contextTokens: 812_345 } });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'compact it' });
+      await runOnce();
+      expect(sessionRow(h.conductorId).lastContextTokens).toBe(12_000);
+
+      // Now a policy that would have fired on the pre-compaction number if it had survived.
+      const compactSession = vi.fn(async () => ({ started: true, runtime: 'fake' }));
+      h.services.workers = { compactSession } as never;
+      h.ctx.config.models = { weaver: { runtime: 'fake', model: null, compaction: { mode: 'tokens', value: 100_000 } }, workers: { runtime: 'fake', model: null }, workerOptions: [] };
+      rt.compactionEvents = [];
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'next' });
+
+      await runOnce();
+
+      expect(compactSession).not.toHaveBeenCalled();
+      // The wake ran as an ordinary turn rather than being held for a policy compaction.
+      expect(h.db.all<{ id: string }>('SELECT id FROM runs')).toHaveLength(2);
+    });
   });
 
 });

@@ -25,6 +25,13 @@ export interface SessionsService {
   markStaleIfIdle(agentId: string, maxIdleDays: number): boolean;
   /** Mark the session compacting (or clear it). While set, the dispatcher leaves this agent's wakes queued. */
   setCompacting(sessionId: string, at: string | null, error?: string | null): void;
+  /**
+   * End an adapter-initiated compaction: clear the mark and store the post-compaction context size
+   * the runtime reported, or clear the observation when it reported none. VS-518 — the runtime path
+   * needs the same one-shot consumption VS-500 gave the daemon path, or the automatic policy can
+   * fire on the pre-compaction number the runtime already replaced.
+   */
+  noteCompactionEnd(sessionId: string, postTokens: number | null): void;
   /** True while this agent's active session is compacting — what the chat banner and the dispatch gate read. */
   compacting(agentId: string): boolean;
 }
@@ -127,6 +134,15 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
         compactingAt: at,
         compactingError: error,
         lastContextTokens: at === null ? undefined : null,
+        updatedAt: nowIso(),
+      });
+    },
+
+    noteCompactionEnd(sessionId, postTokens) {
+      ctx.db.update('agent_sessions', sessionId, {
+        compactingAt: null,
+        compactingError: null,
+        lastContextTokens: postTokens,
         updatedAt: nowIso(),
       });
     },

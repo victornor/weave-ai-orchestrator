@@ -71,6 +71,7 @@ describe('codex buildArgs', () => {
     }));
     expect(s(b.args)).toContain('-c mcp_servers.weave-ai.url="http://127.0.0.1:7777/mcp/runs/run-1"');
     expect(s(b.args)).toContain(`-c mcp_servers.weave-ai.bearer_token_env_var="${tokenKey('weave-ai')}"`);
+    expect(s(b.args)).toContain('-c mcp_servers.weave-ai.default_tools_approval_mode="never"');
     expect(s(b.args)).toContain('-c mcp_servers.weave-ai.http_headers={X-Trace="abc"}');
     expect(s(b.args)).not.toContain('secret-token');
     expect(b.env[tokenKey('weave-ai')]).toBe('secret-token');
@@ -86,10 +87,25 @@ describe('codex buildArgs', () => {
       mcpServers: { 'weave-ai': { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer secret-token' } } },
     }));
     expect(s(b.args)).toContain('mcp_servers.weave-ai.url="http://127.0.0.1:7777/mcp/runs/run-1"');
+    expect(s(b.args)).toContain('mcp_servers.weave-ai.default_tools_approval_mode="never"');
     expect(s(b.args)).toContain('approval_policy="on-request"');
     expect(s(b.args)).not.toContain('secret-token');
     expect(b.args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     expect(b.env[tokenKey('weave-ai')]).toBe('secret-token');
+  });
+
+  it.each([
+    ['auto', null], ['auto', { threadId: 'thread-1' }], ['auto', { threadId: 'thread-1', fork: true }],
+    ['restricted', null], ['restricted', { threadId: 'thread-1' }], ['restricted', { threadId: 'thread-1', fork: true }],
+  ] as const)('keeps %s MCP calls outside the approval prompt for %s turns', (mode, ref) => {
+    const b = buildArgs(input({
+      permission: { mode }, session: { policy: 'per_ticket', ref, isFirstTurn: !ref },
+      mcpServers: { 'weave-ai': { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1' } },
+    }));
+    expect(s(b.args)).toContain('mcp_servers.weave-ai.default_tools_approval_mode="never"');
+    expect(s(b.args)).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+    if (mode === 'auto') expect(s(b.args)).toContain('workspace-write');
+    else expect(s(b.args)).toContain('read-only');
   });
 
   it('falls back to CODEX_HOME/config.toml when asked', () => {
@@ -103,6 +119,7 @@ describe('codex buildArgs', () => {
     const f = b.files.find((x) => x.path === '/ws/.agent-conductor/runtimes/codex/config.toml')!;
     expect(f.content).toContain('[mcp_servers.weave-ai]');
     expect(f.content).toContain('url = "http://h/mcp"');
+    expect(f.content).toContain('default_tools_approval_mode = "never"');
   });
 
   it('mcpOverrides/mcpConfigToml handle stdio servers', () => {
@@ -136,6 +153,14 @@ it('keeps bearer secrets out of generated config files', () => {
   expect(b.files[0]?.content).toContain(`bearer_token_env_var = "${tokenKey('ac')}"`);
   expect(b.files[0]?.content).not.toContain('hidden-token');
   expect(b.env[tokenKey('ac')]).toBe('hidden-token');
+});
+
+it('does not add a per-server approval override to bypass turns', () => {
+  const b = buildArgs(input({
+    permission: { mode: 'bypass' },
+    mcpServers: { 'weave-ai': { type: 'http', url: 'http://local/mcp' } },
+  }));
+  expect(s(b.args)).not.toContain('default_tools_approval_mode');
 });
 
 

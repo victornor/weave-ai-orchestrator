@@ -14,7 +14,7 @@ const strictReport = {
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 
-function input(scenario = 'success', ref: TurnInput['session']['ref'] = null): TurnInput {
+function input(scenario = 'success', ref: TurnInput['session']['ref'] = null, mode: TurnInput['permission']['mode'] = 'auto'): TurnInput {
   const dir = mkdtempSync(join(tmpdir(), 'ac-fake-codex-'));
   dirs.push(dir);
   // Absolute interpreter plus a PATH containing only this fixture guarantees no real CLI runs.
@@ -50,12 +50,14 @@ process.stdin.on('end', () => {
     emit({ type: 'turn.failed', error: { message: '401 Unauthorized' } });
     process.exitCode = 0; return;
   }
-  const hasRunScopedMcp = args.some((arg) => arg.includes('mcp_servers.weave-ai.url='));
-  const automaticApproval = args.includes('approval_policy="on-request"');
+  const configPath = process.env.CODEX_HOME ? require('node:path').join(process.env.CODEX_HOME, 'config.toml') : '';
+  const configText = configPath && fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+  const hasRunScopedMcp = args.some((arg) => arg.includes('mcp_servers.weave-ai.url=')) || configText.includes('[mcp_servers.weave-ai]');
+  const mcpApprovalNever = args.includes('mcp_servers.weave-ai.default_tools_approval_mode="never"') || configText.includes('default_tools_approval_mode = "never"');
   const bypassApproval = args.includes('--dangerously-bypass-approvals-and-sandbox');
-  // This preserves the worker failure reported by VS-485: before the adapter
-  // supplied the auto posture, a configured MCP call failed before it ran.
-  if (hasRunScopedMcp && !automaticApproval && !bypassApproval) {
+  // MCP approval is distinct from shell-command approval: a configured server
+  // must explicitly opt out of per-tool approval for a headless worker.
+  if (hasRunScopedMcp && !mcpApprovalNever && !bypassApproval) {
     emit({ type: 'turn.failed', error: { message: 'MCP tool call requires approval, but approval policy is never' } });
     process.exitCode = 1; return;
   }
@@ -73,15 +75,23 @@ process.stdin.on('end', () => {
     session: { policy: 'per_ticket', ref, isFirstTurn: !ref }, systemPrompt: { text: '', mode: 'skip' },
     prompt: 'private prompt\nsecond line', outputSchema: RUN_REPORT_JSON_SCHEMA as unknown as Record<string, unknown>, mcpServers: {},
     env: { PATH: dir + delimiter, CAPTURE: join(dir, 'capture.json'), SCENARIO: scenario },
-    configHome: dir, options: { model: 'test-model', contextWindowTokens: 1000000 }, limits: { timeoutMs: 5000 }, permission: { mode: 'auto' },
+    configHome: dir, options: { model: 'test-model', contextWindowTokens: 1000000 }, limits: { timeoutMs: 5000 }, permission: { mode },
   };
 }
 
 const sink = (events: RuntimeEvent[] = []) => ({ onSpawn: () => undefined, onRaw: () => undefined, onEvent: (ev: RuntimeEvent) => events.push(ev) });
+const turnCases = [
+  { mode: 'auto' as const, ref: null },
+  { mode: 'auto' as const, ref: { threadId: 'thread-1', usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 } } },
+  { mode: 'auto' as const, ref: { threadId: 'thread-1', fork: true, usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 } } },
+  { mode: 'restricted' as const, ref: null },
+  { mode: 'restricted' as const, ref: { threadId: 'thread-1', usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 } } },
+  { mode: 'restricted' as const, ref: { threadId: 'thread-1', fork: true, usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 } } },
+];
 
 describe('Codex turn against a fake CLI', () => {
-  it.each([null, { threadId: 'thread-1', usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 } }, { threadId: 'thread-1', fork: true, usage: { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 } }])('completes new/resumed/forked turns: %j', async (ref) => {
-    const turn = input('success', ref);
+  it.each(turnCases)('completes %s new/resumed/forked turns: %j', async ({ mode, ref }) => {
+    const turn = input('success', ref, mode);
     writeFileSync(join(turn.cwd, 'config.toml'), 'model_provider = "custom"\n');
     turn.options['mcpViaConfigFile'] = true;
     turn.mcpServers = { 'weave-ai': { type: 'http', url: 'http://localhost/mcp/runs/run-1', headers: { Authorization: 'Bearer ticket-token' } } };
@@ -101,7 +111,8 @@ describe('Codex turn against a fake CLI', () => {
     const capture = JSON.parse(readFileSync(join(turn.cwd, 'capture.json'), 'utf8'));
     expect(capture.prompt).toBe(turn.prompt);
     expect(capture.args).not.toContain(turn.prompt);
-    expect(capture.args).toContain('approval_policy="on-request"');
+    expect(capture.args).toContain('mcp_servers.weave-ai.default_tools_approval_mode="never"');
+    expect(capture.args.join(' ')).toContain(mode === 'auto' ? 'workspace-write' : 'read-only');
     expect(capture.args.join(' ')).toContain('mcp_servers.weave-ai.url="http://localhost/mcp/runs/run-1"');
     expect(capture.args.join(' ')).not.toContain('ticket-token');
     expect(capture.cwd).toBe(turn.cwd);
@@ -161,8 +172,9 @@ it('initializes MCP config once and overrides the endpoint on subsequent turns',
   first.options['mcpViaConfigFile'] = true;
   first.mcpServers = { ac: { type: 'http', url: 'http://first/mcp', headers: { Authorization: 'Bearer first-token' } } };
   expect((await adapter.runTurn(first, sink())).error).toBeUndefined();
-  const config = readFileSync(join(first.cwd, 'config.toml'), 'utf8');
-  expect(config).toContain('http://first/mcp');
+    const config = readFileSync(join(first.cwd, 'config.toml'), 'utf8');
+    expect(config).toContain('http://first/mcp');
+    expect(config).toContain('default_tools_approval_mode = "never"');
   expect(config).not.toContain('first-token');
   const next = input();
   next.configHome = first.configHome;

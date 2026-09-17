@@ -9,6 +9,19 @@ export const RESTRICTED_TOOLS = ['Read', 'Glob', 'Grep', 'TodoWrite', 'Task'] as
 /** Prompts longer than this go on stdin instead of argv (ARG_MAX headroom) — only when live input is off. */
 export const MAX_ARGV_PROMPT = 96_000;
 
+/**
+ * The `claude -p --resume <id> … "/compact"` invocation. Claude Code runs a slash command from a
+ * print-mode resume, which is the only external compaction trigger the CLI exposes: the session is
+ * summarised in place and the next turn resumes the compacted conversation. Verified against Claude
+ * Code 2.1.270 (`system`/`compact_boundary`, `trigger: "manual"`).
+ */
+export function compactArgs(opts: { sessionId: string; model?: string | null }): string[] {
+  const args = ['-p', '--resume', opts.sessionId, '--output-format', 'stream-json', '--verbose'];
+  if (opts.model) args.push('--model', opts.model);
+  args.push('/compact');
+  return args;
+}
+
 export interface ClaudeBuildOpts {
   /** UUID to use when this turn starts a new session. Caller generates it (keeps buildArgs pure). */
   newSessionId: string;

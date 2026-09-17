@@ -96,6 +96,19 @@ describe('stalledWorkerTimeoutSec default (VS-202)', () => {
   });
 });
 
+describe('stalledWorkerMaxAutoRecoverAttempts default (VS-498)', () => {
+  it('defaults to 2, and accepts an override', () => {
+    expect(WorkspaceDefaultsSchema.parse({}).stalledWorkerMaxAutoRecoverAttempts).toBe(2);
+    expect(WorkspaceDefaultsSchema.parse({ stalledWorkerMaxAutoRecoverAttempts: 0 }).stalledWorkerMaxAutoRecoverAttempts).toBe(0);
+    expect(WorkspaceDefaultsSchema.parse({ stalledWorkerMaxAutoRecoverAttempts: 5 }).stalledWorkerMaxAutoRecoverAttempts).toBe(5);
+  });
+
+  it('a full workspace config with no override still parses, defaulting to 2', () => {
+    const cfg = WorkspaceConfigSchema.parse({ version: 1, id: 'acme', name: 'Acme', ticketPrefix: 'ACME' });
+    expect(cfg.defaults.stalledWorkerMaxAutoRecoverAttempts).toBe(2);
+  });
+});
+
 describe('YOLO mode: the setting', () => {
   it('is a per-project setting with no workspace default', () => {
     // VS-382: `defaults.yolo` is gone; the schema strips it if an old config still carries it.

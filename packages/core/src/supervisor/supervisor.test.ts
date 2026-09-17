@@ -9,6 +9,7 @@ import { createKnowledgeService } from '../knowledge/service.js';
 import { createDecisionsService } from '../decisions/service.js';
 import { createWakeService } from '../wake/index.js';
 import { runState } from '../runs/active.js';
+import { isWorkerStalled } from './stall-state.js';
 import type { Supervisor } from '../api.js';
 
 function seedTicket(h: TestHarness, over: Record<string, unknown> = {}): string {
@@ -1539,7 +1540,9 @@ describe('stalled worker detection (VS-202)', () => {
     await supervisor.tick();
     expect(stalledEventsFor(agentId)).toHaveLength(1); // same stall, not re-notified
 
-    h.db.update('agents', agentId, { lastRunAt: oldTimestamp() }); // a new run happened, then it stalled again
+    // A new run happened (its own auto-recovery wake was claimed and completed), then it stalled again.
+    h.db.run("UPDATE wakeups SET status = 'completed' WHERE agent_id = ? AND status = 'queued'", [agentId]);
+    h.db.update('agents', agentId, { lastRunAt: oldTimestamp() });
     vi.setSystemTime(new Date(Date.now() + 61_000));
     await supervisor.tick();
     expect(stalledEventsFor(agentId)).toHaveLength(2);
@@ -1572,6 +1575,192 @@ describe('stalled worker detection (VS-202)', () => {
     await supervisor.tick();
     const wakes = h.db.all<{ source: string; agentId: string }>('SELECT source, agent_id FROM wakeups WHERE source = ?', ['routine']);
     expect(wakes).toEqual([{ source: 'routine', agentId: h.conductorId }]);
+  });
+});
+
+/**
+ * VS-498: a worker detected as stalled (VS-202, above) is now automatically nudged, bounded, before
+ * the supervisor gives up and hands it to the weaver — reproducing the exact VS-495 shape end to end.
+ */
+describe('bounded stall recovery and escalation (VS-498)', () => {
+  let h: TestHarness;
+  let supervisor: Supervisor;
+  let wake: ReturnType<typeof createWakeService>;
+  let decisions: ReturnType<typeof createDecisionsService>;
+
+  beforeEach(() => {
+    h = makeHarness();
+    wake = createWakeService(h.ctx, h.deps);
+    decisions = createDecisionsService(h.ctx, h.deps);
+    h.services.wake = wake as never;
+    h.services.decisions = decisions as never;
+    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.tickets = { livenessViolations: () => [] } as never;
+    h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
+    h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
+    h.ctx.config.defaults.stalledWorkerTimeoutSec = 60;
+    h.ctx.config.defaults.stalledWorkerMaxAutoRecoverAttempts = 2;
+    supervisor = createSupervisor(h.ctx, h.deps);
+    fakeTimeActive = false;
+  });
+  afterEach(() => { vi.useRealTimers(); supervisor.stop(); h.cleanup(); });
+
+  const oldTimestamp = () => new Date(Date.now() - 120_000).toISOString();
+  // Fake time is kept running across calls (never toggled back to real in between) so successive
+  // advances accumulate on the same clock, the way the supervisor's own `lastLiveness` gate expects.
+  let fakeTimeActive = false;
+  const tickLater = async (ms = 61_000) => {
+    if (!fakeTimeActive) { vi.useFakeTimers({ toFake: ['Date'] }); fakeTimeActive = true; }
+    vi.setSystemTime(new Date(Date.now() + ms));
+    await supervisor.tick();
+  };
+  /** Simulates the auto-recovery wake being claimed and completed by a turn that leaves no evidence. */
+  const simulateInertRecoveryTurn = (agentId: string) => {
+    h.db.run("UPDATE wakeups SET status = 'completed' WHERE agent_id = ? AND status = 'queued'", [agentId]);
+    h.db.update('agents', agentId, { lastRunAt: oldTimestamp() });
+  };
+
+  it('reproduces the VS-495 shape end to end: detected, auto-recovered within the bound, then escalated to the weaver', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+
+    await supervisor.tick();
+    expect(h.events.some((e) => e.type === 'worker.stalled' && e.entityId === agentId)).toBe(true);
+    const attemptsOf = () => h.db.get<{ attempts: number }>('SELECT * FROM worker_stall_state WHERE agent_id = ?', [agentId])?.attempts;
+    expect(attemptsOf()).toBe(1);
+    const rows = () => h.db.all<{ status: string; idempotencyKey: string }>('SELECT status, idempotency_key FROM wakeups WHERE agent_id = ?', [agentId]);
+    expect(rows().some((w) => w.idempotencyKey === `stall-recovery:${agentId}:1` && w.status === 'queued')).toBe(true);
+
+    // Attempt 1 produced nothing; the worker stalls again and gets attempt 2.
+    simulateInertRecoveryTurn(agentId);
+    await tickLater();
+    expect(attemptsOf()).toBe(2);
+    expect(rows().some((w) => w.idempotencyKey === `stall-recovery:${agentId}:2` && w.status === 'queued')).toBe(true);
+
+    // Attempt 2 also produced nothing; the cap (2) is now reached — escalate instead of a third wake.
+    simulateInertRecoveryTurn(agentId);
+    await tickLater();
+    expect(rows().some((w) => w.idempotencyKey === `stall-recovery:${agentId}:3`)).toBe(false);
+    const finding = decisions.list({ ticketId, status: ['open'] }).find((d) => d.kind === 'gate_finding');
+    expect(finding).toBeDefined();
+    expect(finding!.owner).toBe('weaver');
+    expect(finding!.correlationKey).toBe(`stalled-worker:${agentId}`);
+    const escalation = h.db.get<{ escalatedAt: string | null; escalationDecisionId: string | null }>('SELECT * FROM worker_stall_state WHERE agent_id = ?', [agentId]);
+    expect(escalation?.escalatedAt).not.toBeNull();
+    expect(escalation?.escalationDecisionId).toBe(finding!.id);
+
+    // No path produced a second worker for this ticket throughout.
+    expect(h.services.workers!.spawnForTicket).not.toHaveBeenCalled();
+    expect(h.db.get<{ workerId: string }>('SELECT worker_id FROM tickets WHERE id = ?', [ticketId])?.workerId).toBe(agentId);
+    expect(h.db.all('SELECT id FROM agents WHERE ticket_id = ? AND kind = ?', [ticketId, 'worker'])).toHaveLength(1);
+
+    // Once escalated, the open decision excludes the worker from further detection/recovery.
+    await tickLater();
+    expect(rows().filter((w) => w.idempotencyKey?.startsWith(`stall-recovery:${agentId}:`))).toHaveLength(2);
+  });
+
+  it('a long-running healthy turn is never treated as stalled, however long it runs', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    const runId = newId();
+    h.db.insert('runs', {
+      id: runId, workspaceId: h.workspaceId, agentId, ticketId, wakeupIdsJson: [], runtimeId: 'claude',
+      status: 'running', turnEpoch: 1, cwd: h.ctx.paths.workers, startedAt: nowIso(), createdAt: nowIso(),
+    });
+    runState(h.ctx).active.set(runId, { runId, agentId, startedAt: Date.now(), pid: null, cancel: async () => undefined });
+    await supervisor.tick();
+    await tickLater();
+    await tickLater();
+    expect(h.db.get('SELECT 1 FROM worker_stall_state WHERE agent_id = ?', [agentId])).toBeUndefined();
+  });
+
+  it('a worker waiting on an open decision is never auto-recovered or escalated', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    decisions.create({ kind: 'agent', id: agentId }, { ticketId, kind: 'question', title: 'Which approach?', askedByAgentId: agentId });
+    await supervisor.tick();
+    expect(h.db.get('SELECT 1 FROM worker_stall_state WHERE agent_id = ?', [agentId])).toBeUndefined();
+  });
+
+  it('a worker with a scheduled future self-wake is never auto-recovered', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    wake.scheduleSelfWake(agentId, { reason: 'check back later', delayMs: 20 * 60_000 });
+    await supervisor.tick();
+    expect(h.db.get('SELECT 1 FROM worker_stall_state WHERE agent_id = ?', [agentId])).toBeUndefined();
+  });
+
+  it('a worker whose ticket is blocked is never auto-recovered, even with no open decision', async () => {
+    const ticketId = seedTicket(h, { status: 'blocked' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    await supervisor.tick();
+    expect(h.db.get('SELECT 1 FROM worker_stall_state WHERE agent_id = ?', [agentId])).toBeUndefined();
+  });
+
+  it('resets the attempt count once a recovered run leaves observable evidence of progress', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+
+    await supervisor.tick();
+    expect(h.db.get<{ attempts: number }>('SELECT attempts FROM worker_stall_state WHERE agent_id = ?', [agentId])?.attempts).toBe(1);
+
+    // The recovered turn leaves a ticket comment: real evidence of progress. Advance the clock first
+    // so the run's timestamp is fresh relative to the tick that will observe it, not stale by the
+    // time that tick's own cutoff is computed.
+    if (!fakeTimeActive) { vi.useFakeTimers({ toFake: ['Date'] }); fakeTimeActive = true; }
+    vi.setSystemTime(new Date(Date.now() + 61_000));
+    h.db.run("UPDATE wakeups SET status = 'completed' WHERE agent_id = ? AND status = 'queued'", [agentId]);
+    const runId = newId();
+    const finishedAt = nowIso();
+    h.db.insert('runs', {
+      id: runId, workspaceId: h.workspaceId, agentId, ticketId, wakeupIdsJson: [], runtimeId: 'claude',
+      status: 'succeeded', turnEpoch: 2, cwd: h.ctx.paths.workers, startedAt: finishedAt, finishedAt, createdAt: finishedAt,
+    });
+    h.db.insert('ticket_comments', { id: newId(), ticketId, authorKind: 'agent', runId, body: 'made progress', kind: 'status', createdAt: finishedAt });
+    h.db.update('agents', agentId, { lastRunAt: finishedAt });
+
+    await supervisor.tick();
+    // Cleared: no longer in an active stall/recovery cycle.
+    expect(h.db.get('SELECT 1 FROM worker_stall_state WHERE agent_id = ?', [agentId])).toBeUndefined();
+
+    // It stalls again later; it gets the full number of attempts again, not a continuation from 1.
+    h.db.update('agents', agentId, { lastRunAt: oldTimestamp() });
+    await tickLater();
+    expect(h.db.get<{ attempts: number }>('SELECT attempts FROM worker_stall_state WHERE agent_id = ?', [agentId])?.attempts).toBe(1);
+  });
+
+  it('resolving the escalation makes the worker eligible for detection again, with a full fresh set of attempts', async () => {
+    h.ctx.config.defaults.stalledWorkerMaxAutoRecoverAttempts = 1;
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+
+    await supervisor.tick(); // attempt 1
+    expect(h.db.get<{ attempts: number }>('SELECT attempts FROM worker_stall_state WHERE agent_id = ?', [agentId])?.attempts).toBe(1);
+
+    simulateInertRecoveryTurn(agentId);
+    await tickLater(); // cap (1) reached — escalates
+    const finding = decisions.list({ ticketId, status: ['open'] }).find((d) => d.kind === 'gate_finding');
+    expect(finding).toBeDefined();
+
+    // The weaver resolves it without the worker itself having made any progress. Its last_run_at is
+    // still stale, so the very next sweep detects and recovers it again — no leftover exclusion, and
+    // a full fresh set of attempts rather than treating it as already at the exhausted cap.
+    decisions.withdraw({ kind: 'agent', id: h.conductorId }, finding!.id, 'steered the worker directly');
+    await tickLater();
+    expect(h.db.get<{ attempts: number; escalatedAt: string | null }>('SELECT * FROM worker_stall_state WHERE agent_id = ?', [agentId]))
+      .toMatchObject({ attempts: 1, escalatedAt: null });
+  });
+
+  it('the workers and tickets reads distinguish a stalled worker from a working one', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { lastRunAt: oldTimestamp() });
+    expect(isWorkerStalled(h.ctx, agentId)).toBe(false);
+    await supervisor.tick();
+    expect(isWorkerStalled(h.ctx, agentId)).toBe(true);
+
+    const otherTicketId = seedTicket(h, { status: 'in_progress', number: 2, identifier: 'TST-2' });
+    const workingAgentId = h.addWorker(otherTicketId, { lastRunAt: nowIso() });
+    expect(isWorkerStalled(h.ctx, workingAgentId)).toBe(false);
   });
 });
 

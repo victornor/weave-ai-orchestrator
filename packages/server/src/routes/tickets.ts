@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { isWorkerStalled } from '@weave-ai/core';
 import { TICKET_KINDS, TICKET_PRIORITIES, TICKET_STATUSES, OcError } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
@@ -50,14 +51,15 @@ export function ticketRoutes(): Hono<AppEnv> {
     const s = c.get('ws').services;
     const ticket = s.tickets.get(c.req.param('id'));
     const openspecState = await s.openspec.statusFor(ticket.id).catch(() => null);
+    const workerId = ticket.workerId ?? s.tickets.lastWorker(ticket.id)?.id ?? null;
     return c.json({
       ticket,
       blockers: s.tickets.blockers(ticket.id),
       children: s.tickets.children(ticket.id),
-      worker: (() => {
-        const workerId = ticket.workerId ?? s.tickets.lastWorker(ticket.id)?.id ?? null;
-        return workerId ? safe(() => s.workers.get(workerId)) : null;
-      })(),
+      worker: workerId ? safe(() => s.workers.get(workerId)) : null,
+      // VS-498: the assigned worker is in an active stall/recovery cycle — distinct from the
+      // ticket's own working status, since both otherwise read the same.
+      workerStalled: workerId ? isWorkerStalled(c.get('ws').ctx, workerId) : false,
       openspecState,
       workProducts: s.tickets.workProducts(ticket.id),
       // Where this ticket stands in its project's merge queue: null once it is merging or elsewhere.

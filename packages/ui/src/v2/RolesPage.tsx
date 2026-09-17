@@ -14,6 +14,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   agentUiStatus,
   projectLabel,
+  type Agent,
   type AgentStatus,
   type Project,
   type Role,
@@ -24,7 +25,6 @@ import { useWs } from '../api/context';
 import {
   useCreateThread,
   useModels,
-  usePersistentSession,
   usePostThreadMessage,
   useProjects,
   usePutCharter,
@@ -32,6 +32,7 @@ import {
   useRoleAction,
   useRoles,
   useRollbackCharter,
+  useSessions,
   useStartSession,
   useThreads,
   useTickets,
@@ -43,10 +44,12 @@ import { EmptyState, ErrorState, messageOf } from '../components/States';
 import { SkeletonRows } from '../components/Skeleton';
 import { cents, initials, statusText, tokens } from '../lib/format';
 import { projectColorVar } from '../lib/projectColor';
+import { roleStateLabel } from '../lib/roleState';
 import { defaultThread } from '../lib/threads';
 import { cx } from '../lib/cx';
 import { V2Page } from './V2Page';
 import { WorkerFeed, useWorkerRun } from './WorkerFeed';
+import { RoleChatControl, sessionForRole } from './roleChat';
 
 /** The statuses a worker counts as an instance of a role right now (mirrors V1's Roles page). */
 export const LIVE_WORKER_STATUSES = new Set(['provisioning', 'active', 'running', 'paused', 'error']);
@@ -66,20 +69,7 @@ export function groupRolesByProject(projects: readonly Project[], roles: readonl
 }
 
 /** `pending_activation` is the state the human names "awaiting hire approval". */
-export function roleStateLabel(status: string): string {
-  switch (status) {
-    case 'pending_activation':
-      return 'awaiting hire approval';
-    case 'active':
-      return 'active';
-    case 'paused':
-      return 'paused';
-    case 'retired':
-      return 'retired';
-    default:
-      return statusText(status);
-  }
-}
+export { roleStateLabel };
 
 /**
  * The message the hire modal sends: the exact string the weaver's `weave-ai-hire` skill recognises
@@ -143,6 +133,7 @@ export function V2RolesScreen(): React.ReactElement {
   const projects = useProjects();
   const roles = useRoles();
   const workers = useWorkers({});
+  const sessions = useSessions();
   const tickets = useTickets({ limit: 300 });
 
   const [projectFilter, setProjectFilter] = useState<string>('all');
@@ -217,6 +208,7 @@ export function V2RolesScreen(): React.ReactElement {
                 group={g}
                 colour={projectColorVar(g.project.id, siblingIds)}
                 allWorkers={allWorkers}
+                sessions={sessions.data ?? []}
                 ticketsById={ticketsById}
                 expanded={expanded}
                 onToggle={toggle}
@@ -238,6 +230,7 @@ function RoleGroupSection({
   group,
   colour,
   allWorkers,
+  sessions,
   ticketsById,
   expanded,
   onToggle,
@@ -247,6 +240,7 @@ function RoleGroupSection({
   group: RoleGroup;
   colour: string;
   allWorkers: WorkerListItem[];
+  sessions: readonly Agent[];
   ticketsById: Map<string, { id: string; identifier: string; title: string }>;
   expanded: ReadonlySet<string>;
   onToggle: (workerId: string) => void;
@@ -274,6 +268,7 @@ function RoleGroupSection({
               key={r.id}
               role={r}
               workers={liveWorkersOf(allWorkers, r.id)}
+              session={sessionForRole(sessions, r.id)}
               ticketsById={ticketsById}
               expanded={expanded}
               onToggle={onToggle}
@@ -290,6 +285,7 @@ function RoleGroupSection({
 function RoleCard({
   role,
   workers,
+  session,
   ticketsById,
   expanded,
   onToggle,
@@ -298,6 +294,7 @@ function RoleCard({
 }: {
   role: Role;
   workers: WorkerListItem[];
+  session: Agent | null;
   ticketsById: Map<string, { id: string; identifier: string; title: string }>;
   expanded: ReadonlySet<string>;
   onToggle: (workerId: string) => void;
@@ -307,23 +304,10 @@ function RoleCard({
   const action = useRoleAction();
   const [menu, setMenu] = useState(false);
   const [starting, setStarting] = useState(false);
-  const go = useGo();
-  const persistentSession = usePersistentSession();
   // VS-526: the worker option a newly opened session starts on; changeable afterwards on its page.
   const sessionModels = useModels();
   const chatOptions = (sessionModels.data?.workerOptions ?? []).filter((o) => o.runtime);
   const [chatOption, setChatOption] = useState('');
-
-  // VS-495: opens (creating on first use) the role's one persistent, no-ticket session and navigates
-  // to it — distinct from "Start session" above, which always creates or resumes a ticket-bound one.
-  // VS-526: the chosen option only applies when the session is created (the endpoint is idempotent,
-  // so re-opening never clobbers an existing session's option).
-  const onChat = (): void => {
-    persistentSession.mutate(
-      { projectId: role.projectId, roleId: role.id, ...(chatOption ? { workerModelId: chatOption } : {}) },
-      { onSuccess: ({ agent }) => go('/w/$ws/workers/$workerId', { params: { ws, workerId: agent.id } }) },
-    );
-  };
 
   return (
     <div className="v2-card overflow-hidden" data-role-card={role.id}>
@@ -349,14 +333,10 @@ function RoleCard({
             {chatOptions.map((o) => (<option key={o.id} value={o.id}>{o.id}</option>))}
           </select>
         ) : null}
-        <button
-          type="button"
-          disabled={persistentSession.isPending}
-          onClick={onChat}
-          className="flex-none text-micro text-accent-link hover:text-text-1 disabled:opacity-40"
-        >
-          Chat
-        </button>
+        {/* VS-525: the shared role-chat control, the same one the project overview's Roles section
+            renders, so both surfaces say "Start chat"/"Open chat" and withhold it for a role that
+            cannot serve a session. */}
+        <RoleChatControl role={role} session={session} ws={ws} workerModelId={chatOption || undefined} className="flex-none" />
         <button
           type="button"
           aria-expanded={starting}

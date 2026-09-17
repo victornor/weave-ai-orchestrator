@@ -355,7 +355,7 @@ export interface HandoverReconciliation {
 }
 export interface HandoverEndResult { note: string; reconciliation: HandoverReconciliation }
 export interface WorkersService {
-  list(filter?: { status?: S.AgentStatus[]; projectId?: string; roleId?: string; includeRetired?: boolean }): S.Agent[];
+  list(filter?: { status?: S.AgentStatus[]; kinds?: S.AgentKind[]; projectId?: string; roleId?: string; includeRetired?: boolean }): S.Agent[];
   get(id: string): S.Agent;
   conductor(): S.Agent;
   ensureConductor(): Promise<S.Agent>;

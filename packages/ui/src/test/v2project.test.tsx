@@ -15,6 +15,8 @@ const state = vi.hoisted(() => ({
   openingPull: false,
   roadmap: [] as Array<Record<string, unknown>>,
   blocks: [] as Array<Record<string, unknown>>,
+  roles: [] as Array<Record<string, unknown>>,
+  sessions: [] as Array<Record<string, unknown>>,
   calls: [] as Array<{ kind: string; args: unknown }>,
 }));
 
@@ -69,6 +71,9 @@ vi.mock('../api/hooks', () => ({
   useChangelogRecent: () => ({ isLoading: false, data: { entries: [] } }),
   useChangelogHeatmap: () => ({ isLoading: false, data: undefined }),
   useDecisions: () => ({ isLoading: false, data: [] }),
+  useRoles: () => ({ isLoading: false, data: state.roles }),
+  useSessions: () => ({ data: state.sessions }),
+  usePersistentSession: () => ({ mutate: vi.fn(), isPending: false, isError: false, error: null }),
   useTickets: () => ({ isLoading: false, data: [{ id: 'tk_1', identifier: 'ACME-42' }] }),
   useRuns: () => ({ isLoading: false, data: [] }),
   useRoadmap: () => ({ isLoading: false, data: state.roadmap }),
@@ -89,6 +94,8 @@ beforeEach(() => {
   state.openingPull = false;
   state.roadmap = [];
   state.blocks = [];
+  state.roles = [];
+  state.sessions = [];
   state.calls = [];
 });
 
@@ -119,9 +126,45 @@ describe('the V2 project overview', () => {
 
   it('renders the kept sections', () => {
     render(<V2ProjectScreen />);
-    for (const label of ['Needs you', 'Work under way', 'Roadmap', 'History', 'Pull requests', 'Recent landings', 'Activity', 'Knowledge']) {
+    for (const label of ['Needs you', 'Work under way', 'Roadmap', 'Roles', 'History', 'Pull requests', 'Recent landings', 'Activity', 'Knowledge']) {
       expect(screen.getByRole('heading', { name: label })).toBeInTheDocument();
     }
+  });
+
+  it('puts the Roles section immediately after Roadmap', () => {
+    render(<V2ProjectScreen />);
+    const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
+    expect(headings.indexOf('Roles')).toBe(headings.indexOf('Roadmap') + 1);
+  });
+
+  const rolesSection = (): HTMLElement =>
+    screen.getByRole('heading', { name: 'Roles' }).closest('section') as HTMLElement;
+
+  it('lists the project’s roles with an existing conversation and a new one distinguished', () => {
+    state.roles = [
+      { id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'active' },
+      { id: 'r2', projectId: 'p1', name: 'Codebase Scout', status: 'active' },
+    ];
+    state.sessions = [{ id: 'a1', kind: 'session', roleId: 'r1' }];
+    render(<V2ProjectScreen />);
+    const section = rolesSection();
+    expect(within(section).getByText('Backend Engineer')).toBeInTheDocument();
+    expect(within(section).getByText('Codebase Scout')).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Open chat' })).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Start chat' })).toBeInTheDocument();
+  });
+
+  it('states why a role with no serviceable session offers no chat', () => {
+    state.roles = [{ id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'paused' }];
+    render(<V2ProjectScreen />);
+    const section = rolesSection();
+    expect(within(section).queryByRole('button', { name: /chat/i })).toBeNull();
+    expect(within(section).getByText(/resume the role to chat/i)).toBeInTheDocument();
+  });
+
+  it('says so when the project has no roles', () => {
+    render(<V2ProjectScreen />);
+    expect(within(rolesSection()).getByText('No roles hired for this project yet.')).toBeInTheDocument();
   });
 
   const roadmapSection = (): HTMLElement =>

@@ -158,6 +158,27 @@ describe('POST /workers/persistent-session (VS-495)', () => {
   });
 });
 
+describe('GET /workers — kind filter (VS-525)', () => {
+  it('passes a kind list through so a role session can be read', async () => {
+    const { h, fetch } = app();
+    const list = vi.fn(() => [worker({ id: 'ag_session', kind: 'session', ticketId: null })]);
+    h.impls.workers!['list'] = list;
+
+    const res = await fetch('/api/w/ws1/workers?kind=session&project=proj1', { headers: authed() });
+    expect(res.status).toBe(200);
+    expect(list).toHaveBeenCalledWith(expect.objectContaining({ kinds: ['session'], projectId: 'proj1' }));
+  });
+
+  it('omits the filter when no kind is asked for, keeping the worker default', async () => {
+    const { h, fetch } = app();
+    const list = vi.fn(() => [worker({ id: 'ag_1' })]);
+    h.impls.workers!['list'] = list;
+
+    await fetch('/api/w/ws1/workers', { headers: authed() });
+    expect((list.mock.calls[0]![0] as { kinds?: string[] }).kinds).toBeUndefined();
+  });
+});
+
 describe('GET /workers/:id — input.midTurn (VS-99)', () => {
   it('names the reason for a runtime that cannot take mid-turn input at all', async () => {
     const { h, fetch } = app();

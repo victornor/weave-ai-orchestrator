@@ -266,8 +266,12 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
 
   const service: WorkersService = {
     list(filter = {}): Agent[] {
-      const where = ["workspace_id = ?", "kind = 'worker'"];
-      const params: unknown[] = [ctx.workspaceId];
+      // VS-525: `kinds` lets a caller read another agent kind (a role's `session` agents, to show
+      // whether its chat already exists) without changing what the default callers — the presenter,
+      // the roles detail route, the worker tool — get back: transient workers only.
+      const kinds = filter.kinds?.length ? filter.kinds : ['worker'];
+      const where = ['workspace_id = ?', `kind IN (${kinds.map(() => '?').join(',')})`];
+      const params: unknown[] = [ctx.workspaceId, ...kinds];
       if (filter.status?.length) { where.push(`status IN (${filter.status.map(() => '?').join(',')})`); params.push(...filter.status); }
       else if (!filter.includeRetired) where.push("status != 'retired'");
       if (filter.projectId) { where.push('project_id = ?'); params.push(filter.projectId); }

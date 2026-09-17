@@ -12,6 +12,7 @@ const state = vi.hoisted(() => ({
   projects: [] as unknown[],
   roles: [] as unknown[],
   workers: [] as unknown[],
+  sessions: [] as unknown[],
   tickets: [] as unknown[],
   runs: [] as unknown[],
   roleDetail: undefined as unknown,
@@ -49,6 +50,7 @@ vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: state.projects, isLoading: false, isError: false, refetch: vi.fn() }),
   useRoles: () => ({ data: state.roles, isLoading: false, isError: false, refetch: vi.fn() }),
   useWorkers: () => ({ data: state.workers }),
+  useSessions: () => ({ data: state.sessions }),
   useTickets: () => ({ data: state.tickets }),
   useRuns: (params: { status?: string } = {}) => ({
     data: (state.runs as Run[]).filter((r) => !params.status || r.status === params.status),
@@ -105,6 +107,7 @@ beforeEach(() => {
   state.projects = [apiProject(), webProject()];
   state.roles = [role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer' }), role({ id: 'r2', projectId: 'p2', name: 'Codebase Scout' })];
   state.workers = [];
+  state.sessions = [];
   state.tickets = [ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode' })];
   state.runs = [];
   state.roleDetail = undefined;
@@ -124,6 +127,10 @@ beforeEach(() => {
   state.updateRole.mockClear();
   state.putCharter.mockClear();
   state.rollback.mockClear();
+  state.persistentSession.mockReset();
+  state.persistentSession.mockImplementation((_v: unknown, opts?: { onSuccess?: (r: { agent: { id: string } }) => void }) =>
+    opts?.onSuccess?.({ agent: { id: 'a_new' } }),
+  );
   state.startSession.mockClear();
 });
 
@@ -185,7 +192,7 @@ describe('the V2 Roles screen', () => {
     };
     render(<V2RolesScreen />);
     fireEvent.change(screen.getByLabelText("Worker option for Backend Engineer's session"), { target: { value: 'deep' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start chat' }));
     expect(state.persistentSession).toHaveBeenCalledWith(
       { projectId: 'p1', roleId: 'r1', workerModelId: 'deep' },
       expect.anything(),
@@ -388,5 +395,31 @@ describe('the V2 Roles screen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Has workers' }));
     expect(screen.getByText('Backend Engineer')).toBeInTheDocument();
     expect(screen.queryByText('Codebase Scout')).toBeNull();
+  });
+});
+
+describe('the V2 Roles screen’s role chat (VS-525)', () => {
+  it('offers to start a conversation and opens it on click', () => {
+    state.roles = [role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'active' })];
+    render(<V2RolesScreen />);
+    const button = screen.getByRole('button', { name: 'Start chat' });
+    fireEvent.click(button);
+    expect(state.persistentSession).toHaveBeenCalledWith({ projectId: 'p1', roleId: 'r1' }, expect.objectContaining({ onSuccess: expect.any(Function) }));
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'a_new' } });
+  });
+
+  it('says Open chat when the role already has a session', () => {
+    state.roles = [role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'active' })];
+    state.sessions = [agent({ id: 'a1', kind: 'session', roleId: 'r1' })];
+    render(<V2RolesScreen />);
+    expect(screen.getByRole('button', { name: 'Open chat' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Start chat' })).toBeNull();
+  });
+
+  it('offers no chat for a paused role, only the reason', () => {
+    state.roles = [role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'paused' })];
+    render(<V2RolesScreen />);
+    expect(screen.queryByRole('button', { name: /chat/i })).toBeNull();
+    expect(screen.getByText(/resume the role to chat/i)).toBeInTheDocument();
   });
 });

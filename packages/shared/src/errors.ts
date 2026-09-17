@@ -3,7 +3,7 @@ export const ERROR_CODES = [
   'wrong_status', 'budget_exceeded', 'duplicate_entry', 'entry_too_long', 'runtime_unreachable', 'model_unconfigured', 'worktree_dirty', 'worktree_not_landed',
   'openspec_validation_failed', 'openspec_not_found', 'openspec_archive_blocked', 'merge_not_approved', 'merge_unverified', 'merge_checks_pending', 'role_full', 'auth_bad_credentials',
   'auth_locked', 'auth_session_expired', 'auth_totp_required', 'auth_totp_invalid', 'net_daemon_unreachable', 'internal',
-  'ambiguous_install_path', 'revision_pending',
+  'ambiguous_install_path', 'revision_pending', 'unavailable',
 ] as const;
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
@@ -23,6 +23,7 @@ export class OcError extends Error {
       case 'validation': case 'entry_too_long': case 'budget_exceeded': case 'model_unconfigured': return 400;
       case 'invalid_disposition': case 'missing_action_path': case 'not_checked_out': case 'openspec_validation_failed': case 'openspec_archive_blocked': case 'worktree_dirty': case 'worktree_not_landed': case 'merge_unverified': case 'role_full': return 422;
       case 'runtime_unreachable': case 'net_daemon_unreachable': return 503;
+      case 'unavailable': return 503;
       default: return 500;
     }
   }

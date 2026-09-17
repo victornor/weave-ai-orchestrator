@@ -38,7 +38,7 @@ A rejection is information, not an obstacle. The daemon rejects near-duplicates,
 
 ## Reading before writing
 
-`weave_knowledge_docs` lists every document you can read with a one-line summary; `weave_knowledge_search(query)` finds hub entries and documents by text; `weave_knowledge_doc_get(slug)` returns a document with `linksTo` and `linkedFrom`, so you can walk the graph as deep as the question needs. Read first, then update the existing page rather than writing a near-duplicate.
+`weave_knowledge_docs` lists every document you can read with a one-line summary; `weave_knowledge_search(query)` finds hub entries and documents by text; `weave_knowledge_semantic_search(query)` is the meaning-based fallback for when the exact words you tried find nothing but you know roughly what you want; `weave_knowledge_doc_get(slug)` returns a document with `linksTo` and `linkedFrom`, so you can walk the graph as deep as the question needs. Read first, then update the existing page rather than writing a near-duplicate.
 
 ## Curation
 

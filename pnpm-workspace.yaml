@@ -6,4 +6,6 @@ packages:
   - examples/plugins/*
 allowBuilds:
   esbuild: true
+  onnxruntime-node: true
+  protobufjs: true
 verifyDepsBeforeRun: false

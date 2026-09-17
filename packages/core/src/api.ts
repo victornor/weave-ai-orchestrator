@@ -518,6 +518,14 @@ export interface KnowledgeService {
   lint(): Array<{ path: string; scope: string; projectId: string | null; tokenEstimate: number; budgetTokens: number; pct: number; lastCuratedAt: string | null; curationPending: boolean }>;
   requestCuration(actor: Actor, scope: S.KnowledgeScope, projectId?: string | null): Promise<{ ticketId?: string; wakeId?: string }>;
   search(query: string, projectId?: string | null, limit?: number): Array<{ kind: string; projectId: string | null; ref: string; title: string; snippet: string }>;
+  /**
+   * VS-493: the opt-in semantic fallback over the caller's visible knowledge. Scoped exactly like
+   * `search()`: a worker's own project plus shared knowledge; the weaver reaches everything. It is
+   * async because it may lazily load the local model and the `sqlite-vec` extension on first use.
+   */
+  semanticSearch(query: string, projectId?: string | null, limit?: number): Promise<SemanticSearchHit[]>;
+  /** VS-493: idempotent backfill of the derived embedding index over the caller's visible tree. */
+  backfillEmbeddings(projectId?: string | null): Promise<EmbeddingBackfillReport>;
   reindex(): void;
   /** Recompute every row's stored token count from the file on disk, without reindex's revisions/links. */
   recountSizes(): void;
@@ -543,6 +551,9 @@ export interface KnowledgeService {
    */
   duplicates(filter?: { scope?: S.KnowledgeScope; projectId?: string | null }): KnowledgeDuplicateReport;
 }
+/** VS-493: one semantic-search hit (a chunk) and the idempotent backfill report. */
+import type { SemanticHit as SemanticSearchHit, EmbeddingBackfillReport } from './knowledge/embeddings.js';
+export type { SemanticHit as SemanticSearchHit, EmbeddingBackfillReport } from './knowledge/embeddings.js';
 export interface KnowledgeDuplicateEntry {
   path: string; scope: S.KnowledgeScope; projectId: string | null; slug: string | null;
   section: string; text: string; line: string;

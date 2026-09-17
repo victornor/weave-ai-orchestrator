@@ -1515,7 +1515,7 @@ export function DeviceSection({ themeControl = 'full' }: { themeControl?: 'full'
       <section>
         <div className="ac-label mb-2">Theme</div>
         {themeControl === 'note' ? (
-          <p className="text-micro text-text-3">Theme follows the switch in the V2 rail footer.</p>
+          <p className="text-micro text-text-3">Theme follows the in-app switch — the rail footer on desktop, the More menu on a phone.</p>
         ) : (
           <>
             <div className="flex gap-1.5">

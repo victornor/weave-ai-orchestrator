@@ -379,6 +379,17 @@ describe('the in-app theme switch', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Light theme' }));
     expect(onTheme).toHaveBeenCalledWith('light');
   });
+
+  it('carries the same switch in the phone More sheet, since the rail is hidden at phone width (VS-490)', () => {
+    mountShell();
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'More' }));
+    const dialog = screen.getByRole('dialog', { name: 'More' });
+    // The sheet's switch is the same component driven by the shell's own `onTheme`, not a copy.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Light theme' }));
+    expect(onTheme).toHaveBeenCalledWith('light');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Dark theme' }));
+    expect(onTheme).toHaveBeenCalledWith('dark');
+  });
 });
 
 describe('the phone tab bar and More', () => {

@@ -178,12 +178,13 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
   const transcribingHere = sessionHere && dictation.transcribing;
 
   // The shared chord (VS-432): only a local composer binds it here — the provider owns it when the
-  // session is shared.
+  // session is shared. The chord's ending is the keybinding ending, which honours the auto-send
+  // setting (VS-494); the mic button keeps the never-send `ctl.stop`.
   useDictationHotkey({
     enabled: !isTouch && hotkey && !disabled && shared === null,
     listening: dictation.listening,
     start: ctl.start,
-    stop: ctl.stop,
+    stop: ctl.stopByChord,
   });
 
   // Register as the place a shared hotkey-started session belongs, and as the submit path that can

@@ -158,12 +158,14 @@ export function DictationSessionProvider({ children }: { children: ReactNode }):
   }, [startToken]);
 
   // The shared chord controls the session from any page (VS-432); on the target chat the composer
-  // announces itself so the chord starts there, off-chat a live session is stopped or toggled.
+  // announces itself so the chord starts there, off-chat a live session is stopped or toggled. The
+  // chord's ending is the keybinding ending — it honours the auto-send setting (VS-494) — while the
+  // bar's Stop and the composer's mic keep the never-send `controller.stop`.
   useDictationHotkey({
     enabled: !(typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches) && (active || hotkeyAllowed),
     listening: controller.dictation.listening,
     start: startSession,
-    stop: controller.stop,
+    stop: controller.stopByChord,
   });
 
   // Escape abandons a running dictation without sending (VS-489). It is bound only while a session

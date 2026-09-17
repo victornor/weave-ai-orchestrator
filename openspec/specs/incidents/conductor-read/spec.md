@@ -1,35 +1,42 @@
 # incidents/conductor-read Specification
 
 ## Purpose
-Lets a conductor list and read back the system incidents agents have filed, through MCP, scoped to its own workspace and bounded by time so a repeating routine sees only what is new. Workers gain no read access.
+Lets a conductor list and read back the system incidents agents have filed, through MCP, from every
+workspace — so the workspace that owns Weave AI can act on the reports the others file — each
+incident tagged with its originating workspace and bounded by time so a repeating routine sees only
+what is new. Workers gain no read access.
 
 ## Requirements
 
 ### Requirement: A conductor can list incidents through MCP
 
-The daemon SHALL expose an MCP tool named `ac_incident_list` to the conductor only. It SHALL return
+The daemon SHALL expose an MCP tool named `weave_incident_list` to the conductor only. It SHALL return
 the incidents matching the given filters newest first as `{ items, total }`, where `total` counts
 every incident matching the filters, not just the returned page. It SHALL accept an optional
 `reporterKind` filter (`conductor` or `worker`), an optional `limit` (default 100, maximum 200,
-matching the daemon-wide HTTP list), and an optional `status` filter (`open`, `resolved`, or `all`)
-that SHALL default to `open` when omitted. This default is specific to `ac_incident_list`: the
-daemon-wide HTTP list (`GET /api/incidents`, unaffected by this capability) SHALL continue to return
-every incident regardless of resolution, exactly as it did before this capability existed.
+matching the daemon-wide HTTP list), an optional `status` filter (`open`, `resolved`, or `all`) that
+SHALL default to `open` when omitted, and an optional `workspaceId` filter. With no `workspaceId`, the
+tool SHALL return incidents from every workspace, plus rows filed with no workspace at all. With a
+`workspaceId`, the tool SHALL return only the incidents filed from exactly that workspace — a
+workspace-less row is not filed from it — so a caller can narrow to one workspace deliberately. This
+`status` default is specific to `weave_incident_list`: the daemon-wide HTTP list (`GET /api/incidents`,
+unaffected by this capability) SHALL continue to return every incident regardless of resolution,
+exactly as it did before this capability existed.
 
 #### Scenario: Lists newest first with a total
 
-- **WHEN** a conductor calls `ac_incident_list` with no filters
+- **WHEN** a conductor calls `weave_incident_list` with no filters
 - **THEN** the result is `{ ok: true, data: { items, total } }` with items ordered newest first
 - **AND** `total` is the number of incidents the conductor can see, even when `limit` returns fewer
 
 #### Scenario: Filter by reporter kind
 
-- **WHEN** a conductor calls `ac_incident_list` with `reporterKind: "worker"`
+- **WHEN** a conductor calls `weave_incident_list` with `reporterKind: "worker"`
 - **THEN** only worker-filed incidents are returned and counted
 
 #### Scenario: Limit bounds the page
 
-- **WHEN** a conductor calls `ac_incident_list` with `limit: 1` while two visible incidents exist
+- **WHEN** a conductor calls `weave_incident_list` with `limit: 1` while two visible incidents exist
 - **THEN** one item is returned and `total` is 2
 
 #### Scenario: The HTTP incidents list keeps showing resolved incidents
@@ -39,23 +46,28 @@ every incident regardless of resolution, exactly as it did before this capabilit
 
 #### Scenario: Resolved incidents are hidden by default
 
-- **WHEN** a conductor calls `ac_incident_list` with no `status` filter while one open and one resolved incident are visible
+- **WHEN** a conductor calls `weave_incident_list` with no `status` filter while one open and one resolved incident are visible
 - **THEN** only the open incident is returned and counted
 
 #### Scenario: status "resolved" shows only resolved incidents
 
-- **WHEN** a conductor calls `ac_incident_list` with `status: "resolved"` while one open and one resolved incident are visible
+- **WHEN** a conductor calls `weave_incident_list` with `status: "resolved"` while one open and one resolved incident are visible
 - **THEN** only the resolved incident is returned and counted
 
 #### Scenario: status "all" shows both
 
-- **WHEN** a conductor calls `ac_incident_list` with `status: "all"` while one open and one resolved incident are visible
+- **WHEN** a conductor calls `weave_incident_list` with `status: "all"` while one open and one resolved incident are visible
 - **THEN** both incidents are returned and counted
 
 #### Scenario: A second sweep after resolving finds nothing new
 
 - **WHEN** a conductor lists incidents, resolves every one it found, and lists again with no `status` filter
 - **THEN** the second list is empty
+
+#### Scenario: Narrowing to one workspace
+
+- **WHEN** incidents were filed from workspace A and workspace B and a conductor lists with `workspaceId` set to A
+- **THEN** only A's incidents are returned and counted, and none of B's appears
 
 ### Requirement: The incident list is lean by default
 
@@ -95,33 +107,6 @@ The daemon SHALL expose an MCP tool named `ac_incident_get` to the conductor onl
 - **WHEN** a conductor calls `ac_incident_get` with an id that was never filed
 - **THEN** the tool returns `{ ok: false, error: { code: "not_found" } }`
 
-### Requirement: Incident reads are scoped to the caller's workspace
-
-A conductor's incident reads SHALL be scoped to the filing workspace of the calling run: the list SHALL return only incidents filed from that workspace, plus incidents filed with no workspace at all (daemon-global rows), and `total` SHALL count only those. `ac_incident_get` SHALL return a caller-workspace or workspace-less incident and SHALL reject an incident filed from a different workspace with `forbidden`. The workspace SHALL NOT be a caller-supplied input; it comes from the run token. This scoping applies to the MCP tools only — the session-authenticated HTTP routes remain daemon-wide for the human.
-
-Incidents carry a nullable workspace id; a null means the incident is daemon-global and is visible to every conductor. This is deliberate: an incident is a system-health report, and a row filed with no workspace carries no workspace binding to leak, while rows that do carry a workspace stay inside it.
-
-#### Scenario: A conductor sees its workspace and nothing else
-
-- **WHEN** workspace Alpha has filed two incidents, workspace Beta one, and one more exists with no workspace
-- **AND** a conductor of workspace Alpha lists incidents
-- **THEN** the result contains exactly Alpha's two incidents and the workspace-less one, and `total` is 3
-
-#### Scenario: Another workspace's incident is invisible to the list
-
-- **WHEN** a conductor of workspace Alpha lists incidents after Beta filed one
-- **THEN** no Beta incident appears and `total` does not count it
-
-#### Scenario: Get of another workspace's incident is forbidden
-
-- **WHEN** a conductor of workspace Alpha calls `ac_incident_get` with the id of an incident filed from Beta
-- **THEN** the tool returns `{ ok: false, error: { code: "forbidden" } }`
-
-#### Scenario: A workspace-less incident is readable
-
-- **WHEN** a conductor calls `ac_incident_get` with the id of an incident stored with no workspace
-- **THEN** the tool returns the row
-
 ### Requirement: Workers cannot read incidents
 
 Neither tool SHALL be available to a worker: a worker's call to `ac_incident_list` or `ac_incident_get` SHALL be rejected with `forbidden`. A worker's ability to file incidents through `ac_incident` SHALL be unchanged.
@@ -143,7 +128,15 @@ Neither tool SHALL be available to a worker: a worker's call to `ac_incident_lis
 
 ### Requirement: The list can be bounded by time
 
-`ac_incident_list` SHALL accept an optional `since` — an ISO-8601 instant — and SHALL return only incidents created strictly after it, regardless of reporter filter or limit. A repeating caller that bookmarks the newest `createdAt` it processed and passes it as `since` SHALL not receive that incident again. An unparseable `since` SHALL be rejected with `validation`. The instant SHALL be compared after normalizing both sides to the daemon's stored timestamp format, so a caller may pass instants with or without millisecond precision.
+`weave_incident_list` SHALL accept an optional `since` — an ISO-8601 instant — and SHALL return only
+incidents created strictly after it, regardless of the reporter, status or workspace filter, or the
+limit. A repeating caller that bookmarks the newest `createdAt` it processed and passes it as `since`
+SHALL not receive that incident again. An unparseable `since` SHALL be rejected with `validation`.
+The instant SHALL be compared after normalizing both sides to the daemon's stored timestamp format,
+so a caller may pass instants with or without millisecond precision. Because the ordering the bound
+is applied to now spans workspaces, a sweep SHALL be correct across them: an incident newer than the
+bound filed from any workspace SHALL be returned, and an incident at or before the bound from any
+workspace SHALL not.
 
 #### Scenario: Only newer incidents are returned
 
@@ -162,8 +155,13 @@ Neither tool SHALL be available to a worker: a worker's call to `ac_incident_lis
 
 #### Scenario: Unparseable since
 
-- **WHEN** a conductor calls `ac_incident_list` with `since: "yesterday"`
+- **WHEN** a conductor calls `weave_incident_list` with `since: "yesterday"`
 - **THEN** the tool returns `{ ok: false, error: { code: "validation" } }`
+
+#### Scenario: A sweep spans workspaces
+
+- **WHEN** workspace A holds an incident at 10:00 and workspace B holds one at 11:00 and a conductor lists with `since` 10:30
+- **THEN** B's 11:00 incident is returned and A's 10:00 incident is not
 
 ### Requirement: Filing and the human routes are unchanged
 
@@ -196,3 +194,69 @@ This is the VS-222 paging contract (bookmark the newest `createdAt` after a shor
 - **WHEN** two incidents share a `createdAt` and a list with a limit covering both returns both
 - **AND** the caller lists again with `since` equal to that `createdAt`
 - **THEN** neither incident is in the second page
+
+### Requirement: Incident reads span every workspace
+
+An incident is a defect report about Weave AI itself, so a conductor's incident reads SHALL NOT be
+restricted to its own workspace. With no `workspaceId` filter, `weave_incident_list` SHALL return
+incidents from every workspace. `weave_incident_get` SHALL return the incident of any workspace by
+id; an incident filed from another workspace SHALL NOT be rejected with `forbidden`, and only an
+unknown id SHALL be rejected with `not_found`. The reading workspace SHALL NOT be a caller-supplied
+input; it comes from the run token and is used only for what a read records, never to restrict what
+it returns.
+
+#### Scenario: A conductor reads another workspace's incident
+
+- **WHEN** workspace A filed an incident and a conductor of workspace B lists incidents with no `workspaceId`
+- **THEN** A's incident is in the result and counted
+- **AND** the conductor of workspace B calling `weave_incident_get` for that incident returns the row
+
+#### Scenario: A workspace-less incident is readable
+
+- **WHEN** an incident was stored with no workspace
+- **THEN** every conductor's list includes it and `weave_incident_get` returns it
+
+#### Scenario: An unknown id is still not_found
+
+- **WHEN** a conductor reads an id that was never filed
+- **THEN** the tool returns `{ ok: false, error: { code: "not_found" } }`
+
+### Requirement: Every incident read names its originating workspace
+
+Each incident returned by `weave_incident_list` and `weave_incident_get` SHALL carry, in addition to
+the stored `workspaceId`, a human-readable name of the workspace it was filed from, so a reader can
+tell at a glance where it came from without resolving an opaque id. The name SHALL be the
+workspace's configured display name as the daemon knows it when the read is served, not a value
+copied into the incident at filing time. An incident stored with no workspace (daemon-global) SHALL
+report no name rather than a fabricated one.
+
+#### Scenario: A named origin
+
+- **WHEN** an incident filed from the workspace named "V OFM" is read
+- **THEN** the result carries that incident's `workspaceName` as "V OFM" alongside its `workspaceId`
+
+#### Scenario: A daemon-global incident
+
+- **WHEN** an incident stored with no workspace is read
+- **THEN** its `workspaceName` is null or absent, and no ULID or empty string is presented as its name
+
+### Requirement: The widening is incidents-only
+
+Widening incident reads to every workspace SHALL NOT widen any other cross-workspace read. Ticket,
+decision and knowledge reads SHALL keep their existing workspace and project scoping, and the
+session-authenticated incident HTTP routes SHALL keep their current daemon-wide, session-only access.
+
+#### Scenario: Another workspace's ticket stays out of reach
+
+- **WHEN** a conductor in workspace B reads a ticket that belongs to workspace A's database
+- **THEN** the ticket is not returned by B's ticket reads
+
+#### Scenario: Knowledge stays scoped
+
+- **WHEN** a conductor in workspace B reads knowledge that belongs to workspace A
+- **THEN** B's knowledge reads do not return A's workspace or project knowledge
+
+#### Scenario: The human routes are unchanged
+
+- **WHEN** a session client calls `GET /api/incidents`
+- **THEN** it still lists every incident across workspaces, exactly as before this capability existed

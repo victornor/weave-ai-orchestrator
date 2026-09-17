@@ -259,6 +259,8 @@ export interface Incident {
   /** Set by `weave_incident_resolve` (VS-271); null means still open. */
   resolvedAt: string | null;
   resolvedByAgentId: string | null;
+  /** The workspace the resolving run belonged to (VS-499); distinct from `workspaceId`, where it was filed. */
+  resolvedByWorkspaceId: string | null;
   resolution: string | null;
   resolutionTicketId: string | null;
 }

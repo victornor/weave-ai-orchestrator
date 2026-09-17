@@ -19,7 +19,7 @@ export { createAuthService, openDaemonDb, DAEMON_DB_FILE } from './auth/index.js
 export { createSecretStore, type SecretStore } from './secrets/store.js';
 export {
   createIncidentsService, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX,
-  type IncidentsService, type IncidentCreateInput, type IncidentListQuery, type IncidentGetScope, type IncidentResolveInput,
+  type IncidentsService, type IncidentCreateInput, type IncidentListQuery, type IncidentResolveInput,
 } from './incidents/index.js';
 export { signRunToken, verifyRunToken, runTokenSecret, peekWorkspaceId, isRunToken, RUN_TOKEN_PREFIX, RUN_TOKEN_TTL_SECONDS, type RunTokenClaims } from './runs/runtoken.js';
 export { describeLiveInput, type LiveInputStatus } from './runs/active.js';

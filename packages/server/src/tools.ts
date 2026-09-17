@@ -37,6 +37,12 @@ export interface ToolCtx {
   claims: RunTokenClaims;
   actor: Actor;
   incidents: IncidentsService;
+  /**
+   * Every loaded workspace, keyed by slug and internal id (VS-499). Optional so a hand-built test
+   * context that does not care about cross-workspace incident names needs no extra field; production
+   * tool front doors (`mcp.ts`, `routes/agent.ts`) always pass it.
+   */
+  workspaces?: Map<string, WorkspaceRuntime>;
 }
 export interface ToolDef<I extends ZodTypeAny = ZodTypeAny> {
   name: string;
@@ -48,6 +54,27 @@ export interface ToolDef<I extends ZodTypeAny = ZodTypeAny> {
 
 const svc = (ctx: ToolCtx): CoreServices => ctx.ws.services;
 const isConductor = (ctx: ToolCtx): boolean => ctx.claims.agentKind === 'weaver';
+
+/**
+ * VS-499: incident reads span workspaces, so an incident filed from another workspace needs a name a
+ * human reads, not just its opaque id. Resolved at read time from the daemon's loaded workspaces —
+ * never stored on the row — so a rename is reflected and pre-existing rows need no backfill. A
+ * workspace-less incident, or one the daemon does not have loaded, reports null.
+ */
+function incidentWorkspaceName(ctx: ToolCtx, id: string | null): string | null {
+  if (!id) return null;
+  return ctx.workspaces?.get(id)?.ctx.config.name ?? null;
+}
+
+function withIncidentNames<T extends { workspaceId: string | null; resolvedByWorkspaceId: string | null }>(
+  ctx: ToolCtx, row: T,
+): T & { workspaceName: string | null; resolvedByWorkspaceName: string | null } {
+  return {
+    ...row,
+    workspaceName: incidentWorkspaceName(ctx, row.workspaceId),
+    resolvedByWorkspaceName: incidentWorkspaceName(ctx, row.resolvedByWorkspaceId),
+  };
+}
 
 /** VS-398: resolves which plan `weave_plan_get` reads — a planning agent's own (omit `input`, or name it and it must match), otherwise the weaver's own explicit choice. */
 function requirePlanId(ctx: ToolCtx, input: string | null | undefined): string {
@@ -562,12 +589,15 @@ export const TOOLS: ToolDef[] = [
     name: 'weave_incident_list', scope: 'weaver', input: z.object({
       reporterKind: z.enum(INCIDENT_REPORTER_KINDS).optional(),
       since: z.string().optional().describe('ISO-8601 instant; returns only incidents created strictly after it'),
+      workspaceId: z.string().min(1).optional().describe('Narrow to the incidents filed from exactly this workspace; omit for every workspace'),
       limit: z.number().int().min(1).max(INCIDENT_LIST_MAX).optional(),
       includeEvidence: z.boolean().optional(),
       status: z.enum(INCIDENT_STATUS_FILTERS).default('open'),
     }),
     description:
-      'List system incidents (VS-174) filed from your workspace, plus workspace-less daemon-global ones, newest first — never another workspace\'s. '
+      'List system incidents (VS-174) from every workspace, newest first (VS-499), plus workspace-less daemon-global ones. '
+      + 'Pass `workspaceId` to narrow to one workspace deliberately. Each item carries the originating workspace\'s `workspaceName` '
+      + 'so you can say where it came from without decoding an id. '
       + 'Lean by default: no `evidence` per item unless includeEvidence is set; read one in full with weave_incident_get. '
       + '`total` counts everything matching the filters, not just the returned page. '
       + 'For an incremental sweep, page until a page comes back short, then pass the newest createdAt you processed as `since` next run — that instant is excluded. '
@@ -577,11 +607,12 @@ export const TOOLS: ToolDef[] = [
         reporterKind: i.reporterKind,
         since: i.since,
         limit: i.limit,
-        workspaceId: ctx.claims.workspaceId,
+        workspaceId: i.workspaceId,
         status: i.status,
       });
+      const decorated = items.map((row) => withIncidentNames(ctx, row));
       return {
-        items: i.includeEvidence ? items : items.map(({ evidence: _evidence, ...row }) => row),
+        items: i.includeEvidence ? decorated : decorated.map(({ evidence: _evidence, ...row }) => row),
         total,
       };
     },
@@ -589,9 +620,9 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'weave_incident_get', scope: 'weaver', input: z.object({ id: z.string().min(1) }),
     description:
-      'Read one system incident back in full, evidence included, by id. Scoped like weave_incident_list: '
-      + 'your workspace plus workspace-less daemon-global rows; another workspace\'s incident is `forbidden`, an unknown id is `not_found`.',
-    handler: (ctx, i) => ctx.incidents.get(i.id, { workspaceId: ctx.claims.workspaceId }),
+      'Read one system incident back in full, evidence included, by id (VS-499): the incident may be from any '
+      + 'workspace, and the result carries its originating workspace\'s `workspaceName`. An unknown id is `not_found`.',
+    handler: (ctx, i) => withIncidentNames(ctx, ctx.incidents.get(i.id)),
   },
   {
     name: 'weave_incident_resolve', scope: 'weaver', input: z.object({
@@ -601,15 +632,16 @@ export const TOOLS: ToolDef[] = [
     }),
     description:
       'Mark a system incident resolved (VS-271): `resolution` is a required reason explaining why, `ticketId` optionally '
-      + 'names the ticket that fixed the cause and is stored as given, unvalidated. Scoped like weave_incident_get: an unknown '
-      + 'id is `not_found`, another workspace\'s incident is `forbidden`. Resolving an already-resolved incident is '
-      + '`wrong_status` and never overwrites the existing resolution. Never inferred — a ticket landing does not resolve one; '
-      + 'call this explicitly.',
-    handler: (ctx, i) => ctx.incidents.resolve(
-      i.id,
-      { resolution: i.resolution, resolvedByAgentId: ctx.claims.agentId, ticketId: i.ticketId ?? null },
-      { workspaceId: ctx.claims.workspaceId },
-    ),
+      + 'names the ticket that fixed the cause and is stored as given, unvalidated. The incident may be from any workspace (VS-499); '
+      + 'the call records the resolving workspace as `resolvedByWorkspaceId` alongside the agent, so filing and resolving are not conflated. '
+      + 'An unknown id is `not_found`. Resolving an already-resolved incident is `wrong_status` and never overwrites the existing resolution. '
+      + 'Never inferred — a ticket landing does not resolve one; call this explicitly.',
+    handler: (ctx, i) => withIncidentNames(ctx, ctx.incidents.resolve(i.id, {
+      resolution: i.resolution,
+      resolvedByAgentId: ctx.claims.agentId,
+      resolvedByWorkspaceId: ctx.claims.workspaceId,
+      ticketId: i.ticketId ?? null,
+    })),
   },
   {
     name: 'weave_knowledge_get', scope: 'all', input: z.object({ scope: z.enum(KNOWLEDGE_SCOPES), projectId: z.string().optional() }),

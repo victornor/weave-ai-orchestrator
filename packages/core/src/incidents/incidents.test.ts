@@ -127,42 +127,44 @@ describe('incident reads (VS-222)', () => {
     close();
   });
 
-  it('scopes the list to the caller workspace plus workspace-less rows', () => {
+  it('narrows the list to exactly one workspace, and is daemon-wide by default', () => {
     const { incidents, close } = service();
     const ws1a = incidents.create({ ...seedBase, reporterKind: 'worker', title: 'ws1 a', workspaceId: 'ws1' });
     const ws2 = incidents.create({ ...seedBase, reporterKind: 'worker', title: 'ws2', workspaceId: 'ws2' });
     const global = incidents.create({ ...seedBase, reporterKind: 'weaver', title: 'daemon-global', workspaceId: null });
     const ws1b = incidents.create({ ...seedBase, reporterKind: 'worker', title: 'ws1 b', workspaceId: 'ws1' });
 
+    // Narrowing is an exact workspace match: another workspace's rows and workspace-less rows are out.
     const alpha = incidents.list({ workspaceId: 'ws1' });
-    expect([...alpha.items.map((i) => i.id)].sort()).toEqual([ws1a.id, ws1b.id, global.id].sort());
-    expect(alpha.total).toBe(3);
+    expect([...alpha.items.map((i) => i.id)].sort()).toEqual([ws1a.id, ws1b.id].sort());
+    expect(alpha.total).toBe(2);
 
     const beta = incidents.list({ workspaceId: 'ws2' });
-    expect([...beta.items.map((i) => i.id)].sort()).toEqual([ws2.id, global.id].sort());
-    expect(beta.total).toBe(2);
+    expect([...beta.items.map((i) => i.id)].sort()).toEqual([ws2.id].sort());
+    expect(beta.total).toBe(1);
 
-    // Unscoped stays daemon-wide (the human's HTTP list).
-    expect(incidents.list().total).toBe(4);
+    // Unscoped is daemon-wide (VS-499): every workspace's rows plus the workspace-less ones.
+    const all = incidents.list();
+    expect([...all.items.map((i) => i.id)].sort()).toEqual([ws1a.id, ws1b.id, ws2.id, global.id].sort());
+    expect(all.total).toBe(4);
     close();
   });
 
-  it('scopes get: own and workspace-less readable, another workspace forbidden', () => {
+  it('reads any workspace incident by id; an unknown id is still not_found', () => {
     const { incidents, close } = service();
     const ws1 = incidents.create({ ...seedBase, reporterKind: 'worker', title: 'ws1', workspaceId: 'ws1' });
     const ws2 = incidents.create({ ...seedBase, reporterKind: 'worker', title: 'ws2', workspaceId: 'ws2' });
     const global = incidents.create({ ...seedBase, reporterKind: 'weaver', title: 'daemon-global', workspaceId: null });
 
-    expect(incidents.get(ws1.id, { workspaceId: 'ws1' }).id).toBe(ws1.id);
-    expect(incidents.get(global.id, { workspaceId: 'ws1' }).id).toBe(global.id);
-    expect(() => incidents.get(ws2.id, { workspaceId: 'ws1' })).toThrow(OcError);
-    try {
-      incidents.get(ws2.id, { workspaceId: 'ws1' });
-    } catch (e) {
-      expect((e as OcError).code).toBe('forbidden');
-    }
-    // Unscoped (the HTTP route) still reads any row.
+    expect(incidents.get(ws1.id).id).toBe(ws1.id);
+    expect(incidents.get(global.id).id).toBe(global.id);
+    // No caller workspace is involved: another workspace's row reads like any other.
     expect(incidents.get(ws2.id).id).toBe(ws2.id);
+    try {
+      incidents.get('nope');
+    } catch (e) {
+      expect((e as OcError).code).toBe('not_found');
+    }
     close();
   });
 });
@@ -173,17 +175,18 @@ describe('incident resolution (VS-271)', () => {
     evidence: null, workspaceId: null, projectId: null, ticketId: null, agentId: 'ag1', runId: 'run1', roleId: null,
   } as const;
 
-  it('resolves an open incident, recording who, why and the fixing ticket', () => {
+  it('resolves an open incident, recording who, from where, why and the fixing ticket', () => {
     const { incidents, close } = service();
     const row = incidents.create({ ...base, reporterKind: 'worker' });
-    const resolved = incidents.resolve(row.id, { resolution: 'fixed by VS-232', resolvedByAgentId: 'weaver1', ticketId: 'VS-232' });
+    const resolved = incidents.resolve(row.id, { resolution: 'fixed by VS-232', resolvedByAgentId: 'weaver1', resolvedByWorkspaceId: 'ws9', ticketId: 'VS-232' });
     expect(resolved.resolvedAt).not.toBeNull();
     expect(resolved.resolvedByAgentId).toBe('weaver1');
+    expect(resolved.resolvedByWorkspaceId).toBe('ws9');
     expect(resolved.resolution).toBe('fixed by VS-232');
     expect(resolved.resolutionTicketId).toBe('VS-232');
     // Round-trips through get.
     expect(incidents.get(row.id)).toMatchObject({
-      resolvedAt: resolved.resolvedAt, resolvedByAgentId: 'weaver1', resolution: 'fixed by VS-232', resolutionTicketId: 'VS-232',
+      resolvedAt: resolved.resolvedAt, resolvedByAgentId: 'weaver1', resolvedByWorkspaceId: 'ws9', resolution: 'fixed by VS-232', resolutionTicketId: 'VS-232',
     });
     close();
   });
@@ -221,7 +224,7 @@ describe('incident resolution (VS-271)', () => {
     close();
   });
 
-  it('resolve is not_found for an unknown id and forbidden for another workspace', () => {
+  it('resolve is not_found for an unknown id, and resolves another workspace\'s incident keeping both workspaces distinct', () => {
     const { incidents, close } = service();
     const ws2 = incidents.create({ ...seedBase, reporterKind: 'worker', workspaceId: 'ws2' });
     expect(() => incidents.resolve('nope', { resolution: 'x', resolvedByAgentId: 'weaver1' })).toThrow(OcError);
@@ -230,13 +233,11 @@ describe('incident resolution (VS-271)', () => {
     } catch (e) {
       expect((e as OcError).code).toBe('not_found');
     }
-    expect(() => incidents.resolve(ws2.id, { resolution: 'x', resolvedByAgentId: 'weaver1' }, { workspaceId: 'ws1' })).toThrow(OcError);
-    try {
-      incidents.resolve(ws2.id, { resolution: 'x', resolvedByAgentId: 'weaver1' }, { workspaceId: 'ws1' });
-    } catch (e) {
-      expect((e as OcError).code).toBe('forbidden');
-    }
-    expect(incidents.get(ws2.id).resolvedAt).toBeNull();
+    // VS-499: no caller scope — an incident filed in ws2 resolves from ws1, and both are recorded.
+    const resolved = incidents.resolve(ws2.id, { resolution: 'x', resolvedByAgentId: 'weaver1', resolvedByWorkspaceId: 'ws1' });
+    expect(resolved.workspaceId).toBe('ws2');
+    expect(resolved.resolvedByWorkspaceId).toBe('ws1');
+    expect(incidents.get(ws2.id).resolvedAt).not.toBeNull();
     close();
   });
 

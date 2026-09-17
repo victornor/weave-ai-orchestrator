@@ -1,7 +1,8 @@
 /**
  * Daemon-level system incidents (VS-174). Agents file them through `weave_incident`; the human reads
- * them on the global Incidents page, the conductor through `weave_incident_list`/`weave_incident_get`
- * (VS-222), scoped to its own workspace. Lives in `daemon.sqlite`, not a workspace db.
+ * them on the global Incidents page and the conductor through `weave_incident_list`/`weave_incident_get`
+ * (VS-222). Since VS-499 reads span every workspace: the conductor that owns Weave AI must be able to
+ * see and close the incidents the other workspaces file. Lives in `daemon.sqlite`, not a workspace db.
  */
 import { newId, nowIso, type Db } from '@weave-ai/db';
 import {
@@ -34,30 +35,31 @@ export interface IncidentListQuery {
   reporterKind?: IncidentReporterKind;
   /** Return only incidents created strictly after this ISO-8601 instant (VS-222). */
   since?: string;
-  /** Scope to this workspace plus workspace-less (daemon-global) rows; unset returns every row. (VS-222) */
+  /**
+   * Narrow to the incidents filed from exactly this workspace. Unset returns every row across every
+   * workspace (VS-499) — the deliberate narrowing filter, not a caller-scope. A workspace-less row is
+   * not filed from any workspace, so it is excluded when this is set.
+   */
   workspaceId?: string;
   limit?: number;
   /** Filters on resolution state; unset (like `all`) applies no filter (VS-271). No default here — see `weave_incident_list`. */
   status?: IncidentStatusFilter;
 }
 
-/** Read scope for `get`: rows from another workspace are forbidden; workspace-less rows are daemon-global. (VS-222) */
-export interface IncidentGetScope {
-  workspaceId?: string;
-}
-
 /** Input to `resolve` (VS-271): the reason is required, the ticket reference is optional and unvalidated. */
 export interface IncidentResolveInput {
   resolution: string;
   resolvedByAgentId: string;
+  /** The resolving run's workspace (VS-499); recorded so a cross-workspace resolve keeps both sides of the audit trail. */
+  resolvedByWorkspaceId?: string | null;
   ticketId?: string | null;
 }
 
 export interface IncidentsService {
   create(input: IncidentCreateInput): Incident;
-  get(id: string, scope?: IncidentGetScope): Incident;
+  get(id: string): Incident;
   list(query?: IncidentListQuery): { items: Incident[]; total: number };
-  resolve(id: string, input: IncidentResolveInput, scope?: IncidentGetScope): Incident;
+  resolve(id: string, input: IncidentResolveInput): Incident;
 }
 
 function trimRequired(label: string, value: string, max: number): string {
@@ -76,12 +78,9 @@ function optionalText(value: string | null | undefined, max: number): string | n
 }
 
 export function createIncidentsService(db: Db): IncidentsService {
-  const read = (id: string, scope?: IncidentGetScope): Incident => {
+  const read = (id: string): Incident => {
     const row = db.get<Incident>('SELECT * FROM incidents WHERE id = ?', [id]);
     if (!row) throw new OcError('not_found', `incident ${id} not found`);
-    if (scope?.workspaceId && row.workspaceId && row.workspaceId !== scope.workspaceId) {
-      throw new OcError('forbidden', `incident ${id} belongs to another workspace`);
-    }
     return row;
   };
 
@@ -114,7 +113,7 @@ export function createIncidentsService(db: Db): IncidentsService {
       return read(id);
     },
 
-    get: (id, scope) => read(id, scope),
+    get: (id) => read(id),
 
     list(query = {}) {
       const limit = Math.min(Math.max(query.limit ?? INCIDENT_LIST_DEFAULT, 1), INCIDENT_LIST_MAX);
@@ -137,7 +136,7 @@ export function createIncidentsService(db: Db): IncidentsService {
         params.push(since.toISOString());
       }
       if (query.workspaceId) {
-        conds.push('(workspace_id = ? OR workspace_id IS NULL)');
+        conds.push('workspace_id = ?');
         params.push(query.workspaceId);
       }
       // No default here: unset behaves like 'all'. `weave_incident_list` defaults to 'open' in its own
@@ -157,8 +156,8 @@ export function createIncidentsService(db: Db): IncidentsService {
       return { items, total };
     },
 
-    resolve(id, input, scope) {
-      const row = read(id, scope);
+    resolve(id, input) {
+      const row = read(id);
       if (row.resolvedAt) {
         throw new OcError('wrong_status', `incident ${id} is already resolved`, {
           resolvedAt: row.resolvedAt,
@@ -170,6 +169,7 @@ export function createIncidentsService(db: Db): IncidentsService {
       db.update('incidents', id, {
         resolvedAt: nowIso(),
         resolvedByAgentId: input.resolvedByAgentId,
+        resolvedByWorkspaceId: input.resolvedByWorkspaceId ?? null,
         resolution,
         resolutionTicketId: input.ticketId ?? null,
       });

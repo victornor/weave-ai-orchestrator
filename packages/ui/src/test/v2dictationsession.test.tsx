@@ -10,6 +10,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { useEffect, useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { draftKey, readDraft } from '../lib/drafts';
+import { writeDictationAutoSend } from '../lib/dictationAutoSend';
 import type { ComposerRegistration } from '../v2/DictationSession';
 
 const state = vi.hoisted(() => ({ path: '/w/acme/chat' }));
@@ -318,6 +319,35 @@ describe('sending from the V2 dictation bar (VS-450)', () => {
 
     expect(sends).toHaveLength(0);
     expect(readDraft(draftKey('acme', 'thread:t1')).text).toBe('these words stay in the draft now');
+  });
+
+  it('leaves the transcript and sends nothing when the bar Stop ends the session, even with the setting on (VS-489, VS-494)', () => {
+    writeDictationAutoSend(true);
+    render(<Harness />);
+    start();
+    toggleRoute();
+    act(() => dict.onText?.('these words stay in the draft now', true));
+    stopFromBar();
+    act(() => dict.setSettled?.(true));
+
+    expect(sends).toHaveLength(0);
+    expect(readDraft(draftKey('acme', 'thread:t1')).text).toBe('these words stay in the draft now');
+  });
+
+  it('posts the settled draft when the keybinding ends the session and the setting is on (VS-494)', async () => {
+    writeDictationAutoSend(true);
+    render(<Harness />);
+    // Start with the chord so the chord owns the session, then leave the chat: its ending is the
+    // keybinding ending, and off-page the submit path posts to the target thread.
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+    toggleRoute();
+    act(() => dict.onText?.('auto send these words to the weaver', true));
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    act(() => dict.setSettled?.(true));
+
+    await waitFor(() => expect(sends).toHaveLength(1));
+    expect((sends[0]!.body as { body: string }).body).toBe('auto send these words to the weaver');
   });
 
   it('discards a five-word outcome and sends nothing (VS-439)', () => {

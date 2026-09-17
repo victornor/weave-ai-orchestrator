@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYPES } from '@weave-ai/shared';
 import { useDictation, isDictationTooShort } from '../lib/dictation';
 import { useDictationHotkey } from '../lib/dictationHotkey';
+import { useDictationAutoSend } from '../lib/dictationAutoSend';
 import { dictationShortcut } from '../lib/dictationHint';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
@@ -179,6 +180,9 @@ export function Composer({
   listeningRef.current = dictation.listening;
 
   const isTouch = typeof window !== 'undefined' && window.matchMedia('(hover: none)').matches;
+  // Opt-in, per browser (VS-435, restored by VS-494): a keybinding-ended session sends the settled
+  // draft, through the same queued path the send arrow uses.
+  const autoSend = useDictationAutoSend();
 
   const startMic = useCallback(() => {
     if (dictation.mode === 'unavailable') {
@@ -195,13 +199,24 @@ export function Composer({
     dictation.start();
   }, [dictation, text]);
 
-  // Every dictation-ending gesture — the hotkey's release or toggle-off, and the mic button —
-  // routes through here. It ends the session and leaves the transcript in the composer; it never
-  // sends (VS-489). Only an explicit send submits, and `send()` keeps the raw `dictation.stop` so a
-  // manual send is never armed twice.
+  // The mic button's ending: it ends the session and leaves the transcript in the composer; it never
+  // sends (VS-489, VS-494). Only an explicit send, or the keybinding's ending below when the setting
+  // is on, submits.
   const stopDictation = useCallback(() => {
     dictation.stop();
   }, [dictation]);
+
+  // The keybinding's ending (VS-494). With "Send automatically when dictation ends" on it arms the
+  // existing queued send before stopping, so the settled transcript goes out through the same path a
+  // queued send arrow uses; with it off it just stops and leaves the transcript. `send()` keeps the
+  // raw `dictation.stop` so a manual send is never armed twice.
+  const stopFromChord = useCallback(() => {
+    if (autoSend && !disabled && !submittingRef.current && !pendingSendRef.current) {
+      pendingSendRef.current = true;
+      setPendingSend(true);
+    }
+    dictation.stop();
+  }, [autoSend, disabled, dictation]);
 
   // The shared dictation chord at a desk: a quick press toggles, a hold is push-to-talk (VS-432);
   // tap-to-toggle on touch. The hook reports which mode is live so the row below can say how to stop.
@@ -209,7 +224,7 @@ export function Composer({
     enabled: !isTouch,
     listening: dictation.listening,
     start: startMic,
-    stop: stopDictation,
+    stop: stopFromChord,
   });
 
   useEffect(() => {

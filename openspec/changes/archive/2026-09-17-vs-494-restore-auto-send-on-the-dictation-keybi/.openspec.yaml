@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-17
+goal: Restore auto-send on the dictation keybinding, keep Stop as the
+  keep-the-text path

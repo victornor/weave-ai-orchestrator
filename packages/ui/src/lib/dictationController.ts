@@ -4,11 +4,13 @@
  * The V2 chat composer and the shell-level dictation session both drive the same lifecycle: start a
  * session, stream the transcript into a draft, discard a result of five words or fewer (VS-439),
  * reveal a long insert (VS-425), cancel on Escape (VS-489), and send the settled draft through the
- * same queued path the send arrow uses (VS-282, VS-416) — which only an explicit send invokes.
- * Keeping it in one hook means the in-chat composer and the off-chat floating bar cannot drift.
+ * same queued path the send arrow uses (VS-282, VS-416) — either from an explicit send or from the
+ * keybinding's ending when the auto-send setting is on (VS-435, VS-494). Keeping it in one hook
+ * means the in-chat composer and the off-chat floating bar cannot drift.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDictation, isDictationTooShort, type Dictation } from './dictation';
+import { useDictationAutoSend } from './dictationAutoSend';
 import { REVEAL_MS, REVEAL_STEP_MS, revealedCount, usePrefersReducedMotion } from './streamReveal';
 
 export interface DictationReveal {
@@ -26,7 +28,17 @@ export interface DictationController {
   /** Set when a dictated insert lands; the textarea consumes it to scroll and place the caret (VS-416). */
   dictated: React.MutableRefObject<boolean>;
   start: () => void;
+  /**
+   * The Stop control's ending: end the session and leave the transcript in the composer. Never
+   * sends, with the auto-send setting on or off (VS-489, VS-494).
+   */
   stop: () => void;
+  /**
+   * The keybinding's ending — a toggle session pressed off, or a held chord released (VS-494). With
+   * the auto-send setting on it arms the queued send before stopping, so the settled transcript goes
+   * out through the same path a queued send arrow uses; with it off it just stops.
+   */
+  stopByChord: () => void;
   /**
    * Abandon the session without sending: clear any queued send, discard the transcript and restore
    * the draft that was there before the mic opened (VS-489). Escape uses this.
@@ -72,6 +84,7 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
   const [pendingSend, setPendingSend] = useState(false);
   const pendingSendRef = useRef(false);
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
+  const autoSend = useDictationAutoSend();
 
   const stopReveal = useCallback((): void => {
     if (revealTimer.current !== null) clearInterval(revealTimer.current);
@@ -140,14 +153,24 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
     dictation.start();
   }, [dictation, opts.value]);
 
-  // Every dictation-ending gesture — the mic button, the bar's Stop, and the hotkey's release or
-  // toggle-off — routes through here. It ends the session and leaves the transcript in the composer;
-  // it never sends (VS-489). Only an explicit send (the send keybinding or the Send button) submits,
-  // through `requestSend()` below, which stops the raw session itself so a manual send is never
-  // armed twice.
+  // The Stop control's ending — the mic button and the off-page bar's Stop — ends the session and
+  // leaves the transcript in the composer; it never sends (VS-489, VS-494). Only an explicit send,
+  // or the keybinding's ending below when the setting is on, submits.
   const stop = useCallback((): void => {
     dictation.stop();
   }, [dictation]);
+
+  // The keybinding's ending (VS-494). With "Send automatically when dictation ends" on it arms the
+  // existing queued send before stopping, so the settled transcript goes out through the same path a
+  // queued send arrow uses; with it off it just stops and leaves the transcript. `requestSend()`
+  // below stops the raw session so a manual send is never armed twice.
+  const stopByChord = useCallback((): void => {
+    if (autoSend && canSubmit.current() && !pendingSendRef.current) {
+      pendingSendRef.current = true;
+      setPendingSend(true);
+    }
+    dictation.stop();
+  }, [autoSend, dictation]);
 
   // Escape means "abandon the dictation and send nothing" (VS-489). It never arms the queued send,
   // and it drops any send that was already queued, so auto-send cannot fire. The restore of the
@@ -220,5 +243,5 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
     void submit.current(t);
   }, [pendingSend, dictation.settled, dictation.error, opts.value]);
 
-  return { dictation, reveal, pendingSend, pendingNotice, dictated, start, stop, cancel, requestSend };
+  return { dictation, reveal, pendingSend, pendingNotice, dictated, start, stop, stopByChord, cancel, requestSend };
 }

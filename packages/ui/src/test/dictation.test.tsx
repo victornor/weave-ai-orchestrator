@@ -9,6 +9,7 @@ import { useState, type ReactElement } from 'react';
 import { Composer } from '../components/Composer';
 import { useDictation } from '../lib/dictation';
 import { DICTATION_HOLD_MS } from '../lib/dictationHotkey';
+import { writeDictationAutoSend } from '../lib/dictationAutoSend';
 
 /**
  * Wait for a condition that settles on the microtask queue, without ever reading the wall clock.
@@ -1024,12 +1025,17 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
 });
 
 /**
- * VS-489: ending a dictation is not sending it. The mic button, the chord's release or toggle-off,
- * and the bar's Stop all end the session and leave the transcript in the composer, submitting
- * nothing — the opt-in auto-send of VS-435 is retired. Only an explicit send submits.
+ * VS-489: the Stop control does not send — the mic button ends the session and leaves the
+ * transcript, submitting nothing.
+ * VS-494: the keybinding is the path the auto-send setting exists for. A hold release or a
+ * toggle-off submits the settled transcript when "Send automatically when dictation ends" is on,
+ * and leaves it when off. Escape is covered separately below.
  */
-describe('dictation — ending a session never sends (VS-489)', () => {
+describe('dictation — how a session ends decides whether it sends (VS-489, VS-494)', () => {
   type TranscribeResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
+
+  beforeEach(() => localStorage.removeItem('conductor.dictationAutoSend'));
+  afterEach(() => localStorage.removeItem('conductor.dictationAutoSend'));
 
   function stubHealthAndTranscribe(postHandler: () => Promise<TranscribeResponse>): void {
     vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
@@ -1135,6 +1141,82 @@ describe('dictation — ending a session never sends (VS-489)', () => {
     await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
     expect(screen.getByRole('alert')).not.toHaveTextContent(/too short/);
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('submits on a hold release when the setting is on', () => {
+    w.webkitSpeechRecognition = FakeRecognition;
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    try {
+      render(<Composer onSubmit={onSubmit} placeholder="Message…" />);
+      fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+      act(() => FakeRecognition.last!.onresult!(said(['held words that will be sent here', true])));
+      clock.mockReturnValue(DICTATION_HOLD_MS);
+      fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+      expect(onSubmit).toHaveBeenCalledWith('held words that will be sent here', undefined, expect.any(String));
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('submits when a toggle session is pressed off and the setting is on', () => {
+    w.webkitSpeechRecognition = FakeRecognition;
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    render(<Composer onSubmit={onSubmit} placeholder="Message…" />);
+
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+    act(() => FakeRecognition.last!.onresult!(said(['toggle words that will be sent now', true])));
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+
+    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).toHaveBeenCalledWith('toggle words that will be sent now', undefined, expect.any(String));
+  });
+
+  it('does not send on the mic button even with the setting on', () => {
+    w.webkitSpeechRecognition = FakeRecognition;
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn();
+    render(<Composer onSubmit={onSubmit} placeholder="Message…" />);
+
+    fireEvent.change(screen.getByLabelText('Message…'), { target: { value: 'typed first' } });
+    dictate();
+    act(() => FakeRecognition.last!.onresult!(said(['and spoken words that stay here', true])));
+    fireEvent.click(screen.getByLabelText('Stop dictation'));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Message…')).toHaveValue('typed first and spoken words that stay here');
+  });
+
+  it('submits an upload transcript on a keybinding ending when the setting is on', async () => {
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const d = deferredResponse();
+    stubHealthAndTranscribe(() => d.promise);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    try {
+      await renderUpload(onSubmit);
+      fireEvent.change(screen.getByLabelText('Message…'), { target: { value: 'typed first' } });
+      fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+      await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
+      clock.mockReturnValue(DICTATION_HOLD_MS);
+      fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+
+      // Nothing yet: the transcript has not landed, and the queued cue is showing.
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(screen.getByLabelText('Send queued')).toBeInTheDocument();
+
+      d.settle(ok('spoken words that will be sent now'));
+      await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit).toHaveBeenCalledWith('typed first spoken words that will be sent now', undefined, expect.any(String));
+    } finally {
+      clock.mockRestore();
+    }
   });
 });
 

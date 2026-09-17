@@ -8,10 +8,11 @@
  * the last words are not lost.
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
 import { dictationHint } from '../lib/dictationHint';
 import { DICTATION_HOLD_MS } from '../lib/dictationHotkey';
+import { writeDictationAutoSend } from '../lib/dictationAutoSend';
 
 const dict = vi.hoisted(() => ({
   onText: null as ((text: string, final: boolean) => void) | null,
@@ -526,12 +527,17 @@ describe('the V2 composer send while dictating (VS-416)', () => {
 });
 
 /**
- * VS-489: ending a dictation is not sending it. The mic button, the bar's Stop and the chord's
- * release or toggle-off all end the session and leave the transcript in the composer, submitting
- * nothing — the opt-in auto-send of VS-435 is retired. Only an explicit send (the send button or the
- * send keybinding) submits, through the queued VS-282/VS-416 path.
+ * VS-489: the Stop control does not send — the mic button ends the session and leaves the
+ * transcript, submitting nothing.
+ * VS-494: the keybinding is the path the auto-send setting exists for. A hold release or a
+ * toggle-off submits the settled transcript when "Send automatically when dictation ends" is on,
+ * and leaves it when off. Only an explicit send (button or send keybinding) submits regardless,
+ * through the queued VS-282/VS-416 path.
  */
-describe('the V2 composer never sends when dictation ends (VS-489)', () => {
+describe('the V2 composer: the keybinding sends when auto-send is on, the mic never does (VS-489, VS-494)', () => {
+  beforeEach(() => localStorage.removeItem('conductor.dictationAutoSend'));
+  afterEach(() => localStorage.removeItem('conductor.dictationAutoSend'));
+
   it('leaves the transcript and sends nothing when the mic button stops it', async () => {
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} />);
@@ -602,6 +608,54 @@ describe('the V2 composer never sends when dictation ends (VS-489)', () => {
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith('explicitly sent words land here now', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
+  });
+
+  it('submits on a hold release when the setting is on', async () => {
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
+    try {
+      render(<Harness onSubmit={onSubmit} />);
+      fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+      act(() => dict.onText?.('held words that will be sent now', true));
+      clock.mockReturnValue(DICTATION_HOLD_MS);
+      fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+
+      finishSpeech('held words that will be sent now');
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit).toHaveBeenCalledWith('held words that will be sent now', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('submits when a toggle is pressed off and the setting is on', async () => {
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+    act(() => dict.onText?.('toggle words that will be sent now', true));
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    finishSpeech('toggle words that will be sent now');
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith('toggle words that will be sent now', [], expect.objectContaining({ idempotencyKey: expect.any(String) }));
+  });
+
+  it('does not send on the mic button even with the setting on', async () => {
+    writeDictationAutoSend(true);
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+
+    dictate();
+    act(() => dict.onText?.('mic words that stay in the box', true));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
+    finishSpeech('mic words that stay in the box');
+
+    await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue('mic words that stay in the box'));
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 });
 

@@ -9,6 +9,7 @@ import { makeHarness, type TestHarness } from '../testing/context.js';
 import { buildTurnPrompt, humanName, renderBrief, renderCharter, renderConductorInstructions, renderSessionInstructions, renderWorkerInstructions } from './index.js';
 
 const SHIPPED_TEMPLATES = fileURLToPath(new URL('../../../../templates', import.meta.url));
+const SHIPPED_WEAVER_SKILL = fileURLToPath(new URL('../../../../skills/weave-ai-weaver/SKILL.md', import.meta.url));
 
 /** The body between a `## heading` and the next `##` heading, for asserting a rendered section is not blank. */
 function section(markdown: string, heading: string): string {
@@ -767,5 +768,24 @@ describe('prompt rendering', () => {
     expect(worker0).toContain(recipe);
     expect(worker0).toContain('gh auth login');
     expect(worker0).toContain('Do not ask the human or the weaver to authorize GitHub');
+  });
+
+  it.runIf(existsSync(SHIPPED_TEMPLATES))('carries the shipped weaver operating lessons (VS-515)', () => {
+    h.ctx.templatesDir = SHIPPED_TEMPLATES;
+    const conductor = renderConductorInstructions(h.ctx, h.deps);
+    // Review order, marking every card, and a running check not being a ready PR.
+    expect(conductor).toMatch(/oldest unreviewed card first/i);
+    expect(conductor).toContain('Mark every card you have read');
+    expect(conductor).toMatch(/not ready to call while its checks are still running/i);
+
+    // The procedural half lives in the weaver skill.
+    const skill = readFileSync(SHIPPED_WEAVER_SKILL, 'utf8');
+    expect(skill).toMatch(/oldest unreviewed card first/i);
+    expect(skill).toContain('A `concerns` mark wakes nobody');
+    expect(skill).toContain('read the delivery');
+    expect(skill).toMatch(/succeeded with no wake scheduled is a stall/i);
+    expect(skill).toMatch(/check whether the human already resumed the worker/i);
+    expect(skill).toMatch(/stated want is not a question/i);
+    expect(skill).toContain('asks that arrive together belong in one ticket');
   });
 });

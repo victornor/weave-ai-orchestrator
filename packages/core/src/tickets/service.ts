@@ -904,8 +904,15 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       if (input.parentId && !find(input.parentId)) throw new OcError('not_found', `parent ticket ${input.parentId} not found`);
       const blockedBy = input.blockedBy ?? [];
       for (const b of blockedBy) if (!find(b)) throw new OcError('not_found', `blocker ${b} not found`);
-      if (input.assigneeRoleId && !db.get('SELECT id FROM roles WHERE id = ?', [input.assigneeRoleId])) {
-        throw new OcError('not_found', `role ${input.assigneeRoleId} not found`);
+      // Create can assign in the same call (`assigneeRoleId`), so it applies the same guards
+      // `assign` does: the role must exist, not be retired, and belong to the ticket's project.
+      if (input.assigneeRoleId) {
+        const role = db.get<{ id: string; projectId: string; status: string }>('SELECT id, project_id, status FROM roles WHERE id = ?', [input.assigneeRoleId]);
+        if (!role) throw new OcError('not_found', `role ${input.assigneeRoleId} not found`);
+        if (role.status === 'retired') throw new OcError('validation', 'cannot assign a retired role');
+        if (input.projectId && role.projectId !== input.projectId) {
+          throw new OcError('validation', 'role belongs to a different project', { roleId: input.assigneeRoleId, projectId: input.projectId });
+        }
       }
       const workerModelId = resolveWorkerModelId(input.workerModelId);
       return tx(db, () => {

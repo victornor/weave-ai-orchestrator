@@ -17,7 +17,7 @@ import { createSessions, type SessionsService } from '../sessions/index.js';
 import { buildTurnPrompt, flattenWakes, type TurnPromptOptions } from '../prompts/index.js';
 import { ensureHomeCurrent } from '../workers/home.js';
 import { recordUsage } from '../usage/index.js';
-import { git } from '../util/git.js';
+import { git, readGitIdentity } from '../util/git.js';
 import { emitRunEvent, runState } from './active.js';
 import { effectiveModels, modelSettingFor, modelsFor } from '../models/resolve.js';
 import { runTokenSecret, signRunToken } from './runtoken.js';
@@ -415,6 +415,9 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
 
     const secrets = roleSecretsEnv(ctx, deps, role);
     redact = makeRedactor([token, ...secrets.values]);
+    const worktreeIdentity = agent.worktreePath ? (await readGitIdentity(agent.worktreePath)).identity : null;
+    const projectIdentity = !worktreeIdentity && project ? (await readGitIdentity(project.clonePath)).identity : null;
+    const gitIdentity = worktreeIdentity ?? projectIdentity;
     const env: Record<string, string> = {
       [AC_ENV.API_URL]: ctx.loopbackUrl,
       [AC_ENV.RUN_TOKEN]: token,
@@ -428,6 +431,12 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       ...(agent.ticketId ? { [AC_ENV.TICKET_ID]: agent.ticketId } : {}),
       ...(agent.worktreePath ? { [AC_ENV.WORKTREE]: agent.worktreePath } : {}),
       ...secrets.env,
+      ...(gitIdentity ? {
+        GIT_AUTHOR_NAME: gitIdentity.name,
+        GIT_AUTHOR_EMAIL: gitIdentity.email,
+        GIT_COMMITTER_NAME: gitIdentity.name,
+        GIT_COMMITTER_EMAIL: gitIdentity.email,
+      } : {}),
     };
 
     const runtime = ctx.registries.runtimes.get(setting.runtime);

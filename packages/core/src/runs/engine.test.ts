@@ -210,6 +210,26 @@ describe('run engine', () => {
     expect(claims).toMatchObject({ workspaceId: h.workspaceId, runId: run.id, agentId: h.conductorId, agentKind: 'weaver' });
   });
 
+  it('passes a worker worktree Git identity to the runtime environment', async () => {
+    const worktree = join(h.ctx.paths.root, 'identity-worktree');
+    mkdirSync(worktree, { recursive: true });
+    await git(['init', '-b', 'main'], worktree);
+    await git(['config', 'user.name', 'Worker Identity'], worktree);
+    await git(['config', 'user.email', 'worker@example.com'], worktree);
+    const ticketId = seedTicket(h);
+    const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: worktree, branch: 'ac/tst-identity' });
+    runtime.queue.push({ structured: { state: 'idle', summary: 'identity checked', tickets: [], knowledge: { recorded: false, reason: 'test' } } });
+    h.services.wake!.enqueue(workerId, { source: 'ticket_comment', reason: 'check identity' });
+
+    await runOnce(workerId);
+
+    const input = runtime.inputs.at(-1)!;
+    expect(input.env.GIT_AUTHOR_NAME).toBe('Worker Identity');
+    expect(input.env.GIT_AUTHOR_EMAIL).toBe('worker@example.com');
+    expect(input.env.GIT_COMMITTER_NAME).toBe('Worker Identity');
+    expect(input.env.GIT_COMMITTER_EMAIL).toBe('worker@example.com');
+  });
+
   it('bundles every queued wake for one agent into a single run', async () => {
     const a = h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'first' });
     const b = h.services.wake!.enqueue(h.conductorId, { source: 'ticket_comment', reason: 'second' });

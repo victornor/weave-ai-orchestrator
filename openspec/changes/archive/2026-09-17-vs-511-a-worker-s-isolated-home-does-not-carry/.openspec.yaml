@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-17
+goal: A worker's isolated HOME does not carry the git identity, so a rebase dies
+  mid-ticket

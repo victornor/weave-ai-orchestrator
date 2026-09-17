@@ -97,6 +97,8 @@ export interface ChatComposerProps {
   dictationTarget?: DictationTarget | null;
   /** False to keep a local dictation session — the Plan modal does this (VS-450). */
   sharedDictation?: boolean;
+  /** Whether this is the focused pane's composer. Only the focused pane may start or show dictation (VS-489). */
+  focused?: boolean;
 }
 
 export function ChatComposer(props: ChatComposerProps): React.ReactElement {
@@ -126,6 +128,7 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
     queuedReason,
     queuedCount = 0,
     dictationTarget = null,
+    focused = true,
   } = props;
 
   const ta = useRef<HTMLTextAreaElement>(null);
@@ -163,9 +166,16 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
     dictationTarget !== null &&
     shared.target.ws === dictationTarget.ws &&
     shared.target.threadId === dictationTarget.threadId;
-  const sessionHere = shared ? isSessionTarget : true;
+  const sessionHere = shared ? isSessionTarget && focused : true;
+  // Only the focused pane shows or drives the shared session (VS-489): a non-focused pane's
+  // composer must never paint the recording state or start a second session. While a session is
+  // running for another pane, even the focused pane's control is inert — a second recording is
+  // refused, not started.
+  const dictationLocked = shared !== null && (!focused || (shared.active && !sessionHere));
   const reveal = sessionHere ? ctl.reveal : null;
   const dictation = ctl.dictation;
+  const listeningHere = sessionHere && dictation.listening;
+  const transcribingHere = sessionHere && dictation.transcribing;
 
   // The shared chord (VS-432): only a local composer binds it here — the provider owns it when the
   // session is shared.
@@ -182,14 +192,14 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
   const regRef = useRef<ComposerRegistration | null>(null);
   const registerComposer = shared?.registerComposer;
   useEffect(() => {
-    if (!registerComposer) return;
+    if (!registerComposer || !focused) return;
     return registerComposer(() => regRef.current);
-  }, [registerComposer]);
+  }, [registerComposer, focused]);
   const setHotkeyAllowed = shared?.setHotkeyAllowed;
   useEffect(() => {
     if (!setHotkeyAllowed) return;
-    setHotkeyAllowed(hotkey && !disabled);
-  }, [setHotkeyAllowed, hotkey, disabled]);
+    setHotkeyAllowed(focused && hotkey && !disabled);
+  }, [setHotkeyAllowed, focused, hotkey, disabled]);
 
   /** What the textarea shows: the committed draft, or a growing prefix of a revealing dictated insert. */
   const displayed = reveal ? `${reveal.prefix}${reveal.piece.slice(0, reveal.shown)}` : value;
@@ -225,8 +235,8 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
 
   // Keep the provider's view of this composer current: its target, whether it may answer the chord,
   // what it has staged, and where a queued send should go.
-  regRef.current = shared && dictationTarget
-    ? { target: dictationTarget, hotkeyAllowed: hotkey && !disabled, disabled: Boolean(disabled), stagedFiles: files.length, submit: doSubmit }
+  regRef.current = shared && dictationTarget && focused
+    ? { target: dictationTarget, hotkeyAllowed: focused && hotkey && !disabled, disabled: Boolean(disabled), stagedFiles: files.length, submit: doSubmit }
     : null;
 
   // Grow to fit, then scroll inside. Measuring collapses the box and throws the scroll position
@@ -352,9 +362,9 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
         onDragOver={(e) => { if (dragHasFiles(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; } }}
         onDragLeave={(e) => { if (dragHasFiles(e.dataTransfer)) { dragDepth.current = Math.max(0, dragDepth.current - 1); if (dragDepth.current === 0) setDragActive(false); } }}
         onDrop={(e) => { if (!dragHasFiles(e.dataTransfer)) return; e.preventDefault(); dragDepth.current = 0; setDragActive(false); addFiles(Array.from(e.dataTransfer.files)); }}
-        className={cx('flex items-end gap-2 rounded-r4 border bg-bg-input px-2.5 py-1.5', dragActive || dictation.listening || dictation.transcribing ? 'border-accent' : 'border-line-2')}
+        className={cx('flex items-end gap-2 rounded-r4 border bg-bg-input px-2.5 py-1.5', dragActive || listeningHere || transcribingHere ? 'border-accent' : 'border-line-2')}
       >
-        {sessionHere && dictation.listening ? (
+        {listeningHere ? (
           <div data-testid="v2-composer-listening" className="flex min-w-0 flex-1 items-center gap-2.5 py-1">
             {dictation.metered ? (
               <VoiceMeter analyser={dictation.analyser} active className="h-6 min-w-0 flex-1" />
@@ -368,7 +378,7 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
               {Math.floor(dictation.elapsed / 60)}:{String(dictation.elapsed % 60).padStart(2, '0')}
             </span>
           </div>
-        ) : sessionHere && dictation.transcribing ? (
+        ) : transcribingHere ? (
           // The mic is closed and the transcript is on its way (VS-441). Keeping this in the same
           // slot as the listening meter means the box never flashes empty between the two.
           <div data-testid="v2-composer-transcribing" className="flex min-w-0 flex-1 items-center py-1">
@@ -402,18 +412,19 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
         </button>
         <button
           type="button"
-          className={cx(BUTTON, dictation.listening && 'border-accent text-accent-link')}
-          aria-label={dictation.mode === 'unavailable' ? 'Dictation unavailable' : dictation.listening ? 'Stop dictation' : 'Dictate'}
-          aria-pressed={dictation.listening}
-          onClick={() => { if (dictation.listening) ctl.stop(); else if (dictation.mode === 'unavailable') { setFreeText(true); setUnavailableNotice('Dictation is unavailable: this browser has no Web Speech API and the daemon has no transcription provider.'); } else { setUnavailableNotice(null); ctl.start(); } }}
+          className={cx(BUTTON, listeningHere && 'border-accent text-accent-link')}
+          aria-label={dictation.mode === 'unavailable' ? 'Dictation unavailable' : listeningHere ? 'Stop dictation' : 'Dictate'}
+          aria-pressed={listeningHere}
+          disabled={disabled || submitting || dictationLocked}
+          onClick={() => { if (listeningHere) ctl.stop(); else if (dictation.mode === 'unavailable') { setFreeText(true); setUnavailableNotice('Dictation is unavailable: this browser has no Web Speech API and the daemon has no transcription provider.'); } else { setUnavailableNotice(null); ctl.start(); } }}
         >
-          {dictation.listening ? <StopIcon /> : <MicIcon slashed={dictation.mode === 'unavailable'} />}
+          {listeningHere ? <StopIcon /> : <MicIcon slashed={dictation.mode === 'unavailable'} />}
         </button>
         <button
           type="button"
           className={cx(BUTTON, pendingSend && 'border-accent text-accent-link')}
           aria-label={pendingSend ? 'Send queued' : 'Send'}
-          disabled={disabled || submitting || pendingSend || (!value.trim() && files.length === 0 && !dictation.listening && !dictation.transcribing)}
+          disabled={disabled || submitting || pendingSend || (!value.trim() && files.length === 0 && !listeningHere && !transcribingHere)}
           onClick={send}
         >
           {pendingSend ? (

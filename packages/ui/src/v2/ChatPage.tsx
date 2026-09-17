@@ -749,6 +749,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                 onOpenSearch={() => setSearchOpen(true)}
                 onOpenPlan={() => setPlanOpen(true)}
                 hotkey={!planOpen}
+                focused={focused}
                 dictationTarget={fetchId ? { ws, threadId: fetchId, projectId: draft.projectId ?? null, replyToMessageId: draft.replyToId ?? null } : null}
                 queuedReason={compacting ? 'Compacting the conversation — your message is queued until it finishes' : offline ? 'Offline — your message is queued' : working ? 'Weaver is replying — your message is queued' : null}
                 queuedCount={queuedCount}

@@ -106,6 +106,12 @@ export interface Dictation {
   error: string | null;
   start: () => void;
   stop: () => void;
+  /**
+   * Abandon the attempt: release the recognizer or abort an in-flight upload, settle, and deliver
+   * no further transcript. Distinct from `stop()`, which finishes the attempt so its text can land
+   * (VS-489).
+   */
+  cancel: () => void;
   toggle: () => void;
   /**
    * Ground truth for a duplication bug no worker can reproduce (VS-121): while
@@ -544,6 +550,30 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
       });
   }, [mode, meter, stopMeters]);
 
+  const cancel = useCallback(() => {
+    const recording = sessionLive.current;
+    const inFlight = transcribingRef.current;
+    if (!recording && !inFlight) return;
+    // Abort the upload first so its response can never call `cb` with a transcript.
+    abortRef.current?.abort();
+    abortRef.current = null;
+    sessionLive.current = false;
+    uploadLive.current = false;
+    wantListening.current = false;
+    rec.current?.stop();
+    rec.current = null;
+    if (processor.current) {
+      processor.current.disconnect();
+      processor.current = null;
+    }
+    pcmChunks.current = [];
+    stopMeters();
+    setListening(false);
+    setError(null);
+    setTranscribingState(false);
+    setSettled(true);
+  }, [stopMeters, setTranscribingState]);
+
   const toggle = useCallback(() => (listening ? stop() : start()), [listening, start, stop]);
 
   useEffect(() => () => stop(), [stop]);
@@ -566,6 +596,7 @@ export function useDictation(onText: (text: string, final: boolean) => void, opt
     error,
     start,
     stop,
+    cancel,
     toggle,
     diagnostics: { enabled: diagnosticsWanted, count: captureCount, copy: copyDiagnostics },
   };

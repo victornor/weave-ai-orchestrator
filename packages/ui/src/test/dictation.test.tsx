@@ -4,12 +4,11 @@
  * recognizer — bars moving, nothing transcribed, then "No speech was detected".
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { useState, type ReactElement } from 'react';
 import { Composer } from '../components/Composer';
 import { useDictation } from '../lib/dictation';
 import { DICTATION_HOLD_MS } from '../lib/dictationHotkey';
-import { writeDictationAutoSend } from '../lib/dictationAutoSend';
 
 /**
  * Wait for a condition that settles on the microtask queue, without ever reading the wall clock.
@@ -1025,12 +1024,11 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
 });
 
 /**
- * VS-435: with "Send automatically when dictation ends" on, every way a session ends — a hold
- * released, a toggle pressed off, the mic button — arms the existing queued send, so the settled
- * transcript goes out through the same path as a pressed send arrow. Off by default; an empty or
- * failed transcript still submits nothing; a second press while queued never double-sends.
+ * VS-489: ending a dictation is not sending it. The mic button, the chord's release or toggle-off,
+ * and the bar's Stop all end the session and leave the transcript in the composer, submitting
+ * nothing — the opt-in auto-send of VS-435 is retired. Only an explicit send submits.
  */
-describe('dictation — auto-send when a session ends (VS-435)', () => {
+describe('dictation — ending a session never sends (VS-489)', () => {
   type TranscribeResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
 
   function stubHealthAndTranscribe(postHandler: () => Promise<TranscribeResponse>): void {
@@ -1053,105 +1051,62 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     return { ok: true, status: 200, json: async () => ({ text }) };
   }
 
-  beforeEach(() => {
-    localStorage.removeItem('conductor.dictationAutoSend');
-    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
-  });
-
-  afterEach(() => {
-    localStorage.removeItem('conductor.dictationAutoSend');
-  });
-
   async function renderUpload(onSubmit: (text: string, files?: File[], idempotencyKey?: string) => void | Promise<void>): Promise<void> {
     render(<Composer onSubmit={onSubmit} placeholder="Message…" allowAttachments />);
     await settleMicrotasks(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
   }
 
-  it('sends nothing when the setting is off, even after a session ends', () => {
+  it('leaves the transcript and sends nothing when the mic button stops speech', () => {
     w.webkitSpeechRecognition = FakeRecognition;
     const onSubmit = vi.fn();
     render(<Composer onSubmit={onSubmit} placeholder="Message…" />);
 
+    fireEvent.change(screen.getByLabelText('Message…'), { target: { value: 'typed first' } });
     dictate();
-    act(() => FakeRecognition.last!.onresult!(said(['typed by voice', true])));
+    act(() => FakeRecognition.last!.onresult!(said(['and spoken words that stay here', true])));
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('Message…')).toHaveValue('typed by voice');
+    expect(screen.getByLabelText('Message…')).toHaveValue('typed first and spoken words that stay here');
   });
 
-  it('sends on the mic button, once the transcript lands, with the whole draft', () => {
+  it('leaves the transcript and sends nothing when a hold is released', () => {
     w.webkitSpeechRecognition = FakeRecognition;
-    writeDictationAutoSend(true);
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
-    render(<Composer onSubmit={onSubmit} placeholder="Message…" />);
-
-    fireEvent.change(screen.getByLabelText('Message…'), { target: { value: 'typed first' } });
-    dictate();
-    act(() => FakeRecognition.last!.onresult!(said(['and spoken words that will be sent', true])));
-    fireEvent.click(screen.getByLabelText('Stop dictation'));
-
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith('typed first and spoken words that will be sent', undefined, expect.any(String));
-  });
-
-  it('sends on a hold release', () => {
-    w.webkitSpeechRecognition = FakeRecognition;
-    writeDictationAutoSend(true);
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onSubmit = vi.fn();
     const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
     try {
       render(<Composer onSubmit={onSubmit} placeholder="Message…" />);
       fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
-      act(() => FakeRecognition.last!.onresult!(said(['held words that will be sent here', true])));
-      clock.mockReturnValue(DICTATION_HOLD_MS);
-      fireEvent.keyUp(window, { key: ' ', code: 'Space' });
-
-      expect(onSubmit).toHaveBeenCalledTimes(1);
-      expect(onSubmit).toHaveBeenCalledWith('held words that will be sent here', undefined, expect.any(String));
-    } finally {
-      clock.mockRestore();
-    }
-  });
-
-  it('sends when a toggle session is pressed off', () => {
-    w.webkitSpeechRecognition = FakeRecognition;
-    writeDictationAutoSend(true);
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
-    render(<Composer onSubmit={onSubmit} placeholder="Message…" />);
-
-    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
-    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
-    act(() => FakeRecognition.last!.onresult!(said(['toggle words that will be sent now', true])));
-    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
-
-    expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith('toggle words that will be sent now', undefined, expect.any(String));
-  });
-
-  it('sends nothing when the composer is disabled', () => {
-    w.webkitSpeechRecognition = FakeRecognition;
-    writeDictationAutoSend(true);
-    const onSubmit = vi.fn();
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(0);
-    try {
-      render(<Composer onSubmit={onSubmit} placeholder="Message…" disabled />);
-      fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
-      act(() => FakeRecognition.last!.onresult!(said(['blocked words', true])));
+      act(() => FakeRecognition.last!.onresult!(said(['held words that stay here now', true])));
       clock.mockReturnValue(DICTATION_HOLD_MS);
       fireEvent.keyUp(window, { key: ' ', code: 'Space' });
 
       expect(onSubmit).not.toHaveBeenCalled();
+      expect(screen.getByLabelText('Message…')).toHaveValue('held words that stay here now');
     } finally {
       clock.mockRestore();
     }
   });
 
-  it('sends an upload dictation when it ends, once the transcript lands, with the whole draft', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
+  it('leaves the transcript and sends nothing when a toggle is pressed off', () => {
+    w.webkitSpeechRecognition = FakeRecognition;
+    const onSubmit = vi.fn();
+    render(<Composer onSubmit={onSubmit} placeholder="Message…" />);
+
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+    fireEvent.keyUp(window, { key: ' ', code: 'Space' });
+    act(() => FakeRecognition.last!.onresult!(said(['toggle words that stay here now', true])));
+    fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Message…')).toHaveValue('toggle words that stay here now');
+  });
+
+  it('keeps an upload transcript in the box and queues nothing', async () => {
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+    const onSubmit = vi.fn();
     const d = deferredResponse();
     stubHealthAndTranscribe(() => d.promise);
-    writeDictationAutoSend(true);
     await renderUpload(onSubmit);
 
     fireEvent.change(screen.getByLabelText('Message…'), { target: { value: 'typed first' } });
@@ -1159,64 +1114,16 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
     await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
     fireEvent.click(screen.getByLabelText('Stop dictation'));
 
-    // Nothing yet: the transcript has not landed, and the queued cue is showing.
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByLabelText('Send queued')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Send queued')).not.toBeInTheDocument();
 
-    d.settle(ok('spoken words that will be sent now'));
-    await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledWith('typed first spoken words that will be sent now', undefined, expect.any(String));
-  });
-
-  it('sends nothing when the transcript comes back empty', async () => {
-    const onSubmit = vi.fn();
-    stubHealthAndTranscribe(() => Promise.resolve(ok('')));
-    writeDictationAutoSend(true);
-    await renderUpload(onSubmit);
-
-    fireEvent.click(screen.getByLabelText('Dictate'));
-    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
-    fireEvent.click(screen.getByLabelText('Stop dictation'));
-
-    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/Nothing was recognized/));
+    d.settle(ok('spoken words that stay here now'));
+    await settleMicrotasks(() => expect(screen.getByLabelText('Message…')).toHaveValue('typed first spoken words that stay here now'));
     expect(onSubmit).not.toHaveBeenCalled();
-  });
-
-  it('sends nothing when the attempt errors', async () => {
-    const onSubmit = vi.fn();
-    stubHealthAndTranscribe(() => Promise.resolve({ ok: false, status: 500, json: async () => ({}) }));
-    writeDictationAutoSend(true);
-    await renderUpload(onSubmit);
-
-    fireEvent.click(screen.getByLabelText('Dictate'));
-    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
-    fireEvent.click(screen.getByLabelText('Stop dictation'));
-
-    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/Transcription failed on the daemon/));
-    expect(onSubmit).not.toHaveBeenCalled();
-  });
-
-  it('does not double-send when the queued control is pressed again', async () => {
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
-    const d = deferredResponse();
-    stubHealthAndTranscribe(() => d.promise);
-    writeDictationAutoSend(true);
-    await renderUpload(onSubmit);
-
-    fireEvent.click(screen.getByLabelText('Dictate'));
-    await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
-    fireEvent.click(screen.getByLabelText('Stop dictation'));
-
-    const queued = screen.getByLabelText('Send queued');
-    expect(queued).toBeDisabled();
-    fireEvent.click(queued);
-
-    d.settle(ok('once and then again here now'));
-    await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledWith('once and then again here now', undefined, expect.any(String));
   });
 
   it('shows a failed transcription as its error, not as a too-short discard', async () => {
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
     const onSubmit = vi.fn().mockResolvedValue(undefined);
     stubHealthAndTranscribe(() => Promise.resolve({ ok: false, status: 500, json: async () => ({}) }));
     await renderUpload(onSubmit);
@@ -1233,8 +1140,7 @@ describe('dictation — auto-send when a session ends (VS-435)', () => {
 
 /**
  * VS-439: a session that ends with five words or fewer is discarded — the draft goes back exactly
- * as it was, taking the interim words with it, and neither a queued send (VS-282) nor an auto-send
- * (VS-435) submits the old draft.
+ * as it was, taking the interim words with it, and a queued send (VS-282) submits nothing.
  */
 describe('dictation — discarding a transcript of five words or fewer (VS-439)', () => {
   type TranscribeResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
@@ -1250,10 +1156,8 @@ describe('dictation — discarding a transcript of five words or fewer (VS-439)'
   }
 
   beforeEach(() => {
-    localStorage.removeItem('conductor.dictationAutoSend');
     getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
   });
-  afterEach(() => localStorage.removeItem('conductor.dictationAutoSend'));
 
   async function renderUpload(onSubmit: (text: string, files?: File[], idempotencyKey?: string) => void | Promise<void>): Promise<void> {
     render(<Composer onSubmit={onSubmit} placeholder="Message…" allowAttachments />);
@@ -1308,18 +1212,43 @@ describe('dictation — discarding a transcript of five words or fewer (VS-439)'
     expect(screen.queryByLabelText('Send queued')).not.toBeInTheDocument();
     expect(box).toHaveValue('typed first');
   });
+});
 
-  it('auto-sends nothing when an upload outcome is discarded, and clears the armed state', async () => {
-    writeDictationAutoSend(true);
-    const onSubmit = vi.fn().mockResolvedValue(undefined);
-    stubHealthAndTranscribe(() => Promise.resolve({ ok: true, status: 200, json: async () => ({ text: 'one two three four five' }) }));
-    await renderUpload(onSubmit);
+describe('dictation — cancel abandons the attempt (VS-489)', () => {
+  it('aborts an in-flight upload, delivers no transcript and settles', async () => {
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop: vi.fn() }] });
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise((_resolve, reject) => {
+      // The real fetch rejects with an AbortError when the signal fires; the hook treats that as a
+      // cancellation, not a transcription failure.
+      init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+    })));
+    const onText = vi.fn();
+    const { result } = renderHook(() => useDictation(onText, { backend: 'voxtype', serverConfigured: true }));
 
-    fireEvent.click(screen.getByLabelText('Dictate'));
+    act(() => result.current.start());
     await settleMicrotasks(() => expect(getUserMedia).toHaveBeenCalled());
-    fireEvent.click(screen.getByLabelText('Stop dictation'));
+    act(() => result.current.stop());
+    await settleMicrotasks(() => expect(result.current.transcribing).toBe(true));
 
-    await settleMicrotasks(() => expect(screen.getByRole('alert')).toHaveTextContent(/too short/));
-    expect(onSubmit).not.toHaveBeenCalled();
+    act(() => result.current.cancel());
+
+    expect(onText).not.toHaveBeenCalled();
+    expect(result.current.transcribing).toBe(false);
+    expect(result.current.settled).toBe(true);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('ends a speech session without delivering its result', () => {
+    w.SpeechRecognition = FakeRecognition;
+    const onText = vi.fn();
+    const { result } = renderHook(() => useDictation(onText));
+
+    act(() => result.current.start());
+    expect(result.current.listening).toBe(true);
+    act(() => result.current.cancel());
+
+    expect(result.current.listening).toBe(false);
+    expect(result.current.settled).toBe(true);
+    expect(onText).not.toHaveBeenCalled();
   });
 });

@@ -226,8 +226,9 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     // ride, so it is created with no ticket attachment rather than left orphaned. The ask stays
     // legitimate (a follow-up on a finished ticket), so it is created, not refused. The project AND
     // the correlation key are both derived from the original ticket before the attachment is
-    // dropped: the key must stay `kind:<ticketId>` so the detached card keeps its own bucket and
-    // neither supersedes nor is superseded by a workspace-level decision of the same kind.
+    // dropped: the key must stay derived from that ticket (`kind:<owner>:<ticketId>`, VS-519) so the
+    // detached card keeps its own bucket and neither supersedes nor is superseded by a workspace-level
+    // decision of the same kind.
     const terminal = ticket ? (TERMINAL_TICKET_STATUSES as readonly string[]).includes(ticket.status) : false;
     // VS-389: an archive-backfill merge approval belongs on the finished ticket whose archive it
     // lands. It is the one card allowed to keep a terminal ticket's attachment, and only when the
@@ -237,8 +238,14 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     const ticketId = terminal && !attachArchiveToTerminal ? null : requestedTicketId;
     const projectId = resolveProject(input, requestedTicketId);
     const inputs = validateInputs(input.inputs ?? []);
-    const correlationKey = input.correlationKey ?? `${input.kind}:${requestedTicketId ?? 'workspace'}`;
     const owner = input.owner ?? defaultOwner(input.kind, requestedTicketId, input.askedByAgentId);
+    // VS-519: the derived bucket is scoped by the audience the ask is put to (`owner`), not just its
+    // kind and ticket. A worker's question (owner `weaver`) and the weaver's escalation of it (owner
+    // `human`) are different objects with different audiences, so they must not share a bucket —
+    // otherwise the escalation supersedes the worker's card and the answer can never be relayed back.
+    // A repeat ask of the same kind by the same owner on the same ticket still supersedes. Callers
+    // passing an explicit key are unchanged; their cross-owner republish supersede is intentional.
+    const correlationKey = input.correlationKey ?? `${input.kind}:${owner}:${requestedTicketId ?? 'workspace'}`;
     const id = newId();
     const now = nowIso();
     return tx(db, () => {

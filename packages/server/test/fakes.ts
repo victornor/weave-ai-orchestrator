@@ -9,7 +9,7 @@ import type { Actor, CoreServices, HistoryQuery, WorkspaceContext } from '@weave
 import type { AuthService } from '@weave-ai/core';
 import {
   DaemonConfigSchema, OcError, WorkspaceConfigSchema,
-  type AccountSyncFailure, type AccountSyncThrottle, type Briefing, type Decision, type Project, type RuntimeAccount, type RuntimeCredential, type Ticket, type TicketComment, type Wakeup,
+  type AccountSyncFailure, type AccountSyncThrottle, type Briefing, type Decision, type DecisionAnswerInputs, type Project, type RuntimeAccount, type RuntimeCredential, type Ticket, type TicketComment, type Wakeup,
 } from '@weave-ai/shared';
 import type { AppDeps, WorkspaceRuntime } from '../src/types.js';
 import { createUpdateChecker } from '../src/release-info.js';
@@ -237,19 +237,23 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     decisions: impl('decisions', {
       get: (id: string) => { const d = decisions.get(id); if (!d) throw new OcError('not_found', `decision ${id} not found`); return d; },
       list: () => [...decisions.values()],
-      create: (_actor: Actor, input: { title: string; kind: Decision['kind']; owner?: Decision['owner']; projectId?: string | null; inputs?: Decision['inputs'] }) => {
+      create: (_actor: Actor, input: { title: string; kind: Decision['kind']; owner?: Decision['owner']; projectId?: string | null; inputs?: Decision['inputs']; askedByAgentId?: string | null }) => {
         decisionInputs.push(input);
         const d = decision({
           id: `dec_${decisions.size + 1}`, title: input.title, kind: input.kind, owner: input.owner ?? 'human',
-          projectId: input.projectId ?? null, inputs: input.inputs ?? [],
+          projectId: input.projectId ?? null, inputs: input.inputs ?? [], askedByAgentId: input.askedByAgentId ?? null,
         });
         decisions.set(d.id, d);
         bus.emit('decision.created', 'decision', d.id, d);
         return d;
       },
-      answer: (_actor: Actor, id: string, answer: { key?: string; text?: string }) => {
-        const d = { ...decisions.get(id)!, status: 'answered' as const, answerKey: answer.key ?? null, answerText: answer.text ?? null };
+      answer: (_actor: Actor, id: string, answer: { key?: string; text?: string; inputs?: DecisionAnswerInputs }) => {
+        const current = decisions.get(id)!;
+        const d = { ...current, status: 'answered' as const, answerKey: answer.key ?? null, answerText: answer.text ?? null, answerInputs: answer.inputs ?? null };
         decisions.set(id, d);
+        if (current.askedByAgentId) {
+          calls.push({ service: 'wake', method: 'enqueue', args: [current.askedByAgentId, { source: 'decision_answered', payload: { decisionId: id, answer: { key: answer.key, text: answer.text }, ...(answer.inputs ? { answerInputs: answer.inputs } : {}) } }] });
+        }
         return d;
       },
       review: (_actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null; waitingOn?: string | null }) => {

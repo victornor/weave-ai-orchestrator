@@ -316,6 +316,27 @@ describe('MCP endpoint', () => {
     await client.close();
   });
 
+  it('answers a weaver-owned card with required input values and wakes the asker (VS-504)', async () => {
+    const { client, h } = await connect({ ...WORKER, agentKind: 'weaver', ticketId: null, agentId: 'ag_conductor' });
+    const weaver = { kind: 'agent', id: 'ag_conductor' } as never;
+    const d = h.runtime.services.decisions.create(weaver, {
+      kind: 'question', owner: 'weaver', title: 'Which handling?', askedByAgentId: 'ag_worker',
+      inputs: [
+        { key: 'guard_handling', label: 'Guard handling', type: 'single_choice', required: true, choices: [{ key: 'keep', label: 'Keep' }, { key: 'remove', label: 'Remove' }] },
+        { key: 'delivery', label: 'Delivery', type: 'single_choice', required: true, choices: [{ key: 'separate', label: 'Separate' }, { key: 'inline', label: 'Inline' }] },
+      ],
+    });
+    const answer = await client.callTool({ name: 'weave_decision_answer', arguments: { id: d.id, inputs: { guard_handling: 'keep', delivery: 'separate' } } });
+    const payload = JSON.parse((answer.content as Array<{ text: string }>)[0]!.text);
+    expect(payload.ok).toBe(true);
+    expect(payload.data.answerInputs).toEqual({ guard_handling: 'keep', delivery: 'separate' });
+    expect(h.runtime.services.decisions.get(d.id).answerInputs).toEqual({ guard_handling: 'keep', delivery: 'separate' });
+    const wake = h.calls.find((c) => c.service === 'wake' && c.method === 'enqueue');
+    expect(wake?.args[0]).toBe('ag_worker');
+    expect(wake?.args[1]).toMatchObject({ payload: { decisionId: d.id, answerInputs: { guard_handling: 'keep', delivery: 'separate' } } });
+    await client.close();
+  });
+
 
   it('reads a scout report on another ticket in the worker\'s own project', async () => {
     const { client, h } = await connect();

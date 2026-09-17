@@ -955,9 +955,10 @@ export const TOOLS: ToolDef[] = [
     name: 'weave_decision_answer', scope: 'weaver',
     input: z.object({
       id: z.string().min(1), key: z.string().optional(), text: z.string().optional(), remember: z.boolean().optional(),
+      inputs: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional(),
       relayMessageId: z.string().min(1).optional(),
     }),
-    description: 'Answer a decision you own. A human-owned `question`, `concern` or `gate_finding` may instead be recorded from the human\'s own words: pass `relayMessageId` naming the inbound human thread message the answer came from, and their words are kept verbatim, marked as relayed, and linked to that message. A plan, merge, hire, discard, retry or action approval is never recordable this way — however the human phrased it in chat, it still needs their own tap.',
+    description: 'Answer a decision you own. For a decision carrying inputs, pass `inputs` as a map keyed by input key with string or string-array values; required fields and declared choices are validated, and the worker receives the recorded `answerInputs` map. A human-owned `question`, `concern` or `gate_finding` may instead be recorded from the human\'s own words: pass `relayMessageId` naming the inbound human thread message the answer came from, and their words are kept verbatim, marked as relayed, and linked to that message. A plan, merge, hire, discard, retry or action approval is never recordable this way — however the human phrased it in chat, it still needs their own tap.',
     handler: async (ctx, i) => {
       const d = svc(ctx).decisions.get(i.id);
       if (d.owner !== 'weaver') {
@@ -965,10 +966,11 @@ export const TOOLS: ToolDef[] = [
         // approval keeps the same forbidden answer it has always had, whatever the human wrote.
         if (!(ASKABLE_DECISION_KINDS as readonly string[]).includes(d.kind)) throw new OcError('forbidden', `decision ${i.id} is owned by the human`);
         if (!i.relayMessageId) throw new OcError('validation', `recording ${d.kind} "${d.title}" from the human's words requires the id of the message it came from`);
+        if (i.inputs && Object.keys(i.inputs).length) throw new OcError('validation', `decision ${i.id} is human-owned and its inputs must be answered on the card`);
         return svc(ctx).decisions.answer(ctx.actor, i.id, { key: i.key, text: i.text, remember: i.remember, relayFromMessageId: i.relayMessageId });
       }
       if (i.relayMessageId) throw new OcError('validation', `decision ${i.id} is yours to answer directly; a relay names a message from the human`);
-      return svc(ctx).decisions.answer(ctx.actor, i.id, { key: i.key, text: i.text, remember: i.remember });
+      return svc(ctx).decisions.answer(ctx.actor, i.id, { key: i.key, text: i.text, remember: i.remember, inputs: i.inputs });
     },
   },
   {

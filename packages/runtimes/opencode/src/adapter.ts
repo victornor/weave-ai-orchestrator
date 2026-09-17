@@ -11,6 +11,7 @@ import { extractReport } from '@weave-ai/shared';
 import { describeOpenCodeAccount } from './account.js';
 import { buildArgs, CONFIG_RELATIVE_PATH, opencodeConfig, resumeCommand } from './args.js';
 import { createOpenCodeParser, parseOpenCodeProviderErrors, type OpenCodeProviderError } from './events.js';
+import { compactOpenCodeSession } from './compact.js';
 import { asOpenCodeSession, type OpenCodeSessionRef } from './session.js';
 
 const pExecFile = promisify(execFile);
@@ -198,6 +199,9 @@ export const adapter: RuntimeAdapter = {
     const s = asOpenCodeSession(ref);
     return { displayId: s?.sessionId ?? 'unknown', exists: Boolean(s) };
   },
+
+  /** A short-lived `opencode serve` + POST /session/<id>/summarize. See `compact.ts`. */
+  compactSession: compactOpenCodeSession,
 
   /** Static: OpenCode bills through provider keys and has no plan limits. */
   async describeAccount(): Promise<AccountDescription> { return describeOpenCodeAccount(); },

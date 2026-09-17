@@ -1,15 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import type {
-  AccountDescription, AccountProbeInput, AgentHome, CredentialFacts, CredentialProbeInput, InputDelivery, InstructionBundle,
+  AccountDescription, AccountProbeInput, AgentHome, CompactSessionInput, CompactSessionResult, CredentialFacts, CredentialProbeInput, InputDelivery, InstructionBundle,
   JsonSchema, RuntimeAdapter, RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle,
   TurnInput, TurnResult, TurnSink,
 } from '@weave-ai/runtime-sdk';
-import { classifyError, detectBinary, installBundleFiles, launchCommand, runTmpDir, spawnLines, writeFiles } from '@weave-ai/runtime-sdk';
+import { childEnv, classifyError, detectBinary, installBundleFiles, launchCommand, runTmpDir, spawnLines, writeFiles } from '@weave-ai/runtime-sdk';
 import { extractReport } from '@weave-ai/shared';
 import { probeAccount } from './account.js';
 import { readCredential } from './credential.js';
-import { buildArgs, resumeCommand, RESTRICTED_TOOLS, userFrame } from './args.js';
+import { buildArgs, compactArgs, resumeCommand, RESTRICTED_TOOLS, userFrame } from './args.js';
 import { createClaudeParser } from './events.js';
 import { asClaudeSession, type ClaudeSessionRef } from './session.js';
 
@@ -126,6 +126,41 @@ export const adapter: RuntimeAdapter = {
   async describeSession(ref: SessionRef) {
     const s = asClaudeSession(ref);
     return { displayId: s?.sessionId ?? 'unknown', exists: Boolean(s) };
+  },
+
+  /** `claude -p --resume <id> "/compact"`: the CLI's own summarise, triggered out of band. */
+  async compactSession(input: CompactSessionInput): Promise<CompactSessionResult> {
+    const ref = asClaudeSession(input.ref);
+    if (!ref) return { ok: false, via: 'command', error: { code: 'no_session', message: 'claude: no session id to compact' } };
+    const overlay: Record<string, string> = { ...(input.env ?? {}) };
+    if (input.configHome) overlay['CLAUDE_CONFIG_DIR'] = input.configHome;
+    const launch = launchCommand('claude', childEnv(overlay));
+    let sawBoundary = false;
+    let isError = false;
+    const run = spawnLines({
+      cmd: launch.cmd,
+      args: compactArgs({ sessionId: ref.sessionId, model: input.model }),
+      cwd: input.cwd,
+      env: launch.env,
+      stdin: null,
+      timeoutMs: input.timeoutMs ?? 600_000,
+      onLine: (stream, line) => {
+        if (stream !== 'stdout') return;
+        if (line.includes('"compact_boundary"')) sawBoundary = true;
+        if (line.includes('"is_error":true')) isError = true;
+      },
+    });
+    const outcome = await run.done;
+    if (outcome.exitCode === 0 && !outcome.timedOut && !isError && sawBoundary) return { ok: true, via: 'command' };
+    const classified = classifyError(outcome.exitCode ?? 1, outcome.stderr);
+    return {
+      ok: false, via: 'command',
+      error: {
+        code: outcome.timedOut ? 'compact_timeout' : (classified?.code ?? 'compact_failed'),
+        message: outcome.timedOut ? 'claude /compact timed out' : (classified?.message ?? 'claude /compact did not report a compact boundary'),
+      },
+      detail: { exitCode: outcome.exitCode, boundary: sawBoundary, isError },
+    };
   },
 
   /** One `get_usage` control request: zero model tokens, no session, sub-second. */

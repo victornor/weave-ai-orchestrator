@@ -106,6 +106,30 @@ export interface CredentialFacts {
 
 export interface InstructionBundle { instructions: string; skills: Array<{ name: string; dir: string }> }
 
+/**
+ * What an out-of-band compaction request needs: the resumed session's ref, plus the same cwd, config
+ * home and model a turn would run under. `ref` is the same shape the adapter returns in
+ * `TurnResult.session`, so a caller passes back what the last turn stored.
+ */
+export interface CompactSessionInput {
+  ref: SessionRef;
+  cwd: string;
+  configHome?: string;
+  /** `provider/model` as the turn ran it. A runtime whose CLI needs the model for the summary uses it. */
+  model?: string | null;
+  env?: Record<string, string>;
+  timeoutMs?: number;
+}
+
+/** The outcome of an external compaction request. Branch on `ok`; `via` names the mechanism used. */
+export interface CompactSessionResult {
+  ok: boolean;
+  /** How it was asked: `command` (Claude `/compact`), `rpc` (Codex app-server), `http` (OpenCode). */
+  via?: string;
+  error?: { code: string; message: string };
+  detail?: Record<string, unknown>;
+}
+
 /** Input to `resumeCommand` (VS-249): the working context a human's own resume needs to reproduce. */
 export interface ResumeCommandInput {
   /** The agent's home — the same `cwd` the daemon's own turn would use. */
@@ -137,6 +161,14 @@ export interface RuntimeAdapter {
   runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult>;
   forkSession?(base: SessionRef, cwd: string): Promise<SessionRef>;
   describeSession?(ref: SessionRef): Promise<{ displayId: string; exists: boolean }>;
+  /**
+   * Ask this runtime's CLI to compact the session now, out of band of a turn — the same summarise
+   * the CLI does for itself at its own threshold, but at a point the daemon chooses. Optional: a
+   * runtime with no external trigger omits it, and a caller must check for the method. Must never
+   * throw — a request that cannot be made or is refused resolves `{ ok: false }` so the caller can
+   * log and carry on.
+   */
+  compactSession?(input: CompactSessionInput): Promise<CompactSessionResult>;
   /**
    * The billing mode and plan limit windows of the account these credentials belong to.
    * Optional: an adapter that cannot determine any of it omits the method rather than

@@ -8,6 +8,7 @@ import { classifyError, detectBinary, installBundleFiles, launchCommand, runTmpD
 import { extractReport } from '@weave-ai/shared';
 import { describeCodexAccount } from './account.js';
 import { buildArgs, mcpConfigToml, resumeCommand } from './args.js';
+import { compactCodexThread } from './compact.js';
 import { createCodexParser } from './events.js';
 import { listModels as listCodexModels, modelContextWindow } from './models.js';
 import { readThreadContextTokens, readThreadUsage } from './usage.js';
@@ -73,6 +74,9 @@ export const adapter: RuntimeAdapter = {
     const s = asCodexSession(ref);
     return { displayId: s?.threadId ?? 'unknown', exists: Boolean(s) };
   },
+
+  /** `codex app-server` → thread/resume → thread/compact/start. See `compact.ts`. */
+  compactSession: compactCodexThread,
 
   /** Billing mode only: Codex exposes no plan limits to a non-interactive run. */
   async describeAccount(input: AccountProbeInput): Promise<AccountDescription> { return describeCodexAccount(input); },

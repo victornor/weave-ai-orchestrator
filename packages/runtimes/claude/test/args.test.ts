@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnInput } from '@weave-ai/runtime-sdk';
-import { buildArgs, MAX_ARGV_PROMPT, resumeCommand, RESTRICTED_TOOLS, userFrame } from '../src/args.js';
+import { buildArgs, compactArgs, MAX_ARGV_PROMPT, resumeCommand, RESTRICTED_TOOLS, userFrame } from '../src/args.js';
 
 const NEW_ID = '11111111-2222-4333-8444-555555555555';
 

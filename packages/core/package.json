@@ -15,22 +15,23 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@weave-ai/shared": "workspace:*",
+    "@huggingface/transformers": "^4.3.0",
+    "@node-rs/argon2": "^2.0.2",
+    "@weave-ai/channel-sdk": "workspace:*",
     "@weave-ai/db": "workspace:*",
+    "@weave-ai/plugin-sdk": "workspace:*",
     "@weave-ai/release": "workspace:*",
     "@weave-ai/render": "workspace:*",
     "@weave-ai/runtime-sdk": "workspace:*",
-    "@weave-ai/channel-sdk": "workspace:*",
+    "@weave-ai/shared": "workspace:*",
     "@weave-ai/surface-sdk": "workspace:*",
-    "@weave-ai/plugin-sdk": "workspace:*",
-    "zod": "^3.25.76",
-    "pino": "^9.9.0",
-    "yaml": "^2.8.1",
-    "ulid": "^3.0.1",
+    "execa": "^9.6.0",
     "jose": "^6.0.13",
-    "@node-rs/argon2": "^2.0.2",
     "otplib": "^12.0.1",
-    "execa": "^9.6.0"
-  },
-  "devDependencies": {}
+    "pino": "^9.9.0",
+    "sqlite-vec": "^0.1.9",
+    "ulid": "^3.0.1",
+    "yaml": "^2.8.1",
+    "zod": "^3.25.76"
+  }
 }

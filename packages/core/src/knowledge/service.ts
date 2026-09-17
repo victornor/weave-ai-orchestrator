@@ -9,6 +9,7 @@ import type { Actor, CoreServices, KnowledgeBootstrapPart, KnowledgeDocDetail, K
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { requestKnowledgeRepoPr } from './repoDelivery.js';
+import { createEmbeddingIndex, type EmbeddingIndexOptions } from './embeddings.js';
 import { tx } from '../tickets/tx.js';
 import {
   CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, MAX_DUPLICATE_ENTRIES, MAX_DUPLICATE_PAIRS, SECRET_SHAPED_RE, appendEntry, budgetOf, countWords, docFolderOf, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection,
@@ -26,10 +27,13 @@ interface ProjectRow { id: string; slug: string; name: string }
 
 const SYSTEM: Actor = { kind: 'system', id: null };
 
-export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreServices): KnowledgeService {
+export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreServices, embeddingOptions: EmbeddingIndexOptions = {}): KnowledgeService {
   const db: Db = ctx.db;
   const log = ctx.log('knowledge');
   const ws = ctx.workspaceId;
+  // VS-493: constructed but inert — neither the sqlite-vec extension nor the model is loaded until
+  // the first semanticSearch/backfillEmbeddings call, and nothing on the turn path calls them.
+  const embeddings = createEmbeddingIndex(ctx, embeddingOptions);
 
   // ---------- file plumbing ----------
 
@@ -555,6 +559,14 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         log.warn({ err: e, query }, 'knowledge search failed');
         return [];
       }
+    },
+
+    semanticSearch(query, projectId, limit = 20) {
+      return embeddings.search(query, { projectId: projectId ?? null, limit });
+    },
+
+    backfillEmbeddings(projectId) {
+      return embeddings.backfill(projectId ?? null);
     },
 
     reindex() {

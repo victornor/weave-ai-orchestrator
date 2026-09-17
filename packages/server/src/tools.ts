@@ -120,6 +120,16 @@ function knowledgeScope(ctx: ToolCtx, scope: string, projectId?: string | null):
 }
 
 /**
+ * VS-493: the one worker-visibility rule BOTH search tools apply to a knowledge `ref`. Workspace-only
+ * knowledge (WORKSPACE.md, the decisions log, workspace-scoped documents) is never reachable by a
+ * worker; project and shared refs are. Sharing this predicate is what stops keyword and semantic
+ * search from drifting apart.
+ */
+function workerVisibleKnowledgeRef(ref: string): boolean {
+  return !ref.startsWith('workspace/WORKSPACE') && !ref.startsWith('workspace/decisions') && !ref.startsWith('workspace/docs/');
+}
+
+/**
  * VS-358: the worktree to also mirror a project knowledge write into, or `undefined` when none
  * applies — a weaver caller, a non-project scope, a worker with no worktree (including today's
  * worktree-less curation spawn for an opted-out project), or a project that has not opted in.
@@ -651,7 +661,15 @@ export const TOOLS: ToolDef[] = [
     description: 'Full-text search over the knowledge bases and documents you can read. Returns the file path (ref), title and a snippet; read the hit with weave_knowledge_get or weave_knowledge_doc_get.',
     handler: (ctx, i) => {
       const hits = svc(ctx).knowledge.search(i.query, isConductor(ctx) ? null : ctx.claims.projectId, i.limit ?? 20);
-      return isConductor(ctx) ? hits : hits.filter((h) => !h.ref.startsWith('workspace/WORKSPACE') && !h.ref.startsWith('workspace/decisions') && !h.ref.startsWith('workspace/docs/'));
+      return isConductor(ctx) ? hits : hits.filter((h) => workerVisibleKnowledgeRef(h.ref));
+    },
+  },
+  {
+    name: 'weave_knowledge_semantic_search', scope: 'all', input: z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(50).optional() }),
+    description: 'Semantic (meaning-based) search over the knowledge you can read — the fallback for when weave_knowledge_search\'s exact keywords find nothing but you know roughly what you want. Scoped exactly like weave_knowledge_search: a worker sees its own project and shared knowledge, the weaver sees everything. Runs a local model in-process with no API key. Returns ref, title, section, matched text and score; read the hit with weave_knowledge_get or weave_knowledge_doc_get. If it reports the tool is `unavailable`, use weave_knowledge_search.',
+    handler: async (ctx, i) => {
+      const hits = await svc(ctx).knowledge.semanticSearch(i.query, isConductor(ctx) ? null : ctx.claims.projectId, i.limit ?? 20);
+      return isConductor(ctx) ? hits : hits.filter((h) => workerVisibleKnowledgeRef(h.ref));
     },
   },
   {

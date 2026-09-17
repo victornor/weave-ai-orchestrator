@@ -16,7 +16,10 @@ export class Db {
   /** Migration files this process applied when it opened the database; empty when it was already current. */
   readonly appliedMigrations: string[] = [];
   constructor(public readonly path: string) {
-    this.sqlite = new DatabaseSync(path);
+    // VS-493: `allowExtension` has to be set at construction — node:sqlite refuses to enable
+    // extension loading afterwards. Loading itself is opt-in per call (`db.loadExtension`), used only
+    // by the knowledge embeddings index to load `sqlite-vec`.
+    this.sqlite = new DatabaseSync(path, { allowExtension: true });
     this.sqlite.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   }
   /**

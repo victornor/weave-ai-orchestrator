@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-17
+goal: weave_knowledge_doc_get's schema advertises a field its implementation rejects

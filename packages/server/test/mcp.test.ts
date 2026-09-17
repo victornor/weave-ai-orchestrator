@@ -51,6 +51,26 @@ describe('MCP endpoint', () => {
     await client.close();
   });
 
+  it('publishes and accepts the slug field for weave_knowledge_doc_get', async () => {
+    const { client, h } = await connect();
+    h.impls.knowledge.getDoc = () => ({ slug: 'schema-doc', body: '# Schema doc\n', tokenEstimate: 1, linksTo: [], linkedFrom: [] });
+
+    const { tools } = await client.listTools();
+    const docGet = tools.find((tool) => tool.name === 'weave_knowledge_doc_get');
+    expect(docGet?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: expect.objectContaining({ slug: expect.any(Object) }),
+      required: expect.arrayContaining(['slug']),
+    });
+    expect((docGet?.inputSchema as { properties?: Record<string, unknown> }).properties).not.toHaveProperty('key');
+
+    const result = await client.callTool({ name: 'weave_knowledge_doc_get', arguments: { slug: 'schema-doc', scope: 'project' } });
+    const payload = JSON.parse((result.content as Array<{ text: string }>)[0]!.text) as { ok: boolean; data?: { slug: string } };
+    expect(payload.ok).toBe(true);
+    expect(payload.data?.slug).toBe('schema-doc');
+    await client.close();
+  });
+
   it('scopes an interactive opening turn to the first-turn tools (VS-462)', async () => {
     const { client } = await connect({ ...WORKER, firstTurn: true });
     const names = (await client.listTools()).tools.map((t) => t.name);

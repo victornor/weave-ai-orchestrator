@@ -5,7 +5,7 @@
  * boundary that sits in front of it, wired to the real core service (not a hand-written double) so
  * these tests catch a real mismatch between the route and what `threads.inbound` actually expects.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -15,6 +15,7 @@ import type { EnqueueInput } from '@weave-ai/core';
 import type { Wakeup } from '@weave-ai/shared';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { resolveOutboundAttachments } from '../../core/src/threads/outboundAttachments.js';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import { authed, makeHarness, type Harness } from './fakes.js';
@@ -204,6 +205,56 @@ describe('GET /threads/:threadId/attachments/:attachmentId', () => {
     // Same thread id string is meaningless across workspaces: a second harness is a separate db.
     const res = await fetch2(`/api/w/ws2/threads/${t1.id}/attachments/${attachmentId}`, { headers: authed() });
     expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /threads/:threadId/attachments/:attachmentId — download framing (VS-528)', () => {
+  it('serves a bundled zip byte-for-byte with the exact declared length and a named download disposition', async () => {
+    const { h, fetch } = withRealThreads();
+    const t = h.runtime.services.threads.bindOrGet('web', 'web-zip', null, 'Victor');
+    const src = mkdtempSync(join(tmpdir(), 'ac-bundle-'));
+    attachmentsDirs.push(src);
+    (h.runtime.ctx.paths as { knowledge: string }).knowledge = src;
+    const one = join(src, 'one.md');
+    writeFileSync(one, 'x'.repeat(5400));
+    const two = join(src, 'two.md');
+    writeFileSync(two, 'y'.repeat(3300));
+    const sh = join(src, 'run.sh');
+    writeFileSync(sh, '#!'.repeat(2000));
+    const resolved = resolveOutboundAttachments(h.runtime.ctx, [
+      { path: sh },
+      { paths: [one, two], zipName: 'vs527-apply-these.zip' },
+    ]);
+    const msg = await h.runtime.services.threads.outbound({ kind: 'human', id: 'victor' }, t.id, 'here', { attachments: resolved });
+    const zipPart = msg.parts.find((p) => p.mediaType === 'application/zip')!;
+    const filePart = msg.parts.find((p) => p.mediaType !== 'application/zip')!;
+
+    const zipRes = await fetch(`/api/w/ws1/threads/${t.id}/attachments/${zipPart.id}`, { headers: authed() });
+    expect(zipRes.status).toBe(200);
+    expect(zipRes.headers.get('content-type')).toBe('application/zip');
+    expect(zipRes.headers.get('content-disposition')).toBe(`attachment; filename="vs527-apply-these.zip"; filename*=UTF-8''vs527-apply-these.zip`);
+    const zipBytes = Buffer.from(await zipRes.arrayBuffer());
+    // The declared length is the body's, and the body is exactly what was stored at send time.
+    expect(zipBytes.byteLength).toBe(Number(zipRes.headers.get('content-length')));
+    expect(zipBytes).toEqual(resolved[1]!.bytes);
+
+    const fileRes = await fetch(`/api/w/ws1/threads/${t.id}/attachments/${filePart.id}`, { headers: authed() });
+    expect(fileRes.status).toBe(200);
+    expect(fileRes.headers.get('content-disposition')).toBe(`attachment; filename="run.sh"; filename*=UTF-8''run.sh`);
+    const fileBytes = Buffer.from(await fileRes.arrayBuffer());
+    expect(fileBytes.byteLength).toBe(Number(fileRes.headers.get('content-length')));
+  });
+
+  it('serves an image inline', async () => {
+    const { h, fetch } = withRealThreads();
+    const t = h.runtime.services.threads.bindOrGet('web', 'web-zip-img', null, 'Victor');
+    const sent = await fetch(`/api/w/ws1/threads/${t.id}/messages`, {
+      method: 'POST', headers: authed(),
+      body: multipart({ body: 'look' }, [{ name: 'shot.png', type: 'image/png', bytes: PNG }]),
+    });
+    const attachmentId = (await sent.json()).parts[0].id;
+    const res = await fetch(`/api/w/ws1/threads/${t.id}/attachments/${attachmentId}`, { headers: authed() });
+    expect(res.headers.get('content-disposition')).toBe('inline');
   });
 });
 

@@ -88,3 +88,24 @@ export function guessOutboundMediaType(filename: string): string {
   const ext = filename.slice(dot + 1).toLowerCase();
   return OUTBOUND_EXTENSION_MEDIA_TYPES[ext] ?? 'application/octet-stream';
 }
+
+/**
+ * RFC 5987 `ext-value` for a filename: `encodeURIComponent` leaves `!'()*` unescaped, but those are
+ * not `attr-char`s, so a strict parser would reject the header — encode them too.
+ */
+function encode5987(value: string): string {
+  return encodeURIComponent(value).replace(/['()*!]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+/**
+ * The `Content-Disposition` value for a served attachment (VS-528). An image is `inline` so the chat
+ * can preview it; everything else is a named download, like the ticket-attachment route. A header
+ * value must be Latin-1 and Node throws `ERR_INVALID_CHAR` on anything else, so the plain `filename`
+ * is reduced to printable ASCII (quotes and backslashes included, which would end the quoted string)
+ * and the attachment's true display name is carried in the RFC 5987 `filename*` form instead.
+ */
+export function attachmentContentDisposition(mediaType: string, filename: string): string {
+  if (mediaType.startsWith('image/')) return 'inline';
+  const ascii = filename.replace(/[^\x20-\x7e]|["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encode5987(filename)}`;
+}

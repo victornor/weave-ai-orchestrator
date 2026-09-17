@@ -18,6 +18,10 @@ const state = vi.hoisted(() => ({
   thread: null as { id: string; agentId: string } | null,
   postThread: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   compact: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  setOption: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  resetOption: vi.fn() as unknown as ReturnType<typeof vi.fn>,
+  models: null as { workers: { runtime: string; model: string | null }; weaver: { runtime: string; model: string | null }; workerOptions: Array<{ id: string; description: string; runtime: string | null; model: string | null }>; source: { weaver: string; workers: string; workerOptions: string } } | null,
+  sessionTurns: null as number | null,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -29,12 +33,14 @@ vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
 vi.mock('../lib/drafts', () => ({ draftKey: () => 'k', useDraft: () => ({ draft: { text: 'steer this' }, patch: state.patch }) }));
 vi.mock('../v2/WorkerFeed', () => ({ WorkerFeed: () => <div data-testid="worker-feed" /> }));
 vi.mock('../api/hooks', () => ({
-  useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: state.noTicket ? null : ticket({ id: 'tk1', identifier: 'ACME-1' }), thread: state.thread, role: null, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
+  useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: state.noTicket ? null : ticket({ id: 'tk1', identifier: 'ACME-1' }), thread: state.thread, role: null, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, sessionTurns: state.sessionTurns, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
   useWorkerBrief: () => ({ data: { brief: '# The brief' } }),
   useWorkerAction: () => ({ mutate: state.action, error: state.actionError }),
   useWorkerMessage: () => ({ mutateAsync: state.send, error: null }),
   usePostThreadMessage: () => ({ mutateAsync: state.postThread, error: null }),
   useCompactWorker: () => ({ mutate: state.compact, isPending: false, error: null }),
+  useModels: () => ({ data: state.models }),
+  useSetSessionOption: () => ({ mutate: state.setOption, isPending: false, reset: state.resetOption, error: null }),
   useThreadMessages: () => ({ data: [], isLoading: false, isError: false, error: null }),
   useHandoverCommand: () => ({ isLoading: false, data: null }),
   useStartHandover: () => ({ mutate: state.start, error: null }),
@@ -59,6 +65,10 @@ beforeEach(() => {
   state.thread = null;
   state.postThread = vi.fn().mockResolvedValue(undefined);
   state.compact = vi.fn();
+  state.setOption = vi.fn();
+  state.resetOption = vi.fn();
+  state.models = null;
+  state.sessionTurns = null;
 });
 
 describe('V2 worker page', () => {
@@ -99,6 +109,17 @@ describe('V2 worker page', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('the worker is already gone');
   });
 
+  it('shows why the last turn failed instead of a bare status (VS-526)', () => {
+    state.agent = agent({ id: 'a1', status: 'error', errorText: 'Not inside a trusted directory and --skip-git-repo-check was not specified.' });
+    render(<WorkerBody workerId="a1" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('--skip-git-repo-check was not specified');
+  });
+
+  it('shows no failure band when the agent has not errored', () => {
+    render(<WorkerBody workerId="a1" />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('requires a confirmation before cancelling', () => {
     render(<WorkerBody workerId="a1" />);
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -125,6 +146,68 @@ describe('V2 worker page', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
       expect(state.postThread).toHaveBeenCalledWith({ threadId: 'th1', body: 'hello there' });
       expect(state.send).not.toHaveBeenCalled();
+    });
+  });
+
+  // VS-526: the session's worker option is selectable and changeable, and the surface states what a
+  // change does to the conversation before it is applied.
+  describe('choosing a session worker option (VS-526)', () => {
+    beforeEach(() => {
+      state.noTicket = true;
+      state.thread = { id: 'th1', agentId: 'a1' };
+      state.models = {
+        workers: { runtime: 'claude-code', model: null },
+        weaver: { runtime: 'claude-code', model: null },
+        workerOptions: [
+          { id: 'quick', description: 'fast', runtime: 'claude-code', model: 'haiku' },
+          { id: 'deep', description: 'slow', runtime: 'codex', model: null },
+        ],
+        source: { weaver: 'default', workers: 'default', workerOptions: 'workspace' },
+      };
+    });
+
+    it('shows the current option and stages a change before applying it', () => {
+      state.agent = agent({ id: 'a1', kind: 'session', ticketId: null, status: 'active', runtimeId: 'claude-code', workerModelId: 'quick' });
+      render(<WorkerBody workerId="a1" />);
+      const select = document.querySelector('[data-v2-session-option]') as HTMLSelectElement;
+      expect(select.value).toBe('quick');
+
+      fireEvent.change(select, { target: { value: 'deep' } });
+      // Staged, not applied: the surface must state the effect first.
+      expect(state.setOption).not.toHaveBeenCalled();
+      const band = document.querySelector('[data-v2-session-option-confirm]') as HTMLElement;
+      expect(band.textContent).toContain('different runtime');
+      expect(band.textContent).toContain('restarts on codex');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Switch' }));
+      expect(state.setOption).toHaveBeenCalledWith({ workerModelId: 'deep' }, expect.anything());
+    });
+
+    it('says a same-runtime change keeps the conversation', () => {
+      state.agent = agent({ id: 'a1', kind: 'session', ticketId: null, status: 'active', runtimeId: 'codex', workerModelId: 'deep' });
+      state.models = { ...state.models!, workerOptions: [
+        { id: 'deep', description: 'slow', runtime: 'codex', model: null },
+        { id: 'fast', description: 'quick', runtime: 'codex', model: 'mini' },
+      ] };
+      render(<WorkerBody workerId="a1" />);
+      fireEvent.change(document.querySelector('[data-v2-session-option]') as HTMLSelectElement, { target: { value: 'fast' } });
+      const band = document.querySelector('[data-v2-session-option-confirm]') as HTMLElement;
+      expect(band.textContent).toContain('same runtime');
+      expect(band.textContent).toContain('kept');
+    });
+
+    it('says the conversation restarted when the session is fresh after a runtime change', () => {
+      state.agent = agent({ id: 'a1', kind: 'session', ticketId: null, status: 'active', runtimeId: 'codex', workerModelId: 'deep' });
+      state.sessionTurns = 0;
+      render(<WorkerBody workerId="a1" />);
+      expect(document.querySelector('[data-v2-session-restarted]')?.textContent).toContain('New conversation on codex');
+    });
+
+    it('shows no restart banner once the fresh conversation has taken a turn', () => {
+      state.agent = agent({ id: 'a1', kind: 'session', ticketId: null, status: 'active', runtimeId: 'codex', workerModelId: 'deep' });
+      state.sessionTurns = 3;
+      render(<WorkerBody workerId="a1" />);
+      expect(document.querySelector('[data-v2-session-restarted]')).toBeNull();
     });
   });
 });

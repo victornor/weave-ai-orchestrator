@@ -375,7 +375,14 @@ export interface WorkersService {
    * worktree until it takes one. Returns the existing session and its thread if the role already has
    * a live one (never creates a second), otherwise creates both.
    */
-  ensureSession(actor: Actor, projectId: string, roleId: string): Promise<{ agent: S.Agent; thread: S.ChannelThread }>;
+  ensureSession(actor: Actor, projectId: string, roleId: string, workerModelId?: string | null): Promise<{ agent: S.Agent; thread: S.ChannelThread }>;
+  /**
+   * VS-526: change the worker option a persistent session runs on. Validated against the effective
+   * catalog exactly as a ticket's option is. Takes effect on the session's next turn; a change that
+   * moves the session to a different runtime retires its current session there (see `sessions.forTurn`),
+   * so the caller must have told the human the conversation will restart before calling this.
+   */
+  setSessionOption(actor: Actor, sessionId: string, workerModelId: string | null): Promise<S.Agent>;
   /**
    * VS-495: a persistent session takes a ticket as its own — assigning it to its own role and
    * binding `tickets.worker_id` to itself atomically (no `await` between the two writes; see the

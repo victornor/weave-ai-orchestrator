@@ -65,6 +65,12 @@ export function workerRoutes(): Hono<AppEnv> {
       scheduledWake: scheduledWake(s, worker.id),
       // VS-498: in an active stall/recovery cycle — see the workers list for what this means.
       stalled: isWorkerStalled(ws.ctx, worker.id),
+      // VS-526: how many turns the current session has taken. A runtime change retires the session
+      // (VS-77) and the next turn starts a fresh one at 0, so the surface can say the conversation
+      // restarted rather than let it read as lost history. Null for every agent that has no session.
+      sessionTurns: worker.kind === 'session' || worker.kind === 'weaver'
+        ? (ws.ctx.db.get<{ n: number }>("SELECT turn_count AS n FROM agent_sessions WHERE agent_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1", [worker.id])?.n ?? null)
+        : null,
     });
   });
 
@@ -83,9 +89,21 @@ export function workerRoutes(): Hono<AppEnv> {
    * ticket-bound). Idempotent: returns the role's existing live session and its thread if it has one.
    */
   app.post('/persistent-session', async (c) => {
-    const { projectId, roleId } = await body(c, z.object({ projectId: z.string().min(1), roleId: z.string().min(1) }));
-    const { agent, thread } = await c.get('ws').services.workers.ensureSession(c.get('actor'), projectId, roleId);
+    const { projectId, roleId, workerModelId } = await body(c, z.object({
+      projectId: z.string().min(1), roleId: z.string().min(1),
+      // VS-526: the worker option the session runs on; omitted or null means `models.workers`.
+      workerModelId: z.string().min(1).nullish(),
+    }));
+    const { agent, thread } = await c.get('ws').services.workers.ensureSession(c.get('actor'), projectId, roleId, workerModelId ?? null);
     return c.json({ agent, thread });
+  });
+
+  // VS-526: change (or clear) the worker option a persistent session runs on. The caller must have
+  // told the human what the change does to the conversation before calling (a runtime change starts
+  // a new session on the next turn).
+  app.post('/:id/session-option', async (c) => {
+    const { workerModelId } = await body(c, z.object({ workerModelId: z.string().min(1).nullable() }));
+    return c.json(await c.get('ws').services.workers.setSessionOption(c.get('actor'), c.req.param('id'), workerModelId));
   });
 
   app.get('/:id/brief', (c) => c.text(c.get('ws').services.workers.brief(c.req.param('id'))));

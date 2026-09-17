@@ -386,6 +386,8 @@ export interface WorkerDetail {
   input: { midTurn: boolean; interrupts?: boolean; reason?: string };
   /** Whether this worker's *next* turn would resume its existing session rather than start fresh (VS-106). */
   sessionResumable: boolean;
+  /** VS-526: turns taken by the current session; 0 means a fresh conversation (e.g. after a runtime change). Null when the agent has no session. */
+  sessionTurns?: number | null;
   /** True while the session is being compacted out of band: wakes are held, so a message sent now is queued. */
   compacting: boolean;
   compactingError: string | null;

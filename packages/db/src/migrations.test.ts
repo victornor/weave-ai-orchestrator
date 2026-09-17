@@ -1777,4 +1777,31 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0053_agent_worker_model (VS-526)', () => {
+    it('adds a nullable worker_model_id to agents and leaves existing rows without one', () => {
+      const path = join(dir, 'agent-worker-model.sqlite');
+      const before = openDbAsOf(path, '0052_ticket_attachments.sql');
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      before.insert('agents', {
+        id: 'a-worker', workspaceId: 'w1', kind: 'worker', name: 'Worker', runtimeId: 'claude',
+        homePath: '/tmp/worker', createdAt: 't0', updatedAt: 't0',
+      });
+      before.close();
+
+      const db = openDb(path);
+      const cols = db.all<{ name: string }>('PRAGMA table_info(agents)').map((c) => c.name);
+      expect(cols).toContain('worker_model_id');
+      expect(db.get<{ workerModelId: string | null }>('SELECT worker_model_id AS workerModelId FROM agents WHERE id = ?', ['a-worker']))
+        .toMatchObject({ workerModelId: null });
+      db.insert('agents', {
+        id: 'a-session', workspaceId: 'w1', kind: 'session', name: 'Session', runtimeId: 'codex',
+        workerModelId: 'deep', homePath: '/tmp/session', createdAt: 't0', updatedAt: 't0',
+      });
+      expect(db.get('SELECT worker_model_id AS workerModelId FROM agents WHERE id = ?', ['a-session'])).toMatchObject({ workerModelId: 'deep' });
+      db.close();
+    });
+  });
 });

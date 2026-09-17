@@ -27,6 +27,22 @@ process.stdin.on('data', (chunk) => { prompt += chunk; });
 process.stdin.on('end', () => {
   fs.writeFileSync(process.env.CAPTURE, JSON.stringify({ args, prompt, cwd: process.cwd(), home: process.env.CODEX_HOME }));
   if (process.env.SCENARIO === 'empty') return;
+  if (process.env.SCENARIO === 'startup_failure') {
+    process.stderr.write('Not inside a trusted directory and --skip-git-repo-check was not specified.\\n');
+    process.exitCode = 1;
+    return;
+  }
+  if (process.env.SCENARIO === 'startup_noisy') {
+    process.stderr.write('WARNING: proceeding, even though we could not create PATH aliases\\n');
+    process.stderr.write('2026-09-17T21:16:32.0Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed\\n');
+    process.stderr.write('Not inside a trusted directory and --skip-git-repo-check was not specified.\\n');
+    process.exitCode = 1;
+    return;
+  }
+  if (process.env.SCENARIO === 'startup_silent') {
+    process.exitCode = 1;
+    return;
+  }
   emit({ type: 'thread.started', thread_id: args[1] === 'fork' ? 'forked-thread' : 'thread-1' });
   emit({ type: 'turn.started' });
   const schema = JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8'));
@@ -144,6 +160,26 @@ describe('Codex turn against a fake CLI', () => {
 
   it('rejects an empty successful process instead of silently completing the run', async () => {
     expect((await adapter.runTurn(input('empty'), sink())).error?.message).toContain('without completing');
+  });
+
+  it('names the reason a runtime wrote to stderr before exiting with no turn output', async () => {
+    const events: RuntimeEvent[] = [];
+    const result = await adapter.runTurn(input('startup_failure'), sink(events));
+    expect(result.error?.message).toBe('Not inside a trusted directory and --skip-git-repo-check was not specified.');
+    expect(result.error?.message).not.toBe('exit_1');
+    expect(events.find((e) => e.type === 'error')?.payload['message'])
+      .toBe('Not inside a trusted directory and --skip-git-repo-check was not specified.');
+  });
+
+  it('ignores startup noise and uses the first real stderr reason', async () => {
+    const result = await adapter.runTurn(input('startup_noisy'), sink());
+    expect(result.error?.message).toBe('Not inside a trusted directory and --skip-git-repo-check was not specified.');
+  });
+
+  it('names the runtime and exit status when a failed start wrote nothing at all', async () => {
+    const result = await adapter.runTurn(input('startup_silent'), sink());
+    expect(result.error?.message).toContain('status 1');
+    expect(result.error?.message).toContain('codex');
   });
 
   it('times out and cleans scratch files', async () => {

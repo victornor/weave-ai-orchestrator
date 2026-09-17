@@ -96,6 +96,7 @@ export function agent(over: Partial<Agent> = {}): Agent {
     homePath: '/w/workers/a1',
     worktreePath: '/w/workers/a1/work',
     branch: 'ac/acme-42',
+    workerModelId: null,
     turnEpoch: 1,
     turnCount: 3,
     spawnedBy: 'weaver',

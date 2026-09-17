@@ -1091,6 +1091,113 @@ describe('workers', () => {
       h.db.run('UPDATE projects SET max_workers = 0 WHERE id = ?', [h.projectId]);
       await expect(workers.ensureSession(HUMAN, h.projectId, h.roleId)).resolves.toMatchObject({ agent: { kind: 'session' } });
     });
+
+    // VS-526: codex refuses to start outside a Git repository, and a ticketless session has no
+    // worktree, so its home has to be one before the first turn.
+    it('initialises its home as a Git repository a runtime can start in', async () => {
+      const { agent } = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+      expect(existsSync(join(agent.homePath, '.git'))).toBe(true);
+      const head = await git(['rev-parse', 'HEAD'], agent.homePath, 15_000);
+      expect(head.ok).toBe(true);
+      // The rendered instructions are present and excluded from the repository's own status.
+      expect(existsSync(join(agent.homePath, 'AGENTS.md'))).toBe(true);
+      expect(readFileSync(join(agent.homePath, '.gitignore'), 'utf8')).toContain('AGENTS.md');
+      expect(readFileSync(join(agent.homePath, '.gitignore'), 'utf8')).toContain('.ac-render.json');
+      const status = await git(['status', '--porcelain'], agent.homePath, 15_000);
+      expect(status.stdout.trim()).toBe('');
+    });
+
+    it('leaves an already-initialised session home untouched on a later open', async () => {
+      const first = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+      const head = await git(['rev-parse', 'HEAD'], first.agent.homePath, 15_000);
+      const second = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+      const after = await git(['rev-parse', 'HEAD'], second.agent.homePath, 15_000);
+      expect(after.stdout.trim()).toBe(head.stdout.trim());
+      expect(h.db.get<{ n: number }>('SELECT COUNT(*) n FROM agents WHERE kind = ?', ['session'])!.n).toBe(1);
+    });
+
+    // VS-526: the option is chosen when the session is opened and is the session's own thereafter.
+    it('stores the chosen worker option on the session, and keeps it on a later open', async () => {
+      h.ctx.config.models.workerOptions = [
+        { id: 'quick', description: 'Fast.', runtime: 'opencode', model: 'glm-4.6' },
+        { id: 'deep', description: 'Cause unknown.', runtime: 'codex', model: null },
+      ];
+      const first = await workers.ensureSession(HUMAN, h.projectId, h.roleId, 'deep');
+      expect(first.agent.workerModelId).toBe('deep');
+      expect(first.agent.runtimeId).toBe('codex');
+      const second = await workers.ensureSession(HUMAN, h.projectId, h.roleId, 'quick');
+      expect(second.agent.id).toBe(first.agent.id);
+      expect(second.agent.workerModelId).toBe('deep');
+    });
+
+    it('rejects an unknown option id and an option with no runtime chosen', async () => {
+      h.ctx.config.models.workerOptions = [
+        { id: 'quick', description: 'Fast.', runtime: 'opencode', model: 'glm-4.6' },
+        { id: 'deep', description: 'Cause unknown.', runtime: null, model: null },
+      ];
+      await expect(workers.ensureSession(HUMAN, h.projectId, h.roleId, 'nope')).rejects.toMatchObject({ code: 'validation' });
+      await expect(workers.ensureSession(HUMAN, h.projectId, h.roleId, 'deep')).rejects.toMatchObject({ code: 'model_unconfigured' });
+    });
+
+    it('keeps the session\'s own option when it takes a ticket that names none (VS-526)', async () => {
+      await seedRepo();
+      h.ctx.config.models.workerOptions = [
+        { id: 'quick', description: 'Fast.', runtime: 'opencode', model: 'glm-4.6' },
+      ];
+      h.services.threads = createThreadsService(h.ctx, h.deps);
+      h.services.tickets = createTicketsService(h.ctx, h.deps);
+      const { agent: session } = await workers.ensureSession(HUMAN, h.projectId, h.roleId, 'quick');
+      const { agent } = await workers.takeTicketForSession(HUMAN, session.id, { kind: 'task', title: 'Fix the thing', projectId: h.projectId, assigneeRoleId: h.roleId });
+      expect(agent.workerModelId).toBe('quick');
+    });
+
+    it('changes the option of a session already holding a ticket without disturbing the ticket binding', async () => {
+      await seedRepo();
+      h.ctx.config.models.workerOptions = [
+        { id: 'quick', description: 'Fast.', runtime: 'opencode', model: 'glm-4.6' },
+        { id: 'deep', description: 'Cause unknown.', runtime: 'codex', model: null },
+      ];
+      h.services.threads = createThreadsService(h.ctx, h.deps);
+      h.services.tickets = createTicketsService(h.ctx, h.deps);
+      const { agent: session } = await workers.ensureSession(HUMAN, h.projectId, h.roleId, 'quick');
+      const { ticket } = await workers.takeTicketForSession(HUMAN, session.id, { kind: 'task', title: 'Fix the thing', projectId: h.projectId, assigneeRoleId: h.roleId });
+      const updated = await workers.setSessionOption(HUMAN, session.id, 'deep');
+      expect(updated.workerModelId).toBe('deep');
+      expect(updated.ticketId).toBe(ticket.id);
+      expect(updated.worktreePath).toBe(session.worktreePath ?? updated.worktreePath);
+    });
+  });
+
+  describe('setSessionOption (VS-526)', () => {
+    beforeEach(() => {
+      h.services.threads = createThreadsService(h.ctx, h.deps);
+      h.ctx.config.models.workerOptions = [
+        { id: 'quick', description: 'Fast.', runtime: 'opencode', model: 'glm-4.6' },
+        { id: 'deep', description: 'Cause unknown.', runtime: 'codex', model: null },
+      ];
+    });
+
+    it('changes the option and the runtime the session resolves to, without retiring it here', async () => {
+      const { agent } = await workers.ensureSession(HUMAN, h.projectId, h.roleId, 'quick');
+      const updated = await workers.setSessionOption(HUMAN, agent.id, 'deep');
+      expect(updated.workerModelId).toBe('deep');
+      expect(updated.runtimeId).toBe('codex');
+      // The session row is untouched by the setter; the next turn's runtime change retires it.
+      expect(h.db.get<{ status: string }>('SELECT status FROM agent_sessions WHERE agent_id = ?', [agent.id])).toMatchObject({ status: 'active' });
+    });
+
+    it('clears the option back to the workers setting with null', async () => {
+      const { agent } = await workers.ensureSession(HUMAN, h.projectId, h.roleId, 'quick');
+      const updated = await workers.setSessionOption(HUMAN, agent.id, null);
+      expect(updated.workerModelId).toBeNull();
+    });
+
+    it('rejects a non-session agent and an unknown option', async () => {
+      const { agent } = await workers.ensureSession(HUMAN, h.projectId, h.roleId, 'quick');
+      h.db.insert('agents', { id: 'w1', workspaceId: h.workspaceId, kind: 'worker', name: 'Worker', runtimeId: 'claude', homePath: '/tmp/w1', createdAt: nowIso(), updatedAt: nowIso() });
+      await expect(workers.setSessionOption(HUMAN, 'w1', 'deep')).rejects.toMatchObject({ code: 'validation' });
+      await expect(workers.setSessionOption(HUMAN, agent.id, 'nope')).rejects.toMatchObject({ code: 'validation' });
+    });
   });
 
   describe('takeTicketForSession (VS-495)', () => {

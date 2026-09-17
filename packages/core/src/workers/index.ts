@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
 import {
@@ -13,7 +13,7 @@ import { recordHumanInputEvent, runState } from '../runs/active.js';
 import { renderHome } from './home.js';
 import { renderBrief } from '../prompts/index.js';
 import { createSessions } from '../sessions/index.js';
-import { modelSettingFor, modelsFor } from '../models/resolve.js';
+import { effectiveModels, modelSettingFor, modelsFor, resolveWorkerModelId as resolveWorkerModelOption } from '../models/resolve.js';
 import { landedWorkTest, worktreeChanges } from '../worktrees/landed.js';
 import { configureGitWorktreeIdentity, git, requireGitIdentity, worktreeState } from '../util/git.js';
 import { buildHandoverCommand } from './resume-command.js';
@@ -135,6 +135,28 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     });
     ctx.db.update('agents', agentId, { worktreePath: info.path, branch: resolvedBranch, updatedAt: nowIso() });
     return { path: info.path, branch: resolvedBranch, worktreeRowId };
+  }
+
+  /**
+   * VS-526: a ticketless persistent session has no ticket, so no worktree, and its home is where the
+   * turn runs — but several runtimes (codex 0.154.0 among them) refuse to start in a directory that
+   * is not a Git repository. Initialise the home as a repository with a single empty commit so such
+   * a runtime can start; the session's rendered `AGENTS.md` is excluded so its own instructions are
+   * not mistaken for the project's. Idempotent: an existing repository is left untouched.
+   */
+  async function ensureSessionRepo(home: string): Promise<void> {
+    mkdirSync(home, { recursive: true });
+    if (existsSync(join(home, '.git'))) return;
+    const init = await git(['init'], home, 30_000);
+    if (!init.ok) throw new OcError('internal', `could not initialise the session directory as a Git repository: ${init.stderr.trim() || init.stdout.trim()}`);
+    writeFileSync(join(home, '.gitignore'), 'AGENTS.md\n.ac-render.json\n');
+    const add = await git(['add', '.gitignore'], home, 30_000);
+    if (!add.ok) throw new OcError('internal', `could not stage the session directory's initial commit: ${add.stderr.trim()}`);
+    const commit = await git(
+      ['-c', 'user.name=Weave AI', '-c', 'user.email=weave@localhost', 'commit', '--allow-empty', '-m', 'session workspace'],
+      home, 30_000,
+    );
+    if (!commit.ok) throw new OcError('internal', `could not create the session directory's initial commit: ${commit.stderr.trim()}`);
   }
 
   /** Rolls back a `provisionTicketWorktree` call (or a plain checkout on the same branch) that must not survive — same shape `spawn()`'s and `takeTicketForSession`'s failure handlers both need. */
@@ -377,14 +399,19 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
      * for one (see `takeTicketForSession`). Returns the existing live session for the role if there
      * is one (mirrors `ensurePlanner`'s "do not create a second agent"), otherwise creates it.
      */
-    async ensureSession(actor: Actor, projectId: string, roleId: string): Promise<{ agent: Agent; thread: ChannelThread }> {
+    async ensureSession(actor: Actor, projectId: string, roleId: string, workerModelId?: string | null): Promise<{ agent: Agent; thread: ChannelThread }> {
       const project = projectOf(projectId);
       const role = ctx.db.get<Role>('SELECT * FROM roles WHERE id = ?', [roleId]);
       if (!role || role.projectId !== project.id) throw new OcError('not_found', `role ${roleId} not found in project ${project.slug}`);
+      // VS-526: validate the chosen option the same way a ticket's is, before anything is created.
+      const optionId = resolveWorkerModelOption(effectiveModels(ctx.daemon, ctx.config), workerModelId);
       const existing = ctx.db.get<Agent>(`SELECT * FROM agents WHERE role_id = ? AND kind = 'session' AND status IN ${LIVE}`, [roleId]);
       if (existing) {
         const thread = deps().threads.list({ agentId: existing.id })[0];
         if (!thread) throw new OcError('internal', `session ${existing.id} has no thread`);
+        // VS-526: self-heal a session opened before the home was a repository, so opening it again
+        // (not only creating it) leaves a runtime that requires one able to start.
+        await ensureSessionRepo(existing.homePath);
         return { agent: existing, thread };
       }
 
@@ -396,16 +423,19 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
 
       ctx.db.insert('agents', {
         id, workspaceId: ctx.workspaceId, kind: 'session', projectId: project.id, roleId: role.id, roleRevision: role.specRevision,
-        ticketId: null, name: `${role.name} — session`, runtimeId: modelSettingFor(modelsFor(ctx), 'session').runtime,
+        ticketId: null, name: `${role.name} — session`,
+        runtimeId: modelSettingFor(modelsFor(ctx), 'session', null, { workerModelId: optionId }).runtime,
+        workerModelId: optionId,
         status: 'provisioning', homePath: home, worktreePath: null, branch: null,
         turnEpoch: 0, turnCount: 0, spawnedBy, spawnReason: `role ${role.id}`,
         briefRevision: 1, createdAt: now, updatedAt: now,
       });
       mkdirSync(home, { recursive: true });
+      await ensureSessionRepo(home);
       const agent = get(id);
       await renderHome(ctx, deps, agent);
       ctx.db.update('agents', id, { status: 'active', updatedAt: nowIso() });
-      const setting = modelSettingFor(modelsFor(ctx), 'session');
+      const setting = modelSettingFor(modelsFor(ctx), 'session', null, { workerModelId: optionId });
       sessions.forTurn({ id, kind: 'session', runtimeId: setting.runtime }, 'persistent');
 
       const created = get(id);
@@ -500,6 +530,25 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       await renderHome(ctx, deps, agent);
       ctx.events.emit('worker.status', 'agent', session.id, { status: 'active', reason: 'returned to ticketless conversation' });
       log.info({ sessionAgentId: session.id }, 'persistent session returned to ticketless conversation');
+    },
+
+    /**
+     * VS-526: set (or clear) the worker option a persistent session runs on. The option is validated
+     * against the effective catalog exactly as a ticket's is; `agent.runtimeId` is updated to the
+     * resolved runtime so `sessions.forTurn` retires the current session when the runtime moves (the
+     * new session is created on the next turn), and keeps it when only the model or effort changed.
+     */
+    async setSessionOption(actor: Actor, sessionId: string, workerModelId: string | null): Promise<Agent> {
+      const session = get(sessionId);
+      if (session.kind !== 'session') throw new OcError('validation', `${sessionId} is not a persistent session`);
+      const optionId = resolveWorkerModelOption(effectiveModels(ctx.daemon, ctx.config), workerModelId);
+      const setting = modelSettingFor(modelsFor(ctx), 'session', null, { workerModelId: optionId });
+      ctx.db.update('agents', session.id, { workerModelId: optionId, runtimeId: setting.runtime, updatedAt: nowIso() });
+      const updated = get(session.id);
+      recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.status', 'agent', session.id, { workerModelId: optionId, runtimeId: setting.runtime });
+      ctx.events.emit('worker.status', 'agent', session.id, { status: updated.status, workerModelId: optionId, runtimeId: setting.runtime });
+      log.info({ sessionAgentId: session.id, workerModelId: optionId, runtimeId: setting.runtime }, 'persistent session option changed');
+      return updated;
     },
 
     async createPlan(actor: Actor, projectId: string, opts: { title?: string | null } = {}): Promise<{ plan: Plan; agent: Agent }> {
@@ -720,7 +769,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       // is the one its next turn would run on — the workspace's setting, not the row the gate
       // stamped, which VS-77 may have left pointing at a runtime nothing runs on anymore.
       const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;
-      const runtimeId = modelSettingFor(modelsFor(ctx), agent.kind, ticket).runtime;
+      const runtimeId = modelSettingFor(modelsFor(ctx), agent.kind, ticket, agent).runtime;
       if (waitingOnRuntimeLogin(agent) && gatedRuntime(runtimeId)) {
         throw new OcError('conflict', `${agent.name} is waiting on the ${runtimeId} login, not on you. Log that CLI in again and it resumes on its own.`, { runtimeId }, true);
       }
@@ -920,7 +969,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
 
       const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;
       let setting;
-      try { setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket); }
+      try { setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket, agent); }
       catch (e) { throw new OcError('model_unconfigured', `cannot resolve a runtime for ${agent.name}: ${(e as Error).message}`); }
       const adapter = ctx.registries.runtimes.get(setting.runtime);
       if (!adapter?.compactSession) throw new OcError('validation', `runtime ${setting.runtime} cannot compact a session externally`);
@@ -958,7 +1007,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const agent = get(id);
       const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) : null;
       let model: string | null = null;
-      try { model = modelSettingFor(modelsFor(ctx), agent.kind, ticket).model ?? null; } catch { /* unconfigured; the command still resolves without a --model flag */ }
+      try { model = modelSettingFor(modelsFor(ctx), agent.kind, ticket, agent).model ?? null; } catch { /* unconfigured; the command still resolves without a --model flag */ }
       const result = buildHandoverCommand(ctx, agent, sessions.active(id), model);
       return result.resumable
         ? { resumable: true, command: result.command, runtime: result.runtime, landingLine: result.landingLine, reason: null }

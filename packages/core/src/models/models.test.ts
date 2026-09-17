@@ -49,6 +49,26 @@ describe('modelSettingFor', () => {
     expect(modelSettingFor(withOpts, 'weaver', { workerModelId: 'cheap' })).toEqual({ runtime: 'claude', model: 'claude-fable-5-1' });
   });
 
+  it('uses a persistent session\'s own option when it has one (VS-526)', () => {
+    const withOpts = {
+      models: {
+        weaver: { runtime: 'claude', model: 'claude-fable-5-1' },
+        workers: { runtime: 'codex', model: 'gpt-5', effort: 'high' },
+        workerOptions: [
+          { id: 'quick', description: 'Fast.', runtime: 'opencode', model: 'glm-4.6' },
+        ],
+      },
+    };
+    const session = { workerModelId: 'quick' };
+    expect(modelSettingFor(withOpts, 'session', null, session)).toEqual({ runtime: 'opencode', model: 'glm-4.6' });
+    // No option of its own → the workers setting, exactly as before VS-526.
+    expect(modelSettingFor(withOpts, 'session', null, { workerModelId: null })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
+    // An option that has left the catalog falls back to the workers setting.
+    expect(modelSettingFor(withOpts, 'session', null, { workerModelId: 'gone' })).toEqual({ runtime: 'codex', model: 'gpt-5', effort: 'high' });
+    // A ticketed session's ticket option wins over the session's own.
+    expect(modelSettingFor(withOpts, 'session', { workerModelId: 'quick' }, { workerModelId: 'gone' })).toEqual({ runtime: 'opencode', model: 'glm-4.6' });
+  });
+
   it('takes a snapshot of the selected option for a turn', () => {
     const withOpts = {
       models: {

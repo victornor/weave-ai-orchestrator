@@ -283,7 +283,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   // rather than consulted, so a stale row can never decide what this turn launches.
   let setting;
   try {
-    setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket);
+    setting = modelSettingFor(modelsFor(ctx), agent.kind, ticket, agent);
   } catch (e) {
     if (!(e instanceof OcError) || e.code !== 'model_unconfigured') throw e;
     ctx.events.emit('run.started', 'run', runId, { agentId: agent.id, ticketId: agent.ticketId, turnEpoch: run.turnEpoch });

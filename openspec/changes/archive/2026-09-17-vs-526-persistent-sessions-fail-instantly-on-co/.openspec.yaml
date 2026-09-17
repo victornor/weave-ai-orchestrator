@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-17
+goal: Persistent sessions fail instantly on codex, and you cannot choose the model

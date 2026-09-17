@@ -122,7 +122,31 @@ describe('POST /workers/persistent-session (VS-495)', () => {
     const out = await res.json();
     expect(out.agent.id).toBe('ag_session');
     expect(out.thread.id).toBe('th_1');
-    expect(ensureSession).toHaveBeenCalledWith(expect.anything(), 'proj1', 'role1');
+    expect(ensureSession).toHaveBeenCalledWith(expect.anything(), 'proj1', 'role1', null);
+  });
+
+  it('passes a chosen worker option through to the session open (VS-526)', async () => {
+    const { h, fetch } = app();
+    const ensureSession = vi.fn(async () => ({ agent: worker({ id: 'ag_session', kind: 'session', ticketId: null }), thread: { id: 'th_1', channelKind: 'web', agentId: 'ag_session' } }));
+    h.impls.workers!['ensureSession'] = ensureSession;
+
+    const res = await fetch('/api/w/ws1/workers/persistent-session', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ projectId: 'proj1', roleId: 'role1', workerModelId: 'deep' }),
+    });
+    expect(res.status).toBe(200);
+    expect(ensureSession).toHaveBeenCalledWith(expect.anything(), 'proj1', 'role1', 'deep');
+  });
+
+  it('changes a session\'s worker option through its own route (VS-526)', async () => {
+    const { h, fetch } = app();
+    const setSessionOption = vi.fn(async () => ({ id: 'ag_session', kind: 'session' }));
+    h.impls.workers!['setSessionOption'] = setSessionOption;
+
+    const res = await fetch('/api/w/ws1/workers/ag_session/session-option', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ workerModelId: 'quick' }),
+    });
+    expect(res.status).toBe(200);
+    expect(setSessionOption).toHaveBeenCalledWith(expect.anything(), 'ag_session', 'quick');
   });
 
   it('refuses a body missing projectId or roleId', async () => {

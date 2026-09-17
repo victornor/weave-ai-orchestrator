@@ -130,6 +130,11 @@ export function RunBody({ runId }: { runId: string }): React.ReactElement {
         <p className="v2-card p-3.5 text-meta leading-relaxed text-text-body" data-v2-run-summary>
           {run.summary ?? `The turn ${live ? 'is still running.' : `ended as ${run.status}.`}`}
         </p>
+        {run.lastError ? (
+          <p className="v2-card p-3.5 text-meta leading-relaxed text-blocked" data-v2-run-error>
+            {run.lastError}
+          </p>
+        ) : null}
       </section>
 
       <div className="ac-mono text-nano text-text-3">{ago(run.startedAt ?? run.createdAt)}</div>

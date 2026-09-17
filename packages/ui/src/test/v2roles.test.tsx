@@ -30,6 +30,7 @@ const state = vi.hoisted(() => ({
   postPending: false,
   createPending: false,
   startSessionError: null as string | null,
+  models: null as { workers: { runtime: string; model: string | null }; weaver: { runtime: string; model: string | null }; workerOptions: Array<{ id: string; description: string; runtime: string | null; model: string | null }>; source: { weaver: string; workers: string; workerOptions: string } } | null,
 }));
 
 vi.mock('../app/link', () => ({
@@ -74,6 +75,7 @@ vi.mock('../api/hooks', () => ({
     isError: false,
     error: null,
   }),
+  useModels: () => ({ data: state.models }),
   useThreads: () => ({ data: state.threads }),
   useCreateThread: () => ({ mutateAsync: state.createThread, isPending: state.createPending }),
   usePostThreadMessage: () => ({ mutate: state.post, isPending: state.postPending, isError: false, error: null }),
@@ -112,6 +114,7 @@ beforeEach(() => {
   state.postPending = false;
   state.createPending = false;
   state.startSessionError = null;
+  state.models = null;
   state.createThread.mockReset();
   state.createThread.mockResolvedValue({ id: 't_new' });
   state.post.mockReset();
@@ -166,6 +169,27 @@ describe('the V2 Roles screen', () => {
     expect(screen.getByText('Backend Engineer')).toBeInTheDocument();
     expect(screen.queryByText('Codebase Scout')).toBeNull();
     expect(screen.getByText('No role hired for this project yet.')).toBeInTheDocument();
+  });
+
+  // VS-526: the option is chosen when opening a role's session, and passed to the open.
+  it('passes the chosen worker option when opening a role session', () => {
+    state.roles = [role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer' })];
+    state.models = {
+      workers: { runtime: 'claude-code', model: null },
+      weaver: { runtime: 'claude-code', model: null },
+      workerOptions: [
+        { id: 'quick', description: 'fast', runtime: 'claude-code', model: 'haiku' },
+        { id: 'deep', description: 'slow', runtime: 'codex', model: null },
+      ],
+      source: { weaver: 'default', workers: 'default', workerOptions: 'workspace' },
+    };
+    render(<V2RolesScreen />);
+    fireEvent.change(screen.getByLabelText("Worker option for Backend Engineer's session"), { target: { value: 'deep' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Chat' }));
+    expect(state.persistentSession).toHaveBeenCalledWith(
+      { projectId: 'p1', roleId: 'r1', workerModelId: 'deep' },
+      expect.anything(),
+    );
   });
 
   it('shows awaiting hire approval for a pending role', () => {

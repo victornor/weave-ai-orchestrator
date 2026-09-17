@@ -21,7 +21,7 @@ function agent(over: Partial<Agent> = {}): Agent {
     id: 'ag_1', workspaceId: 'ws', kind: 'worker', projectId: 'web', roleId: 'role_1', roleRevision: 1,
     ticketId: 'tkt_1', planId: null, name: 'Backend Engineer #7', runtimeId: 'claude',
     status: 'running', pauseReason: null, pauseDetail: null, errorText: null, homePath: '/ws/workers/ag_1', worktreePath: '/ws/workers/ag_1/work',
-    branch: 'ac/acme-42', turnEpoch: 1, turnCount: 7, spawnedBy: 'weaver', spawnReason: null, briefRevision: 1,
+    branch: 'ac/acme-42', workerModelId: null, turnEpoch: 1, turnCount: 7, spawnedBy: 'weaver', spawnReason: null, briefRevision: 1,
     lastRunAt: null, retiredAt: null, createdAt: '2026-09-04T11:00:00.000Z', updatedAt: '2026-09-04T11:00:00.000Z', ...over,
   };
 }

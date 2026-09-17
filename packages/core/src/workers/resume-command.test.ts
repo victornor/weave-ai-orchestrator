@@ -21,7 +21,7 @@ function agent(h: TestHarness, over: Partial<Agent> = {}): Agent {
     id: 'a1', workspaceId: h.workspaceId, kind: 'worker', projectId: null, roleId: null, roleRevision: null,
     ticketId: null, planId: null, name: 'Backend Engineer #1', runtimeId: 'claude', status: 'active', pauseReason: null,
     pauseDetail: null, errorText: null, homePath: join(h.ctx.paths.workers, 'a1'),
-    worktreePath: join(h.ctx.paths.workers, 'a1', 'work'), branch: 'ac/tst-1', turnEpoch: 1, turnCount: 1,
+    worktreePath: join(h.ctx.paths.workers, 'a1', 'work'), branch: 'ac/tst-1', workerModelId: null, turnEpoch: 1, turnCount: 1,
     spawnedBy: 'system', spawnReason: null, briefRevision: 1, lastRunAt: null, retiredAt: null,
     createdAt: 't0', updatedAt: 't0', ...over,
   };

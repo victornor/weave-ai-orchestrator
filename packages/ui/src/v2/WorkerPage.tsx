@@ -13,7 +13,9 @@ import {
   useCompactWorker,
   useEndHandover,
   useHandoverCommand,
+  useModels,
   usePostThreadMessage,
+  useSetSessionOption,
   useStartHandover,
   useThreadMessages,
   useWorker,
@@ -87,6 +89,9 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
   const message = useWorkerMessage();
   const postThreadMessage = usePostThreadMessage();
   const compact = useCompactWorker(workerId);
+  const models = useModels();
+  const setSessionOption = useSetSessionOption(workerId);
+  const [optionCandidate, setOptionCandidate] = useState<string | null>(null);
   const held = detail.data ? heldByHuman(detail.data.agent) : false;
   const [sessionOpen, setSessionOpen] = useState(false);
   const [givingBack, setGivingBack] = useState(false);
@@ -132,6 +137,12 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
   const { agent, ticket, thread, project, usage, worktree, input } = detail.data;
   const isSession = agent.kind === 'session';
   const pausedFor = workerPauseReason(agent);
+  // VS-526: the catalog option this session runs on, and the runtime each option resolves to. Only a
+  // catalog with a configured option can be chosen; the rest are shown disabled.
+  const configuredOptions = (models.data?.workerOptions ?? []).filter((o) => o.runtime);
+  const currentOption = configuredOptions.find((o) => o.id === agent.workerModelId) ?? null;
+  const currentRuntime = currentOption?.runtime ?? models.data?.workers.runtime ?? agent.runtimeId;
+  const candidate = optionCandidate ? configuredOptions.find((o) => o.id === optionCandidate) ?? null : null;
   const steerLabel =
     lastOutcome ??
     (input.midTurn
@@ -173,6 +184,27 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
               Session
             </Button>
           )}
+          {isSession && configuredOptions.length > 0 ? (
+            <label className="flex items-center gap-1.5 text-micro text-text-3">
+              <span className="ac-label">Option</span>
+              <select
+                className="ac-input ac-mono py-1 text-nano"
+                data-v2-session-option
+                value={agent.workerModelId ?? ''}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  // Only stage the change; it is applied from the confirm band below, which first
+                  // states what it does to the conversation.
+                  if (next !== (agent.workerModelId ?? '')) { setSessionOption.reset(); setOptionCandidate(next); }
+                }}
+              >
+                <option value="" disabled={configuredOptions.length > 0}>{currentOption ? 'workers setting' : '(workers setting)'}</option>
+                {configuredOptions.map((o) => (
+                  <option key={o.id} value={o.id}>{o.id}</option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {isSession ? (
             <Button size="sm" variant="secondary" disabled={compact.isPending} onClick={() => compact.mutate()}>
               {compact.isPending ? 'Compacting…' : 'Compact now'}
@@ -197,6 +229,32 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
           )}
         </div>
       </div>
+
+      {agent.errorText ? (
+        <p role="alert" className="border-b border-line-1 px-4 py-2 text-micro text-blocked" data-v2-worker-failure>
+          {agent.errorText}
+        </p>
+      ) : null}
+
+      {candidate ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-line-1 px-4 py-2 text-micro" data-v2-session-option-confirm>
+          <span className={candidate.runtime === currentRuntime ? 'text-text-3' : 'text-blocked'}>
+            {candidate.runtime === currentRuntime
+              ? `Switch to ${candidate.id} (${candidate.runtime}) — same runtime, the conversation is kept.`
+              : `Switch to ${candidate.id} (${candidate.runtime}) — a different runtime, so the conversation restarts on ${candidate.runtime} and the current history does not carry over.`}
+          </span>
+          <Button size="sm" disabled={setSessionOption.isPending} onClick={() => setSessionOption.mutate({ workerModelId: candidate.id }, { onSuccess: () => setOptionCandidate(null) })}>
+            {setSessionOption.isPending ? 'Switching…' : 'Switch'}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setOptionCandidate(null)}>Keep</Button>
+        </div>
+      ) : null}
+
+      {isSession && agent.workerModelId && detail.data.sessionTurns === 0 ? (
+        <p className="border-b border-line-1 px-4 py-2 text-micro text-text-3" data-v2-session-restarted>
+          New conversation on {agent.runtimeId} — the previous one is not carried over (it started on a different runtime).
+        </p>
+      ) : null}
 
       {actionError ? (
         <p role="alert" className="border-b border-line-1 px-4 py-2 text-micro text-blocked" data-v2-worker-error>

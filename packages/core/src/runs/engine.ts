@@ -6,6 +6,7 @@ import { nowIso } from '@weave-ai/db';
 import {
   AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents, OcError, landingBranchOf,
   isWorkerOptionConfigured, isProgressRunEvent, MCP_SERVER_NAME, PLANNER_TOOLS, FIRST_TURN_TOOLS,
+  TERMINAL_TICKET_STATUSES,
   type Agent, type AgentKind, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
   type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
 } from '@weave-ai/shared';
@@ -681,7 +682,19 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
       });
     }
 
-    const agentStatus = status === 'succeeded' || shutdownInterrupted ? 'active' : (errorFamily && RETRYABLE.includes(errorFamily)) || status === 'cancelled' ? 'active' : 'error';
+    // Terminal cleanup marks a worker done before the run finalizes. Re-read both rows because the
+    // ticket/agent snapshots in FinalizeInput were taken before the runtime turn. Preserving that
+    // state prevents a successful self-closing run (or an externally closed ticket whose run is
+    // being interrupted) from resurrecting the worker into the live set.
+    const currentTicket = f.ticket ? ctx.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [f.ticket.id]) : null;
+    const currentAgent = ctx.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [f.agent.id]);
+    const terminalWorkerReleased = f.agent.kind === 'worker'
+      && currentTicket != null
+      && TERMINAL_TICKET_STATUSES.includes(currentTicket.status as (typeof TERMINAL_TICKET_STATUSES)[number])
+      && currentAgent?.status === 'done';
+    const agentStatus = terminalWorkerReleased
+      ? 'done'
+      : status === 'succeeded' || shutdownInterrupted ? 'active' : (errorFamily && RETRYABLE.includes(errorFamily)) || status === 'cancelled' ? 'active' : 'error';
     ctx.db.update('agents', f.agent.id, {
       status: agentStatus,
       turnEpoch: f.run.turnEpoch,

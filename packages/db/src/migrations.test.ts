@@ -729,13 +729,14 @@ describe('migrations', () => {
   });
 
   describe('0028_incident_resolution (VS-271)', () => {
-    it('adds four nullable resolution columns with no foreign keys', () => {
+    it('adds the nullable resolution columns with no foreign keys', () => {
       const db = openDb(join(dir, 'incidents-resolution.sqlite'));
       const cols = db.all<{ name: string }>('PRAGMA table_info(incidents)').map((c) => c.name);
       expect(cols).toEqual([
         'id', 'reporter_kind', 'title', 'what_failed', 'trying_to_do', 'evidence',
         'workspace_id', 'project_id', 'ticket_id', 'agent_id', 'run_id', 'role_id', 'created_at',
         'resolved_at', 'resolved_by_agent_id', 'resolution', 'resolution_ticket_id',
+        'resolved_by_workspace_id',
       ]);
       expect(db.all<{ table: string }>('PRAGMA foreign_key_list(incidents)')).toHaveLength(0);
       db.close();
@@ -772,6 +773,43 @@ describe('migrations', () => {
         resolvedAt: '2026-09-12T00:00:00.000Z', resolvedByAgentId: 'weaver1',
         resolution: 'fixed by VS-232', resolutionTicketId: 'VS-232',
       });
+      db.close();
+    });
+  });
+
+  describe('0051_incident_resolved_workspace (VS-499)', () => {
+    it('adds the nullable resolving-workspace column and round-trips it', () => {
+      const db = openDb(join(dir, 'incidents-resolved-workspace.sqlite'));
+      const cols = db.all<{ name: string }>('PRAGMA table_info(incidents)').map((c) => c.name);
+      expect(cols).toContain('resolved_by_workspace_id');
+      db.insert('incidents', {
+        id: 'i1', reporterKind: 'worker', title: 'MCP failed', whatFailed: 'x', tryingToDo: 'y',
+        agentId: 'ag1', runId: 'run1', workspaceId: 'ws_filed', createdAt: '2026-09-10T00:00:00.000Z',
+      });
+      db.update('incidents', 'i1', {
+        resolvedAt: '2026-09-12T00:00:00.000Z', resolvedByAgentId: 'weaver1',
+        resolvedByWorkspaceId: 'ws_resolver', resolution: 'closed from another workspace',
+      });
+      const row = db.get<{ workspaceId: string | null; resolvedByWorkspaceId: string | null }>(
+        'SELECT * FROM incidents WHERE id = ?', ['i1'],
+      );
+      // The filing workspace and the resolving workspace stay distinct.
+      expect(row).toMatchObject({ workspaceId: 'ws_filed', resolvedByWorkspaceId: 'ws_resolver' });
+      db.close();
+    });
+
+    it('leaves a pre-existing resolved incident at null resolvedByWorkspaceId', () => {
+      const before = openDbAsOf(join(dir, 'incidents-resolved-workspace-upgrade.sqlite'), '0028_incident_resolution.sql');
+      before.insert('incidents', {
+        id: 'i1', reporterKind: 'worker', title: 'old resolved', whatFailed: 'x', tryingToDo: 'y',
+        agentId: 'ag1', runId: 'run1', createdAt: '2026-09-10T00:00:00.000Z',
+      });
+      before.run('UPDATE incidents SET resolved_at = ?, resolved_by_agent_id = ? WHERE id = ?', ['2026-09-11T00:00:00.000Z', 'weaver0', 'i1']);
+      before.close();
+
+      const db = openDb(join(dir, 'incidents-resolved-workspace-upgrade.sqlite'));
+      const row = db.get<{ resolvedByWorkspaceId: string | null }>('SELECT * FROM incidents WHERE id = ?', ['i1']);
+      expect(row?.resolvedByWorkspaceId).toBeNull();
       db.close();
     });
   });

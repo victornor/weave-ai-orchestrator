@@ -17,7 +17,7 @@ export function agentRoutes(deps: AppDeps): Hono<AppEnv> {
     if (principal.kind !== 'run' || !principal.claims) throw new OcError('unauthorized', 'agent endpoints require a run token');
     const ws = c.get('ws') as unknown as ToolCtx['ws'];
     if (principal.claims.workspaceId !== ws.id) throw new OcError('forbidden', 'run token belongs to another workspace');
-    return { ws, claims: principal.claims, actor: c.get('actor') as unknown as ToolCtx['actor'], incidents: deps.incidents };
+    return { ws, claims: principal.claims, actor: c.get('actor') as unknown as ToolCtx['actor'], incidents: deps.incidents, workspaces: deps.workspaces };
   };
 
   app.get('/inbox', async (c) => c.json(await runTool('weave_inbox', toolCtx(c as never), {})));

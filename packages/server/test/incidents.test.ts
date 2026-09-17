@@ -150,7 +150,7 @@ describe('weave_incident_list / weave_incident_get (VS-222)', () => {
     expect(harness.deps.incidents.list().total).toBe(1);
   });
 
-  it('lists the weave workspace plus workspace-less rows, never another workspace', async () => {
+  it('lists incidents from every workspace, workspace-less rows included (VS-499)', async () => {
     harness = makeHarness({ listener: 'loopback' });
     await fileViaAgent(harness, CONDUCTOR, { ...FILE, title: 'alpha conductor' });
     await fileViaAgent(harness, WORKER, { ...FILE, title: 'alpha worker' });
@@ -168,10 +168,16 @@ describe('weave_incident_list / weave_incident_get (VS-222)', () => {
       ok: boolean; data: { items: Array<{ title: string }>; total: number };
     };
     expect(body.ok).toBe(true);
-    const titles = body.data.items.map((i) => i.title);
-    expect(titles).not.toContain('beta worker');
-    expect([...titles].sort()).toEqual(['alpha conductor', 'alpha worker', 'daemon-global']);
-    expect(body.data.total).toBe(3);
+    // Another workspace's incident is now in the result; nothing is silently scoped away.
+    expect([...body.data.items.map((i) => i.title)].sort()).toEqual(['alpha conductor', 'alpha worker', 'beta worker', 'daemon-global']);
+    expect(body.data.total).toBe(4);
+
+    // Narrowing is exact: only the named workspace's rows, never the workspace-less one.
+    const narrow = (await (await callTool(harness, CONDUCTOR, 'weave_incident_list', { workspaceId: 'ws2' })).json()) as {
+      data: { items: Array<{ title: string }>; total: number };
+    };
+    expect(narrow.data.items.map((i) => i.title)).toEqual(['beta worker']);
+    expect(narrow.data.total).toBe(1);
   });
 
   it('returns a lean list by default and the full row on get', async () => {
@@ -198,7 +204,7 @@ describe('weave_incident_list / weave_incident_get (VS-222)', () => {
     expect(got.data).toMatchObject({ title: FILE.title, evidence: FILE.evidence, reporterKind: 'worker' });
   });
 
-  it('get: not_found for an unknown id, forbidden for another workspace', async () => {
+  it('get: reads any workspace\'s incident, not_found for an unknown id (VS-499)', async () => {
     harness = makeHarness({ listener: 'loopback' });
     const beta = harness.deps.incidents.create({
       reporterKind: 'worker', title: 'beta worker', whatFailed: 'x', tryingToDo: 'y',
@@ -209,9 +215,12 @@ describe('weave_incident_list / weave_incident_get (VS-222)', () => {
     expect(unknown.ok).toBe(false);
     expect(unknown.error?.code).toBe('not_found');
 
-    const cross = (await (await callTool(harness, CONDUCTOR, 'weave_incident_get', { id: beta.id })).json()) as ToolEnvelope;
-    expect(cross.ok).toBe(false);
-    expect(cross.error?.code).toBe('forbidden');
+    // No `forbidden`: another workspace's incident reads like any other.
+    const cross = (await (await callTool(harness, CONDUCTOR, 'weave_incident_get', { id: beta.id })).json()) as {
+      ok: boolean; data: { title: string; workspaceId: string };
+    };
+    expect(cross.ok).toBe(true);
+    expect(cross.data).toMatchObject({ title: 'beta worker', workspaceId: 'ws2' });
   });
 
   it('passes since through: past bound returns all, future bound none, unparseable is validation', async () => {
@@ -257,10 +266,11 @@ describe('weave_incident_resolve (VS-271)', () => {
     const { data } = await filed.json() as { data: { id: string } };
 
     const res = await callTool(harness, CONDUCTOR, 'weave_incident_resolve', { id: data.id, resolution: 'fixed by VS-232', ticketId: 'VS-232' });
-    const payload = await res.json() as { ok: boolean; data: { resolvedAt: string | null; resolvedByAgentId: string; resolution: string; resolutionTicketId: string } };
+    const payload = await res.json() as { ok: boolean; data: { resolvedAt: string | null; resolvedByAgentId: string; resolvedByWorkspaceId: string | null; resolution: string; resolutionTicketId: string } };
     expect(payload.ok).toBe(true);
     expect(payload.data.resolvedAt).not.toBeNull();
     expect(payload.data.resolvedByAgentId).toBe(CONDUCTOR.agentId);
+    expect(payload.data.resolvedByWorkspaceId).toBe(CONDUCTOR.workspaceId);
     expect(payload.data.resolution).toBe('fixed by VS-232');
     expect(payload.data.resolutionTicketId).toBe('VS-232');
 
@@ -303,7 +313,7 @@ describe('weave_incident_resolve (VS-271)', () => {
     expect(harness.deps.incidents.get(data.id).resolution).toBe('first');
   });
 
-  it('resolve: not_found for an unknown id, forbidden for another workspace', async () => {
+  it('resolve: closes any workspace\'s incident, keeping filing and resolving workspaces distinct (VS-499)', async () => {
     harness = makeHarness({ listener: 'loopback' });
     const beta = harness.deps.incidents.create({
       reporterKind: 'worker', title: 'beta worker', whatFailed: 'x', tryingToDo: 'y',
@@ -314,10 +324,15 @@ describe('weave_incident_resolve (VS-271)', () => {
     expect(unknown.ok).toBe(false);
     expect(unknown.error?.code).toBe('not_found');
 
-    const cross = (await (await callTool(harness, CONDUCTOR, 'weave_incident_resolve', { id: beta.id, resolution: 'x' })).json()) as ToolEnvelope;
-    expect(cross.ok).toBe(false);
-    expect(cross.error?.code).toBe('forbidden');
-    expect(harness.deps.incidents.get(beta.id).resolvedAt).toBeNull();
+    const cross = (await (await callTool(harness, CONDUCTOR, 'weave_incident_resolve', { id: beta.id, resolution: 'fixed cross-workspace' })).json()) as {
+      ok: boolean; data: { workspaceId: string; resolvedByWorkspaceId: string | null };
+    };
+    expect(cross.ok).toBe(true);
+    expect(cross.data).toMatchObject({ workspaceId: 'ws2', resolvedByWorkspaceId: CONDUCTOR.workspaceId });
+    const stored = harness.deps.incidents.get(beta.id);
+    expect(stored.workspaceId).toBe('ws2');
+    expect(stored.resolvedByWorkspaceId).toBe('ws1');
+    expect(stored.resolvedAt).not.toBeNull();
   });
 
   it('a second sweep finds nothing new: list, resolve everything found, list again', async () => {

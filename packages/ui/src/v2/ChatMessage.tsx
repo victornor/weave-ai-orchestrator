@@ -92,6 +92,26 @@ export function AttachmentRows({ ws, threadId, parts }: { ws: string; threadId: 
   );
 }
 
+/**
+ * The message container both directions share: a user message in a narrower recessed bubble, a
+ * weaver reply full width on the card surface. Extracted (VS-551) so the settings text-size preview
+ * renders the real message shape instead of a copy that can drift.
+ */
+export function MessageBubble({ mine, children }: { mine: boolean; children: React.ReactNode }): React.ReactElement {
+  return (
+    <div
+      className={cx(
+        'min-w-0',
+        mine
+          ? 'max-w-[78%] rounded-r4 border border-line-2 bg-bg-2 px-3 py-2.5'
+          : 'w-full rounded-r4 border border-line-1 bg-bg-1 px-3.5 py-3',
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
 export interface ChatMessageProps {
   message: ThreadMessage;
   ws: string;
@@ -150,17 +170,10 @@ export function ChatMessage({ message, ws, spent, projectName, onTicket, onReply
           </span>
         )
       ) : null}
-      <div
-        className={cx(
-          'min-w-0',
-          mine
-            ? 'max-w-[78%] rounded-r4 border border-line-2 bg-bg-2 px-3 py-2.5'
-            : 'w-full rounded-r4 border border-line-1 bg-bg-1 px-3.5 py-3',
-        )}
-      >
+      <MessageBubble mine={mine}>
         <MessageBody body={body} onTicket={onTicket} />
         <AttachmentRows ws={ws} threadId={message.threadId} parts={message.parts} />
-      </div>
+      </MessageBubble>
       <span className={cx('flex items-center gap-2 px-0.5', mine && 'justify-end')}>
         {mine && onJumpTo && responseIds && responseIds.length > 0 ? (
           <button type="button" onClick={() => onJumpTo(responseIds)} className="text-nano text-text-3 hover:text-text-1">

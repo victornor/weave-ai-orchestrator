@@ -8,6 +8,7 @@ import { Outlet, useParams } from '@tanstack/react-router';
 import { WorkspaceProvider } from '../api/context';
 import { HostRoutesProvider, V2_HOST_ROUTES } from '../app/host';
 import { useV2Theme, type V2ThemeState } from './theme';
+import { useTextSize } from './textSize';
 import { V2Shell } from './V2Shell';
 import { DictationSessionProvider } from './DictationSession';
 
@@ -22,10 +23,15 @@ export function useV2ThemeState(): V2ThemeState {
 
 export function V2Root(): React.ReactElement {
   const theme = useV2Theme();
+  const { size } = useTextSize();
   return (
     <HostRoutesProvider routes={V2_HOST_ROUTES}>
       <V2ThemeContext.Provider value={theme}>
-        <div className="v2-root flex h-[100dvh] min-h-0 flex-col overflow-hidden" data-theme={theme.theme}>
+        <div
+          className="v2-root flex h-[100dvh] min-h-0 flex-col overflow-hidden"
+          data-theme={theme.theme}
+          data-text-size={size}
+        >
           <Outlet />
         </div>
       </V2ThemeContext.Provider>

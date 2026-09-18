@@ -160,14 +160,17 @@ export const ARTIFACT_KIT_CSS = `/* --------------------------------------------
   --ff-ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --ff-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
 
-  --fs-display: 1.75rem;
-  --fs-title: 1.25rem;
-  --fs-head: 1rem;
-  --fs-body: 0.875rem;
-  --fs-ui: 0.8125rem;
-  --fs-meta: 0.75rem;
-  --fs-micro: 0.6875rem;
-  --fs-nano: 0.625rem;
+  /* The type scale is one family scaled by this multiplier, matching index.css (VS-551). An artifact
+     document defines it at 1; it is the same expression the app's own root block carries. */
+  --fs-scale: 1;
+  --fs-display: calc(1.75rem * var(--fs-scale));
+  --fs-title: calc(1.25rem * var(--fs-scale));
+  --fs-head: calc(1rem * var(--fs-scale));
+  --fs-body: calc(0.875rem * var(--fs-scale));
+  --fs-ui: calc(0.8125rem * var(--fs-scale));
+  --fs-meta: calc(0.75rem * var(--fs-scale));
+  --fs-micro: calc(0.6875rem * var(--fs-scale));
+  --fs-nano: calc(0.625rem * var(--fs-scale));
 
   --track-display: -0.02em;
   --track-title: -0.015em;

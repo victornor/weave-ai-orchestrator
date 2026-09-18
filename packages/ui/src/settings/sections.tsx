@@ -53,6 +53,8 @@ import type * as T from '../api/types';
 import type { TotpSetup } from '../api/types';
 import { useHookWs, useWs } from '../api/context';
 import { useTheme } from '../lib/theme';
+import { TEXT_SIZE_STEPS, useTextSize } from '../v2/textSize';
+import { MessageBody, MessageBubble } from '../v2/ChatMessage';
 import { readShowSilentTurns, writeShowSilentTurns } from '../lib/chatPrefs';
 import { useDictationDiagnosticsEnabled, writeDictationDiagnosticsEnabled } from '../lib/dictationDiagnostics';
 import { useDictationAutoSend, writeDictationAutoSend } from '../lib/dictationAutoSend';
@@ -1445,6 +1447,61 @@ export function DictationSection(): React.ReactElement {
   );
 }
 
+/** The text-size preview's real exchange — a user question and a weaver reply, at the current size. */
+const TEXT_SIZE_PREVIEW_USER =
+  'Could the chat text be a size I choose? I read it for long stretches and the default feels a little tight.';
+const TEXT_SIZE_PREVIEW_WEAVER =
+  'Done — there is a text-size control under Settings → This device. Pick a step and this preview, like the rest of the app, resizes with it.';
+const noopTicket = (): void => {};
+
+/**
+ * The device text-size preference (VS-551): the bounded ladder, and a preview built from the real
+ * message components so the choice is judged on real message-shaped text, not a lorem block.
+ */
+export function TextSizeSection(): React.ReactElement {
+  const { size: textSize, setSize: setTextSize } = useTextSize();
+  return (
+    <section>
+      <div className="ac-label mb-2">Text size</div>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:gap-4">
+        <div className="md:w-44 md:flex-none">
+          <div className="flex flex-wrap gap-1.5">
+            {TEXT_SIZE_STEPS.map((step) => (
+              <button
+                key={step.key}
+                type="button"
+                aria-pressed={textSize === step.key}
+                onClick={() => setTextSize(step.key)}
+                className={cx(
+                  'rounded-r6 border px-2.5 py-1.5 text-meta',
+                  textSize === step.key ? 'border-accent-edge bg-accent-tint text-accent-link' : 'border-line-2 text-text-3',
+                )}
+              >
+                {step.label}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-micro text-text-3">
+            Applies to every page in this browser, the weaver chat included. Default matches today&apos;s size.
+          </p>
+        </div>
+        <div className="min-w-0 flex-1 rounded-r6 border border-line-1 bg-bg-0 p-3" data-text-size-preview>
+          <div className="flex flex-col gap-2">
+            <div className="flex justify-end">
+              <MessageBubble mine>
+                <MessageBody body={TEXT_SIZE_PREVIEW_USER} onTicket={noopTicket} />
+              </MessageBubble>
+            </div>
+            <MessageBubble mine={false}>
+              <MessageBody body={TEXT_SIZE_PREVIEW_WEAVER} onTicket={noopTicket} />
+            </MessageBubble>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export function DeviceSection({ themeControl = 'full' }: { themeControl?: 'full' | 'note' } = {}): React.ReactElement {
   // Push subscriptions are registered per workspace — the daemon's push routes live under
   // `/api/w/:ws`, and the subscription id is remembered per workspace in localStorage — so the
@@ -1533,6 +1590,8 @@ export function DeviceSection({ themeControl = 'full' }: { themeControl?: 'full'
           </>
         )}
       </section>
+
+      <TextSizeSection />
 
       <section>
         <div className="ac-label mb-2">Chat</div>

@@ -48,18 +48,19 @@
   --accent-edge: rgb(61 65 72 / 0.34);
   --focus-ring: rgb(61 65 72 / 0.18);
 
-  /* The one affirmative action fill (VS-418; dark values VS-422): an Approve that is actually
-     available is the card's call to action. On dark a near-white fill (the theme's strongest ink)
-     under near-black ink makes it the most prominent control on the card (≈18:1); a blocked one
-     drops to a mid grey with muted ink. */
+  /* The affirmative action fill (VS-418): the Approve control is an inverse high-contrast pair, not a
+     hue (VS-551). On dark it is the theme's strongest ink (near-white) under near-black ink; on light
+     it is a dark neutral under white ink. A blocked one drops to a muted neutral fill with muted ink,
+     the same recipe in both themes. */
   --approve: #f2f3f5;
   --approve-ink: #0b0b0d;
-  --approve-blocked: #3d4148;
-  --approve-blocked-ink: #c6cad1;
+  --approve-blocked: #222226;
+  --approve-blocked-ink: #868c95;
 
-  /* The weaver's clean-review green (VS-418). Split out of --approve in VS-422 so the near-white
-     dark Approve fill cannot recolour the "no concerns" line. */
-  --review-clean: #34d399;
+  /* The weaver's clean-review green (VS-418; one hue across themes since VS-551). Split out of
+     --approve in VS-422 so the Approve fill cannot recolour the "no concerns" line. Dark is a lighter
+     step of the same green hue as light's #15803d. */
+  --review-clean: #4ade80;
 
   /* Hue only where work is live — working amber, needs-you indigo, blocked red. done / merging /
      idle stay greyscale (HANDOFF §2). stalled and failed keep the design's base values, which
@@ -157,10 +158,13 @@
   --accent-edge: rgb(61 65 72 / 0.34);
   --focus-ring: rgb(61 65 72 / 0.18);
 
-  /* The available Approve fill in light: a deep green with white ink (≥4.5:1 both as text on paper
-     and as a fill under white). A blocked Approve keeps the neutral recipe, so it needs no token. */
-  --approve: #15803d;
+  /* The available Approve fill in light is the inverse of dark's: a dark neutral with white ink
+     (VS-551), replacing the saturated green VS-418 shipped. Both fills are neutral, so the control
+     carries no hue in either theme. A blocked Approve gets the muted neutral recipe, shared with dark. */
+  --approve: #3d4148;
   --approve-ink: #ffffff;
+  --approve-blocked: #eaecef;
+  --approve-blocked-ink: #565a61;
   --review-clean: #15803d;
 
   --status-idle: #6b7078;
@@ -217,6 +221,22 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* The text-size preference (VS-551): one multiplier for the whole type scale, carried on the same
+   root element as the theme. `md` is the default and is left implicit, so an untouched install has
+   no attribute rule to apply at all. */
+.v2-root[data-text-size='xs'] {
+  --fs-scale: 0.9;
+}
+.v2-root[data-text-size='sm'] {
+  --fs-scale: 0.95;
+}
+.v2-root[data-text-size='lg'] {
+  --fs-scale: 1.1;
+}
+.v2-root[data-text-size='xl'] {
+  --fs-scale: 1.2;
+}
+
 /* space · radii · type · motion (theme-independent) */
 :root {
   /* space scale 2 · 4 · 6 · 8 · 12 · 16 · 24 · 32 · 48 — Tailwind's
@@ -242,14 +262,18 @@
   --ff-ui: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --ff-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
 
-  --fs-display: 1.75rem; /* 28 */
-  --fs-title: 1.25rem; /* 20 */
-  --fs-head: 1rem; /* 16 */
-  --fs-body: 0.875rem; /* 14 */
-  --fs-ui: 0.8125rem; /* 13 */
-  --fs-meta: 0.75rem; /* 12 */
-  --fs-micro: 0.6875rem; /* 11 */
-  --fs-nano: 0.625rem; /* 10 */
+  /* The app's type scale is one family scaled by this one multiplier, so the text-size preference
+     can resize every named size from a single place (VS-551). It is declared here at 1 — the
+     designed size — and overridden on `.v2-root[data-text-size]` below. */
+  --fs-scale: 1;
+  --fs-display: calc(1.75rem * var(--fs-scale)); /* 28 */
+  --fs-title: calc(1.25rem * var(--fs-scale)); /* 20 */
+  --fs-head: calc(1rem * var(--fs-scale)); /* 16 */
+  --fs-body: calc(0.875rem * var(--fs-scale)); /* 14 */
+  --fs-ui: calc(0.8125rem * var(--fs-scale)); /* 13 */
+  --fs-meta: calc(0.75rem * var(--fs-scale)); /* 12 */
+  --fs-micro: calc(0.6875rem * var(--fs-scale)); /* 11 */
+  --fs-nano: calc(0.625rem * var(--fs-scale)); /* 10 */
 
   --track-display: -0.02em;
   --track-title: -0.015em;
@@ -1000,9 +1024,10 @@ a.v2-link:hover {
   background: var(--approve);
   filter: brightness(1.08);
 }
-/* A blocked Approve (VS-422): dark only, so light keeps the neutral disabled recipe. Greyer
-   than the near-white ready fill and still muted, it cannot be mistaken for the call to action. */
-:not([data-theme='light']) .v2-button[data-approve='blocked'] {
+/* A blocked Approve (VS-422; same recipe in both themes since VS-551): a muted neutral fill with
+   muted ink, distinct from the ready inverse fill in each theme, so it cannot be mistaken for the
+   call to action. */
+.v2-button[data-approve='blocked'] {
   background: var(--approve-blocked);
   color: var(--approve-blocked-ink);
 }

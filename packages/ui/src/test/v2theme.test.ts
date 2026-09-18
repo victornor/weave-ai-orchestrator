@@ -19,6 +19,51 @@ function token(selector: string, name: string): string | undefined {
   return new RegExp(`${name}\\s*:\\s*([^;]+);`).exec(block(selector))?.[1]?.trim();
 }
 
+/** Hex → channels, for the same-hue and contrast checks below (VS-551). */
+function channels(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** How far apart the strongest and weakest channels are: 0 is grey, 255 is fully saturated. */
+function chroma(hex: string): number {
+  const [r, g, b] = channels(hex);
+  return Math.max(r, g, b) - Math.min(r, g, b);
+}
+
+/** HSL hue in degrees; only meaningful for a colour with some chroma. */
+function hue(hex: string): number {
+  const [r, g, b] = channels(hex);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const d = max - min;
+  if (d === 0) return 0;
+  let h: number;
+  if (max === r) h = (60 * ((g - b) / d) + 360) % 360;
+  else if (max === g) h = 60 * ((b - r) / d) + 120;
+  else h = 60 * ((r - g) / d) + 240;
+  return h;
+}
+
+function relativeLuminance(hex: string): number {
+  return channels(hex)
+    .map((v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    })
+    .reduce((acc, c, i) => acc + c * [0.2126, 0.7152, 0.0722][i]!, 0);
+}
+
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+function hueGap(a: string, b: string): number {
+  const d = Math.abs(hue(a) - hue(b));
+  return Math.min(d, 360 - d);
+}
+
 describe('the Mono token set', () => {
   it('collapses --text-4 into --text-3 in both themes (HANDOFF §2)', () => {
     for (const selector of ['[data-theme=\'dark\']', "[data-theme='light']"]) {
@@ -35,14 +80,15 @@ describe('the Mono token set', () => {
     expect(token("[data-theme='dark']", '--bg-2')).toBe('#101012');
   });
 
-  it('drops the `.v2-root` token scope now that V1 is gone', () => {
+  it('keeps `.v2-root` unscoped apart from the paint rule and the text-size scale (VS-551)', () => {
     const withoutComments = css.replace(/\/\*[\s\S]*?\*\//g, '');
-    // `.v2-root` scopes no component rule (no `.v2-root .x`, `.v2-root:x`, `.v2-root[x]`,
-    // `.v2-root.x`) and declares no custom properties. It keeps exactly its own paint rule — the
-    // ground, ink and base typography (VS-482) — because V2 carries the theme on that element, not
-    // on `<html>`. The class itself also stays on elements for non-CSS reasons (Toast mirrors it,
-    // `flip.ts` reads it).
-    expect(withoutComments).not.toMatch(/\.v2-root[.:[]/);
+    // `.v2-root` scopes no component rule: no descendant (`.v2-root .x`), pseudo (`.v2-root:x`) or
+    // class (`.v2-root.x`) selector, and no token scope. It keeps exactly its own paint rule — the
+    // ground, ink and base typography (VS-482) — and the text-size attribute rules VS-551 adds.
+    expect(withoutComments).not.toMatch(/\.v2-root[.:]/);
+    const attrs = [...withoutComments.matchAll(/\.v2-root\[([^\]]+)\]/g)].map((m) => m[1]);
+    expect(attrs.length).toBeGreaterThan(0);
+    for (const attr of attrs) expect(attr).toMatch(/^data-text-size=/);
     const paintStart = withoutComments.indexOf('.v2-root');
     const paint = withoutComments.slice(paintStart, withoutComments.indexOf('}', paintStart));
     expect(paint).not.toMatch(/--[a-z0-9-]+\s*:/);
@@ -103,20 +149,56 @@ describe('the Mono palette', () => {
     expect(token(light, '--diff-remove-bg')).not.toBe(token(light, '--status-done'));
   });
 
-  it('gives the dark Approve a near-white ready fill and a grey blocked one (VS-422)', () => {
-    expect(token(dark, '--approve')).toBe('#f2f3f5');
-    expect(token(dark, '--approve-ink')).toBe('#0b0b0d');
-    const blocked = token(dark, '--approve-blocked');
-    expect(blocked).toBeDefined();
-    expect(blocked).not.toBe(token(dark, '--approve'));
-    expect(token(dark, '--approve-blocked-ink')).toBeDefined();
+  it('makes Approve an inverse pair with no hue and ink that contrasts (VS-551)', () => {
+    const darkFill = token(dark, '--approve')!;
+    const darkInk = token(dark, '--approve-ink')!;
+    const lightFill = token(light, '--approve')!;
+    const lightInk = token(light, '--approve-ink')!;
+    // dark: near-white fill under dark ink; light: a dark fill under white ink — the inverse pair.
+    expect(relativeLuminance(darkFill)).toBeGreaterThan(0.5);
+    expect(relativeLuminance(lightFill)).toBeLessThan(0.2);
+    expect(relativeLuminance(darkInk)).toBeLessThan(0.1);
+    expect(relativeLuminance(lightInk)).toBeGreaterThan(0.9);
+    // The control carries no hue in either theme.
+    expect(chroma(darkFill)).toBeLessThanOrEqual(10);
+    expect(chroma(lightFill)).toBeLessThanOrEqual(20);
+    // Each fill's own ink clears contrast.
+    expect(contrast(darkInk, darkFill)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(lightInk, lightFill)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('leaves the light Approve and the clean-review green unchanged (VS-422)', () => {
-    expect(token(light, '--approve')).toBe('#15803d');
-    expect(token(light, '--approve-ink')).toBe('#ffffff');
-    expect(token(dark, '--review-clean')).toBe('#34d399');
-    expect(token(light, '--review-clean')).toBe('#15803d');
+  it('gives a blocked Approve the same muted recipe in both themes (VS-422, VS-551)', () => {
+    for (const selector of [dark, light]) {
+      const blocked = token(selector, '--approve-blocked')!;
+      const ink = token(selector, '--approve-blocked-ink')!;
+      expect(blocked).toBeDefined();
+      expect(blocked).not.toBe(token(selector, '--approve'));
+      expect(contrast(ink, blocked)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('keeps the clean-review green one hue at each theme’s lightness (VS-551)', () => {
+    const darkGreen = token(dark, '--review-clean')!;
+    const lightGreen = token(light, '--review-clean')!;
+    expect(hueGap(darkGreen, lightGreen)).toBeLessThanOrEqual(3);
+    expect(contrast(darkGreen, '#0b0b0d')).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(lightGreen, '#ffffff')).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('keeps every status, diff and project colour on one hue across themes (VS-551)', () => {
+    const names = [
+      '--status-idle', '--status-working', '--status-stalled', '--status-blocked', '--status-needs-you',
+      '--status-merging', '--status-done', '--status-failed', '--status-paused',
+      '--diff-add-fg', '--diff-remove-fg',
+      '--project-1', '--project-2', '--project-3', '--project-4', '--project-5',
+    ];
+    for (const name of names) {
+      const d = token(dark, name);
+      const l = token(light, name);
+      expect(d, name).toBeDefined();
+      expect(l, name).toBeDefined();
+      expect(hueGap(d!, l!), `${name} hue differs by theme`).toBeLessThanOrEqual(8);
+    }
   });
 
   it('keeps hue only on working, needs-you and blocked', () => {

@@ -259,7 +259,7 @@ export function V2OnboardingPage(): React.ReactElement {
             <div className="h-[3px] flex-1 overflow-hidden rounded-pill bg-bg-3">
               <div className="h-full bg-accent transition-[width] duration-300" style={{ width: `${((step + 1) / TOTAL) * 100}%` }} />
             </div>
-            <span className="ac-mono text-[10.5px] text-text-3">{step + 1} / {TOTAL}</span>
+            <span className="ac-mono text-micro text-text-3">{step + 1} / {TOTAL}</span>
           </div>
 
           {Array.from({ length: step }, (_, i) => (
@@ -303,7 +303,7 @@ export function V2OnboardingPage(): React.ReactElement {
                     <Button variant="secondary" onClick={addProject}>{projects.length ? 'Add another project' : 'Add a project'}</Button>
                   </div>
                   <div className="mt-1 flex flex-col gap-3">
-                    <div className="text-[13px] leading-relaxed text-text-body">How much should I check with you before acting?</div>
+                    <div className="text-ui leading-relaxed text-text-body">How much should I check with you before acting?</div>
                     <div className="flex flex-wrap gap-2">
                       {AUTONOMY.map((a) => (
                         <button
@@ -311,13 +311,13 @@ export function V2OnboardingPage(): React.ReactElement {
                           type="button"
                           aria-pressed={autonomy === a.key}
                           onClick={() => setAutonomy(a.key)}
-                          className={cx('v2-tag h-7 px-3 text-[11px]', autonomy === a.key ? 'border-accent bg-accent-tint text-text-1' : 'text-text-2 hover:text-text-1')}
+                          className={cx('v2-tag h-7 px-3 text-micro', autonomy === a.key ? 'border-accent bg-accent-tint text-text-1' : 'text-text-2 hover:text-text-1')}
                         >
                           {a.label}
                         </button>
                       ))}
                     </div>
-                    <p className="text-[11px] leading-relaxed text-text-3">{AUTONOMY_NOTE}</p>
+                    <p className="text-micro leading-relaxed text-text-3">{AUTONOMY_NOTE}</p>
                   </div>
                 </div>
               ) : null}
@@ -425,15 +425,15 @@ function question(i: number): string {
 function WeaverMessage({ children }: { children: React.ReactNode }): React.ReactElement {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[12.5px] font-semibold text-text-strong">Weaver</span>
-      <p className="max-w-[82%] text-[14px] leading-[1.55] text-text-body">{children}</p>
+      <span className="text-meta font-semibold text-text-strong">Weaver</span>
+      <p className="max-w-[82%] text-body leading-[1.55] text-text-body">{children}</p>
     </div>
   );
 }
 
 function HumanMessage({ children }: { children: React.ReactNode }): React.ReactElement {
   return (
-    <div className="self-end max-w-[82%] rounded-[6px_10px_3px_10px] bg-accent px-3 py-2.5 text-[14px] leading-[1.5] text-accent-on">
+    <div className="self-end max-w-[82%] rounded-[6px_10px_3px_10px] bg-accent px-3 py-2.5 text-body leading-[1.5] text-accent-on">
       {children}
     </div>
   );

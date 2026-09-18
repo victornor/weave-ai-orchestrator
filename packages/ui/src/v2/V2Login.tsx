@@ -186,18 +186,18 @@ export function V2Login(): React.ReactElement {
           >
             {stage === 'totp' ? (
               <>
-                <h1 className="mb-1 text-[20px] font-semibold tracking-[-0.015em] text-text-strong">Enter your code</h1>
-                <p className="mb-5 text-[13px] text-text-2">Six digits from your authenticator.</p>
+                <h1 className="mb-1 text-title font-semibold tracking-[-0.015em] text-text-strong">Enter your code</h1>
+                <p className="mb-5 text-ui text-text-2">Six digits from your authenticator.</p>
                 <div className="mb-4">
                   <TOTPInput value={totp} onChange={setTotp} onComplete={() => void submit()} invalid={error?.code === 'AUTH_BAD_CREDENTIALS'} />
                 </div>
               </>
             ) : (
               <>
-                <h1 className="mb-1 text-[20px] font-semibold tracking-[-0.015em] text-text-strong">
+                <h1 className="mb-1 text-title font-semibold tracking-[-0.015em] text-text-strong">
                   {stage === 'setup' ? 'Set your password' : 'Sign in'}
                 </h1>
-                <p className="mb-5 text-[13px] text-text-2">
+                <p className="mb-5 text-ui text-text-2">
                   {stage === 'setup' ? 'First run: this password protects everything the daemon can do.' : 'Welcome back.'}
                 </p>
                 <div className="flex flex-col gap-3">
@@ -229,7 +229,7 @@ export function V2Login(): React.ReactElement {
             {stage !== 'setup' ? (
               <label className="my-4 flex items-center gap-2.5">
                 <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="size-4 rounded-[3px] accent-(--accent)" />
-                <span className="text-[13px] text-text-2">
+                <span className="text-ui text-text-2">
                   Remember this device{remember && deviceName ? <> — <span className="text-text-1">{deviceName}</span></> : null}
                 </span>
               </label>
@@ -237,13 +237,13 @@ export function V2Login(): React.ReactElement {
 
             {error ? (
               <div className={cx('mb-4 rounded-r6 border p-3', error.code === 'AUTH_LOCKED' ? 'border-blocked/35 bg-blocked/8' : 'border-failed/30 bg-failed/8')} role="alert">
-                <div className="ac-mono mb-1 text-[10px] text-failed">{error.code}</div>
-                <div className="text-[13px] font-medium text-text-1">
+                <div className="ac-mono mb-1 text-nano text-failed">{error.code}</div>
+                <div className="text-ui font-medium text-text-1">
                   {error.code === 'AUTH_LOCKED' && locked
                     ? `Locked for ${Math.floor((countdown ?? 0) / 60)}:${String((countdown ?? 0) % 60).padStart(2, '0')}.`
                     : error.title}
                 </div>
-                <div className="mt-1 text-[11px] leading-relaxed text-text-2">{error.detail}</div>
+                <div className="mt-1 text-micro leading-relaxed text-text-2">{error.detail}</div>
               </div>
             ) : null}
 
@@ -253,7 +253,7 @@ export function V2Login(): React.ReactElement {
           </form>
         )}
 
-        <p className="mt-3.5 text-center ac-mono text-[10.5px] text-text-2">
+        <p className="mt-3.5 text-center ac-mono text-micro text-text-2">
           {window.location.host} · weave-ai
         </p>
       </div>

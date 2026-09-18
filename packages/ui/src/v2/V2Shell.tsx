@@ -618,7 +618,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
               <CollapsedRow key={d.key} dest={d} scope={scope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} />
             ))}
             <div className="my-1 h-px w-[22px] bg-line-2" />
-            <span className="ac-mono py-1 text-[9.5px] font-medium tracking-[0.06em] text-text-3">{initial}</span>
+            <span className="ac-mono py-1 text-nano font-medium tracking-[0.06em] text-text-3">{initial}</span>
             {V2_RAIL_WORKSPACE.map((d) => (
               <CollapsedRow
                 key={d.key}
@@ -705,7 +705,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
           className="flex min-w-[44px] flex-1 flex-col items-center justify-center gap-1 text-text-nav"
         >
           <V2Glyph name="more" />
-          <span className="text-[10px] font-medium">More</span>
+          <span className="text-nano font-medium">More</span>
         </button>
       </nav>
 
@@ -760,7 +760,7 @@ function PhoneTab({
       )}
     >
       <V2Glyph name={dest.glyph} />
-      <span className="text-[10px] font-medium">{dest.label}</span>
+      <span className="text-nano font-medium">{dest.label}</span>
     </A>
   );
 }

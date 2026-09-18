@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-18
+goal: "Roadmap page: show each pending item's ticket and status, and collapse
+  blocks by default"

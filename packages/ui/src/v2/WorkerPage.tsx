@@ -7,7 +7,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import { agentUiStatus, heldByHuman, projectLabel } from '@weave-ai/shared';
+import { agentUiStatus, heldByHuman, projectLabel, type ThreadMessage } from '@weave-ai/shared';
 import { workerPauseReason } from '@weave-ai/render';
 import {
   useCompactWorker,
@@ -45,13 +45,37 @@ const TABS = [
 ] as const;
 
 /**
+ * VS-553: who a session message is from, named for the human. Attribution is by `authorKind`, never
+ * by direction: a missing or unexpected direction used to fall through to `you` and put the agent's
+ * own words in the human's mouth. The session's own agent is named by its role (what the human
+ * recognises), the weaver — the only other agent that posts into this thread — by `Weaver`, a system
+ * notice by `System`, and any kind this surface does not know by its own name rather than `you`.
+ */
+export function sessionAuthorLabel(
+  message: Pick<ThreadMessage, 'authorKind' | 'authorId'>,
+  sessionAgentId: string,
+  roleName: string,
+): string {
+  switch (message.authorKind) {
+    case 'human':
+      return 'you';
+    case 'agent':
+      return message.authorId === sessionAgentId ? roleName : 'Weaver';
+    case 'system':
+      return 'System';
+    default:
+      return message.authorKind;
+  }
+}
+
+/**
  * VS-495: a persistent session with no ticket has no ticket-comment history for `WorkerFeed` to
  * read — its conversation lives in its own thread instead, the same storage the weaver's own chat
  * uses. This renders that thread plainly: no live-run trace, no decision cards, no dispatch chips —
  * those are `ChatConversation`'s weaver/planner-only extras (see `PlanTab`), and a persistent
  * session's ticketless turns raise none of them.
  */
-function SessionThreadFeed({ threadId, label }: { threadId: string; label: string }): React.ReactElement {
+function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }: { threadId: string; label: string; sessionAgentId: string; roleName: string }): React.ReactElement {
   const history = useThreadMessages(threadId);
   if (history.isLoading) return <SkeletonRows rows={4} />;
   if (history.isError) return <ErrorState code="THREAD_UNREADABLE" message={history.error?.message ?? 'Could not load this conversation.'} />;
@@ -63,7 +87,7 @@ function SessionThreadFeed({ threadId, label }: { threadId: string; label: strin
           <div className={cx('max-w-[85%] rounded-r6 px-3 py-2 text-meta', m.direction === 'outbound' ? 'bg-bg-2 text-text-1' : 'bg-accent-tint text-text-1')}>
             <Markdown source={m.body} />
           </div>
-          <span className="ac-mono text-nano text-text-4">{m.direction === 'outbound' ? 'session' : 'you'}</span>
+          <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(m, sessionAgentId, roleName)}</span>
         </li>
       ))}
     </ol>
@@ -302,7 +326,12 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
         {tab === 'transcript' ? (
           <div className="mx-auto max-w-3xl p-4 md:p-5">
             {isSession && !ticket && thread ? (
-              <SessionThreadFeed threadId={thread.id} label={`${agent.name} conversation`} />
+              <SessionThreadFeed
+                threadId={thread.id}
+                label={`${agent.name} conversation`}
+                sessionAgentId={agent.id}
+                roleName={detail.data.role?.name ?? agent.name}
+              />
             ) : (
               <WorkerFeed agentId={workerId} ws={ws} label={`${agent.name} transcript`} />
             )}

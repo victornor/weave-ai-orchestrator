@@ -56,15 +56,44 @@ beforeEach(() => {
 });
 
 describe('V2 Incidents', () => {
-  it('filters by open and resolved', () => {
+  it('opens on open incidents and switches filters', () => {
     render(<IncidentsBody />);
-    expect(screen.getByText('2 shown')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    // VS-553: the page opens on Open, so only the unresolved incident is shown.
     expect(screen.getByText('1 shown')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByText('Runtime unreachable')).toBeInTheDocument();
     expect(screen.queryByText('Old outage')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Resolved' }));
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
+    expect(screen.getByText('2 shown')).toBeInTheDocument();
     expect(screen.getByText('Old outage')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Resolved' }));
+    expect(screen.getByText('1 shown')).toBeInTheDocument();
+    expect(screen.getByText('Old outage')).toBeInTheDocument();
+    expect(screen.queryByText('Runtime unreachable')).toBeNull();
+  });
+
+  it('reads an empty Open view as nothing being wrong (VS-553)', () => {
+    state.items = [incident({ id: 'i2', title: 'Old outage', resolvedAt: '2026-09-12T10:00:00.000Z' })];
+    render(<IncidentsBody />);
+    expect(screen.getByText('Nothing open.')).toBeInTheDocument();
+    expect(screen.getByText('No incidents need attention.')).toBeInTheDocument();
+    expect(screen.queryByText('Nothing in this filter.')).toBeNull();
+    expect(screen.queryByText('Old outage')).toBeNull();
+  });
+
+  it('says nothing has been resolved yet when Resolved is empty (VS-553)', () => {
+    state.items = [incident({ id: 'i1', title: 'Runtime unreachable' })];
+    render(<IncidentsBody />);
+    fireEvent.click(screen.getByRole('button', { name: 'Resolved' }));
+    expect(screen.getByText('Nothing resolved yet.')).toBeInTheDocument();
+    expect(screen.queryByText(/Runtime unreachable/)).toBeNull();
+  });
+
+  it('keeps the no-incidents wording when nothing has ever been filed (VS-553)', () => {
+    state.items = [];
+    render(<IncidentsBody />);
+    expect(screen.getByText('No incidents.')).toBeInTheDocument();
+    expect(screen.queryByText('Nothing open.')).toBeNull();
   });
 
   it('resolves the workspace name from whichever id the incident carries, never the ULID', () => {
@@ -81,6 +110,8 @@ describe('V2 Incidents', () => {
 
   it('pulses the dot only while open', () => {
     render(<IncidentsBody />);
+    // The resolved card is not on the opening Open view (VS-553), so show everything first.
+    fireEvent.click(screen.getByRole('button', { name: 'All' }));
     const open = document.querySelector('[data-v2-incident="i1"] [data-pulse="true"]');
     const resolved = document.querySelector('[data-v2-incident="i2"] [data-pulse="false"]');
     expect(open).toBeTruthy();

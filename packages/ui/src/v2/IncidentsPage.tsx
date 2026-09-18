@@ -45,7 +45,9 @@ export function V2IncidentsPage(): React.ReactElement {
 export function IncidentsBody(): React.ReactElement {
   const incidents = useIncidents();
   const workspaces = useWorkspaces();
-  const [filter, setFilter] = useState<IncidentFilter>('all');
+  // VS-553: open on unresolved incidents. The nav badge counts only `resolvedAt === null`, so a page
+  // opening on `all` made a fully-resolved list look like an outstanding pile (badge zero, page full).
+  const [filter, setFilter] = useState<IncidentFilter>('open');
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
 
   const all = incidents.data?.items ?? [];
@@ -88,7 +90,13 @@ export function IncidentsBody(): React.ReactElement {
         {all.length === 0 ? (
           <EmptyState title="No incidents." detail="An agent files one here when something breaks." />
         ) : filtered.length === 0 ? (
-          <EmptyState title="Nothing in this filter." detail="Choose another state." />
+          // VS-553: an empty filter is the normal state for Open (nothing wrong) — say that, rather
+          // than the generic "nothing here" that reads like a search that found nothing.
+          filter === 'open' ? (
+            <EmptyState title="Nothing open." detail="No incidents need attention." />
+          ) : (
+            <EmptyState title="Nothing resolved yet." detail="Resolved incidents will appear here." />
+          )
         ) : (
           <div className="mx-auto flex max-w-3xl flex-col gap-2.5">
             {filtered.map((i) => {

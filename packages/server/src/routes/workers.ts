@@ -63,6 +63,10 @@ export function workerRoutes(): Hono<AppEnv> {
     const activity = s.activity.summaryFor(worker.id);
     return c.json({
       worker,
+      // VS-553: the worker's role, so a session transcript can name its agent by the role the human
+      // recognises. The client's `WorkerDetail.role` already declared and parsed this; the route
+      // simply never sent it, so it was always null.
+      role: worker.roleId ? safe(() => s.roles.get(worker.roleId!)) : null,
       ticket: worker.ticketId ? safe(() => s.tickets.get(worker.ticketId!)) : null,
       // VS-495: a persistent session's own conversation thread, so a ticketless view knows what to
       // fetch/post against without a second round trip. Null for every other kind.

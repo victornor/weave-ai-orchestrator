@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-18
+goal: Open the Incidents page on open incidents, and label a session agent's
+  replies as the agent, not 'you'

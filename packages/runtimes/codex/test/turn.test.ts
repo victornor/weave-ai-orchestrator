@@ -43,6 +43,22 @@ process.stdin.on('end', () => {
     process.exitCode = 1;
     return;
   }
+  const configPath = process.env.CODEX_HOME ? require('node:path').join(process.env.CODEX_HOME, 'config.toml') : '';
+  const configText = configPath && fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+  const modeFromArgs = (args.find((arg) => arg.startsWith('mcp_servers.weave-ai.default_tools_approval_mode=')) || '').replace(/^[^=]*=/, '').replace(/"/g, '');
+  const modeFromConfig = (/default_tools_approval_mode\\s*=\\s*"([^"]*)"/.exec(configText) || [])[1];
+  const approvalMode = modeFromArgs || modeFromConfig;
+  // Codex 0.154.0's real AppToolApproval set. A value from any other key's
+  // vocabulary (e.g. approval_policy's "never") makes the CLI refuse the whole
+  // config and exit before any turn output, with these exact bytes.
+  if (process.env.SCENARIO === 'config_rejected') {
+    process.stderr.write('Error loading config.toml: unknown variant \`never\`, expected one of \`auto\`, \`prompt\`, \`writes\`, \`approve\`\\n');
+    process.exitCode = 1; return;
+  }
+  if (approvalMode && !['auto', 'prompt', 'writes', 'approve'].includes(approvalMode)) {
+    process.stderr.write('Error loading config.toml: unknown variant \`' + approvalMode + '\`, expected one of \`auto\`, \`prompt\`, \`writes\`, \`approve\`\\n');
+    process.exitCode = 1; return;
+  }
   emit({ type: 'thread.started', thread_id: args[1] === 'fork' ? 'forked-thread' : 'thread-1' });
   emit({ type: 'turn.started' });
   const schema = JSON.parse(fs.readFileSync(args[args.indexOf('--output-schema') + 1], 'utf8'));
@@ -66,14 +82,12 @@ process.stdin.on('end', () => {
     emit({ type: 'turn.failed', error: { message: '401 Unauthorized' } });
     process.exitCode = 0; return;
   }
-  const configPath = process.env.CODEX_HOME ? require('node:path').join(process.env.CODEX_HOME, 'config.toml') : '';
-  const configText = configPath && fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
   const hasRunScopedMcp = args.some((arg) => arg.includes('mcp_servers.weave-ai.url=')) || configText.includes('[mcp_servers.weave-ai]');
-  const mcpApprovalNever = args.includes('mcp_servers.weave-ai.default_tools_approval_mode="never"') || configText.includes('default_tools_approval_mode = "never"');
   const bypassApproval = args.includes('--dangerously-bypass-approvals-and-sandbox');
-  // MCP approval is distinct from shell-command approval: a configured server
-  // must explicitly opt out of per-tool approval for a headless worker.
-  if (hasRunScopedMcp && !mcpApprovalNever && !bypassApproval) {
+  // MCP approval is distinct from shell-command approval. Only "approve" lifts the
+  // per-tool prompt; "auto", "prompt" and "writes" still require approval for the
+  // daemon's unannotated tools, which a headless worker cannot give.
+  if (hasRunScopedMcp && !bypassApproval && approvalMode !== 'approve') {
     emit({ type: 'turn.failed', error: { message: 'MCP tool call requires approval, but approval policy is never' } });
     process.exitCode = 1; return;
   }
@@ -127,7 +141,8 @@ describe('Codex turn against a fake CLI', () => {
     const capture = JSON.parse(readFileSync(join(turn.cwd, 'capture.json'), 'utf8'));
     expect(capture.prompt).toBe(turn.prompt);
     expect(capture.args).not.toContain(turn.prompt);
-    expect(capture.args).toContain('mcp_servers.weave-ai.default_tools_approval_mode="never"');
+    expect(capture.args).toContain('mcp_servers.weave-ai.default_tools_approval_mode="approve"');
+    expect(capture.args).not.toContain('default_tools_approval_mode="never"');
     expect(capture.args.join(' ')).toContain(mode === 'auto' ? 'workspace-write' : 'read-only');
     expect(capture.args.join(' ')).toContain('mcp_servers.weave-ai.url="http://localhost/mcp/runs/run-1"');
     expect(capture.args.join(' ')).not.toContain('ticket-token');
@@ -171,6 +186,15 @@ describe('Codex turn against a fake CLI', () => {
       .toBe('Not inside a trusted directory and --skip-git-repo-check was not specified.');
   });
 
+  it("reports a rejected MCP approval value as the runtime's own config error", async () => {
+    const events: RuntimeEvent[] = [];
+    const result = await adapter.runTurn(input('config_rejected'), sink(events));
+    const expected = 'Error loading config.toml: unknown variant `never`, expected one of `auto`, `prompt`, `writes`, `approve`';
+    expect(result.error?.message).toBe(expected);
+    expect(result.error?.message).not.toBe('exit_1');
+    expect(events.find((e) => e.type === 'error')?.payload['message']).toBe(expected);
+  });
+
   it('ignores startup noise and uses the first real stderr reason', async () => {
     const result = await adapter.runTurn(input('startup_noisy'), sink());
     expect(result.error?.message).toBe('Not inside a trusted directory and --skip-git-repo-check was not specified.');
@@ -210,7 +234,7 @@ it('initializes MCP config once and overrides the endpoint on subsequent turns',
   expect((await adapter.runTurn(first, sink())).error).toBeUndefined();
     const config = readFileSync(join(first.cwd, 'config.toml'), 'utf8');
     expect(config).toContain('http://first/mcp');
-    expect(config).toContain('default_tools_approval_mode = "never"');
+    expect(config).toContain('default_tools_approval_mode = "approve"');
   expect(config).not.toContain('first-token');
   const next = input();
   next.configHome = first.configHome;

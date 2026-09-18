@@ -5,7 +5,14 @@ import { runTmpDir } from '@weave-ai/runtime-sdk';
 import { asCodexSession } from './session.js';
 
 export interface CodexBuildOpts { tmpDir?: string; configExists?: boolean; modelContextWindowTokens?: number }
-type McpApprovalMode = 'never';
+/**
+ * `mcp_servers.<name>.default_tools_approval_mode` (Rust `AppToolApproval`) is a different key from
+ * `approval_policy`. Its variants are `auto`, `prompt`, `writes`, `approve`; `never` is an
+ * `approval_policy` variant and the CLI refuses to load a config that puts it here. `approve` is the
+ * auto-approval variant, which is what a headless worker needs for its run-scoped MCP server;
+ * `auto` would still prompt for the daemon's unannotated tools.
+ */
+type McpApprovalMode = 'approve';
 
 export interface CodexBuiltCommand extends BuiltCommand {
   /** Thread being resumed/forked, or null for a new thread (id arrives in `thread.started`). */
@@ -153,7 +160,7 @@ export function buildArgs(input: TurnInput, opts: CodexBuildOpts = {}): CodexBui
 
   const servers = Object.entries(input.mcpServers ?? {});
   const viaFile = input.options?.['mcpViaConfigFile'] === true;
-  const mcpApprovalMode: McpApprovalMode | undefined = input.permission.mode === 'bypass' ? undefined : 'never';
+  const mcpApprovalMode: McpApprovalMode | undefined = input.permission.mode === 'bypass' ? undefined : 'approve';
   if (servers.length > 0) {
     if (viaFile && input.configHome && !opts.configExists) {
       files.push({ path: join(input.configHome, 'config.toml'), content: mcpConfigToml(input.mcpServers, env, mcpApprovalMode) });

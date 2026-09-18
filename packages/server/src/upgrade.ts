@@ -532,8 +532,10 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
       if (!row) return;
       if (row.state === 'restarting') {
         const runningSha = releaseSha(deps.releaseRoot);
-        const onTarget = (row.toRelease && row.toRelease === deps.releaseRoot)
-          || Boolean(row.toSha && runningSha && row.toSha === runningSha);
+        // VS-572: a differing commit means the old code is still running, even from the target's directory.
+        const shaDiffers = Boolean(row.toSha && runningSha && row.toSha !== runningSha);
+        const onTarget = !shaDiffers && ((row.toRelease && row.toRelease === deps.releaseRoot)
+          || Boolean(row.toSha && runningSha && row.toSha === runningSha));
         if (onTarget) {
           finish(row.id, 'completed', { cameBackVersion: deps.version });
           recordUpgradeInChangelogs(row);

@@ -121,6 +121,8 @@ export async function driveRestart(target: { release: string; sha: string | null
 
 /** The daemon that answered is the one the upgrade switched to — by directory, or by the commit it was built from. */
 function onTarget(health: HealthProbe, target: { release: string; sha: string | null }): boolean {
+  // VS-572: two known, different commits mean the old code is still serving, whatever directory it reports.
+  if (target.sha && health.releaseSha && health.releaseSha !== target.sha) return false;
   if (health.releasePath && health.releasePath === target.release) return true;
   return Boolean(target.sha && health.releaseSha && health.releaseSha === target.sha);
 }

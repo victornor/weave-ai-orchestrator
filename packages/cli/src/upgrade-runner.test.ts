@@ -72,6 +72,11 @@ describe('driveRestart', () => {
     expect(host.rollbacks).toEqual([]);
   });
 
+  it('does not accept the target directory when the commit it reports is a different one (VS-572)', async () => {
+    const host = io({ answers: [healthy({ releaseSha: 'a'.repeat(40) })] });
+    await expect(driveRestart(TARGET, host)).resolves.toMatchObject({ outcome: 'rolled_back' });
+  });
+
   it('rolls back to previous and restarts again when the target never answers', async () => {
     const host = io({ answers: [] });
     const verdict = await driveRestart(TARGET, host);

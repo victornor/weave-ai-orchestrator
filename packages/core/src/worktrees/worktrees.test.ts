@@ -63,6 +63,9 @@ describe('git identity', () => {
     vi.stubEnv('HOME', tmpDir('ac-git-home-'));
     vi.stubEnv('GIT_CONFIG_GLOBAL', join(tmpDir('ac-git-global-'), 'config'));
     vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+    // VS-572: a caller that exports GIT_AUTHOR_*/GIT_COMMITTER_* (every worker turn does) would mask
+    // the worktree config this test exists to prove.
+    for (const k of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']) vi.stubEnv(k, undefined);
 
     await commit(target, 'feature.txt', 'feature\n', 'feat: feature');
     await commit(repo, 'main.txt', 'main\n', 'feat: main');

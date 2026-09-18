@@ -1,7 +1,7 @@
 /** VS-350: the V2 worker page — identity, tabs, shared feed, actions, handover and steer. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent } from '@weave-ai/shared';
+import type { Agent, ThreadMessage } from '@weave-ai/shared';
 import { agent, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -16,6 +16,8 @@ const state = vi.hoisted(() => ({
   // VS-495: null keeps every existing test's ticketed worker unchanged; a session test overrides both.
   noTicket: false,
   thread: null as { id: string; agentId: string } | null,
+  role: null as { id: string; name: string } | null,
+  threadMessages: [] as ThreadMessage[],
   postThread: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   compact: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   setOption: vi.fn() as unknown as ReturnType<typeof vi.fn>,
@@ -33,7 +35,7 @@ vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
 vi.mock('../lib/drafts', () => ({ draftKey: () => 'k', useDraft: () => ({ draft: { text: 'steer this' }, patch: state.patch }) }));
 vi.mock('../v2/WorkerFeed', () => ({ WorkerFeed: () => <div data-testid="worker-feed" /> }));
 vi.mock('../api/hooks', () => ({
-  useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: state.noTicket ? null : ticket({ id: 'tk1', identifier: 'ACME-1' }), thread: state.thread, role: null, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, sessionTurns: state.sessionTurns, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
+  useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: state.noTicket ? null : ticket({ id: 'tk1', identifier: 'ACME-1' }), thread: state.thread, role: state.role, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, sessionTurns: state.sessionTurns, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
   useWorkerBrief: () => ({ data: { brief: '# The brief' } }),
   useWorkerAction: () => ({ mutate: state.action, error: state.actionError }),
   useWorkerMessage: () => ({ mutateAsync: state.send, error: null }),
@@ -41,7 +43,7 @@ vi.mock('../api/hooks', () => ({
   useCompactWorker: () => ({ mutate: state.compact, isPending: false, error: null }),
   useModels: () => ({ data: state.models }),
   useSetSessionOption: () => ({ mutate: state.setOption, isPending: false, reset: state.resetOption, error: null }),
-  useThreadMessages: () => ({ data: [], isLoading: false, isError: false, error: null }),
+  useThreadMessages: () => ({ data: state.threadMessages, isLoading: false, isError: false, error: null }),
   useHandoverCommand: () => ({ isLoading: false, data: null }),
   useStartHandover: () => ({ mutate: state.start, error: null }),
   useEndHandover: () => ({ mutateAsync: state.end, error: null }),
@@ -50,7 +52,28 @@ vi.mock('../api/hooks', () => ({
   useWorkspaces: () => ({ data: [] }),
 }));
 
-const { WorkerBody } = await import('../v2/WorkerPage');
+const { WorkerBody, sessionAuthorLabel } = await import('../v2/WorkerPage');
+
+/** A thread message with only the fields the session transcript reads. */
+const message = (over: Partial<ThreadMessage> = {}): ThreadMessage => ({
+  id: 'm1',
+  threadId: 'th1',
+  direction: 'inbound',
+  authorKind: 'human',
+  authorId: null,
+  runId: null,
+  projectId: null,
+  blockId: null,
+  replyToMessageId: null,
+  replyToMessageIds: [],
+  replyToExcerpt: null,
+  body: 'hi',
+  parts: [],
+  externalMessageId: null,
+  deliveryStatus: 'received',
+  createdAt: 't0',
+  ...over,
+});
 
 beforeEach(() => {
   state.go = vi.fn();
@@ -63,6 +86,8 @@ beforeEach(() => {
   state.agent = agent({ id: 'a1', name: 'Backend Engineer #7', status: 'running', runtimeId: 'claude-code' });
   state.noTicket = false;
   state.thread = null;
+  state.role = null;
+  state.threadMessages = [] as ThreadMessage[];
   state.postThread = vi.fn().mockResolvedValue(undefined);
   state.compact = vi.fn();
   state.setOption = vi.fn();
@@ -146,6 +171,31 @@ describe('V2 worker page', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }));
       expect(state.postThread).toHaveBeenCalledWith({ threadId: 'th1', body: 'hello there' });
       expect(state.send).not.toHaveBeenCalled();
+    });
+    it('names each author of the session conversation (VS-553)', () => {
+      state.role = { id: 'r1', name: 'Full-stack Engineer' };
+      state.threadMessages = [
+        message({ id: 'm1', direction: 'inbound', authorKind: 'human', authorId: null, body: 'hi' }),
+        message({ id: 'm2', direction: 'outbound', authorKind: 'agent', authorId: 'a1', body: 'Hello — the session is up and running.' }),
+        message({ id: 'm3', direction: 'outbound', authorKind: 'agent', authorId: 'weaver1', body: 'The weaver relayed this.' }),
+        message({ id: 'm4', direction: 'outbound', authorKind: 'system', authorId: null, body: 'Session resumed.' }),
+      ];
+      render(<WorkerBody workerId="a1" />);
+      expect(screen.getByText('Full-stack Engineer')).toBeInTheDocument();
+      expect(screen.getByText('Weaver')).toBeInTheDocument();
+      expect(screen.getByText('System')).toBeInTheDocument();
+      // Only the human's own message reads `you`, whatever its direction; nothing else falls back to it.
+      expect(screen.getAllByText('you')).toHaveLength(1);
+    });
+  });
+
+  describe('sessionAuthorLabel (VS-553)', () => {
+    it('attributes by author, never by direction', () => {
+      expect(sessionAuthorLabel({ authorKind: 'human', authorId: null }, 'a1', 'Full-stack Engineer')).toBe('you');
+      expect(sessionAuthorLabel({ authorKind: 'agent', authorId: 'a1' }, 'a1', 'Full-stack Engineer')).toBe('Full-stack Engineer');
+      expect(sessionAuthorLabel({ authorKind: 'agent', authorId: 'weaver1' }, 'a1', 'Full-stack Engineer')).toBe('Weaver');
+      expect(sessionAuthorLabel({ authorKind: 'system', authorId: null }, 'a1', 'Full-stack Engineer')).toBe('System');
+      expect(sessionAuthorLabel({ authorKind: 'plugin', authorId: null }, 'a1', 'Full-stack Engineer')).toBe('plugin');
     });
   });
 

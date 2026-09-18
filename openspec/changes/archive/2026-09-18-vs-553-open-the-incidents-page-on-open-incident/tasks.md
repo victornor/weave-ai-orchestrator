@@ -1,0 +1,17 @@
+## 1. Incidents page opens on open incidents
+
+- [x] 1.1 Change `IncidentsBody`'s initial filter to `'open'` in `packages/ui/src/v2/IncidentsPage.tsx`, update `packages/ui/src/test/v2incidents.test.tsx` so the opening view asserts `1 shown`, only the unresolved incident listed and the Open chip `aria-pressed`, and verify `pnpm vitest run packages/ui/src/test/v2incidents.test.tsx` passes (the existing "filters by open and resolved" test's opening assertion changes from `2 shown` to `1 shown`).
+- [x] 1.2 Make the empty branch filter-aware in `IncidentsPage.tsx`: when the loaded list is empty keep the existing "no incident has been filed" state; when `filter === 'open'` and it matches nothing show a state that reads as nothing being wrong (no open incidents / all clear), not "nothing in this filter"; when `filter === 'resolved'` and it matches nothing show that nothing has been resolved. Add tests in `v2incidents.test.tsx` for all three cases and verify the file passes.
+- [x] 1.3 Confirm the nav badge and the page agree: assert in `v2incidents.test.tsx` that with only resolved incidents present the page opens empty and shows the "nothing open" wording. Verify the whole UI suite stays green for the incidents file.
+
+## 2. A session transcript names its authors
+
+- [x] 2.1 Add `role: worker.roleId ? safe(() => s.roles.get(worker.roleId)) : null` to the `GET /workers/:id` response in `packages/server/src/routes/workers.ts`, and add a route test in `packages/server/test/workers.test.ts` asserting the role is present for a role-bound worker and null for one without a role. Verify with `pnpm vitest run packages/server/test/workers.test.ts`.
+- [x] 2.2 Add a pure `sessionAuthorLabel(message, sessionAgentId, roleName)` helper (in `WorkerPage.tsx`, exported, matching the surface's existing pure-helper style) implementing design D2: `human` → `you`; `agent` whose `authorId` is the session agent → the role name (falling back to the agent's name when the role is null); any other `agent` → `Weaver`; `system` → `System`; any unknown `authorKind` → that kind, never `you`. Unit-test the resolver directly in `packages/ui/src/test/v2worker.test.tsx` and verify it passes.
+- [x] 2.3 Wire `SessionThreadFeed` to the resolver: keep `direction` for alignment and bubble styling, take the session agent's id and the role name (from `detail.data.role?.name ?? agent.name`) from `WorkerBody`, and label each message through `sessionAuthorLabel`. Extend `v2worker.test.tsx`'s `useThreadMessages` mock to return human, session-agent, weaver and system messages in one session transcript and assert each renders its own label and none of the non-human ones read `you`. Verify the file passes.
+- [x] 2.4 Rendered evidence of both UI items in light and dark: the Incidents page open with open incidents and with none, and a session transcript showing the human, the agent, a weaver and a system message — session transcript also at phone width. Capture outside the worktree (e.g. `/tmp/opencode/`), keep `git status --porcelain` in `work/` empty, and attach every capture to VS-553 with `weave_ticket_attachment_put`.
+
+## 3. Verification
+
+- [x] 3.1 Run `pnpm lint && pnpm typecheck && pnpm test` and paste both suite blocks verbatim in the ticket report, including the UI block; state plainly if any part could not be run.
+- [x] 3.2 Run `openspec validate vs-553-open-the-incidents-page-on-open-incident --json --strict` clean and confirm the captures from 2.4 are attached to the ticket.

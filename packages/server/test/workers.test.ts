@@ -227,6 +227,26 @@ describe('GET /workers/:id — sessionResumable (VS-106)', () => {
   });
 });
 
+describe('GET /workers/:id — role (VS-553)', () => {
+  it('returns the worker\'s role so a session transcript can name its agent', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['get'] = () => worker({ roleId: 'role1' });
+    h.impls.roles!.get = (id: string) => ({ id, name: 'Full-stack Engineer' });
+
+    const res = await fetch('/api/w/ws1/workers/ag_1', { headers: authed() });
+    expect(res.status).toBe(200);
+    expect((await res.json()).role).toMatchObject({ id: 'role1', name: 'Full-stack Engineer' });
+  });
+
+  it('returns null when the worker has no role', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['get'] = () => worker({ roleId: null });
+
+    const res = await fetch('/api/w/ws1/workers/ag_1', { headers: authed() });
+    expect((await res.json()).role).toBeNull();
+  });
+});
+
 describe('GET /workers — stalled (VS-498)', () => {
   function seedStallRow(h: Harness, agentId: string, ticketId: string): void {
     h.db.run(

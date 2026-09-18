@@ -138,6 +138,8 @@ export const qk = {
   plan: (ws: string, planId: string) => ['w', ws, 'plans', planId] as const,
   /** VS-477: a project's drafting plans as tab summaries. Sits under `planRoot` so one `plan.*` invalidation reaches the tabs and the open plan alike. */
   plans: (ws: string, projectId: string) => ['w', ws, 'plans', 'project', projectId] as const,
+  /** VS-550: every ticket created from a plan draft, keyed by ticket id — one workspace read for the Work board. */
+  planOrigins: (ws: string) => ['w', ws, 'plans', 'origins'] as const,
 
   presentation: (ws: string) => ['w', ws, 'presentation'] as const,
   presentationSurfaces: (ws: string) => ['w', ws, 'presentation', 'surfaces'] as const,

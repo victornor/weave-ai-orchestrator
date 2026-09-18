@@ -8,7 +8,8 @@
  * — are imported from there rather than copied.
  */
 import type { Decision, Project, Ticket, TicketStatus, UiStatus } from '@weave-ai/shared';
-import { liveWorkersByTicket, finishedAt, recentlyFinished, type FinishedMode, type LiveLookup } from '../../lib/board';
+import { compareMergeQueue } from '@weave-ai/shared';
+import { liveWorkersByTicket, finishedAt, mergeWaitPhase, recentlyFinished, type FinishedMode, type LiveLookup, type MergeStripTicket, type MergeWait } from '../../lib/board';
 import { isAutoApproving } from '../../lib/yolo';
 
 export interface V2BoardColumnDef {
@@ -172,3 +173,66 @@ export function highlightSegments(text: string, query: string): TitleSegment[] {
 }
 
 export { liveWorkersByTicket };
+
+/**
+ * VS-550: the label on a ticket's bottom row. A live worker keeps its own identity — replacing a
+ * running worker with its role name reads as if the role, not the agent, is working. Once the worker
+ * is gone, the ticket's own `assigneeRoleId` is what survives, so the role names who did it. A
+ * historical worker name is a last non-empty resort before `unassigned`.
+ */
+export function ticketAssigneeLabel(input: {
+  liveWorkerName: string | null;
+  roleName: string | null;
+  historicalWorkerName: string | null;
+}): string {
+  return input.liveWorkerName ?? input.roleName ?? input.historicalWorkerName ?? 'unassigned';
+}
+
+/** The ticket facts a merge card reads; a full `Ticket` satisfies it. */
+export interface MergeCardTicket extends MergeStripTicket {
+  id: string;
+}
+
+export interface MergeCardState {
+  state: 'landing' | 'waiting';
+  /** 1-based place among its project's waiting tickets; null for the ticket that is landing. */
+  position: number | null;
+  /** What a landing ticket is waiting on; null for a waiting ticket. */
+  wait: MergeWait | null;
+}
+
+/**
+ * VS-550: the queue state of every `merging` ticket in the loaded set, keyed by ticket id. The
+ * landing/waiting split is read from `merge_started_at`, never from status alone. Waiting tickets are
+ * ordered per project with the same `compareMergeQueue` rule the daemon admits by, so the position is
+ * the queue's own order rather than the order the query happened to return.
+ */
+export function mergeCardStates(tickets: readonly MergeCardTicket[]): Map<string, MergeCardState> {
+  const out = new Map<string, MergeCardState>();
+  const waitingByProject = new Map<string, MergeCardTicket[]>();
+  for (const t of tickets) {
+    if (t.status !== 'merging') continue;
+    if (t.mergeStartedAt) {
+      const d = (t.delivery ?? {}) as Record<string, unknown>;
+      out.set(t.id, {
+        state: 'landing',
+        position: null,
+        wait: {
+          identifier: t.identifier,
+          phase: mergeWaitPhase(d['ciState'] as 'pending' | 'success' | 'failure' | 'none' | null | undefined),
+          since: (d['ciStateAt'] as string | undefined) ?? null,
+        },
+      });
+      continue;
+    }
+    const key = t.projectId ?? '';
+    const list = waitingByProject.get(key) ?? [];
+    list.push(t);
+    waitingByProject.set(key, list);
+  }
+  for (const list of waitingByProject.values()) {
+    list.sort(compareMergeQueue);
+    list.forEach((t, i) => out.set(t.id, { state: 'waiting', position: i + 1, wait: null }));
+  }
+  return out;
+}

@@ -65,6 +65,8 @@ export function ticketRoutes(): Hono<AppEnv> {
       attachments: (safe(() => s.tickets.attachments(ticket.id)) ?? []).map((a) => ({ ...a, url: `/api/w/${c.get('ws').id}/tickets/${a.ticketId}/attachments/${a.id}` })),
       // Where this ticket stands in its project's merge queue: null once it is merging or elsewhere.
       mergeQueue: { position: s.tickets.mergeQueue.positionOf(ticket.id), concurrency: s.tickets.mergeQueue.limitFor(ticket.projectId) },
+      // VS-550: the plan this ticket was created from, read through its draft link, or null.
+      plan: s.planning.planOriginForTicket(ticket.id),
       documents: s.tickets.documents(ticket.id),
     });
   });

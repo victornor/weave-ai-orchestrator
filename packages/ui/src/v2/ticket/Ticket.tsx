@@ -48,7 +48,8 @@ import {
 } from '../../api/hooks';
 import { useWorkerActivity } from '../../api/workerActivity';
 import { LiveActivityLine, type LiveActivityLineModel } from '../../components/LiveActivityLine';
-import { liveWorkersByTicket, ticketBoardStatus } from '../../lib/board';
+import { isLiveWorker, liveWorkersByTicket, ticketBoardStatus } from '../../lib/board';
+import { ticketAssigneeLabel } from '../work/board';
 import { lastLinesByAgent } from '../../lib/projectOverview';
 import { activityLine, mergeWorkerActivity } from '../../lib/workerActivity';
 import { projectColorVar } from '../../lib/projectColor';
@@ -175,6 +176,13 @@ function TicketHeader({
   liveLine: LiveActivityLineModel | null;
 }): React.ReactElement {
   const { ticket, project, worker } = detail;
+  // VS-550: same label as Work — the live worker while one holds the ticket, else the role that did
+  // it, so a landed ticket names a role instead of reading `unassigned`.
+  const assigneeLabel = ticketAssigneeLabel({
+    liveWorkerName: isLiveWorker(worker) ? worker!.name : null,
+    roleName: detail.role?.name ?? null,
+    historicalWorkerName: worker?.name ?? null,
+  });
   const decisions = useDecisions({ status: 'open', owner: 'human' });
   // VS-469: an `in_review`/`proposed` ticket whose live open approval is still unseen is waiting on
   // the weaver, not on the human — say so in the header rather than only showing the ticket status.
@@ -209,7 +217,15 @@ function TicketHeader({
             {projectLabel(project)}
           </span>
         ) : null}
-        {worker ? <span>{worker.name}</span> : null}
+        <span data-v2-assignee>{assigneeLabel}</span>
+        {detail.plan ? (
+          <span className="flex items-center gap-1.5" data-v2-plan-origin={detail.plan.dispatched ? 'dispatched' : 'submission'}>
+            <A to="/w/$ws/chat" params={{ ws }} className="v2-link">
+              plan · {detail.plan.planTitle ?? 'untitled plan'}
+            </A>
+            <span>{detail.plan.dispatched ? '· dispatched while drafting' : '· filed at submission'}</span>
+          </span>
+        ) : null}
         {usageLine ? <span className="ac-mono">{usageLine}</span> : null}
         {pausedFor ? <span className="ac-mono">paused · {pausedFor}</span> : null}
         <A to="/w/$ws/work" params={{ ws }} className="v2-link ml-auto">
@@ -420,6 +436,12 @@ function OverviewPane({ ticket }: { ticket: Ticket }): React.ReactElement {
   const retryDecision = (decisions.data ?? []).find(
     (dec) => dec.kind === 'retry_approval' && (dec.ticketId === ticket.id || dec.ticketId === ticket.identifier),
   );
+  // VS-550: the Delivery row names the role once the worker is gone, matching Work's label.
+  const assigneeLabel = ticketAssigneeLabel({
+    liveWorkerName: d?.worker && isLiveWorker(d.worker) ? d.worker.name : null,
+    roleName: d?.role?.name ?? null,
+    historicalWorkerName: d?.worker?.name ?? null,
+  });
   return (
     <div className="flex min-w-0 flex-col gap-5" data-v2-overview-pane>
       {retryDecision ? (
@@ -450,7 +472,7 @@ function OverviewPane({ ticket }: { ticket: Ticket }): React.ReactElement {
           title="Delivery"
           rows={[
             ['project', d?.project ? projectLabel(d.project) : '—'],
-            ['worker', d?.worker?.name ?? 'unassigned'],
+            ['worker', assigneeLabel],
             ['branch', d?.worker?.branch ?? '—'],
             ['auto-merge', ticket.autoMerge ? 'on' : 'off'],
           ]}

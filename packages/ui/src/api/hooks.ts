@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, TicketStatus, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, RoadmapBlock, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanSummary, ChannelThread } from '@weave-ai/shared';
+import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, TicketStatus, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, RoadmapBlock, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanOrigin, PlanSummary, ChannelThread } from '@weave-ai/shared';
 import { dayKey } from '@weave-ai/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -116,6 +116,7 @@ function ticketDetail(v: unknown): T.TicketDetail {
       position: (((r['mergeQueue'] ?? {}) as Record<string, unknown>)['position'] as number | null | undefined) ?? null,
       concurrency: Number(((r['mergeQueue'] ?? {}) as Record<string, unknown>)['concurrency'] ?? 1),
     },
+    plan: (r['plan'] as PlanOrigin | null | undefined) ?? null,
     openspecState: spec
       ? {
           changeName: (spec['changeName'] as string | null) ?? null,
@@ -399,6 +400,19 @@ export function usePlansMany(projectIds: readonly string[]): { plans: PlanSummar
     plans: results.flatMap((r) => r.data?.plans ?? []),
     isLoading: results.some((r) => r.isLoading),
   };
+}
+
+/**
+ * VS-550: every ticket in the workspace created from a plan draft, keyed by ticket id — the plan it
+ * came from and whether it was an early dispatch. One workspace read for the whole board; a ticket
+ * with no plan is simply absent from the map.
+ */
+export function usePlanOrigins(): UseQueryResult<Map<string, PlanOrigin>> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.planOrigins(ws),
+    queryFn: () => api.ws<{ origins: PlanOrigin[] }>(ws, '/plan-origins').then((r) => new Map(r.origins.map((o) => [o.ticketId, o]))),
+  });
 }
 
 /** VS-477: create a fresh drafting plan (with its own thread and planner) alongside any the project already has; the modal focuses the new tab. */

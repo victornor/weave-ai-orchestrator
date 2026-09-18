@@ -2,17 +2,19 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Decision, Project, Run, Ticket, WorkerActivitySummary, WorkerModelOption } from '@weave-ai/shared';
+import type { Agent, Decision, PlanOrigin, Project, Run, Ticket, WorkerActivitySummary, WorkerModelOption } from '@weave-ai/shared';
 import { agent, decision, project, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
   active: [] as Ticket[],
   finished: [] as Ticket[],
   projects: [] as Project[],
+  roles: [] as Array<{ id: string; name: string }>,
   workers: [] as Agent[],
   runs: [] as Run[],
   decisions: [] as Decision[],
   workerOptions: undefined as WorkerModelOption[] | undefined,
+  planOrigins: new Map<string, import('@weave-ai/shared').PlanOrigin>(),
   stream: null as import('../api/events').EventStream | null,
   search: {} as Record<string, string | undefined>,
   go: vi.fn() as unknown as ReturnType<typeof vi.fn>,
@@ -64,6 +66,11 @@ vi.mock('../api/context', async () => {
   };
 });
 vi.mock('../app/link', () => ({
+  A: ({ to, children, ...rest }: { to: string; children?: React.ReactNode }) => (
+    <a href={to} {...rest}>
+      {children}
+    </a>
+  ),
   useGo: () => state.go,
   useSearchParams: () => state.search,
 }));
@@ -88,7 +95,7 @@ vi.mock('../api/hooks', () => ({
     return { data: terminal ? (enabled ? state.finished : undefined) : state.active, isLoading: false, isError: false, refetch: vi.fn() };
   },
   useProjects: () => ({ data: state.projects }),
-  useRoles: () => ({ data: [] }),
+  useRoles: () => ({ data: state.roles }),
   useWorkers: () => ({ data: state.workers }),
   useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: state.workers })),
   useDecisionsMany: (ids: readonly string[]) => ids.map(() => ({ data: state.decisions ?? [] })),
@@ -96,6 +103,7 @@ vi.mock('../api/hooks', () => ({
   useDecisions: () => ({ data: state.decisions }),
   useWorkspaceSummary: () => ({ data: { config: {} } }),
   useModels: () => ({ data: state.workerOptions === undefined ? undefined : { workerOptions: state.workerOptions } }),
+  usePlanOrigins: () => ({ data: state.planOrigins }),
   useIncidents: () => ({ data: { items: [], total: 0 } }),
   useWorkspaces: () => ({ data: [{ id: 'ws1', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 0 }] }),
   useMe: () => ({ data: { operator: { username: 'victor' }, session: { id: 's', kind: 'web' }, totpEnabled: false } }),
@@ -111,6 +119,9 @@ const column = (key: string): HTMLElement => {
   return el as HTMLElement;
 };
 
+/** VS-550: the merge strip line's whole text, whitespace-collapsed (its parts are links, so not one node). */
+const mergeLine = (): string => (document.querySelector('[data-v2-merge-strip-line]')?.textContent ?? '').replace(/\s+/g, ' ').trim();
+
 const liveWorker = (over: Partial<WorkerActivitySummary> & Partial<Agent> = {}): Agent =>
   Object.assign(agent({ id: 'a1', ticketId: 'tk_1', status: 'running', name: 'Platform Engineer #1' }), over);
 
@@ -118,10 +129,12 @@ beforeEach(() => {
   state.go = vi.fn();
   state.createTicket = vi.fn();
   state.projects = [project({ id: 'p1', slug: 'web', name: 'web' })];
+  state.roles = [];
   state.workers = [];
   state.runs = [];
   state.decisions = [];
   state.workerOptions = undefined;
+  state.planOrigins = new Map();
   state.stream = null;
   FakeEventSource.open = [];
   (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
@@ -379,7 +392,20 @@ describe('V2 Work merge strip', () => {
       ticket({ id: 'tk_2', identifier: 'ACME-2', status: 'merging', mergeStartedAt: null }),
     ];
     render(<V2WorkScreen />);
-    expect(screen.getByText(/1 landing · 1 waiting · on CI/)).toBeInTheDocument();
+    expect(mergeLine()).toMatch(/^1 landing ACME-1 · on CI .* · 1 waiting ACME-2 · next: ACME-2$/);
+  });
+
+  it('links the tickets it counts, so the summary reaches them (VS-550)', () => {
+    state.active = [
+      ticket({ id: 'tk_1', identifier: 'ACME-1', status: 'merging', mergeStartedAt: '2026-09-10T00:00:00.000Z' }),
+      ticket({ id: 'tk_2', identifier: 'ACME-2', status: 'merging', mergeStartedAt: null }),
+    ];
+    render(<V2WorkScreen />);
+    const links = [...document.querySelectorAll('[data-v2-merge-strip-line] a')].map((a) => a.getAttribute('href'));
+    expect(links).toContain('/w/$ws/tickets/$ticketId');
+    expect(links).toHaveLength(3); // landing + waiting + next (the next ticket is repeated)
+    expect(screen.getByRole('link', { name: 'ACME-1' })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'ACME-2' })).toHaveLength(2); // waiting + next
   });
 
   it('names the next waiting ticket and its priority when it jumped an earlier join (VS-390)', () => {
@@ -389,7 +415,7 @@ describe('V2 Work merge strip', () => {
       ticket({ id: 'tk_3', identifier: 'ACME-3', status: 'merging', priority: 'critical', mergeQueuedAt: '2026-09-10T00:06:00.000Z', mergeStartedAt: null }),
     ];
     render(<V2WorkScreen />);
-    expect(screen.getByText(/1 landing · 2 waiting · on the worker · next: ACME-3 \(critical, jumped ahead\)/)).toBeInTheDocument();
+    expect(mergeLine()).toMatch(/^1 landing ACME-1 · on the worker · 2 waiting ACME-3 ACME-2 · next: ACME-3 \(critical, jumped ahead\)$/);
   });
 
   it('names the next waiting ticket without a reason when it is in join order', () => {
@@ -399,7 +425,66 @@ describe('V2 Work merge strip', () => {
       ticket({ id: 'tk_3', identifier: 'ACME-3', status: 'merging', priority: 'medium', mergeQueuedAt: '2026-09-10T00:06:00.000Z', mergeStartedAt: null }),
     ];
     render(<V2WorkScreen />);
-    expect(screen.getByText(/on the worker · next: ACME-2$/)).toBeInTheDocument();
+    expect(mergeLine()).toMatch(/^1 landing ACME-1 · on the worker · 2 waiting ACME-2 ACME-3 · next: ACME-2$/);
+  });
+});
+
+describe('V2 Work assignee label (VS-550)', () => {
+  it('names the role on a finished ticket instead of unassigned', () => {
+    state.finished = [ticket({ id: 'tk_4', identifier: 'ACME-4', title: 'Landed', status: 'done', completedAt: new Date().toISOString(), assigneeRoleId: 'r1' })];
+    state.roles = [{ id: 'r1', name: 'Platform Engineer' }];
+    render(<V2WorkScreen />);
+    const card = document.querySelector('[data-v2-card="ACME-4"]') as HTMLElement;
+    expect(within(card).getByText('Platform Engineer')).toBeInTheDocument();
+    expect(within(card).queryByText('unassigned')).toBeNull();
+  });
+
+  it('still reads unassigned when no role is assigned', () => {
+    state.finished = [ticket({ id: 'tk_4', identifier: 'ACME-4', title: 'Landed', status: 'done', completedAt: new Date().toISOString(), assigneeRoleId: null })];
+    render(<V2WorkScreen />);
+    const card = document.querySelector('[data-v2-card="ACME-4"]') as HTMLElement;
+    expect(within(card).getByText('unassigned')).toBeInTheDocument();
+  });
+
+  it('keeps a live worker’s identity rather than its role name', () => {
+    state.active = [ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Moving', status: 'in_progress', assigneeRoleId: 'r1' })];
+    state.workers = [liveWorker({ ticketId: 'tk_1' })];
+    state.roles = [{ id: 'r1', name: 'Platform Engineer' }];
+    render(<V2WorkScreen />);
+    const card = document.querySelector('[data-v2-card="ACME-1"]') as HTMLElement;
+    expect(within(card).getByText('Platform Engineer #1')).toBeInTheDocument();
+    expect(within(card).queryByText('Platform Engineer')).toBeNull();
+  });
+});
+
+describe('V2 Work merge card state (VS-550)', () => {
+  it('marks the landing ticket and gives a queued one its position', () => {
+    state.active = [
+      ticket({ id: 'tk_1', identifier: 'ACME-1', title: 'Landing', status: 'merging', mergeStartedAt: '2026-09-10T00:00:00.000Z', delivery: { ciState: 'pending', ciStateAt: '2026-09-10T00:00:00.000Z' } }),
+      ticket({ id: 'tk_2', identifier: 'ACME-2', title: 'Queued', status: 'merging', mergeStartedAt: null, priority: 'critical', mergeQueuedAt: '2026-09-10T00:05:00.000Z' }),
+    ];
+    render(<V2WorkScreen />);
+    const landing = document.querySelector('[data-v2-card="ACME-1"] [data-v2-merge="landing"]') as HTMLElement;
+    expect(landing.textContent).toMatch(/landing · on CI/);
+    const waiting = document.querySelector('[data-v2-card="ACME-2"] [data-v2-merge="waiting"]') as HTMLElement;
+    expect(waiting.textContent).toMatch(/queued · #1/);
+  });
+});
+
+describe('V2 Work plan origin (VS-550)', () => {
+  it('names the plan and marks an early dispatch on the card', () => {
+    state.planOrigins = new Map<string, PlanOrigin>([['tk_1', { ticketId: 'tk_1', planId: 'plan1', planTitle: 'Redesign the board', planStatus: 'drafting', dispatched: true }]]);
+    render(<V2WorkScreen />);
+    const tag = document.querySelector('[data-v2-card="ACME-1"] [data-v2-plan-origin="dispatched"]') as HTMLElement;
+    expect(tag.textContent).toContain('Redesign the board');
+    expect(tag.textContent).toContain('dispatched');
+    expect(document.querySelector('[data-v2-card="ACME-3"] [data-v2-plan-origin]')).toBeNull();
+  });
+
+  it('distinguishes a submission-time ticket from a dispatched one', () => {
+    state.planOrigins = new Map<string, PlanOrigin>([['tk_1', { ticketId: 'tk_1', planId: 'plan1', planTitle: 'Redesign', planStatus: 'submitted', dispatched: false }]]);
+    render(<V2WorkScreen />);
+    expect(document.querySelector('[data-v2-card="ACME-1"] [data-v2-plan-origin="submission"]')?.textContent).toContain('at submission');
   });
 });
 

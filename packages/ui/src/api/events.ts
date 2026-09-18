@@ -440,6 +440,8 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
       // A ticket landing or changing status can change which branches the History section covers
       // (a finished ticket's branch drops out of ref coverage) — VS-96.
       if (evt.type === 'ticket.status' || evt.type === 'ticket.merged') inv(qk.historyRoot(ws));
+      // VS-550: a ticket created from a plan draft (dispatch or submission) picks up its origin here.
+      if (evt.type === 'ticket.created') inv(qk.planOrigins(ws));
       break;
     case 'ticket.comment':
       inv(qk.ticketComments(ws, id));

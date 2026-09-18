@@ -53,6 +53,44 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
     return db.get<{ kind: string }>('SELECT c.kind FROM channel_threads t JOIN channels c ON c.id = t.channel_id WHERE t.id = ?', [threadId])?.kind ?? 'web';
   }
 
+  /**
+   * VS-567: a plan's thread is owned by the plan's planner, and a planner can be replaced (an upgrade
+   * retires one and spawns another). Returns the agent a wake for this thread should address: the
+   * thread's own agent, unless that is a retired planner and the plan has a live one, in which case
+   * the thread is rebound first and the human messages that were skipped as `agent_retired` are
+   * re-enqueued for the live planner (idempotent by message id).
+   */
+  function liveAddressee(t: ChannelThread): string {
+    const stale = db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [t.agentId]);
+    if (stale?.status !== 'retired') return t.agentId;
+    const live = db.get<{ id: string }>(
+      `SELECT a.id FROM plans p JOIN agents a ON a.id = p.agent_id
+        WHERE p.thread_id = ? AND a.kind = 'planner' AND a.status NOT IN ('retired', 'done')`,
+      [t.id],
+    );
+    if (!live) return t.agentId;
+    const oldAgentId = t.agentId;
+    db.run('UPDATE channel_threads SET agent_id = ? WHERE id = ?', [live.id, t.id]);
+    recordActivity(db, ws, { kind: 'system', id: null }, 'thread.rebind', 'channel_thread', t.id, { from: oldAgentId, to: live.id });
+    const skipped = db.all<{ payload: Record<string, unknown> | null; reason: string }>(
+      "SELECT payload_json, reason FROM wakeups WHERE agent_id = ? AND source = 'human_message' AND status = 'skipped' AND skip_reason = 'agent_retired' ORDER BY created_at",
+      [oldAgentId],
+    );
+    for (const w of skipped) {
+      const payload = w.payload ?? {};
+      if (payload.threadId !== t.id || typeof payload.messageId !== 'string') continue;
+      try {
+        deps().wake.enqueue(live.id, {
+          source: 'human_message', reason: w.reason, payload, requestedBy: { kind: 'system', id: null },
+          idempotencyKey: `replay:${payload.messageId}`,
+        });
+      } catch (e) {
+        log.warn({ err: e, threadId: t.id }, 'replay of a skipped plan message failed');
+      }
+    }
+    return live.id;
+  }
+
   function row(r: Record<string, unknown>): ThreadRow {
     return threadRow(r) as unknown as ThreadRow;
   }
@@ -323,7 +361,7 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
           deps().tickets.comment(human, t.ticketId, body, 'comment', 'trusted');
         } else {
           try {
-            deps().wake.enqueue(t.agentId, {
+            deps().wake.enqueue(liveAddressee(t), {
               source: 'human_message',
               reason: `message from ${t.humanLabel ?? 'the human'}${project ? ` about ${projectLabel(project)}` : ''}`,
               payload: {

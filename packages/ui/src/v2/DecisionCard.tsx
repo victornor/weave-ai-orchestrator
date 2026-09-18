@@ -740,7 +740,7 @@ export function V2DecisionCard({
                 data-approve={approveReady ? 'ready' : 'blocked'}
                 className={cx('v2-button', 'flex-1')}
               >
-                Approve merge
+                {landLabel(decision, approveKey)}
               </button>
               <button
                 type="button" disabled={busy}
@@ -820,4 +820,10 @@ export function V2DecisionCard({
       </div>
     </article>
   );
+}
+
+/** VS-568: a merge card on a land-then-promote project names its landing branch ("Land on edge"); every other card keeps "Approve merge". */
+function landLabel(decision: { options?: Array<{ key: string; label: string }> }, approveKey: string): string {
+  const label = (decision.options ?? []).find((o) => o.key === approveKey)?.label;
+  return label?.startsWith('Land on ') ? label : 'Approve merge';
 }

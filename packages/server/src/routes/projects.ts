@@ -94,6 +94,12 @@ export function projectRoutes(): Hono<AppEnv> {
   app.delete('/:id', async (c) => { await c.get('ws').services.projects.remove(c.get('actor'), c.req.param('id')); return c.json({ ok: true }); });
   app.post('/:id/fetch', async (c) => c.json(await c.get('ws').services.projects.fetch(c.req.param('id'))));
   /** Read-only (VS-131): classifies the clone against its remote without checkout or merge. */
+  // VS-568: how far the landing branch is ahead of the default branch, and which tickets wait.
+  app.get('/:id/promotion', async (c) => c.json(await c.get('ws').services.promotion.status(c.req.param('id'))));
+  // Raise the project's promotion approval for the human. Never a worker's action: the card itself is
+  // answered by a human and only then does the daemon push.
+  app.post('/:id/promotion', async (c) => c.json(await c.get('ws').services.promotion.request(c.get('actor'), c.req.param('id')), 201));
+
   app.get('/:id/sync', async (c) => c.json(await c.get('ws').services.projects.checkSync(c.req.param('id'))));
   /** VS-359: whether the project's repository is public, or `null` when the forge cannot say. */
   app.get('/:id/repo-info', async (c) => c.json(await c.get('ws').services.projects.repoInfo(c.req.param('id'))));

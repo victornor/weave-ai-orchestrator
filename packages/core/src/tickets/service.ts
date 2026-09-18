@@ -162,6 +162,19 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     if (!id) return null;
     return db.get<ProjectRow>('SELECT id, slug, clone_path, openspec_enabled, policies_json FROM projects WHERE id = ?', [id]) ?? null;
   }
+  /**
+   * VS-568: on a project that lands before it promotes, a merge card says where the work is landing
+   * ("Land on edge") instead of implying a merge to production. Null when landing is the default branch.
+   */
+  function distinctLanding(t: Ticket): string | null {
+    if (!t.projectId) return null;
+    const p = db.get<{ defaultBranch: string; landingBranch: string | null }>('SELECT default_branch, landing_branch FROM projects WHERE id = ?', [t.projectId]);
+    if (!p) return null;
+    const landing = landingBranchOf(p, t);
+    return landing !== p.defaultBranch ? landing : null;
+  }
+  const landVerb = (t: Ticket): string => { const b = distinctLanding(t); return b ? `Land on ${b}` : 'Approve the merge'; };
+  const landOptionLabel = (t: Ticket): string => { const b = distinctLanding(t); return b ? `Land on ${b}` : 'Approve merge'; };
   function blockersOf(id: string): Ticket[] {
     return db
       .all<Record<string, unknown>>(
@@ -750,10 +763,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       const wp = db.get<{ url: string | null; title: string | null }>('SELECT url, title FROM ticket_work_products WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1', [t.id]);
       deps().decisions.create(actor, {
         ticketId: t.id, kind: 'merge_approval', owner: 'human',
-        title: `Approve the merge for ${next.identifier}: ${next.title}`,
+        title: `${landVerb(next)} for ${next.identifier}: ${next.title}`,
         context: wp?.url ? `Work product: ${wp.url}` : 'The worker delivered its work product.',
         options: [
-          { key: NAMED_CARD_OPTION_KEYS.merge_approval.approve, label: 'Approve merge', recommended: true },
+          { key: NAMED_CARD_OPTION_KEYS.merge_approval.approve, label: landOptionLabel(next), recommended: true },
           { key: NAMED_CARD_OPTION_KEYS.merge_approval.changes, label: 'Request changes', description: 'Send it back to the worker.' },
         ],
         allowFreeText: true,
@@ -1712,7 +1725,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
             metadataJson: { method: info.method ?? null }, createdAt: nowIso(), updatedAt: nowIso(),
           });
         }
-        const delivery = { ...(t.delivery ?? {}), merged: true, mergeCommit: recordedSha ?? landInfo?.head ?? null, method: info.method ?? landInfo?.mode ?? null, archivedAs, landed: landInfo?.detail ?? null };
+        const delivery = { ...(t.delivery ?? {}), merged: true, mergeCommit: recordedSha ?? landInfo?.head ?? null, method: info.method ?? landInfo?.mode ?? null, archivedAs, landed: landInfo?.detail ?? null, ...(landInfo?.landing ? { landedOn: landInfo.landing, landedSha: landInfo.landingHead } : {}) };
         const updated = touch(t.id, { status: 'done', completedAt: nowIso(), deliveryJson: delivery, unblockJson: null, mergeQueuedAt: null, mergeStartedAt: null });
         recordActivity(db, ws, actor, 'ticket.merged', 'ticket', t.id, { mergeCommit: recordedSha, archivedAs, skipped }, t.id);
         ctx.events.emit('ticket.merged', 'ticket', t.id, { ticketId: t.id, mergeCommit: recordedSha, archivedAs, skipped });
@@ -1951,10 +1964,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         const wp = db.get<{ url: string | null }>("SELECT url FROM ticket_work_products WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1", [t.id]);
         deps().decisions.create(SYSTEM, {
           ticketId: t.id, kind: 'merge_approval', owner: 'human',
-          title: `Approve the merge for ${t.identifier}: ${t.title}`,
+          title: `${landVerb(t)} for ${t.identifier}: ${t.title}`,
           context: `${wp?.url ? `Work product: ${wp.url}` : 'The worker delivered its work product.'} (Re-raised: the previous approval was lost.)`,
           options: [
-            { key: NAMED_CARD_OPTION_KEYS.merge_approval.approve, label: 'Approve merge', recommended: true },
+            { key: NAMED_CARD_OPTION_KEYS.merge_approval.approve, label: landOptionLabel(t), recommended: true },
             { key: NAMED_CARD_OPTION_KEYS.merge_approval.changes, label: 'Request changes', description: 'Send it back to the worker.' },
           ],
           allowFreeText: true,

@@ -151,7 +151,8 @@ A project SHALL be able to declare, optionally, the branch its tickets' work is 
 its landing branch. When a project declares no landing branch, its landing branch SHALL be its default
 branch, so that a project which declares nothing behaves exactly as it did before this capability
 existed. Promoting a project's landing branch to its default branch — merging `edge` into `main`, in
-Fernwood's case — SHALL remain entirely outside the daemon: no worker, and no part of the daemon, ever
+Fernwood's case — SHALL be performed by the daemon only, and only through an approved project-scoped
+promotion approval (see `ticket-delivery/promotion`). No worker, and no other part of the daemon, ever
 pushes or merges that promotion.
 
 #### Scenario: A project with no declared landing branch behaves as before
@@ -169,8 +170,8 @@ pushes or merges that promotion.
 #### Scenario: Promotion stays a human's action
 
 - **WHEN** a project's landing branch differs from its default branch
-- **THEN** nothing the daemon or a worker does merges or pushes the landing branch into the default
-  branch
+- **THEN** nothing merges or pushes the landing branch into the default branch except the daemon acting
+  on a human-approved promotion approval
 
 ### Requirement: A ticket may declare its own landing branch, overriding its project's
 

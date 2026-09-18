@@ -611,6 +611,10 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
 
     const key = ans.key ?? null;
     const text = ans.text ?? null;
+    // VS-568: the promotion push happens before the answer is recorded, so a refusal (not a
+    // fast-forward, head moved, remote rejected) leaves the card open. Human-only, never the daemon's
+    // own grant: `execute` refuses any other actor.
+    if (d.kind === 'promotion_approval' && approving) await deps().promotion.execute(actor, d);
     const answered = tx(db, () => {
       db.update('decisions', d.id, {
         status: 'answered' as DecisionStatus, answerKey: key, answerText: text, answerInputsJson: answerInputs,

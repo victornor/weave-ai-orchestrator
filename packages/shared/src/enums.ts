@@ -55,13 +55,13 @@ export type ArchiveCommit = (typeof ARCHIVE_COMMITS)[number];
 export const MODEL_SOURCES = ['workspace', 'daemon', 'default'] as const;
 export type ModelSource = (typeof MODEL_SOURCES)[number];
 
-export const DECISION_KINDS = ['approval', 'question', 'concern', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval', 'retry_approval', 'action_approval'] as const;
+export const DECISION_KINDS = ['approval', 'question', 'concern', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval', 'retry_approval', 'action_approval', 'promotion_approval'] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 
 /**
  * What the general-purpose ask tool (`weave_ask`) may construct (VS-127): `question`, `concern` and
  * `gate_finding` only. `plan_approval`, `merge_approval`, `hire_approval`, `discard_approval`,
- * `retry_approval`, `action_approval` and the generic `approval` stay exclusively system-raised — each of those already
+ * `retry_approval`, `action_approval`, `promotion_approval` and the generic `approval` stay exclusively system-raised — each of those already
  * sets its own owner directly (tickets, roles, the run engine) — so a caller of `weave_ask` can never
  * construct one and collide its correlation key with a real approval's.
  */
@@ -82,7 +82,7 @@ export const WEAVER_REVIEW_STATUSES = ['unseen', 'looked', 'concerns'] as const;
 export type WeaverReviewStatus = (typeof WEAVER_REVIEW_STATUSES)[number];
 
 /** The only decision kinds that carry weaver review. A mark against any other kind is `validation`. */
-export const WEAVER_REVIEW_KINDS = ['plan_approval', 'merge_approval', 'action_approval'] as const;
+export const WEAVER_REVIEW_KINDS = ['plan_approval', 'merge_approval', 'action_approval', 'promotion_approval'] as const;
 export type WeaverReviewKind = (typeof WEAVER_REVIEW_KINDS)[number];
 
 /**
@@ -99,7 +99,8 @@ export const NAMED_CARD_OPTION_KEYS = {
   hire_approval: { approve: 'approve', reject: 'reject' },
   discard_approval: { approve: 'approve', reject: 'reject' },
   action_approval: { approve: 'approve', revise: 'revise', reject: 'reject' },
-} as const satisfies Record<'plan_approval' | 'merge_approval' | 'hire_approval' | 'discard_approval' | 'action_approval', Record<string, string>>;
+  promotion_approval: { approve: 'approve', decline: 'decline' },
+} as const satisfies Record<'plan_approval' | 'merge_approval' | 'hire_approval' | 'discard_approval' | 'action_approval' | 'promotion_approval', Record<string, string>>;
 export type NamedCardKind = keyof typeof NAMED_CARD_OPTION_KEYS;
 
 /** What a decision can ask for beyond an option (VS-92). `secret` never records its value — only the name it was stored under. */

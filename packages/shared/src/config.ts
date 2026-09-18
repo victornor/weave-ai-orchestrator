@@ -50,6 +50,8 @@ export const ProjectPoliciesSchema = z.object({
   mergeConcurrency: z.number().int().min(1).max(8).default(1),
   /** YOLO mode for this project (PLAN §15, VS-382); off unless this project sets it true. */
   yolo: z.boolean(),
+  /** What going live does, shown verbatim on the promotion card when landing differs from default (VS-568). */
+  promotionNotes: z.array(z.string().min(1).max(300)).max(12),
 }).partial();
 export type ProjectPolicies = z.infer<typeof ProjectPoliciesSchema>;
 

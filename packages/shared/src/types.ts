@@ -639,3 +639,20 @@ export interface ChangelogHeatmap {
   days: ChangelogDay[]; timezone: string;
   measure: { kind: E.ChangelogKind; label: string; definition: string };
 }
+
+/** What a done ticket's delivery reads as on a project that lands before it promotes (VS-568). */
+export type DeliveryBadge = { state: 'on_landing'; branch: string } | { state: 'in_production'; branch: string };
+
+/**
+ * A ticket's delivery badge, derived from its recorded `delivery` JSON. `promotedAt` is stamped on the
+ * ticket when a promotion includes it; a ticket landed directly on the default branch is in production
+ * already. Null when the ticket has not landed or the project lands on its default branch (nothing to say).
+ */
+export function deliveryBadgeOf(project: Pick<Project, 'defaultBranch' | 'landingBranch'> | null, ticket: Pick<Ticket, 'status' | 'landingBranch' | 'delivery'>): DeliveryBadge | null {
+  if (ticket.status !== 'done' || !project) return null;
+  const d = (ticket.delivery ?? {}) as { merged?: unknown; landedOn?: unknown; promotedAt?: unknown };
+  if (d.merged !== true) return null;
+  const landedOn = typeof d.landedOn === 'string' ? d.landedOn : landingBranchOf(project, ticket);
+  if (landedOn === project.defaultBranch) return project.landingBranch && project.landingBranch !== project.defaultBranch ? { state: 'in_production', branch: landedOn } : null;
+  return typeof d.promotedAt === 'string' ? { state: 'in_production', branch: project.defaultBranch } : { state: 'on_landing', branch: landedOn };
+}

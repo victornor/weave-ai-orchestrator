@@ -11,11 +11,13 @@ const state = vi.hoisted(() => ({
   search: {} as Record<string, string | undefined>,
   go: vi.fn(),
   workspaces: [] as { id: string; name: string }[],
-  workers: {} as Record<string, Agent[]>,
+  workers: {} as Record<string, Array<Agent & { lastContextTokens?: number | null }>>,
   tickets: {} as Record<string, Ticket[]>,
   runs: [] as Run[],
   options: [] as { id: string; description: string; runtime: string | null; model: string | null }[],
   projects: [] as Project[],
+  models: [] as { id: string; label?: string; contextWindowTokens?: number }[],
+  runtimes: [] as { id: string; capabilities: Record<string, unknown> }[],
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -29,7 +31,8 @@ vi.mock('../api/hooks', () => ({
   useTicketsMany: (ids: string[]) => ids.map((id) => ({ data: state.tickets[id] ?? [] })),
   useModelsMany: (ids: string[]) => ids.map(() => ({ data: { workerOptions: state.options } })),
   useWorkspaceProjects: (ids: string[]) => Object.fromEntries(ids.map((id) => [id, { status: 'success', projects: state.projects }])),
-  useRuntimeModels: () => ({ data: [] }),
+  useRuntimeModels: () => ({ data: state.models }),
+  useRuntimes: () => ({ data: state.runtimes }),
   useRuns: (params: { status?: string } = {}) => ({ data: state.runs.filter((r) => !params.status || r.status === params.status) }),
   useDecisionsMany: (ids: string[]) => ids.map(() => ({ data: [] })),
   useIncidents: () => ({ data: { items: [], total: 0 } }),
@@ -59,6 +62,8 @@ const grid = (): HTMLElement => document.querySelector('[data-v2-live-grid]') as
 beforeEach(() => {
   state.search = {};
   state.go = vi.fn();
+  state.models = [];
+  state.runtimes = [];
   state.projects = [project({ id: 'p1', slug: 'web', name: 'web' })];
   state.options = [
     { id: 'standard', description: 'Standard', runtime: 'claude-code', model: 'sonnet-4.6' },
@@ -334,6 +339,57 @@ describe('V2 Live tile height (VS-372, VS-429)', () => {
     setMedia(true);
     render(<LiveBody />);
     expect(screen.queryByRole('separator', { name: 'Resize all live tiles' })).toBeNull();
+  });
+});
+
+describe('V2 Live context meter (VS-554)', () => {
+  function seedContextCard(
+    tokens: number | null,
+    models: { id: string; label?: string; contextWindowTokens?: number }[] = [{ id: 'sonnet-4.6', label: 'Sonnet', contextWindowTokens: 200_000 }],
+    runtimes: { id: string; capabilities: Record<string, unknown> }[] = [{ id: 'claude-code', capabilities: { contextCompactionAt: 0.92 } }],
+  ): void {
+    state.workers = { ws1: [{ ...agent({ id: 'a1', ticketId: 'tk1', projectId: 'p1', status: 'running', runtimeId: 'claude-code', createdAt: '2026-09-01T10:00:00.000Z' }), lastContextTokens: tokens }] };
+    state.tickets = { ws1: [makeTicket({ id: 'tk1', identifier: 'ACME-1', title: 'Dark mode' })] };
+    state.runs = [makeRun({ id: 'run_a1', agentId: 'a1', status: 'running', model: 'sonnet-4.6', runtimeId: 'claude-code', createdAt: '2026-09-01T10:00:00.000Z' })];
+    state.models = models;
+    state.runtimes = runtimes;
+  }
+
+  it('shows the last completed turn size over the window with the compaction point marked', () => {
+    seedContextCard(123_000);
+    render(<LiveBody />);
+    const card = document.querySelector('[data-v2-live-card="a1"]') as HTMLElement;
+    const meter = card.querySelector('[data-context-meter]') as HTMLElement;
+    expect(meter).toBeTruthy();
+    expect(meter.querySelector('[role="meter"]')).toBeTruthy();
+    expect(card.textContent).toContain('123k / 200k');
+    const marker = meter.querySelector('[data-context-compaction]') as HTMLElement;
+    expect(marker.style.left).toBe('92%');
+  });
+
+  it('shows the count and the unknown window without a proportion', () => {
+    seedContextCard(123_000, []);
+    render(<LiveBody />);
+    const card = document.querySelector('[data-v2-live-card="a1"]') as HTMLElement;
+    expect(card.querySelector('[data-context-meter]')).toBeTruthy();
+    expect(card.querySelector('[role="meter"]')).toBeNull();
+    expect(card.textContent).toContain('Context window unknown');
+  });
+
+  it('shows no context line before the first completed turn', () => {
+    seedContextCard(null);
+    render(<LiveBody />);
+    const card = document.querySelector('[data-v2-live-card="a1"]') as HTMLElement;
+    expect(card.querySelector('[data-context-meter]')).toBeNull();
+  });
+
+  it('keeps the context line one line at phone width', () => {
+    setMedia(true);
+    seedContextCard(123_000);
+    render(<LiveBody />);
+    const card = document.querySelector('[data-v2-live-card="a1"]') as HTMLElement;
+    expect(card.querySelector('[data-context-label]')?.className).toContain('truncate');
+    expect(grid().getAttribute('data-cols')).toBe('1');
   });
 });
 

@@ -48,9 +48,10 @@ export function isLiveWorker(worker: Pick<Agent, 'status'> | null | undefined): 
 /**
  * Live workers currently on a ticket, newest first. The Live page's working set: same liveness
  * predicate as the board, listed as workers rather than keyed by ticket, so two live workers on
- * one ticket both appear. The conductor is excluded (`kind === 'worker'`).
+ * one ticket both appear. The conductor is excluded (`kind === 'worker'`). Generic over the worker
+ * type (VS-554) so a caller's list-only fields — e.g. the session context size — survive.
  */
-export function liveWorkingAgents(workers: readonly Agent[]): Agent[] {
+export function liveWorkingAgents<T extends Agent>(workers: readonly T[]): T[] {
   return workers
     .filter((w) => w.kind === 'worker' && w.ticketId && isLiveWorker(w))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));

@@ -13,8 +13,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { projectLabel, type Agent, type Ticket, type UiStatus } from '@weave-ai/shared';
-import { resolveModel } from '@weave-ai/render';
-import { useModelsMany, useRuntimeModels, useTicketsMany, useWorkersMany, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
+import { resolveModel, contextStrip } from '@weave-ai/render';
+import { useModelsMany, useRuntimes, useRuntimeModels, useTicketsMany, useWorkersMany, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
 import { useGo, useSearchParams } from '../app/link';
 import { liveWorkingAgents } from '../lib/board';
 import { agentIsWorking, cellUiStatus, orderByRunning, useRunningWorkerIds } from '../lib/liveOrder';
@@ -23,6 +23,7 @@ import { projectColorVar } from '../lib/projectColor';
 import { STATUS_LABEL, STATUS_TEXT } from '../lib/status';
 import { cx } from '../lib/cx';
 import { SkeletonCards } from '../components/Skeleton';
+import { ContextMeter } from '../components/ContextMeter';
 import { EmptyState, ErrorState } from '../components/States';
 import { workerModelTagLabel } from '../components/WorkerModelTag';
 import { V2Page } from './V2Page';
@@ -83,6 +84,10 @@ interface LiveCellInput {
   ticketId: string | null;
   createdAt: string;
   ws: string;
+  /** The worker's runtime, for resolving the model window and compaction point (VS-554). */
+  runtimeId: string;
+  /** The active session's last completed turn context size, null when it has none yet (VS-554). */
+  contextTokens: number | null;
 }
 
 /** The corner grip every desktop tile carries and the one shared height it drives (VS-429). */
@@ -112,9 +117,18 @@ interface LiveCardProps {
 
 function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optionName, bodyHeight, resize, focused }: LiveCardProps): React.ReactElement {
   const { run } = useWorkerRun(cell.id, cell.ws);
-  const runtimeModels = useRuntimeModels(run?.runtimeId ?? null);
+  const runtimeId = run?.runtimeId ?? cell.runtimeId;
+  const runtimeModels = useRuntimeModels(runtimeId);
   const resolved = resolveModel(runtimeModels.data ?? null, run?.model ?? null);
   const modelLabel = resolved ? modelOptionLabel(resolved) : (run?.model ?? null);
+  // VS-554: the same inputs the weaver chat and the run page feed `contextStrip` — the last
+  // completed turn's size, the resolved model's window and the runtime's compaction point (the Plan
+  // modal reads that capability the same way). A session with no recorded size yet draws nothing.
+  const runtimes = useRuntimes();
+  const compactionAt = (runtimes.data ?? []).find((r) => r.id === runtimeId)?.capabilities['contextCompactionAt'] as number | undefined;
+  const context = cell.contextTokens !== null && cell.contextTokens > 0 && run !== null
+    ? contextStrip({ usage: { contextTokens: cell.contextTokens }, contextWindowTokens: resolved?.contextWindowTokens ?? null, compactionAt, hasRun: true })
+    : null;
   return (
     <div
       ref={(el) => {
@@ -140,6 +154,7 @@ function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optio
         <span className="min-w-0 flex-1 truncate text-micro text-text-3">{ticket?.title ?? ''}</span>
         {optionName ? <span className="v2-tag flex-none text-text-3">{optionName}</span> : null}
       </div>
+      <ContextMeter view={context} compactionAt={compactionAt} className="shrink-0 border-b border-line-1 bg-bg-2 px-2.5 py-1" />
       <WorkerFeed agentId={cell.id} ws={cell.ws} global bodyHeight={bodyHeight} showChrome={false} label={`${cell.name} live feed`} />
       {resize ? (
         <ResizeGrip
@@ -215,7 +230,7 @@ export function LiveBody(): React.ReactElement {
     const out: LiveCellInput[] = [];
     ids.forEach((ws, i) => {
       for (const a of liveWorkingAgents(workersQueries[i]?.data ?? [])) {
-        out.push({ id: a.id, name: a.name, status: a.status, ticketId: a.ticketId ?? null, createdAt: a.createdAt, ws });
+        out.push({ id: a.id, name: a.name, status: a.status, ticketId: a.ticketId ?? null, createdAt: a.createdAt, ws, runtimeId: a.runtimeId, contextTokens: a.lastContextTokens ?? null });
       }
     });
     return out;

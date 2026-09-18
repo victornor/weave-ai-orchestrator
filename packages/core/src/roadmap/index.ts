@@ -6,8 +6,8 @@
  * VS-478 grows it into blocks: ordered, named groups of **pending tickets** — items carrying the
  * fields a real ticket needs (`description`, `kind`, `priority`, `roleId`) and a `blockId`. The
  * weaver builds a block up, bundles related items by merging them, and starts the block, which
- * returns filing-ready drafts; `done` is derived from the block's linked tickets, never stored. An
- * item with no block is a loose item and keeps VS-397's behaviour exactly.
+ * returns one filing-ready draft for the whole block (VS-557); `done` is derived from the block's
+ * linked tickets, never stored. An item with no block is a loose item and keeps VS-397's behaviour.
  *
  * See `openspec/changes/vs-478-roadmap-blocks-group-pending-tickets-int`.
  */
@@ -20,6 +20,7 @@ import {
   TICKET_PRIORITIES,
   roadmapBlockStatus,
   type RoadmapBlock,
+  type RoadmapBlockDraft,
   type RoadmapBlockStoredStatus,
   type RoadmapItem,
   type RoadmapMergeRecord,
@@ -49,6 +50,34 @@ type BlockRow = Omit<RoadmapBlock, 'workspaceId' | 'reportedStatus' | 'items'>;
 const isStatus = (v: unknown): v is RoadmapStatus => (ROADMAP_STATUSES as readonly string[]).includes(String(v));
 const isBlockStatus = (v: unknown): v is RoadmapBlockStoredStatus =>
   (ROADMAP_BLOCK_STATUSES as readonly string[]).includes(String(v));
+
+/**
+ * One filing-ready draft for a whole block (VS-557): starting a block files **one ticket** by
+ * default, so the draft carries every item as a section and the ids it covers. Kind and role are the
+ * items' own only when they all agree; a disagreement is a named split reason for the weaver, so the
+ * draft falls back to `change`/null rather than inventing an owner. Priority is the most urgent item,
+ * so nothing is filed as less urgent than it is.
+ */
+function mergeBlockDraft(block: RoadmapBlock, items: ItemRow[]): RoadmapBlockDraft {
+  const first = items[0]!;
+  const agree = <T>(pick: (item: ItemRow) => T): T | null =>
+    items.every((item) => pick(item) === pick(first)) ? pick(first) : null;
+  const priority = items.reduce(
+    (best, item) => (TICKET_PRIORITIES.indexOf(item.priority) < TICKET_PRIORITIES.indexOf(best) ? item.priority : best),
+    first.priority,
+  );
+  const description = items
+    .map((item) => `### ${item.title}\n\n${item.description.trim() || '_No description yet._'}`)
+    .join('\n\n');
+  return {
+    title: block.title,
+    description,
+    kind: agree((item) => item.kind) ?? 'change',
+    priority,
+    roleId: agree((item) => item.roleId),
+    itemIds: items.map((item) => item.id),
+  };
+}
 
 export function createRoadmapService(ctx: WorkspaceContext, deps: () => CoreServices): RoadmapService {
   const db = ctx.db;
@@ -289,17 +318,8 @@ export function createRoadmapService(ctx: WorkspaceContext, deps: () => CoreServ
         ctx.events.emit('roadmap.block.updated', 'roadmap', blockId, { projectId: current.projectId });
       }
       const block = asBlock(getBlockRow(blockId));
-      const drafts = itemsOfBlock(blockId)
-        .filter((item) => item.ticketId === null)
-        .map((item) => ({
-          itemId: item.id,
-          title: item.title,
-          description: item.description,
-          kind: item.kind,
-          priority: item.priority,
-          roleId: item.roleId,
-        }));
-      return { block, drafts };
+      const items = itemsOfBlock(blockId).filter((item) => item.ticketId === null);
+      return { block, draft: items.length ? mergeBlockDraft(block, items) : null };
     },
 
     addItem(actor, input: RoadmapItemCreateInput) {

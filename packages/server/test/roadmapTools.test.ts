@@ -158,25 +158,35 @@ describe('the roadmap block and pending-ticket tools (VS-478)', () => {
     expect(blocks.find((x) => x.id === b2)!.items.map((i) => i.title)).toEqual(['C']);
   });
 
-  it('starts a block into filing-ready drafts and links each created ticket', async () => {
+  it('starts a block into one filing-ready draft and links each item it covers', async () => {
     const h = makeHarness(); harness = h; seed(h);
     const made = await call(h, 'weave_roadmap_block_create', { projectId: 'proj1', title: 'UI polish' });
     const b1 = (made as { ok: true; data: { id: string } }).data.id;
     const i1 = (await call(h, 'weave_roadmap_item_add', { blockId: b1, title: 'One', description: 'd1', kind: 'change', priority: 'high' })) as { ok: true; data: { id: string } };
+    const i2 = (await call(h, 'weave_roadmap_item_add', { blockId: b1, title: 'Two', description: 'd2' })) as { ok: true; data: { id: string } };
 
     const started = await call(h, 'weave_roadmap_block_start', { blockId: b1 });
     expect(started.ok).toBe(true);
     if (!started.ok) return;
-    const data = started.data as { block: { status: string }; drafts: Array<{ itemId: string; title: string; description: string; kind: string; priority: string }> };
+    const data = started.data as { block: { status: string }; draft: { title: string; description: string; kind: string; priority: string; roleId: string | null; itemIds: string[] } | null };
     expect(data.block.status).toBe('started');
-    expect(data.drafts).toEqual([{ itemId: i1.data.id, title: 'One', description: 'd1', kind: 'change', priority: 'high', roleId: null }]);
+    // One draft for the whole block — the default path files one ticket, not one per item.
+    expect(data.draft).toMatchObject({ title: 'UI polish', kind: 'change', priority: 'high', roleId: null });
+    expect(data.draft!.itemIds).toEqual([i1.data.id, i2.data.id]);
+    expect(data.draft!.description).toContain('### One');
+    expect(data.draft!.description).toContain('d1');
+    expect(data.draft!.description).toContain('### Two');
+    expect(data.draft!.description).toContain('d2');
 
-    const linked = await call(h, 'weave_roadmap_item_update', { itemId: i1.data.id, ticketId: 'tk_1' });
-    expect(linked.ok).toBe(true);
-    if (linked.ok) expect((linked.data as { ticketId: string }).ticketId).toBe('tk_1');
+    const linked1 = await call(h, 'weave_roadmap_item_update', { itemId: i1.data.id, ticketId: 'tk_1' });
+    expect(linked1.ok).toBe(true);
+    if (linked1.ok) expect((linked1.data as { ticketId: string }).ticketId).toBe('tk_1');
+    const linked2 = await call(h, 'weave_roadmap_item_update', { itemId: i2.data.id, ticketId: 'tk_1' });
+    expect(linked2.ok).toBe(true);
     // A second start has nothing left to file.
     const again = await call(h, 'weave_roadmap_block_start', { blockId: b1 });
-    if (again.ok) expect((again.data as { drafts: unknown[] }).drafts).toHaveLength(0);
+    expect(again.ok).toBe(true);
+    if (again.ok) expect((again.data as { draft: unknown }).draft).toBeNull();
   });
 
   it('refuses every block and pending-ticket write to a worker', async () => {
@@ -200,11 +210,13 @@ describe('the roadmap block and pending-ticket tools (VS-478)', () => {
     }
   });
 
-  it('states the bundling intent in the tool descriptions', () => {
+  it('states the one-ticket-by-default intent and the named split reasons', () => {
     const byName = new Map(TOOLS.map((t) => [t.name, t.description]));
     expect(byName.get('weave_roadmap_block_create')).toMatch(/bundle|one ticket/);
     expect(byName.get('weave_roadmap_block_start')).toMatch(/weave_ticket_create/);
     expect(byName.get('weave_roadmap_block_start')).toMatch(/bundl/);
+    expect(byName.get('weave_roadmap_block_start')).toMatch(/one ticket for the whole block/i);
+    expect(byName.get('weave_roadmap_block_start')).toMatch(/different roles/);
     expect(byName.get('weave_roadmap_item_merge')).toMatch(/bundle|one worker/);
   });
 });

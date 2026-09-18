@@ -252,17 +252,20 @@ describe('roadmap blocks (VS-478)', () => {
     expect(() => roadmap.mergeItems(HUMAN, [a.id, c.id])).toThrow(/already linked/);
   });
 
-  it('starts a block into filing-ready drafts, then reports started and done from its tickets', () => {
+  it('starts a block into one merged draft, then reports started and done from its tickets', () => {
     const b = block();
     const i1 = roadmap.addItem(HUMAN, { blockId: b.id, title: 'One', description: 'd1', kind: 'change', priority: 'medium', roleId: h.roleId });
     const i2 = roadmap.addItem(HUMAN, { blockId: b.id, title: 'Two', description: 'd2' });
     const started = roadmap.startBlock(HUMAN, b.id);
     expect(started.block.status).toBe('started');
     expect(started.block.startedAt).not.toBeNull();
-    expect(started.drafts).toEqual([
-      { itemId: i1.id, title: 'One', description: 'd1', kind: 'change', priority: 'medium', roleId: h.roleId },
-      { itemId: i2.id, title: 'Two', description: 'd2', kind: 'change', priority: 'medium', roleId: null },
-    ]);
+    // One ticket for the whole block: every item as a section, so the default path cannot fan out.
+    expect(started.draft).toMatchObject({ title: 'UI polish', kind: 'change', priority: 'medium', roleId: null });
+    expect(started.draft!.itemIds).toEqual([i1.id, i2.id]);
+    expect(started.draft!.description).toContain('### One');
+    expect(started.draft!.description).toContain('d1');
+    expect(started.draft!.description).toContain('### Two');
+    expect(started.draft!.description).toContain('d2');
 
     seedTicket('t-1', h.projectId, 'in_progress');
     seedTicket('t-2', h.projectId, 'done');
@@ -270,11 +273,26 @@ describe('roadmap blocks (VS-478)', () => {
     roadmap.updateItem(HUMAN, i2.id, { ticketId: 't-2' });
     expect(roadmap.getBlock(b.id).reportedStatus).toBe('started');
     // A second start returns only what is still unfiled, so a partial filing retries cleanly.
-    expect(roadmap.startBlock(HUMAN, b.id).drafts).toEqual([]);
+    expect(roadmap.startBlock(HUMAN, b.id).draft).toBeNull();
     h.ctx.db.run("UPDATE tickets SET status = 'done' WHERE id = 't-1'");
     expect(roadmap.getBlock(b.id).reportedStatus).toBe('done');
     roadmap.updateBlock(HUMAN, b.id, { status: 'dropped' });
     expect(() => roadmap.startBlock(HUMAN, b.id)).toThrow(/dropped/);
+  });
+
+  it('derives the merged draft from the items: shared role, most urgent priority, fallbacks when they differ', () => {
+    const b = block();
+    const a = roadmap.addItem(HUMAN, { blockId: b.id, title: 'A', description: 'body a', kind: 'task', priority: 'low', roleId: h.roleId });
+    const c = roadmap.addItem(HUMAN, { blockId: b.id, title: 'C', priority: 'critical', roleId: h.roleId });
+    const draft = roadmap.startBlock(HUMAN, b.id).draft!;
+    // Kind differs (task vs the default change), so the draft falls back to change rather than guess.
+    expect(draft).toMatchObject({ title: 'UI polish', kind: 'change', priority: 'critical', roleId: h.roleId });
+    expect(draft.itemIds).toEqual([a.id, c.id]);
+    expect(draft.description).toContain('body a');
+    expect(draft.description).toContain('_No description yet._');
+
+    const empty = block('Empty');
+    expect(roadmap.startBlock(HUMAN, empty.id).draft).toBeNull();
   });
 
   it('emits block events with the project id', async () => {

@@ -23,6 +23,12 @@ Not qualifying: "it's two files", "it's frontend and backend in the same repo", 
 
 **Then do a merge-back pass.** Read the graph you just drew and merge every pair that no longer needs to be separate. Two tickets with the same owner, no dependency between them and no separate review gate are one ticket.
 
+## Roadmap blocks
+
+Starting a roadmap block (`weave_roadmap_block_start`) is this same rule. It returns **one draft for the whole block**, and the default is to file that as **one ticket, owned by one role** — a large single ticket is fine, because the worker resumes its session across turns, so it costs turns rather than a fresh worker learning the project again.
+
+Split a block into more tickets only for a named reason that actually applies here: the items need different roles or projects; one item needs its own approval path (`operational` vs `change`); or the block is too large for one worker to finish in a reasonable number of turns. Touching different screens is not a reason. Even then, file two or three tickets — never one per item or per surface.
+
 ## Dependencies
 
 Use first-class blockers: `weave_ticket_create({..., blockedBy: ["ACME-51"]})`. Never encode a dependency as prose in a description, and never as ordering you keep in your head — nothing wakes on it.

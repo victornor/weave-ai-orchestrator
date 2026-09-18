@@ -1039,16 +1039,18 @@ export interface RoadmapItemPatch {
   ticketId?: string | null;
 }
 
-/** What starting a block returned: the block and the drafts the weaver files (VS-478). */
+/** What starting a block returned: the block and the one draft the weaver files (VS-478, VS-557). */
 export interface RoadmapBlockStart {
   block: S.RoadmapBlock;
-  drafts: S.RoadmapBlockDraft[];
+  /** One ticket for the whole block by default; null once every item already has a ticket. */
+  draft: S.RoadmapBlockDraft | null;
 }
 
 /**
  * A project's roadmap (VS-397): durable ideas that are not tickets. Scoped to one project; `get`
  * exists so a route or tool can resolve an item before writing it. VS-478 adds blocks of pending
- * tickets, the bundling merge, and the start that returns filing-ready drafts.
+ * tickets and the bundling merge; VS-557 makes the start return one filing-ready draft for the whole
+ * block, because one ticket per block is the default.
  */
 export interface RoadmapService {
   list(projectId: string): S.RoadmapItem[];
@@ -1061,7 +1063,7 @@ export interface RoadmapService {
   getBlock(blockId: string): S.RoadmapBlock;
   createBlock(actor: Actor, projectId: string, input: RoadmapBlockCreateInput): S.RoadmapBlock;
   updateBlock(actor: Actor, blockId: string, patch: RoadmapBlockPatch): S.RoadmapBlock;
-  /** Starts a block and returns its items still without a linked ticket as filing-ready drafts. */
+  /** Starts a block and returns one filing-ready draft for its items still without a ticket (VS-557). */
   startBlock(actor: Actor, blockId: string): RoadmapBlockStart;
   /** Adds a pending ticket to a block, appending it to that block's order. */
   addItem(actor: Actor, input: RoadmapItemCreateInput): S.RoadmapItem;

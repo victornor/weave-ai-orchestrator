@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-18
+goal: An agent that predates an upgrade keeps the old tool schemas, so shipped
+  fixes are unusable

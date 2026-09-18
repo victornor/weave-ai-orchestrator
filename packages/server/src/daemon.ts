@@ -31,6 +31,7 @@ import {
 import { createApp, type WorkspaceAdmin } from './app.js';
 import { createUpdateChecker, runningReleaseRoot } from './release-info.js';
 import { createUpgradeService } from './upgrade.js';
+import { toolContractProvider } from './tool-contract.js';
 import { announceRestart, markBooted, observeBoot, recordShutdown, recordStartFailure } from './restart-notice.js';
 import { ChannelManager } from './channels.js';
 import { WebhookDispatcher } from './webhooks.js';
@@ -271,6 +272,9 @@ async function loadWorkspaceInto(
   // plugin's own hook fires for its own workspace, unlike the pre-VS-334 ordering bug where it never
   // did (subscription ran before that workspace's plugins had registered anything).
   await loadPlugins(ctx, opts.registries);
+  // VS-542: the tool surface is fixed once plugins are loaded, so compute each agent kind's contract
+  // fingerprint here — before `ensureConductor` (and any spawn) reads it — and record it on sessions.
+  ctx.toolContractHash = toolContractProvider(runtime);
   for (const hook of ctx.plugins.hooks) {
     ctx.events.on((ev) => {
       if (hook.events !== '*' && !hook.events.includes(ev.type)) return;

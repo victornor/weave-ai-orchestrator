@@ -1,7 +1,7 @@
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { UI_STATUSES, NAMED_CARD_OPTION_KEYS } from '@weave-ai/shared';
-import type { Decision, WorkerModelOption } from '@weave-ai/shared';
+import type { Decision, TicketAttachment, WorkerModelOption } from '@weave-ai/shared';
 import { StatusGlyph, StatusBadge } from '../components/StatusGlyph';
 import { TicketCard } from '../components/TicketCard';
 import { DecisionCard } from '../components/DecisionCard';
@@ -22,6 +22,20 @@ import { decision, ticket } from './factories';
 const reviewed = (over: Partial<Decision> = {}): Decision =>
   decision({ weaverReviewStatus: 'looked', weaverReviewedAt: '2026-09-11T03:01:00.000Z', weaverReviewNote: 'reviewed', ...over });
 
+/** VS-555: one ticket attachment for the evidence-strip tests. */
+const attachment = (over: Partial<TicketAttachment> = {}): TicketAttachment => ({
+  id: 'att1',
+  ticketId: 'tk_9',
+  label: 'capture.png',
+  mediaType: 'image/png',
+  byteSize: 1234,
+  sha256: 'sha',
+  storageKey: 'att1.png',
+  createdAt: '2026-09-18T01:00:00.000Z',
+  url: '/api/w/ws1/tickets/tk_9/attachments/att1',
+  ...over,
+});
+
 const planDoc = vi.hoisted(() => ({ current: null as Record<string, unknown> | null }));
 const docById = vi.hoisted(() => ({
   head: null as Record<string, unknown> | null,
@@ -33,6 +47,8 @@ const handoverState = vi.hoisted(() => ({
   startMutate: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   calls: [] as Array<{ ws: string; id: string; enabled: boolean }>,
 }));
+/** VS-555: the ticket detail the approval card's evidence strip reads. */
+const evidenceState = vi.hoisted(() => ({ current: null as { attachments?: TicketAttachment[] } | null }));
 vi.mock('../api/hooks', () => ({
   useTicketDocument: () => planDoc.current ?? { data: undefined, isLoading: false, isError: true },
   // VS-224: the document-target fetch. `head` answers the HEAD call, `named` the revision-named
@@ -47,6 +63,8 @@ vi.mock('../api/hooks', () => ({
     return { data: enabled ? (handoverState.current ?? undefined) : undefined, isLoading: false, isError: false };
   },
   useStartHandoverFor: () => ({ mutate: handoverState.startMutate }),
+  // VS-555: the approval card's evidence strip reads the ticket detail; these tests carry none.
+  useTicketFor: () => ({ data: evidenceState.current ?? undefined }),
 }));
 vi.mock('../components/Toast', () => ({ useToast: () => ({ push: vi.fn(() => 'id'), dismiss: vi.fn() }) }));
 // DecisionCard's "Ask the worker" (VS-106) and "Show PR" (VS-107) links are the only things in this
@@ -271,6 +289,22 @@ describe('DecisionCard', () => {
     unmount();
     render(<DecisionCard decision={decision({ kind: 'merge_approval' })} plan={<p>the rendered plan</p>} onAnswer={() => undefined} />);
     expect(screen.queryByText('the rendered plan')).not.toBeInTheDocument();
+  });
+
+  // VS-555: the same card the ticket page mounts shows the ticket's evidence.
+  it('shows the ticket evidence on an approval card, and nothing when the ticket has none', () => {
+    evidenceState.current = { attachments: [
+      attachment({ id: 'shot', label: 'dashboard.png' }),
+      attachment({ id: 'zip', label: 'logs.zip', mediaType: 'application/zip' }),
+    ] };
+    onTestFinished(() => { evidenceState.current = null; });
+    const { unmount } = render(<DecisionCard decision={decision({ kind: 'merge_approval', ticketId: 'tk_9' })} ws="ws1" onAnswer={() => undefined} />);
+    expect(screen.getByAltText('dashboard.png')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /logs\.zip/ })).toBeInTheDocument();
+    unmount();
+    evidenceState.current = { attachments: [] };
+    render(<DecisionCard decision={decision({ kind: 'merge_approval', ticketId: 'tk_9' })} ws="ws1" onAnswer={() => undefined} />);
+    expect(document.querySelector('[data-v2-section="evidence"]')).toBeNull();
   });
 
   it('answers with the approve key', () => {

@@ -67,6 +67,8 @@ vi.mock('../api/hooks', () => ({
           },
         },
   useTicketWorkProducts: () => ({ data: state.products, isLoading: false }),
+  // VS-555: the approval card's evidence strip reads the ticket detail; this fixture carries none.
+  useTicketFor: () => ({ data: undefined }),
   useTicketComments: () => ({ data: [], isLoading: false }),
   useTicketRuns: () => ({ data: [], isLoading: false }),
   useTicketDocument: () => state.notFound ? { data: undefined, isLoading: false, isError: true } : { data: { key: 'plan', revision: 1, body: '# The plan', createdAt: '' }, isLoading: false, isError: false },

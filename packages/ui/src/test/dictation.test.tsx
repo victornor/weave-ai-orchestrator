@@ -1221,10 +1221,10 @@ describe('dictation — how a session ends decides whether it sends (VS-489, VS-
 });
 
 /**
- * VS-439: a session that ends with five words or fewer is discarded — the draft goes back exactly
+ * VS-439, VS-552: a session that ends below three words is discarded — the draft goes back exactly
  * as it was, taking the interim words with it, and a queued send (VS-282) submits nothing.
  */
-describe('dictation — discarding a transcript of five words or fewer (VS-439)', () => {
+describe('dictation — discarding a transcript below three words (VS-439, VS-552)', () => {
   type TranscribeResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
 
   function stubHealthAndTranscribe(postHandler: () => Promise<TranscribeResponse>): void {
@@ -1246,7 +1246,7 @@ describe('dictation — discarding a transcript of five words or fewer (VS-439)'
     await settleMicrotasks(() => expect(screen.getByLabelText('Dictate')).toBeInTheDocument());
   }
 
-  it('discards a five-word speech outcome and puts the draft back, removing the interim words', () => {
+  it('discards a two-word speech outcome and puts the draft back, removing the interim words', () => {
     w.webkitSpeechRecognition = FakeRecognition;
     render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
     const box = screen.getByLabelText('Message…') as HTMLTextAreaElement;
@@ -1254,31 +1254,31 @@ describe('dictation — discarding a transcript of five words or fewer (VS-439)'
 
     dictate();
     const rec = FakeRecognition.last!;
-    act(() => rec.onresult!(said(['one two three', false])));
-    expect(box.value).toBe('typed first one two three');
+    act(() => rec.onresult!(said(['one two', false])));
+    expect(box.value).toBe('typed first one two');
 
     fireEvent.click(screen.getByLabelText('Stop dictation'));
-    act(() => rec.onresult!(said(['one two three four five', true])));
+    act(() => rec.onresult!(said(['one two', true])));
     act(() => rec.onend!());
 
     expect(box.value).toBe('typed first');
   });
 
-  it('inserts a six-word speech outcome as before', () => {
+  it('inserts a three-word speech outcome', () => {
     w.webkitSpeechRecognition = FakeRecognition;
     render(<Composer onSubmit={() => undefined} placeholder="Message…" />);
     const box = screen.getByLabelText('Message…') as HTMLTextAreaElement;
 
     dictate();
     const rec = FakeRecognition.last!;
-    act(() => rec.onresult!(said(['one two three four five six', true])));
+    act(() => rec.onresult!(said(['yes do that', true])));
 
-    expect(box.value).toBe('one two three four five six');
+    expect(box.value).toBe('yes do that');
   });
 
   it('discards an upload outcome and clears the queued send instead of submitting it', async () => {
     const onSubmit = vi.fn().mockResolvedValue(undefined);
-    stubHealthAndTranscribe(() => Promise.resolve({ ok: true, status: 200, json: async () => ({ text: 'one two three four five' }) }));
+    stubHealthAndTranscribe(() => Promise.resolve({ ok: true, status: 200, json: async () => ({ text: 'one two' }) }));
     await renderUpload(onSubmit);
     const box = screen.getByLabelText('Message…') as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: 'typed first' } });

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-18
+goal: "Weaver chat: collapse an empty decisions pane, and show the chosen
+  roadmap block on sent messages"

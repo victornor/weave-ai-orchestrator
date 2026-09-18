@@ -295,6 +295,28 @@ export function useRoadmapBlocks(projectId: string | null | undefined, wsOverrid
   });
 }
 
+/**
+ * The titles of every block across the given projects, merged into one `blockId → title` map
+ * (VS-549). A chat thread spans projects, so the block marker on a sent message resolves from this
+ * rather than a per-project hook. Each project is queried under the same `roadmapBlocks` key the
+ * composer and the roadmap screens use, so the cache entry is shared and no extra request is made
+ * for a project already loaded.
+ */
+export function useRoadmapBlockTitles(projectIds: readonly string[]): ReadonlyMap<string, string> {
+  const ws = useHookWs();
+  const results = useQueries({
+    queries: projectIds.map((projectId) => ({
+      queryKey: qk.roadmapBlocks(ws, projectId),
+      queryFn: () => api.ws<{ blocks?: RoadmapBlock[] } | RoadmapBlock[]>(ws, `/projects/${projectId}/roadmap/blocks`).then((r) => listOf<RoadmapBlock>(r, 'blocks')),
+    })),
+  });
+  return useMemo(() => {
+    const titles = new Map<string, string>();
+    for (const r of results) for (const b of r.data ?? []) titles.set(b.id, b.title);
+    return titles;
+  }, [results]);
+}
+
 export function useCreateRoadmapItem(): UseMutationResult<RoadmapItem, Error, { projectId: string; title: string; notes?: string; status?: RoadmapItem['status']; ticketId?: string | null }> {
   const ws = useWs();
   const qc = useQueryClient();

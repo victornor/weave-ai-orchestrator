@@ -81,6 +81,8 @@ export interface ChatConversationProps {
   revealIds?: ReadonlySet<string>;
   onTicket: (identifier: string) => void;
   projectName: (id: string | null) => string | null;
+  /** Resolve the roadmap block a message carried to its title; absent hides the block marker (VS-549). */
+  blockName?: (id: string | null) => string | null;
   /** Present only where the thread supports replying; omitted hides the control. */
   onReply?: (messageId: string) => void;
   /** The turn summary's context-window figures for a trace. */
@@ -161,6 +163,7 @@ export function ChatConversation({
   revealIds,
   onTicket,
   projectName,
+  blockName,
   onReply,
   resolveContext = NO_CONTEXT,
   ready = true,
@@ -260,6 +263,7 @@ export function ChatConversation({
                         ws={ws}
                         spent={row.trace?.usage ? row.trace.usage.inputTokens + row.trace.usage.outputTokens : null}
                         projectName={projectName(m.projectId)}
+                        blockName={blockName}
                         onTicket={onTicket}
                         reveal={revealIds?.has(m.id) ?? false}
                         highlighted={highlighted}

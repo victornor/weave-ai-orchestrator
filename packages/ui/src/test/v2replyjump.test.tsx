@@ -212,6 +212,7 @@ vi.mock('../api/hooks', () => ({
   useWorkers: () => ({ data: state.workers }),
   useProjects: () => ({ data: [{ id: 'p1', workspaceId: 'ws1', slug: 'web', name: 'web' }] }),
   useRoadmapBlocks: () => ({ data: [] }),
+  useRoadmapBlockTitles: () => new Map<string, string>(),
   useTickets: () => ({ data: state.tickets }),
   useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: 'claude' }, lastRun: state.lastRun } }),
   useCompactWeaver: () => ({ mutate: vi.fn(), isPending: false }),

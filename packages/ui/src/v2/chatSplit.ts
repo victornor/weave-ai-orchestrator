@@ -9,6 +9,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** Below this width of the chat region the decisions pane drops out and chat is full width. */
 export const SPLIT_MIN_WIDTH = 620;
+/** The width the decisions pane collapses to when nothing is waiting (VS-549); not a divider bound. */
+export const DECISIONS_RAIL_WIDTH = 36;
 /** The decisions pane's draggable bounds, and the width it opens at. */
 export const DIVIDER_MIN = 300;
 export const DIVIDER_MAX = 560;

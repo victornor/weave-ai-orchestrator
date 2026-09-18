@@ -21,6 +21,7 @@ const state = vi.hoisted(() => ({
   workers: [] as Agent[],
   roadmapBlocks: [] as Array<{ id: string; reportedStatus: string; title: string }>,
   planTabs: [] as Array<{ id: string; projectId: string; title: string | null; titleSource: string; status: string; draftCount: number; createdAt: string; updatedAt: string }>,
+  blockTitles: new Map<string, string>(),
   search: [] as Array<{ messageId: string; authorKind: string; authorId: string | null; createdAt: string; snippet: string }>,
   context: [] as ThreadMessage[],
   events: [] as unknown[],
@@ -92,6 +93,7 @@ vi.mock('../api/hooks', () => ({
   useWorkers: () => ({ data: state.workers }),
   useProjects: () => ({ data: [{ id: 'p1', workspaceId: 'ws1', slug: 'web', name: 'web' }] }),
   useRoadmapBlocks: () => ({ data: state.roadmapBlocks }),
+  useRoadmapBlockTitles: () => state.blockTitles,
   useTickets: () => ({ data: state.tickets }),
   useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: 'claude' }, lastRun: state.lastRun, compacting: state.compacting } }),
   useCompactWeaver: () => ({ mutate: state.compact, isPending: false }),
@@ -240,6 +242,7 @@ beforeEach(() => {
   ];
   state.roadmapBlocks = [];
   state.planTabs = [];
+  state.blockTitles = new Map();
   state.search = [];
   state.context = [];
   state.events = [];
@@ -337,16 +340,25 @@ describe('the V2 Chat screen', () => {
     expect(document.querySelector('[data-trace-compaction]')).toHaveTextContent('Conversation compacted · 184.3k → 11.8k tok');
   });
 
-  it('keeps the decisions pane on desktop when nothing is waiting, and drops it below the threshold', async () => {
+  it('collapses an empty decisions pane on desktop and expands it when a decision arrives (VS-549)', async () => {
     state.decisions = [];
     const utils = render(<V2ChatPage />);
-    expect(await screen.findByText('Nothing needs you right now.')).toBeInTheDocument();
-    expect(document.querySelector('[data-decisions-pane]')).not.toBeNull();
+    await screen.findByLabelText('Message the weaver');
+    const collapsed = document.querySelector('[data-decisions-pane]') as HTMLElement;
+    expect(collapsed).not.toBeNull();
+    expect(collapsed.hasAttribute('data-decisions-pane-collapsed')).toBe(true);
+    expect(collapsed.style.width).toBe('36px');
+    expect(screen.getByRole('button', { name: 'Expand decisions' })).toBeInTheDocument();
+    // The resize handle and the empty state belong to the expanded pane.
+    expect(screen.queryByRole('separator', { name: 'Resize the decisions pane' })).toBeNull();
+    expect(screen.queryByText('Nothing needs you right now.')).toBeNull();
 
     state.decisions = [question()];
     utils.rerender(<V2ChatPage />);
     expect(await screen.findByText('Approve now')).toBeInTheDocument();
-    expect(document.querySelector('[data-decisions-pane]')).not.toBeNull();
+    const expanded = document.querySelector('[data-decisions-pane]') as HTMLElement;
+    expect(expanded.hasAttribute('data-decisions-pane-collapsed')).toBe(false);
+    expect(screen.getByRole('separator', { name: 'Resize the decisions pane' })).toBeInTheDocument();
 
     state.width = 500;
     utils.rerender(<V2ChatPage />);
@@ -373,6 +385,29 @@ describe('the V2 Chat screen', () => {
     expect(screen.getByRole('tab', { name: 'Weaver chat' })).toHaveAttribute('aria-selected', 'false');
     expect(screen.queryByLabelText('Message the weaver')).toBeNull();
     expect(screen.getByLabelText('Message the planner')).toBeInTheDocument();
+  });
+
+  it('collapses the pane again when the last decision is answered (VS-549)', async () => {
+    state.decisions = [question()];
+    const utils = render(<V2ChatPage />);
+    await screen.findByText('Approve now');
+    expect((document.querySelector('[data-decisions-pane]') as HTMLElement).hasAttribute('data-decisions-pane-collapsed')).toBe(false);
+
+    // The daemon recorded the answer: the open list drains and the answered read holds it.
+    state.decisions = [question({ status: 'answered', answerKey: 'a' })];
+    utils.rerender(<V2ChatPage />);
+    await waitFor(() => expect(document.querySelector('[data-decisions-pane]')?.hasAttribute('data-decisions-pane-collapsed')).toBe(true));
+  });
+
+  it('lets the reader expand an empty collapsed pane and collapse it again (VS-549)', async () => {
+    state.decisions = [];
+    render(<V2ChatPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Expand decisions' }));
+    expect(await screen.findByText('Nothing needs you right now.')).toBeInTheDocument();
+    expect((document.querySelector('[data-decisions-pane]') as HTMLElement).hasAttribute('data-decisions-pane-collapsed')).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse decisions' }));
+    expect((document.querySelector('[data-decisions-pane]') as HTMLElement).hasAttribute('data-decisions-pane-collapsed')).toBe(true);
   });
 
   it('reports running workers, waiting decisions and the session limit in its status bar', async () => {
@@ -792,5 +827,33 @@ describe('the V2 Chat screen', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Auto' }));
     expect(screen.queryByRole('button', { name: 'UI polish' })).toBeNull();
+  });
+
+  it('shows the roadmap block a message carried beside the project tag (VS-549)', async () => {
+    state.blockTitles = new Map([['b1', 'UI polish']]);
+    state.messages = [
+      message({ id: 'm1', body: 'with a block', projectId: 'p1', blockId: 'b1' }),
+      message({ id: 'm2', body: 'project only', projectId: 'p1', blockId: null }),
+    ];
+    render(<V2ChatPage />);
+    await screen.findByText('with a block');
+
+    const withBlock = screen.getByText('with a block').closest('[data-chat-message]') as HTMLElement;
+    expect(withBlock.querySelector('[data-block-tag]')?.textContent).toBe('UI polish');
+    expect(withBlock.textContent).toContain('web');
+
+    const projectOnly = screen.getByText('project only').closest('[data-chat-message]') as HTMLElement;
+    expect(projectOnly.querySelector('[data-block-tag]')).toBeNull();
+    expect(projectOnly.textContent).toContain('web');
+  });
+
+  it('never shows an id for a block it cannot name (VS-549)', async () => {
+    state.blockTitles = new Map();
+    state.messages = [message({ id: 'm1', body: 'unknown block', projectId: 'p1', blockId: 'bX' })];
+    render(<V2ChatPage />);
+    await screen.findByText('unknown block');
+    const bubble = screen.getByText('unknown block').closest('[data-chat-message]') as HTMLElement;
+    expect(bubble.querySelector('[data-block-tag]')).toBeNull();
+    expect(bubble.textContent).not.toContain('bX');
   });
 });

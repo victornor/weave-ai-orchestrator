@@ -32,6 +32,7 @@ import {
   usePostThreadMessage,
   useProjects,
   useRoadmapBlocks,
+  useRoadmapBlockTitles,
   useRunTraces,
   useRuntimes,
   useRuntimeModels,
@@ -52,7 +53,7 @@ import { useExitPresence } from './motion';
 import { SearchPanel } from './SearchPanel';
 import { PlanTab } from './PlanTab';
 import { PlanTabStrip, usePlanTabs } from './PlanTabs';
-import { DIVIDER_MAX, DIVIDER_MIN, clampDivider, readDivider, shouldSplit, useElementWidth, writeDivider } from './chatSplit';
+import { DECISIONS_RAIL_WIDTH, DIVIDER_MAX, DIVIDER_MIN, clampDivider, readDivider, shouldSplit, useElementWidth, writeDivider } from './chatSplit';
 
 /** The answer shown in a note: the chosen option's label, else the first line of the free text. */
 function decisionAnswerLabel(decision: Decision): string {
@@ -154,6 +155,10 @@ function DecisionsPane({
   projects,
   answerError,
   agentNameById,
+  collapsed,
+  canCollapse,
+  onExpand,
+  onCollapse,
 }: {
   ws: string;
   decisions: Decision[];
@@ -169,14 +174,45 @@ function DecisionsPane({
   projects: Project[];
   answerError: string | null;
   agentNameById: ReadonlyMap<string, string>;
+  /** True when nothing is waiting and the reader has not expanded the pane (VS-549). */
+  collapsed: boolean;
+  /** Whether the collapse control should render: it can only collapse while nothing is waiting. */
+  canCollapse: boolean;
+  onExpand: () => void;
+  onCollapse: () => void;
 }): React.ReactElement {
   const ticketOf = (d: Decision): Ticket | undefined => tickets.find((t) => t.id === d.ticketId);
   const projectOf = (d: Decision): Project | undefined => projects.find((p) => p.id === (d.projectId ?? ticketOf(d)?.projectId));
+  const transition = 'width var(--v2-dur-base) var(--v2-ease)';
+  // The collapsed rail is the deliberate way back to the pane (VS-549): a narrow, always-present
+  // sliver with a keyboard-operable expand control, never no element at all.
+  if (collapsed) {
+    return (
+      <aside
+        aria-label="Open decisions"
+        className="relative flex min-h-0 flex-none flex-col border-l border-line-2 bg-bg-0"
+        style={{ width: DECISIONS_RAIL_WIDTH, transition }}
+        data-decisions-pane
+        data-decisions-pane-collapsed
+      >
+        <button
+          type="button"
+          onClick={onExpand}
+          aria-label="Expand decisions"
+          aria-expanded={false}
+          className="flex h-full w-full flex-col items-center gap-2 py-3 text-text-3 hover:text-text-1"
+        >
+          <span aria-hidden className="text-micro leading-none">‹</span>
+          <span aria-hidden className="ac-mono text-nano [writing-mode:vertical-rl]">Decisions</span>
+        </button>
+      </aside>
+    );
+  }
   return (
     <aside
       aria-label="Open decisions"
       className="relative flex min-h-0 flex-none flex-col border-l border-line-2 bg-bg-0"
-      style={{ width }}
+      style={{ width, transition }}
       data-decisions-pane
     >
       <div
@@ -194,7 +230,12 @@ function DecisionsPane({
       <div className="flex h-[38px] flex-none items-center gap-2 border-b border-line-1 px-3">
         <span className="text-meta font-semibold text-text-1">Decisions</span>
         <span className="ac-mono text-nano text-text-3">{decisions.filter((d) => !exitingIds.has(d.id)).length} waiting</span>
-        <A to="/needs" className="ml-auto text-micro text-text-3 hover:text-text-1">Needs you</A>
+        <A to="/needs" className={cx('text-micro text-text-3 hover:text-text-1', canCollapse ? undefined : 'ml-auto')}>Needs you</A>
+        {canCollapse ? (
+          <button type="button" onClick={onCollapse} aria-label="Collapse decisions" className="ml-auto flex-none px-1 text-micro text-text-3 hover:text-text-1">
+            ›
+          </button>
+        ) : null}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
         {answerError ? (
@@ -241,6 +282,7 @@ function JumpView({
   targetId,
   loading,
   projectName,
+  blockName,
   onTicket,
   onReply,
   onBack,
@@ -250,6 +292,7 @@ function JumpView({
   targetId: string;
   loading: boolean;
   projectName: (id: string | null) => string | null;
+  blockName: (id: string | null) => string | null;
   onTicket: (id: string) => void;
   onReply: (id: string) => void;
   onBack: () => void;
@@ -263,7 +306,7 @@ function JumpView({
       <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-5">
         {loading ? <p className="text-micro text-text-3">Loading…</p> : messages.map((m) => (
           <div key={m.id} className={cx('rounded-r4', m.id === targetId && 'bg-accent/10')}>
-            <ChatMessage message={m} ws={ws} spent={null} projectName={projectName(m.projectId)} onTicket={onTicket} {...(m.direction === 'outbound' ? { onReply: () => onReply(m.id) } : {})} />
+            <ChatMessage message={m} ws={ws} spent={null} projectName={projectName(m.projectId)} blockName={blockName} onTicket={onTicket} {...(m.direction === 'outbound' ? { onReply: () => onReply(m.id) } : {})} />
           </div>
         ))}
       </div>
@@ -334,6 +377,10 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const [justAnswered, setJustAnswered] = useState<Record<string, Decision>>({});
   const [divider, setDivider] = useState(readDivider);
   const [dragging, setDragging] = useState(false);
+  // VS-549: the reader's deliberate expansion of an empty decisions pane. Cleared when the open
+  // count drops back to zero or the region can no longer split, so the automatic collapse wins
+  // again once the pane has nothing to show; it survives while the count stays zero.
+  const [panePinned, setPanePinned] = useState(false);
   const dragStart = useRef<{ x: number; width: number } | null>(null);
   const { ref: shellRef, width: shellWidth } = useElementWidth<HTMLDivElement>();
 
@@ -439,6 +486,16 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
       }),
     [messages.data, decisionsById],
   );
+  // VS-549: resolve the block a sent message carries from its project's block list. A thread spans
+  // projects, so only the projects that actually appear on a block-carrying message are queried, each
+  // under the same `roadmapBlocks` key the composer and the roadmap screens already use.
+  const messageBlockProjects = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of conversation) if (m.blockId && m.projectId) ids.add(m.projectId);
+    return [...ids];
+  }, [conversation]);
+  const blockTitles = useRoadmapBlockTitles(messageBlockProjects);
+  const blockName = useCallback((id: string | null) => (id ? blockTitles.get(id) ?? null : null), [blockTitles]);
   // The conversation rows: each message, its turn's trace attached to the last message that run
   // produced (V1's `chatEntries`/`chatRows` view model). Silent turns are dropped here — Chat shows
   // the turn that produced a message, not a standalone trace row.
@@ -568,14 +625,22 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   );
 
   const canSplit = shouldSplit(shellWidth);
-  // Desktop is split by default: the pane stays whether or not anything is waiting, so the layout
-  // does not jump when the last card is answered and the empty state has somewhere to live.
+  // The pane is shown when it can split and either a decision is waiting or the reader opened it by
+  // hand (VS-549): the collapse follows the live count, so a decision arriving expands it without a
+  // reload and the last answer collapses it again.
   const rail = canSplit;
+  const paneExpanded = rail && (openDecisionCount > 0 || panePinned);
   // The inline answerable card renders in exactly the case the pane is absent. It waits for the
   // region to be measured (`width > 0`): `useElementWidth` reads 0 on the first render, and treating
   // that as "phone" would flash the card on desktop for a frame before the pane takes over. Waiting
   // costs a phone one unmeasured frame with no card, and never shows desktop a card it must drop.
   const showInlineDecisionCard = shellWidth > 0 && !canSplit;
+
+  // Drop the hand-expansion when the count returns to zero or the region can no longer split. Keyed
+  // only on those two values, so pinning an empty pane (the count stays zero) is not undone here.
+  useEffect(() => {
+    if (!canSplit || openDecisionCount === 0) setPanePinned(false);
+  }, [canSplit, openDecisionCount]);
 
   const startDrag = useCallback((e: React.PointerEvent): void => {
     e.preventDefault();
@@ -730,6 +795,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
               targetId={anchor}
               loading={jump.isLoading}
               projectName={projectNameFor}
+              blockName={blockName}
               onTicket={openTicket}
               onReply={(id) => patch({ replyToId: id })}
               onBack={() => setAnchor(null)}
@@ -750,6 +816,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
               revealIds={revealIds}
               onTicket={openTicket}
               projectName={projectNameFor}
+              blockName={blockName}
               onReply={(id) => patch({ replyToId: id })}
               resolveContext={resolveContext}
               ready={messages.data !== undefined}
@@ -808,6 +875,10 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
             projects={projects.data ?? []}
             answerError={answerError}
             agentNameById={agentNameById}
+            collapsed={!paneExpanded}
+            canCollapse={openDecisionCount === 0}
+            onExpand={() => setPanePinned(true)}
+            onCollapse={() => setPanePinned(false)}
           />
         ) : null}
       </div>

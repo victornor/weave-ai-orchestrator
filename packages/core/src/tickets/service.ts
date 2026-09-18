@@ -58,6 +58,8 @@ function sameGitSha(a: string, b: string): boolean {
 interface ProjectRow { id: string; slug: string; clonePath: string; openspecEnabled: number; policies: Record<string, unknown> | null }
 
 const TERMINAL = new Set<TicketStatus>(TERMINAL_TICKET_STATUSES);
+// VS-541: statuses that mean work has begun. `approved` is permission, not work, so it is not here.
+const STARTED_STATUSES = new Set<TicketStatus>(['proposing', 'in_progress', 'in_review', 'merging', 'done']);
 
 /** Named in a wake reason when a one-line excerpt was cut, so a worker reading a fragment knows what to call. */
 const FULL_COMMENT_HINT = 'full comment via weave_ticket_comments';
@@ -723,7 +725,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       patch.blockedTransitionAt = null;
       patch.blockedFromStatus = null;
     }
-    if (!t.startedAt && (to === 'proposing' || to === 'in_progress')) patch.startedAt = now;
+    if (!t.startedAt && STARTED_STATUSES.has(to)) patch.startedAt = now;
     if (to === 'done') patch.completedAt = now;
     if (to === 'cancelled') patch.cancelledAt = now;
 

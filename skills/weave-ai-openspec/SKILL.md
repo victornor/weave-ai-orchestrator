@@ -20,7 +20,7 @@ For a `task` ticket with a tracker change, write `skip_specs: true` into the cha
 | `todo` | the **propose** workflow (`/opsx:propose <change>` on Claude/OpenCode, `$openspec-propose` on Codex) | proposal, specs, design and tasks all written; `openspec validate <change> --json --strict` clean | `weave_ticket_transition(id, "proposed")` |
 | `proposing` | fix what the gate or the revision comment listed | the same as above | `proposed` again |
 | `proposed` | nothing — the human is deciding | — | — |
-| `approved` | the **apply** workflow (`/opsx:apply <change>` / `$openspec-apply`) | every task in `tasks.md` ticked and committed | deliver, then `in_review` |
+| `approved` | the **apply** workflow (`/opsx:apply <change>` / `$openspec-apply`) | every task in `tasks.md` ticked and committed | deliver, then `in_review` — straight from `approved` when the apply finishes in one turn |
 | `in_progress` | continue apply | as above | `in_review` |
 | `in_review` | nothing; answer comments | — | — |
 | `merging` | the merge procedure (`weave-ai-worker` → `references/delivery.md`) | merged and verified | `weave_ticket_merge_done` |

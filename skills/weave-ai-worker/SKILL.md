@@ -24,11 +24,11 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 |---|---|---|
 | `todo` (`change`) | Create the named OpenSpec change if absent; run the propose workflow. No code. | `weave_ticket_transition(id, "proposed")` |
 | `proposing` | Fix the validation issues or the revision feedback on the ticket. | request `proposed` again |
-| `approved` | Run the apply workflow: implement pending tasks, tick them, commit. | `in_progress` (implicit) or `in_review` when all tasks are done |
+| `approved` | Run the apply workflow: implement pending tasks, tick them, commit. | `in_review` when all tasks are done — straight from `approved` if one turn, or via `in_progress` if it spans turns |
 | `in_progress` | Keep applying. When every task is done, deliver. | `weave_ticket_transition(id, "in_review")` with a work product |
 | `in_review` | Nothing, normally — you are waiting on the human. Answer comments. | `weave_report({state:"paused"})` or an idle report |
 | `merging` | The merge procedure (`references/delivery.md`). | `weave_ticket_merge_done` |
-| `todo` (`task`) | Implement, test, then choose your ending (next section). | `in_review` with a work product — or `done`, ending stated in the note, when nothing needs landing |
+| `todo` (`task`) | Implement, test, then choose your ending (next section). | `in_review` with a work product — or `done`, ending stated in the note, when nothing needs landing (either straight from `todo`) |
 | `todo` (`scout`) | Investigate; write the report document. Load `weave-ai-scout`. | `done` |
 | `todo` (`question`) | Answer as a ticket comment with evidence, then `weave_report` with `state: done` — that report closes a question ticket for you. | `done` |
 | `todo` (`operational`) | Write an `action` document (commands, host/service, expected outcome) and wait for human `action_approval` — YOLO does not grant it. After approval, execute, write a `report` of what actually happened, update the knowledge base. A later `approve` of an `action` revision that already has a `report` is not a second authorisation to run. Repo docs are a follow-up `change`. Never finish with unlanded commits. | `done` |
@@ -46,6 +46,8 @@ While a `change` ticket is `proposed`, you can be woken to answer weaver concern
 
 The daemon enforces the boundary rather than trusting the vibe: `done` is refused with `worktree_not_landed` while your branch carries commits its landing branch does not contain, and with `validation` when the note is missing. A rejection is information: `worktree_not_landed` means you produced a diff — deliver it through `in_review`.
 
+Either ending is reachable straight from `todo`: you do not need to mark `in_progress` first. Use `in_progress` only when the work spans turns.
+
 ## An operational ticket gates before the action
 
 State what you will do — the concrete commands, against which host or service, and what you expect to happen — in an `action` document (`weave_ticket_document_put(id, "action", body)`). That write raises a human-owned `action_approval`. Do not execute until it is answered `approve`. YOLO and `proposalApproval: none` do not grant it. After you run it, write a `report` of what actually happened (including if it differed) and update the knowledge base where applicable. A later `approve` of an `action` revision that already has a `report` is not a second authorisation to run. Repo documentation is a follow-up `change` ticket, never unlanded commits on this one.
@@ -56,7 +58,7 @@ State what you will do — the concrete commands, against which host or service,
 - **Your ticket is your only work.** Never look for unassigned work, never audit, never sweep for improvements. An empty inbox is a healthy idle turn.
 - **Use first-class blockers.** `weave_ticket_transition(id, "blocked", {blockedBy: ["ACME-51"]})`, not a comment saying "blocked by ACME-51". A prose-only block has no routing and will be rejected.
 - **Status is a contract about who owns the next move:**
-  - `in_progress` — you are working now, or you will resume on your next wake.
+  - `in_progress` — optional; use it when the work spans turns. You are not required to enter it before `in_review` or `done`.
   - `in_review` — there is a real work product and a real reviewer path. Assigning yourself and commenting "please review" is not a review path.
   - `blocked` — there are blockers, an open decision, or `{owner, action}` naming exactly who does what next.
 - **Only claim a monitor, watcher or follow-up exists after you scheduled one.** Describing one in a comment does not create it. To check on something later — a long background job, a quota window — call `weave_schedule_wakeup({reason, delayMinutes})` (or an absolute `at`); it queues a wake for your own next turn. The runtime's own scheduling tools (`ScheduleWakeup`, cron) run inside the turn's process and die with it, so they never fire; never rely on them.

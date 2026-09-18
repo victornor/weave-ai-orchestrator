@@ -6,7 +6,7 @@ const CHANGE: Record<TicketStatus, readonly TicketStatus[]> = {
   todo: ['proposing', 'blocked', 'cancelled', 'backlog'],
   proposing: ['proposed', 'blocked', 'cancelled'],
   proposed: ['approved', 'proposing', 'cancelled'],
-  approved: ['in_progress', 'blocked', 'cancelled'],
+  approved: ['in_progress', 'in_review', 'blocked', 'cancelled'],
   in_progress: ['in_review', 'blocked', 'cancelled'],
   in_review: ['merging', 'in_progress', 'blocked', 'cancelled'],
   merging: ['done', 'blocked', 'in_review'],
@@ -16,7 +16,7 @@ const CHANGE: Record<TicketStatus, readonly TicketStatus[]> = {
 };
 const TASK: Record<TicketStatus, readonly TicketStatus[]> = {
   backlog: ['todo', 'cancelled'],
-  todo: ['in_progress', 'blocked', 'cancelled', 'backlog'],
+  todo: ['in_progress', 'in_review', 'done', 'blocked', 'cancelled', 'backlog'],
   proposing: [], proposed: [], approved: [],
   in_progress: ['in_review', 'done', 'blocked', 'cancelled'],
   in_review: ['merging', 'in_progress', 'done', 'blocked', 'cancelled'],
@@ -26,7 +26,7 @@ const TASK: Record<TicketStatus, readonly TicketStatus[]> = {
 };
 const SCOUT: Record<TicketStatus, readonly TicketStatus[]> = {
   backlog: ['todo', 'cancelled'],
-  todo: ['in_progress', 'blocked', 'cancelled', 'backlog'],
+  todo: ['in_progress', 'done', 'blocked', 'cancelled', 'backlog'],
   proposing: [], proposed: [], approved: [], merging: [],
   in_progress: ['done', 'blocked', 'cancelled'],
   in_review: ['done', 'cancelled'],

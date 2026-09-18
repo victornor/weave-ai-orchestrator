@@ -47,7 +47,7 @@ Do not add or keep a `mise.toml` (or equivalent) Node pin that makes host CLIs s
 3. Do the phase your ticket status asks for:
    - `todo` (`change`) → create the named OpenSpec change if absent, run the propose workflow, then request `proposed`.
    - `proposing` → fix whatever the gate reported, or the revision feedback on the ticket, then request `proposed` again.
-   - `approved` → run the apply workflow: implement pending tasks, tick them in `tasks.md` as each is fully done, commit as you go.
+   - `approved` → run the apply workflow: implement pending tasks, tick them in `tasks.md` as each is fully done, commit as you go; when every task is done, deliver and transition to `in_review` (going through `in_progress` only if the apply spans turns).
    - `in_progress` → continue applying; when every task is done, deliver and transition to `in_review`.
    - `merging` → sync, resolve conflicts, re-run checks, merge, `weave_ticket_merge_done`.
    - `todo` (`task` / `scout` / `question` / `operational`) → do the work, deliver the artifact its kind requires, transition.

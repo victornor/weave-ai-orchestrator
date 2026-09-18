@@ -441,14 +441,76 @@ describe('tickets', () => {
     });
 
     // VS-209: the error names what IS reachable, so a worker doesn't need to have memorised the graph.
-    it('names the reachable statuses when rejecting approved -> in_review on a change ticket', async () => {
+    // VS-541 moved the example from approved -> in_review (now a legal delivery) to approved -> merging.
+    it('names the reachable statuses when rejecting approved -> merging on a change ticket', async () => {
       const t = make({ kind: 'change' });
       h.db.update('tickets', t.id, { status: 'approved' });
-      await expect(tickets.transition(AGENT, t.id, { to: 'in_review' })).rejects.toMatchObject({
+      await expect(tickets.transition(AGENT, t.id, { to: 'merging' })).rejects.toMatchObject({
         code: 'invalid_disposition',
-        details: { kind: 'change', from: 'approved', to: 'in_review', allowed: TRANSITIONS.change.approved },
+        details: { kind: 'change', from: 'approved', to: 'merging', allowed: TRANSITIONS.change.approved },
       });
-      expect(TRANSITIONS.change.approved).not.toContain('in_review');
+      expect(TRANSITIONS.change.approved).not.toContain('merging');
+    });
+
+    // VS-541: a ticket finishes from the status its work began in; in_progress is optional, not a gate.
+    describe('direct delivery (VS-541)', () => {
+      it('delivers a change ticket straight from approved to in_review and raises the merge approval', async () => {
+        const t = make({ kind: 'change' });
+        tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'https://example.com/pr/1' });
+        h.db.update('tickets', t.id, { status: 'approved' });
+        decisions.create.mockClear();
+        const done = await tickets.transition(AGENT, t.id, { to: 'in_review' });
+        expect(done.status).toBe('in_review');
+        expect(tickets.get(t.id).status).toBe('in_review');
+        expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'merge_approval' }));
+      });
+
+      it('still requires a work product for a direct change delivery', async () => {
+        const t = make({ kind: 'change' });
+        h.db.update('tickets', t.id, { status: 'approved' });
+        await expect(tickets.transition(AGENT, t.id, { to: 'in_review' })).rejects.toMatchObject({ code: 'invalid_disposition' });
+      });
+
+      it('delivers a task with a diff straight from todo, and finishes a no-diff task from todo', async () => {
+        const withDiff = make({ kind: 'task', title: 'With a diff' });
+        tickets.addWorkProduct(AGENT, withDiff.id, { type: 'pull_request', url: 'u' });
+        expect((await tickets.transition(AGENT, withDiff.id, { to: 'in_review' })).status).toBe('in_review');
+
+        const noDiff = make({ kind: 'task', title: 'No diff' });
+        const finished = await tickets.transition(AGENT, noDiff.id, { to: 'done', note: 'ending: done — config only' });
+        expect(finished.status).toBe('done');
+      });
+
+      it('keeps the task done gates on the direct path: the ending must be stated', async () => {
+        const t = make({ kind: 'task', title: 'Needs an ending' });
+        await expect(tickets.transition(AGENT, t.id, { to: 'done' })).rejects.toMatchObject({ code: 'validation' });
+        expect(tickets.get(t.id).status).toBe('todo');
+      });
+
+      it('finishes scout, question and operational tickets straight from todo', async () => {
+        for (const kind of ['scout', 'question', 'operational'] as const) {
+          const t = make({ kind, title: `${kind} from todo` });
+          expect((await tickets.transition(AGENT, t.id, { to: 'done' })).status).toBe('done');
+        }
+      });
+
+      it('still rejects propose, review and merge statuses for an operational ticket', async () => {
+        for (const to of ['proposing', 'proposed', 'approved', 'in_review', 'merging'] as const) {
+          const t = make({ kind: 'operational', title: `op ${to}` });
+          await expect(tickets.transition(AGENT, t.id, { to })).rejects.toMatchObject({
+            code: 'invalid_disposition',
+            details: expect.objectContaining({ allowed: TRANSITIONS.operational.todo }),
+          });
+        }
+      });
+
+      it('records started_at on a direct delivery that never entered in_progress', async () => {
+        const t = make({ kind: 'task', title: 'Direct stamp' });
+        tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'u' });
+        expect(tickets.get(t.id).startedAt).toBeNull();
+        await tickets.transition(AGENT, t.id, { to: 'in_review' });
+        expect(tickets.get(t.id).startedAt).not.toBeNull();
+      });
     });
 
     it('rejects in_review without a work product', async () => {

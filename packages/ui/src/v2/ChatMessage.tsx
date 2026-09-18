@@ -118,6 +118,8 @@ export interface ChatMessageProps {
   /** The turn's own tokens spent, or null when it reported none. */
   spent: number | null;
   projectName?: string | null;
+  /** The roadmap block the message was sent with, resolved to its title; null or absent hides it. */
+  blockName?: (id: string | null) => string | null;
   onTicket: (identifier: string) => void;
   /** Present on a weaver message: set the reply target for the next message. */
   onReply?: () => void;
@@ -133,9 +135,12 @@ export interface ChatMessageProps {
   highlighted?: boolean;
 }
 
-export function ChatMessage({ message, ws, spent, projectName, onTicket, onReply, reveal = false, responseIds, jumpBackTo, onJumpTo, highlighted = false }: ChatMessageProps): React.ReactElement {
+export function ChatMessage({ message, ws, spent, projectName, blockName, onTicket, onReply, reveal = false, responseIds, jumpBackTo, onJumpTo, highlighted = false }: ChatMessageProps): React.ReactElement {
   const mine = message.direction === 'inbound';
   const body = useStreamReveal(message.body, reveal);
+  // VS-549: the roadmap block the message carried, named by its title. An unresolvable block shows
+  // nothing — never the raw id.
+  const block = message.blockId ? blockName?.(message.blockId) ?? null : null;
 // A reply can answer more than one human message when they arrived batched (VS-449): the excerpt
   // is the newest target, and the rest are named by count.
   const quote = message.replyToExcerpt;
@@ -174,13 +179,14 @@ export function ChatMessage({ message, ws, spent, projectName, onTicket, onReply
         <MessageBody body={body} onTicket={onTicket} />
         <AttachmentRows ws={ws} threadId={message.threadId} parts={message.parts} />
       </MessageBubble>
-      <span className={cx('flex items-center gap-2 px-0.5', mine && 'justify-end')}>
+      <span className={cx('flex flex-wrap items-center gap-2 px-0.5', mine && 'justify-end')}>
         {mine && onJumpTo && responseIds && responseIds.length > 0 ? (
           <button type="button" onClick={() => onJumpTo(responseIds)} className="text-nano text-text-3 hover:text-text-1">
             Jump to response
           </button>
         ) : null}
         {message.projectId && projectName ? <span className="v2-tag text-text-3">{projectName}</span> : null}
+        {block ? <span className="v2-tag max-w-full truncate text-text-3" data-block-tag>{block}</span> : null}
         <span className="ac-mono text-nano text-text-4">{clock(message.createdAt)}</span>
         {spent != null ? <span className="ac-mono text-nano text-text-4">· {tokens(spent)} tok</span> : null}
         {onReply ? (

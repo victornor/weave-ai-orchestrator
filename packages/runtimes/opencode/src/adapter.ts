@@ -236,7 +236,9 @@ export const adapter: RuntimeAdapter = {
     for (const ev of parser.finish()) sink.onEvent({ ...ev, seq: seq++ });
 
     const st = parser.state;
-    const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError;
+    // VS-573: exit 0 after a `tool-calls` step is a stream cut off mid-work, not a finished turn.
+    const incomplete = outcome.exitCode === 0 && !outcome.timedOut && !st.isError && st.lastStepReason === 'tool-calls';
+    const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError || incomplete;
     // The provider error the CLI logged for this session, if the turn ended without succeeding.
     const providerError = failed ? readProviderError(providerLog, logOffset, st.sessionId ?? built.sessionId ?? null) : null;
     if (providerError) {
@@ -257,7 +259,9 @@ export const adapter: RuntimeAdapter = {
     const classified = failed ? classifyError(outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) : null;
     // A real classification (auth, quota, transient) wins; the provider's own message beats the
     // generic `unknown` a silent CLI retry leaves behind.
-    const error = failed
+    const error = incomplete
+      ? { code: 'incomplete_turn', family: 'transient_upstream' as const, message: truncate(providerError ? `opencode ended mid-work; provider ${providerError.provider ?? 'unknown'}: ${providerError.message}` : 'opencode exited after a tool-calls step without finishing the turn', 4000) }
+      : failed
       ? (classified && classified.family !== 'unknown' ? classified : providerError
         ? { code: 'provider_error', family: 'unknown' as const, message: truncate(`provider ${providerError.provider ?? 'unknown'}: ${providerError.message}`, 4000) }
         : classified ?? { code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'opencode turn failed' })

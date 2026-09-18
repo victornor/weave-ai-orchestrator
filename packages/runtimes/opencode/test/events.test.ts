@@ -31,6 +31,14 @@ describe('opencode run --format json parser', () => {
     expect(state.isError).toBe(false);
   });
 
+  // VS-573: the first three lines of turn-tool-report — the stream as the planner's 2026-09-18 run
+  // left it: the last step finished with `tool-calls` and nothing followed.
+  it('records the last step reason, so a stream cut off after tool-calls is distinguishable', () => {
+    expect(run('turn-cut-off').state.lastStepReason).toBe('tool-calls');
+    expect(run('turn-tool-report').state.lastStepReason).toBe('stop');
+    expect(run('turn-simple').state.lastStepReason).toBe('stop');
+  });
+
   it('normalizes tool use and extracts the fenced report from the last message', () => {
     const { types, state, events } = run('turn-tool-report');
     expect(types).toContain('tool.call');

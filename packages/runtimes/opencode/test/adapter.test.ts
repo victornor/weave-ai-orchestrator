@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -81,3 +81,32 @@ describe('opencode adapter', () => {
     expect(readProviderError(logPath, statSync(logPath).size, SESSION)).toBeNull();
   });
 }, 90_000);
+
+// VS-573: opencode exited 0 after a `tool-calls` step (run 01M2TNG49HM35TZ1GXEGKPHA8Y). A fake
+// `opencode` on PATH replays a recorded stream; nothing here launches the real CLI.
+describe('opencode runTurn ending', () => {
+  const fixture = (name: string): string => fileURLToPath(new URL(`../fixtures/${name}.jsonl`, import.meta.url));
+  async function turn(name: string) {
+    const bin = tmp('ac-bin-'); const cwd = tmp('ac-cwd-'); const configHome = tmp('ac-cfg-');
+    writeFileSync(join(bin, 'opencode'), `#!/bin/sh\ncat ${fixture(name)}\nexit 0\n`);
+    chmodSync(join(bin, 'opencode'), 0o755);
+    return adapter.runTurn({
+      runId: 'r', turnEpoch: 1, cwd, worktree: null, session: { policy: 'reuse', ref: null, isFirstTurn: true },
+      systemPrompt: { text: '', mode: 'skip' }, prompt: 'hi', mcpServers: {},
+      env: { PATH: `${bin}:${process.env['PATH'] ?? ''}` }, options: {}, limits: { timeoutMs: 30_000 },
+      permission: { mode: 'auto' }, model: 'xai/grok-4.6', configHome,
+    } as never, { onSpawn() {}, onEvent() {}, onRaw() {} });
+  }
+
+  it('reports incomplete_turn, a retryable family, when the stream ends on tool-calls', async () => {
+    const r = await turn('turn-cut-off');
+    expect(r.exitCode).toBe(0);
+    expect(r.error).toMatchObject({ code: 'incomplete_turn', family: 'transient_upstream' });
+  });
+
+  it('leaves a turn that ended on stop successful', async () => {
+    const r = await turn('turn-simple');
+    expect(r.error).toBeUndefined();
+    expect(r.finalText).toBe('pong');
+  });
+});

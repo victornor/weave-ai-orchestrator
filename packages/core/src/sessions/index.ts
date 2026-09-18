@@ -12,13 +12,20 @@ export interface SessionRow {
   compactingAt?: string | null; compactingError?: string | null;
   /** The last turn's own context size (its last request), for the automatic compaction policy. */
   lastContextTokens?: number | null;
+  /** VS-542: the MCP tool-list fingerprint this session was started under; null on a row predating the column. */
+  toolContract: string | null;
 }
 
 export interface TurnSession { session: SessionRow; ref: SessionRef | null; isFirstTurn: boolean; stale: boolean; policy: SessionPolicy }
 
 export interface SessionsService {
   active(agentId: string): SessionRow | null;
-  forTurn(agent: { id: string; kind: string; runtimeId: string }, policy: SessionPolicy): TurnSession;
+  /**
+   * VS-542: `contract` is the current tool-list fingerprint for the agent's kind. When it is given
+   * and differs from the session's recorded one, the session is retired and a new one started, so the
+   * runtime fetches the current tool definitions rather than resuming under a stale contract.
+   */
+  forTurn(agent: { id: string; kind: string; runtimeId: string }, policy: SessionPolicy, contract?: string): TurnSession;
   record(sessionId: string, patch: { ref?: SessionRef | null; displayId?: string | null; runId?: string | null; error?: string | null; usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number } | null; contextTokens?: number | null }): void;
   reset(agentId: string, reason: string): SessionRow;
   close(agentId: string): void;
@@ -43,19 +50,28 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
   const get = (agentId: string): SessionRow | null =>
     ctx.db.get<SessionRow>("SELECT * FROM agent_sessions WHERE agent_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1", [agentId]) ?? null;
 
-  const create = (agentId: string, runtimeId: string): SessionRow => {
+  const create = (agentId: string, runtimeId: string, contract: string | null): SessionRow => {
     const id = newId();
     const now = nowIso();
-    ctx.db.insert('agent_sessions', { id, agentId, runtimeId, sessionRefJson: null, displayId: null, status: 'active', turnCount: 0, cumulativeUsageJson: {}, createdAt: now, updatedAt: now });
+    ctx.db.insert('agent_sessions', { id, agentId, runtimeId, sessionRefJson: null, displayId: null, status: 'active', turnCount: 0, cumulativeUsageJson: {}, toolContract: contract, createdAt: now, updatedAt: now });
     return ctx.db.get<SessionRow>('SELECT * FROM agent_sessions WHERE id = ?', [id])!;
   };
 
   const service: SessionsService = {
     active: get,
 
-    forTurn(agent, policy) {
+    forTurn(agent, policy, contract) {
       let session = get(agent.id);
       let stale = false;
+      // VS-542: the runtime fixed its tool definitions when this session started, so a contract
+      // change since then cannot reach it by resuming. Retire it and start fresh so the next spawn
+      // fetches the current definitions. A null (pre-column) fingerprint is treated as different.
+      if (session && contract !== undefined && session.toolContract !== contract) {
+        ctx.db.update('agent_sessions', session.id, { status: 'stale', updatedAt: nowIso() });
+        log.info({ agentId: agent.id, had: session.toolContract, now: contract }, 'tool contract changed; starting a new session');
+        session = null;
+        stale = true;
+      }
       if (session && policy === 'persistent') {
         const idleDays = (Date.now() - new Date(session.updatedAt).getTime()) / 86_400_000;
         const max = ctx.config.defaults.sessionMaxIdleDays;
@@ -79,7 +95,7 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
         session = null;
         stale = true;
       }
-      if (!session) session = create(agent.id, agent.runtimeId);
+      if (!session) session = create(agent.id, agent.runtimeId, contract ?? null);
       const ref = policy === 'fresh' ? null : (session.sessionRef ?? null);
       return { session, ref, isFirstTurn: session.turnCount === 0 || ref === null, stale, policy };
     },
@@ -111,7 +127,8 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
       if (cur) ctx.db.update('agent_sessions', cur.id, { status: 'closed', lastError: reason, updatedAt: nowIso() });
       const agent = ctx.db.get<{ kind: AgentKind; runtimeId: string }>('SELECT kind, runtime_id FROM agents WHERE id = ?', [agentId]);
       log.info({ agentId, reason }, 'session reset');
-      return create(agentId, agent?.runtimeId ?? modelSettingFor(modelsFor(ctx), agent?.kind ?? 'worker').runtime);
+      const runtimeId = agent?.runtimeId ?? modelSettingFor(modelsFor(ctx), agent?.kind ?? 'worker').runtime;
+      return create(agentId, runtimeId, agent ? ctx.toolContractHash?.(agent.kind) ?? null : null);
     },
 
     close(agentId) {

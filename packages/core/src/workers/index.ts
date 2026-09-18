@@ -219,7 +219,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const agent = get(id);
       await renderHome(ctx, deps, agent);
       ctx.db.update('agents', id, { status: 'active', updatedAt: nowIso() });
-      sessions.forTurn({ id, kind: 'worker', runtimeId: modelSettingFor(modelsFor(ctx), 'worker', ticket).runtime }, role.sessionPolicy);
+      sessions.forTurn({ id, kind: 'worker', runtimeId: modelSettingFor(modelsFor(ctx), 'worker', ticket).runtime }, role.sessionPolicy, ctx.toolContractHash?.('worker'));
       deps().wake.enqueue(id, { source: 'ticket_assigned', reason: `${ticket.identifier}: ${ticket.title}`, payload: { ticketId: ticket.id }, requestedBy: actor });
     } catch (e) {
       // Roll back the row, the home and the worktree; nothing half-created is left behind.
@@ -309,7 +309,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         a = get(a.id);
       }
       await renderHome(ctx, deps, a);
-      sessions.forTurn({ id: a.id, kind: 'weaver', runtimeId: a.runtimeId }, 'persistent');
+      sessions.forTurn({ id: a.id, kind: 'weaver', runtimeId: a.runtimeId }, 'persistent', ctx.toolContractHash?.('weaver'));
       return get(a.id);
     },
 
@@ -361,7 +361,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         const agent = get(id);
         await renderHome(ctx, deps, agent);
         ctx.db.update('agents', id, { status: 'active', updatedAt: nowIso() });
-        sessions.forTurn({ id, kind: 'planner', runtimeId: setting.runtime }, 'persistent');
+        sessions.forTurn({ id, kind: 'planner', runtimeId: setting.runtime }, 'persistent', ctx.toolContractHash?.('planner'));
         deps().planning.setAgent(plan.id, id);
       } catch (e) {
         log.error({ err: String(e), planId }, 'planner spawn failed; rolling back');
@@ -440,7 +440,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       await renderHome(ctx, deps, agent);
       ctx.db.update('agents', id, { status: 'active', updatedAt: nowIso() });
       const setting = modelSettingFor(modelsFor(ctx), 'session', null, { workerModelId: optionId });
-      sessions.forTurn({ id, kind: 'session', runtimeId: setting.runtime }, 'persistent');
+      sessions.forTurn({ id, kind: 'session', runtimeId: setting.runtime }, 'persistent', ctx.toolContractHash?.('session'));
 
       const created = get(id);
       recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.spawn', 'agent', id, { roleId: role.id, projectId: project.id, kind: 'session' });

@@ -218,6 +218,32 @@ describe('run engine', () => {
     expect(runtime.inputs[1]!.turnEpoch).toBe(2);
   });
 
+  it('resumes while the tool contract is unchanged (VS-542)', async () => {
+    h.ctx.toolContractHash = () => 'contract-A';
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'one' });
+    await runOnce();
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'two' });
+    await runOnce();
+
+    expect(runtime.inputs[1]!.session.isFirstTurn).toBe(false);
+    expect(runtime.inputs[1]!.session.ref).toEqual(runtime.inputs[0]!.session.ref ?? expect.anything());
+  });
+
+  it('starts a fresh session when the tool contract changes, so the new schema is fetched (VS-542)', async () => {
+    h.ctx.toolContractHash = () => 'contract-A';
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'one' });
+    await runOnce();
+    h.ctx.toolContractHash = () => 'contract-B';
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'two' });
+    await runOnce();
+
+    expect(runtime.inputs).toHaveLength(2);
+    expect(runtime.inputs[0]!.session.isFirstTurn).toBe(true);
+    expect(runtime.inputs[1]!.session.isFirstTurn).toBe(true);
+    expect(runtime.inputs[1]!.session.ref).toBeNull();
+    expect(runtime.inputs[1]!.systemPrompt.mode).toBe('inject');
+  });
+
   it('passes the MCP endpoint, the run token and the AC_* environment to the runtime', async () => {
     h.services.wake!.enqueue(h.conductorId, { source: 'system', reason: 'digest' });
     const run = await runOnce();

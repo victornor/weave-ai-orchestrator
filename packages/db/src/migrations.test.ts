@@ -1804,4 +1804,34 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0054_session_tool_contract (VS-542)', () => {
+    it('adds a nullable tool_contract to agent_sessions and leaves existing rows without one', () => {
+      const path = join(dir, 'session-tool-contract.sqlite');
+      const before = openDbAsOf(path, '0053_agent_worker_model.sql');
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      before.insert('agents', {
+        id: 'a-worker', workspaceId: 'w1', kind: 'worker', name: 'Worker', runtimeId: 'claude',
+        homePath: '/tmp/worker', createdAt: 't0', updatedAt: 't0',
+      });
+      before.run(
+        `INSERT INTO agent_sessions (id, agent_id, runtime_id, status, turn_count, created_at, updated_at)
+         VALUES ('s-legacy', 'a-worker', 'claude', 'active', 1, 't0', 't0')`);
+      before.close();
+
+      const db = openDb(path);
+      const cols = db.all<{ name: string }>('PRAGMA table_info(agent_sessions)').map((c) => c.name);
+      expect(cols).toContain('tool_contract');
+      expect(db.get<{ toolContract: string | null }>('SELECT tool_contract AS toolContract FROM agent_sessions WHERE id = ?', ['s-legacy']))
+        .toMatchObject({ toolContract: null });
+      db.insert('agent_sessions', {
+        id: 's-new', agentId: 'a-worker', runtimeId: 'claude', status: 'active', turnCount: 0,
+        toolContract: 'abc123', createdAt: 't0', updatedAt: 't0',
+      });
+      expect(db.get('SELECT tool_contract AS toolContract FROM agent_sessions WHERE id = ?', ['s-new'])).toMatchObject({ toolContract: 'abc123' });
+      db.close();
+    });
+  });
 });

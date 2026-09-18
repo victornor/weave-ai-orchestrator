@@ -86,6 +86,14 @@ export interface WorkspaceContext {
   isolated: boolean;
   /** The daemon's own resolved config directory — where an isolated daemon's own credentials live. */
   daemonConfigDir: string;
+  /**
+   * VS-542: the fingerprint of the MCP tool list this workspace serves an agent kind. Computed by
+   * the server once the workspace's plugins have loaded (core cannot reach the tool registry), so it
+   * is optional — a context without one simply skips the session tool-contract check. A session
+   * records the fingerprint it started under; a changed one retires it so the new schema reaches the
+   * agent on its next turn.
+   */
+  toolContractHash?: (kind: import('@weave-ai/shared').AgentKind) => string;
   /** Persist the (possibly updated) workspace.yaml. */
   saveConfig(next: WorkspaceConfig): Promise<void>;
 }

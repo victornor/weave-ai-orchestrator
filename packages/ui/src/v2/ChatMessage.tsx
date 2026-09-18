@@ -7,7 +7,7 @@
  * It also carries the two ends of VS-447's navigation: a quiet "Jump to response" under an inbound
  * message, and a quoted weaver reply that jumps back to the message it answers. Both call the one
  * `onJumpTo` the conversation owns, so the scroll and highlight live in the list and this component
- * stays shared — the Plan modal inherits the behaviour when VS-442 puts its conversation on it.
+ * stays shared — a plan tab inherits the behaviour through its conversation (VS-442).
  */
 import { useMemo } from 'react';
 import type { ThreadMessage } from '@weave-ai/shared';

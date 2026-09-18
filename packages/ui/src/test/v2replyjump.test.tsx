@@ -229,6 +229,7 @@ vi.mock('../api/hooks', () => ({
   useTicketDocumentById: () => ({ data: undefined, isLoading: false, isError: true }),
   useStartOrResumePlan: () => ({ mutate: vi.fn() }),
   usePlans: () => ({ data: { plans: [] } }),
+  usePlansMany: () => ({ plans: [], isLoading: false }),
   useCreatePlan: () => ({ mutate: vi.fn(), isPending: false }),
   useActivatePlan: () => ({ mutate: vi.fn(), isPending: false }),
   useRenamePlan: () => ({ mutate: vi.fn(), isPending: false }),

@@ -1,6 +1,6 @@
 /**
  * The one conversation view (web-v2/chat): the scrolling message list, each turn's trace, and the
- * live working section, shared by the weaver chat (`ChatPage`) and the Plan modal's planner chat so
+ * live working section, shared by the weaver chat (`ChatPage`) and a plan tab's planner chat so
  * the two read identically (VS-442).
  *
  * It owns no thread of its own. The caller passes the rows (`chatRows`), the live run to follow, and

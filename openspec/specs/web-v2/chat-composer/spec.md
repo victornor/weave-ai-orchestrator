@@ -134,7 +134,8 @@ The listening waveform drawn by the composer's dictation meter SHALL NOT determi
 element in the page. The element that allocates the meter's space SHALL be sized by the surrounding
 layout and by CSS alone; the canvas's backing-store dimensions SHALL be derived from that box and
 SHALL NOT feed back into it. In particular, growing the canvas's `width` or `height` attribute SHALL
-NOT change the element's laid-out width or height.
+NOT change the element's laid-out width or height. This SHALL hold in every host of the composer,
+including the weaver chat and a plan tab.
 
 #### Scenario: The meter holds its width across frames
 
@@ -144,14 +145,14 @@ NOT change the element's laid-out width or height.
 
 #### Scenario: The meter holds its width in any host
 
-- **WHEN** the meter is rendered in a host that does not itself clamp the composer's width — as in
-  the Plan modal — and the backing store is resized every frame
+- **WHEN** the meter is rendered in a host that does not itself clamp the composer's width and the
+  backing store is resized every frame
 - **THEN** the meter and its ancestors do not widen, on any browser engine
 
 #### Scenario: A wide meter does not widen the composer
 
-- **WHEN** the listening waveform appears in the composer inside the Plan modal
-- **THEN** the conversation pane's width is unchanged from before dictation started
+- **WHEN** the listening waveform appears in a plan tab's composer
+- **THEN** the tab's conversation pane width is unchanged from before dictation started
 
 ### Requirement: A typed send submits the composer's own draft, independent of the dictation session
 

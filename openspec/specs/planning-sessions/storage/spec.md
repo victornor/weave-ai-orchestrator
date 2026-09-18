@@ -2,7 +2,7 @@
 
 ## Purpose
 Defines the persistent record of a captain's draft plans — project-scoped, pre-ticket planning
-sessions and their ordered lists of draft tickets — so that closing and reopening the planning modal
+sessions and their ordered lists of draft tickets — so that leaving and returning to the weaver chat
 always resumes the same conversations and the same lists, for one plan or several at once, never a
 fresh one and never losing an unfinished one.
 
@@ -10,15 +10,13 @@ fresh one and never losing an unfinished one.
 
 ### Requirement: A draft plan persists across the modal closing and reopening
 
-The system SHALL persist a plan's conversation and its draft list independently of whether the
-planning modal is open and independently of which of the project's plan tabs is focused. Closing the
-modal, switching to another plan's tab, and opening the modal again on another device SHALL NOT
-discard or alter any plan.
+The system SHALL persist a plan's conversation and its draft list independently of whether the weaver
+chat is open and independently of which of the project's plan tabs is focused. Switching tabs,
+leaving the chat, and opening it again on another device SHALL NOT discard or alter any plan.
 
 #### Scenario: Reopening after closing shows the same state
 
-- **WHEN** captain closes the Plan modal with a `drafting` plan containing drafts, then reopens it
-  later
+- **WHEN** captain leaves the chat with a `drafting` plan containing drafts, then returns to it later
 - **THEN** the same conversation history and the same drafts, in the same order, are shown for that
   plan
 
@@ -31,9 +29,9 @@ discard or alter any plan.
 
 #### Scenario: Another device shows the same plans
 
-- **WHEN** captain opens the Plan modal for a project on a second device
-- **THEN** the same drafting plans are listed and each shows the same conversation history and
-  drafts as on the first device
+- **WHEN** captain opens the chat for a project on a second device
+- **THEN** the same drafting plans are listed as tabs and each shows the same conversation history
+  and drafts as on the first device
 
 ### Requirement: A draft ticket carries the fields needed to create a real ticket from it
 

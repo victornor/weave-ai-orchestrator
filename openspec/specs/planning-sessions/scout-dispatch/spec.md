@@ -1,7 +1,7 @@
 # planning-sessions/scout-dispatch Specification
 
 ## Purpose
-Lets a scout draft run as a real ticket before its plan is submitted — from the Plan modal, by
+Lets a scout draft run as a real ticket before its plan is submitted — from the plan's tab, by
 captain, or from the planning conversation, by the planning agent that drafted it — with its report
 routed to that planning agent instead of to the weaver, so a plan's own scouting can inform the plan
 while it is still being written.

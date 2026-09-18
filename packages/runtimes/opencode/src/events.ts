@@ -21,6 +21,11 @@ export interface OpenCodeParseState {
   costUsd: number | null;
   isError: boolean;
   errorMessage: string | null;
+  /**
+   * VS-573: `part.reason` of the last `step_finish`. `tool-calls` means the model asked for another
+   * step; a stream that ends there was cut off (opencode swallows the provider error and exits 0).
+   */
+  lastStepReason: string | null;
 }
 
 type Json = Record<string, unknown>;
@@ -46,7 +51,7 @@ const EDIT_TOOLS = new Set(['edit', 'write', 'patch', 'multiedit']);
  * `runtime.raw`, which is the honest record that something arrived we do not model.
  */
 export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: false }) {
-  const state: OpenCodeParseState = { sessionId: null, finalText: null, usage: null, firstRequest: null, contextTokens: null, costUsd: null, isError: false, errorMessage: null };
+  const state: OpenCodeParseState = { sessionId: null, finalText: null, usage: null, firstRequest: null, contextTokens: null, costUsd: null, isError: false, errorMessage: null, lastStepReason: null };
   const textByMessage = new Map<string, string[]>();
   let lastMessageId: string | null = null;
   let announced = false;
@@ -91,6 +96,7 @@ export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: fal
         out.push(...tool(part, ts));
         break;
       case 'step_finish': {
+        state.lastStepReason = str(part?.['reason']);
         const t = obj(part?.['tokens']);
         if (t) {
           const cache = obj(t['cache']);

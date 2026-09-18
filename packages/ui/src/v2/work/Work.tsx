@@ -5,7 +5,7 @@
  * top-right, and the worker role on its own bottom row under a hairline.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { openspecArchive, projectLabel, TICKET_KINDS, TICKET_PRIORITIES, type Ticket, type TicketKind, type TicketPriority, type WorkerModelOption } from '@weave-ai/shared';
+import { openspecArchive, projectLabel, TICKET_KINDS, TICKET_PRIORITIES, type PlanOrigin, type Ticket, type TicketKind, type TicketPriority, type WorkerModelOption } from '@weave-ai/shared';
 import { workerPauseDetail } from '@weave-ai/render';
 import { V2Page } from '../V2Page';
 import { Button } from '../../components/Button';
@@ -16,11 +16,12 @@ import { WorkerModelTag, workerModelTagLabel } from '../../components/WorkerMode
 import { SkeletonRows } from '../../components/Skeleton';
 import { EmptyState, ErrorState } from '../../components/States';
 import { useWs } from '../../api/context';
-import { useSearchParams, useGo } from '../../app/link';
+import { A, useSearchParams, useGo } from '../../app/link';
 import {
   useCreateTicket,
   useDecisions,
   useModels,
+  usePlanOrigins,
   useProjects,
   useRoles,
   useRuns,
@@ -39,9 +40,12 @@ import {
   foldV2Board,
   highlightSegments,
   liveWorkersByTicket,
+  mergeCardStates,
   needsYouTicketIds,
+  ticketAssigneeLabel,
   v2ColumnStatusOf,
   v2ShownFinished,
+  type MergeCardState,
   type V2BoardColumn,
 } from './board';
 import { useFlipList } from './flip';
@@ -64,7 +68,8 @@ interface WorkRow {
   ticket: Ticket;
   projectLabel: string | null;
   projectColor: string | null;
-  workerName: string | null;
+  /** VS-550: the live worker's identity while one holds the ticket, else the role that did it. */
+  assigneeLabel: string;
   needsYou: boolean;
   live: boolean;
   /** The line under the worker: the worker's current activity, its last run summary, or "Working". */
@@ -73,6 +78,20 @@ interface WorkRow {
   tests: { passed: number; total: number } | null;
   /** Why the ticket's worker is paused, when one is and it is not live. */
   pausedFor: string | null;
+  /** VS-550: landing/waiting state for a `merging` ticket, else null. */
+  merge: MergeCardState | null;
+  /** VS-550: the plan this ticket was created from, else null. */
+  plan: PlanOrigin | null;
+}
+
+/** The label on a `merging` card: what a landing ticket waits on, or a waiting ticket's position. */
+function mergeText(merge: MergeCardState): string {
+  return merge.state === 'landing' ? `landing · ${mergeWaitLabel(merge.wait) ?? 'merging'}` : `queued · #${merge.position}`;
+}
+
+/** VS-550: the plan a ticket came from, and whether it was an early dispatch or filed at submission. */
+function planText(plan: PlanOrigin): string {
+  return `${plan.planTitle ?? 'untitled plan'} · ${plan.dispatched ? 'dispatched while drafting' : 'filed at submission'}`;
 }
 
 export function V2WorkScreen(): React.ReactElement {
@@ -105,6 +124,7 @@ export function V2WorkScreen(): React.ReactElement {
   const runs = useRuns({ limit: 100 });
   const decisions = useDecisions({ status: 'open', owner: 'human' });
   const models = useModels();
+  const planOrigins = usePlanOrigins();
   const workerOptions = models.data?.workerOptions;
 
   const activeQuery = debouncedQ.trim();
@@ -147,6 +167,11 @@ export function V2WorkScreen(): React.ReactElement {
     for (const w of workers.data ?? []) if (w.ticketId) m.set(w.ticketId, w.name);
     return m;
   }, [workers.data]);
+  // VS-550: the role a ticket's `assigneeRoleId` names, and the merge-queue state of the loaded
+  // tickets, are what let a finished ticket say who did it and a merging one say where it stands.
+  const roleNameById = useMemo(() => new Map((roles.data ?? []).map((r) => [r.id, r.name])), [roles.data]);
+  const mergeStates = useMemo(() => mergeCardStates(tickets.data ?? []), [tickets.data]);
+  const planOriginByTicket = planOrigins.data ?? new Map<string, PlanOrigin>();
 
   const filtered = useMemo(() => {
     const base = filterTickets(sourceTickets, { project, role, kind, priority });
@@ -164,19 +189,26 @@ export function V2WorkScreen(): React.ReactElement {
         // A live worker always carries a line: its current activity, else its last run summary, else
         // a bare "Working" — so the amber working mark is never missing on a running ticket.
         const line = liveWorker ? activityLine(summary, runLine) ?? { label: 'Working', since: null } : null;
+        const roleName = t.assigneeRoleId ? roleNameById.get(t.assigneeRoleId) ?? null : null;
         return {
           ticket: t,
           projectLabel: p ? projectLabel(p) : null,
           projectColor: p ? projectColorVar(p.id, siblingIds) : null,
-          workerName: liveWorker?.name ?? workerNameByTicket.get(t.id) ?? null,
+          assigneeLabel: ticketAssigneeLabel({
+            liveWorkerName: liveWorker?.name ?? null,
+            roleName,
+            historicalWorkerName: workerNameByTicket.get(t.id) ?? null,
+          }),
           needsYou: needsYou.has(t.id),
           live: live.has(t.id),
           line,
           tests: summary?.tests ?? null,
           pausedFor: !liveWorker && pausedWorker ? workerPauseDetail(pausedWorker)?.summary ?? null : null,
+          merge: mergeStates.get(t.id) ?? null,
+          plan: planOriginByTicket.get(t.id) ?? null,
         };
       }),
-    [filtered, projectList, live, paused, activity, runLines, workerNameByTicket, needsYou, siblingIds],
+    [filtered, projectList, live, paused, activity, runLines, workerNameByTicket, roleNameById, mergeStates, planOriginByTicket, needsYou, siblingIds],
   );
 
   const columns = useMemo(
@@ -338,9 +370,22 @@ export function V2WorkScreen(): React.ReactElement {
             Merge queue
           </span>
           <span className="ac-mono min-w-0 truncate text-nano text-text-3" data-v2-merge-strip-line>
-            {strip.landing + strip.waiting > 0
-              ? `${strip.landing} landing · ${strip.waiting} waiting${strip.landing > 0 ? ` · ${mergeWaitLabel(strip.active)}` : ''}${strip.next ? ` · next: ${strip.next.identifier}${strip.next.ahead ? ` (${strip.next.priority}, jumped ahead)` : ''}` : ''}`
-              : 'nothing landing'}
+            {strip.landing + strip.waiting > 0 ? (
+              <>
+                {`${strip.landing} landing`}
+                {strip.landingIdentifiers.map((identifier) => (
+                  <span key={`l-${identifier}`}> <TicketLink ws={ws} identifier={identifier} /></span>
+                ))}
+                {strip.landing > 0 && mergeWaitLabel(strip.active) ? ` · ${mergeWaitLabel(strip.active)}` : ''}
+                {` · ${strip.waiting} waiting`}
+                {strip.waitingIdentifiers.map((identifier) => (
+                  <span key={`w-${identifier}`}> <TicketLink ws={ws} identifier={identifier} /></span>
+                ))}
+                {strip.next ? ' · next: ' : ''}
+                {strip.next ? <TicketLink ws={ws} identifier={strip.next.identifier} /> : null}
+                {strip.next?.ahead ? ` (${strip.next.priority}, jumped ahead)` : ''}
+              </>
+            ) : 'nothing landing'}
           </span>
         </div>
 
@@ -412,6 +457,15 @@ export function V2WorkScreen(): React.ReactElement {
       </div>
       {creating ? <NewTicketDialog onClose={() => setCreating(false)} onCreated={(t) => openTicket(t.identifier)} /> : null}
     </V2Page>
+  );
+}
+
+/** VS-550: an identifier in the merge strip that opens that ticket, so a count is never a dead number. */
+function TicketLink({ ws, identifier }: { ws: string; identifier: string }): React.ReactElement {
+  return (
+    <A to="/w/$ws/tickets/$ticketId" params={{ ws, ticketId: identifier }} className="v2-link flex-none">
+      {identifier}
+    </A>
   );
 }
 
@@ -659,12 +713,33 @@ function WorkCard({
         {tier ? <span className="v2-tag uppercase text-text-3">{tier}</span> : null}
         {row.tests ? <TestTally tests={row.tests} /> : null}
         {row.needsYou ? <span className="v2-tag uppercase text-needs-you">needs you</span> : null}
+        {row.merge ? (
+          <span
+            className={cx('v2-tag uppercase', row.merge.state === 'landing' ? 'text-merging' : 'text-text-3')}
+            data-v2-merge={row.merge.state}
+          >
+            {mergeText(row.merge)}
+          </span>
+        ) : null}
         {archive?.state === 'pending' ? (
           <span className="v2-tag uppercase text-needs-you" data-v2-archive-pending title={archive.pendingPrUrl ?? undefined}>spec archive pending</span>
         ) : null}
       </div>
+      {row.plan ? (
+        <div className="mb-1.5 flex flex-wrap items-center gap-1.5" data-v2-plan-origin={row.plan.dispatched ? 'dispatched' : 'submission'}>
+          <span className="ac-mono ac-truncate text-nano text-text-3" title={row.plan.planTitle ?? 'untitled plan'}>
+            plan · {row.plan.planTitle ?? 'untitled plan'}
+          </span>
+          <span
+            className={cx('v2-tag uppercase', row.plan.dispatched ? 'text-needs-you' : 'text-text-3')}
+            title={planText(row.plan)}
+          >
+            {row.plan.dispatched ? 'dispatched' : 'at submission'}
+          </span>
+        </div>
+      ) : null}
       <div className="flex items-baseline gap-2 border-t border-line-1 pt-1.5">
-        <span className="min-w-0 flex-1 truncate text-micro text-text-2">{row.workerName ?? 'unassigned'}</span>
+        <span className="min-w-0 flex-1 truncate text-micro text-text-2">{row.assigneeLabel}</span>
         <span className="ac-mono flex-none text-nano text-text-3">{ago(ticket.updatedAt)}</span>
       </div>
     </button>
@@ -693,7 +768,17 @@ function PhoneRow({ row, query, onOpen }: { row: WorkRow; query: string; onOpen:
         <div className="mb-1.5 text-body leading-snug text-text-1">
           <Title text={ticket.title} query={query} />
         </div>
-        <div className="text-micro text-text-2">{row.workerName ?? 'unassigned'}</div>
+        <div className="text-micro text-text-2">{row.assigneeLabel}</div>
+        {row.merge ? (
+          <div className={cx('ac-mono mt-1 text-nano', row.merge.state === 'landing' ? 'text-merging' : 'text-text-3')} data-v2-merge={row.merge.state}>
+            {mergeText(row.merge)}
+          </div>
+        ) : null}
+        {row.plan ? (
+          <div className="ac-mono ac-truncate mt-1 text-nano text-text-3" data-v2-plan-origin={row.plan.dispatched ? 'dispatched' : 'submission'} title={planText(row.plan)}>
+            plan · {planText(row.plan)}
+          </div>
+        ) : null}
         {row.line ? (
           <div data-v2-activity className="ac-mono mt-1 flex items-center gap-1.5 text-nano text-text-2">
             <StatusGlyph status="working" size="xs" pulse className="flex-none" />
@@ -776,6 +861,16 @@ function WorkTable({
                     ) : r.pausedFor ? (
                       <span className="ac-mono block truncate text-nano text-text-3">paused · {r.pausedFor}</span>
                     ) : null}
+                    {r.merge ? (
+                      <span className={cx('ac-mono block truncate text-nano', r.merge.state === 'landing' ? 'text-merging' : 'text-text-3')} data-v2-merge={r.merge.state}>
+                        {mergeText(r.merge)}
+                      </span>
+                    ) : null}
+                    {r.plan ? (
+                      <span className="ac-mono block truncate text-nano text-text-3" data-v2-plan-origin={r.plan.dispatched ? 'dispatched' : 'submission'}>
+                        plan · {planText(r.plan)}
+                      </span>
+                    ) : null}
                   </div>
                   <span className="flex-none" style={{ width: 88 }}>
                     <Badge>{r.ticket.kind}</Badge>
@@ -787,7 +882,7 @@ function WorkTable({
                     {r.ticket.priority}
                   </span>
                   <span className="min-w-0 flex-none truncate text-micro text-text-2" style={{ width: 160 }}>
-                    {r.workerName ?? 'unassigned'}
+                    {r.assigneeLabel}
                   </span>
                   <span className="ac-mono flex-none text-right text-nano text-text-3" style={{ width: 44 }}>
                     {ago(r.ticket.updatedAt)}

@@ -5,7 +5,9 @@ import { ticket } from './factories';
 import {
   foldV2Board,
   highlightSegments,
+  mergeCardStates,
   needsYouTicketIds,
+  ticketAssigneeLabel,
   v2ColumnFor,
   v2ShownFinished,
   type V2BoardColumnKey,
@@ -130,5 +132,39 @@ describe('title highlights', () => {
 
   it('leaves the text alone for an empty query', () => {
     expect(highlightSegments('nothing', '')).toEqual([{ text: 'nothing', match: false }]);
+  });
+});
+
+describe('assignee label (VS-550)', () => {
+  it('prefers the live worker, then the role, then a historical worker, then unassigned', () => {
+    expect(ticketAssigneeLabel({ liveWorkerName: 'Engineer #1', roleName: 'Platform Engineer', historicalWorkerName: 'Old #2' })).toBe('Engineer #1');
+    expect(ticketAssigneeLabel({ liveWorkerName: null, roleName: 'Platform Engineer', historicalWorkerName: 'Old #2' })).toBe('Platform Engineer');
+    expect(ticketAssigneeLabel({ liveWorkerName: null, roleName: null, historicalWorkerName: 'Old #2' })).toBe('Old #2');
+    expect(ticketAssigneeLabel({ liveWorkerName: null, roleName: null, historicalWorkerName: null })).toBe('unassigned');
+  });
+});
+
+describe('merge card states (VS-550)', () => {
+  it('reads landing from mergeStartedAt and gives a waiting ticket its queue position', () => {
+    const states = mergeCardStates([
+      ticket({ id: 'l', identifier: 'ACME-1', status: 'merging', projectId: 'p1', mergeStartedAt: '2026-09-10T00:00:00.000Z', delivery: { ciState: 'pending', ciStateAt: '2026-09-10T00:01:00.000Z' } }),
+      ticket({ id: 'w1', identifier: 'ACME-2', status: 'merging', projectId: 'p1', mergeStartedAt: null, priority: 'medium', mergeQueuedAt: '2026-09-10T00:05:00.000Z' }),
+      ticket({ id: 'w2', identifier: 'ACME-3', status: 'merging', projectId: 'p1', mergeStartedAt: null, priority: 'critical', mergeQueuedAt: '2026-09-10T00:06:00.000Z' }),
+      ticket({ id: 'other', identifier: 'ACME-4', status: 'in_review', projectId: 'p1' }),
+    ]);
+    expect(states.get('l')).toMatchObject({ state: 'landing', position: null, wait: { phase: 'ci', since: '2026-09-10T00:01:00.000Z' } });
+    // The critical ticket is admitted first, so it holds position 1.
+    expect(states.get('w2')).toMatchObject({ state: 'waiting', position: 1 });
+    expect(states.get('w1')).toMatchObject({ state: 'waiting', position: 2 });
+    expect(states.has('other')).toBe(false);
+  });
+
+  it('counts positions per project, not across the whole board', () => {
+    const states = mergeCardStates([
+      ticket({ id: 'a', identifier: 'ACME-1', status: 'merging', projectId: 'p1', mergeStartedAt: null, mergeQueuedAt: '2026-09-10T00:05:00.000Z' }),
+      ticket({ id: 'b', identifier: 'ACME-2', status: 'merging', projectId: 'p2', mergeStartedAt: null, mergeQueuedAt: '2026-09-10T00:06:00.000Z' }),
+    ]);
+    expect(states.get('a')?.position).toBe(1);
+    expect(states.get('b')?.position).toBe(1);
   });
 });

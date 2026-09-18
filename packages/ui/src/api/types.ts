@@ -37,6 +37,7 @@ import type {
   UsageBillingMix,
   AuthSessionKind,
   PresentationConfig,
+  PlanOrigin,
 } from '@weave-ai/shared';
 export type { TicketAttachment } from '@weave-ai/shared';
 
@@ -235,6 +236,8 @@ export interface TicketDetail {
   openspecState: OpenSpecState | null;
   /** Where the ticket stands in its project's merge queue; `position` is null unless it is waiting. */
   mergeQueue: { position: number | null; concurrency: number };
+  /** VS-550: the plan this ticket was created from, or null. */
+  plan: PlanOrigin | null;
   usage?: UsageTotals;
 }
 

@@ -262,15 +262,17 @@ export function mergeWaitLabel(wait: MergeWait | null, now: number = Date.now())
   return span ? `${phase} ${span}` : phase;
 }
 
-export function mergeStrip(tickets: readonly MergeStripTicket[]): { landing: number; waiting: number; active: MergeWait | null; next: MergeStripNext | null } {
+export function mergeStrip(tickets: readonly MergeStripTicket[]): { landing: number; waiting: number; active: MergeWait | null; next: MergeStripNext | null; landingIdentifiers: string[]; waitingIdentifiers: string[] } {
   let landing = 0;
   let active: MergeWait | null = null;
   let activeSince: string | null = null;
+  const landingIdentifiers: string[] = [];
   const waiting: MergeStripTicket[] = [];
   for (const t of tickets) {
     if (t.status !== 'merging') continue;
     if (!t.mergeStartedAt) { waiting.push(t); continue; }
     landing++;
+    landingIdentifiers.push(t.identifier);
     if (activeSince === null || t.mergeStartedAt < activeSince) {
       activeSince = t.mergeStartedAt;
       const d = (t.delivery ?? {}) as Record<string, unknown>;
@@ -281,7 +283,10 @@ export function mergeStrip(tickets: readonly MergeStripTicket[]): { landing: num
       };
     }
   }
-  const nextTicket = [...waiting].sort(compareMergeQueue)[0] ?? null;
+  // The waiting order is the queue's admission rule, so the identities the strip prints are in the
+  // order they will actually land (VS-550: the strip must reach the tickets it counts).
+  const orderedWaiting = [...waiting].sort(compareMergeQueue);
+  const nextTicket = orderedWaiting[0] ?? null;
   const next: MergeStripNext | null = nextTicket
     ? {
         identifier: nextTicket.identifier,
@@ -289,5 +294,5 @@ export function mergeStrip(tickets: readonly MergeStripTicket[]): { landing: num
         ahead: waiting.some((w) => w !== nextTicket && mergeQueueJoinedEarlier(w, nextTicket) && mergePriorityRank(w.priority) > mergePriorityRank(nextTicket.priority)),
       }
     : null;
-  return { landing, waiting: waiting.length, active, next };
+  return { landing, waiting: waiting.length, active, next, landingIdentifiers, waitingIdentifiers: orderedWaiting.map((t) => t.identifier) };
 }

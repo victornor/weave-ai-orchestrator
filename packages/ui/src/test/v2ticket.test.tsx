@@ -1,7 +1,7 @@
 /** The V2 ticket page: the header, the tabs and their data, the folded knowledge usage, the actions. */
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, Decision, Role, Ticket } from '@weave-ai/shared';
+import type { Agent, Decision, PlanOrigin, Role, Ticket } from '@weave-ai/shared';
 import type { UsageTotals } from '../api/types';
 import { ToastProvider } from '../components/Toast';
 import { agent, decision, project, ticket, workProduct } from './factories';
@@ -25,6 +25,9 @@ const state = vi.hoisted(() => ({
   answerError: null as Error | null,
   go: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   workers: [] as Array<Agent & { activity?: unknown; tests?: unknown }>,
+  worker: null as Agent | null,
+  role: null as Role | null,
+  plan: null as PlanOrigin | null,
   onEvent: undefined as ((e: unknown) => void) | undefined,
 }));
 
@@ -55,14 +58,15 @@ vi.mock('../api/hooks', () => ({
           data: {
             ticket: state.ticket,
             project: project({ id: 'p1', slug: 'web', name: 'web' }),
-            worker: agent({ id: 'a1', name: 'Backend Engineer #7' }),
-            role: null,
+            worker: state.worker,
+            role: state.role,
             blockers: [],
             children: [],
             documents: state.documents,
             workProducts: state.products,
             openspecState: null,
             mergeQueue: { position: null, concurrency: 1 },
+            plan: state.plan,
             usage,
           },
         },
@@ -111,6 +115,9 @@ beforeEach(() => {
   state.notFound = false;
   state.search = {};
   state.decisions = [];
+  state.worker = agent({ id: 'a1', name: 'Backend Engineer #7' });
+  state.role = null;
+  state.plan = null;
   state.products = [workProduct({ id: 'wp1', type: 'artifact', externalId: 'overview', title: 'Overview', url: '/api/w/ws1/tickets/tk_42/artifacts/overview/raw' })];
   state.documents = [{ key: 'artifact:overview', revision: 1, updatedAt: '2026-09-01T00:00:00.000Z' }];
   state.patch = vi.fn();
@@ -424,5 +431,34 @@ describe('V2 ticket live status (VS-368)', () => {
   it('shows no live line without a live worker', () => {
     renderScreen();
     expect(document.querySelectorAll('[data-v2-activity]')).toHaveLength(0);
+  });
+});
+
+describe('V2 ticket page assignee label and plan origin (VS-550)', () => {
+  it('names the role once the worker has finished', () => {
+    state.worker = agent({ id: 'a1', name: 'Backend Engineer #7', status: 'done' });
+    state.role = { id: 'r1', name: 'Platform Engineer' } as Role;
+    renderScreen();
+    expect(document.querySelector('[data-v2-assignee]')?.textContent).toBe('Platform Engineer');
+  });
+
+  it('keeps a live worker’s identity rather than its role name', () => {
+    state.worker = agent({ id: 'a1', name: 'Backend Engineer #7', status: 'running' });
+    state.role = { id: 'r1', name: 'Platform Engineer' } as Role;
+    renderScreen();
+    expect(document.querySelector('[data-v2-assignee]')?.textContent).toBe('Backend Engineer #7');
+  });
+
+  it('shows the plan a dispatched ticket came from', () => {
+    state.plan = { ticketId: 'tk_42', planId: 'plan1', planTitle: 'Redesign the board', planStatus: 'drafting', dispatched: true };
+    renderScreen();
+    const tag = document.querySelector('[data-v2-plan-origin="dispatched"]') as HTMLElement;
+    expect(tag.textContent).toContain('Redesign the board');
+    expect(tag.textContent).toContain('dispatched while drafting');
+  });
+
+  it('shows nothing extra for a ticket with no plan', () => {
+    renderScreen();
+    expect(document.querySelector('[data-v2-plan-origin]')).toBeNull();
   });
 });

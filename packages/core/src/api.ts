@@ -978,6 +978,14 @@ export interface PlanningService {
    */
   findDraftByTicket(ticketId: string): { draftId: string; planId: string } | null;
   /**
+   * VS-550: the plan a ticket was created from, read back through `plan_drafts.created_ticket_id`,
+   * or null for a ticket with no such draft. `dispatched` distinguishes a draft that became the
+   * ticket while its plan was still `drafting` from one linked at submission.
+   */
+  planOriginForTicket(ticketId: string): S.PlanOrigin | null;
+  /** VS-550: every ticket in this workspace with a plan origin, for the work page's board. */
+  listPlanOrigins(): S.PlanOrigin[];
+  /**
    * VS-517: dispatch a `scout` draft in the caller's own `drafting` plan as a real ticket immediately,
    * without waiting for plan submission. Refused for any other draft kind, a draft not in `pending`
    * status, or a plan that is not `drafting`. Links the draft to the created ticket the same way

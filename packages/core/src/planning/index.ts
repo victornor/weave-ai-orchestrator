@@ -5,7 +5,7 @@
  * See `openspec/changes/vs-398-captain-can-t-plan-a-large-feature-inter`.
  */
 import { newId, nowIso } from '@weave-ai/db';
-import { OcError, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, PLAN_TITLE_MAX_WORDS, TICKET_PRIORITIES, type Plan, type PlanDraft, type PlanDraftKind, type PlanDraftTier, type PlanSummary, type PlanTitleSource, type TicketPriority } from '@weave-ai/shared';
+import { OcError, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, PLAN_TITLE_MAX_WORDS, TICKET_PRIORITIES, type Plan, type PlanDraft, type PlanDraftKind, type PlanDraftTier, type PlanOrigin, type PlanStatus, type PlanSummary, type PlanTitleSource, type TicketPriority } from '@weave-ai/shared';
 import type { Actor, CoreServices, PlanDraftInput, PlanDraftPatch, PlanningService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { tx } from '../tickets/tx.js';
@@ -18,6 +18,34 @@ function isTier(v: unknown): v is PlanDraftTier {
 }
 function isPriority(v: unknown): v is TicketPriority {
   return (TICKET_PRIORITIES as readonly string[]).includes(String(v));
+}
+
+/** The columns a plan origin reads, aliased to the `PlanOrigin` shape. */
+const ORIGIN_COLUMNS = 'd.created_ticket_id AS ticketId, p.id AS planId, p.title AS planTitle, p.status AS planStatus, p.submitted_at AS submittedAt, t.created_at AS ticketCreatedAt';
+
+interface PlanOriginRow {
+  ticketId: string;
+  planId: string;
+  planTitle: string | null;
+  planStatus: PlanStatus;
+  submittedAt: string | null;
+  ticketCreatedAt: string;
+}
+
+/**
+ * VS-550: a draft becomes a ticket either by the planner dispatching a scout while the plan is still
+ * `drafting`, or when the weaver creates it after submission. The dispatch case predates the plan's
+ * `submitted_at`; a plan with none is still drafting (or was discarded mid-dispatch), which is also
+ * an early dispatch. Both compared timestamps are set once and never edited.
+ */
+function toOrigin(row: PlanOriginRow): PlanOrigin {
+  return {
+    ticketId: row.ticketId,
+    planId: row.planId,
+    planTitle: row.planTitle,
+    planStatus: row.planStatus,
+    dispatched: row.submittedAt === null || Date.parse(row.ticketCreatedAt) < Date.parse(row.submittedAt),
+  };
 }
 
 /** VS-477: a tab title is trimmed, whitespace-collapsed and stripped of wrapping quotes; an auto title is capped at six words. */
@@ -314,6 +342,22 @@ export function createPlanningService(ctx: WorkspaceContext, deps: () => CoreSer
     findDraftByTicket(ticketId) {
       const row = db.get<{ id: string; planId: string }>('SELECT id, plan_id FROM plan_drafts WHERE created_ticket_id = ?', [ticketId]);
       return row ? { draftId: row.id, planId: row.planId } : null;
+    },
+
+    planOriginForTicket(ticketId) {
+      const row = db.get<PlanOriginRow>(
+        `SELECT ${ORIGIN_COLUMNS} FROM plan_drafts d JOIN plans p ON p.id = d.plan_id JOIN tickets t ON t.id = d.created_ticket_id WHERE d.created_ticket_id = ? AND p.workspace_id = ? LIMIT 1`,
+        [ticketId, ws],
+      );
+      return row ? toOrigin(row) : null;
+    },
+
+    listPlanOrigins() {
+      const rows = db.all<PlanOriginRow>(
+        `SELECT ${ORIGIN_COLUMNS} FROM plan_drafts d JOIN plans p ON p.id = d.plan_id JOIN tickets t ON t.id = d.created_ticket_id WHERE d.created_ticket_id IS NOT NULL AND p.workspace_id = ? ORDER BY t.created_at DESC, t.id`,
+        [ws],
+      );
+      return rows.map(toOrigin);
     },
 
     dispatchDraft(actor, draftId) {

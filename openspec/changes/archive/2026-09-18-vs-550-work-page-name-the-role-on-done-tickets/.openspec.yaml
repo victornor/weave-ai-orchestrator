@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-18
+goal: "Work page: name the role on done tickets, show the merge queue order, and
+  mark planner-dispatched tickets"

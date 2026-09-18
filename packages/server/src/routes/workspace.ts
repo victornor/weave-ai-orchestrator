@@ -64,6 +64,12 @@ export function workspaceRoutes(deps: AppDeps): Hono<AppEnv> {
   });
 
   app.get('/briefing', (c) => c.json(c.get('ws').services.briefing.snapshot()));
+  /**
+   * VS-550: every ticket in this workspace created from a plan draft, with the plan it came from and
+   * whether it was an early dispatch. Workspace-scoped because the work page shows several projects
+   * at once and reads it once for the whole board.
+   */
+  app.get('/plan-origins', (c) => c.json({ origins: c.get('ws').services.planning.listPlanOrigins() }));
   app.post('/transcribe', (c) => transcribe(c as never, deps));
 
   return app;

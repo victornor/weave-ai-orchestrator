@@ -241,6 +241,30 @@ describe('planning (VS-398)', () => {
     expect(planning.findDraftByTicket('tkt-1')).toEqual({ draftId: draft.id, planId: plan.id });
   });
 
+  it('reads a ticket plan origin, distinguishing an early dispatch from a submission-time ticket (VS-550)', () => {
+    const insertTicket = (id: string, number: number, createdAt: string): void =>
+      h.ctx.db.insert('tickets', { id, workspaceId: h.workspaceId, projectId: h.projectId, number, identifier: `TST-${id}`, kind: 'scout', title: id, createdByKind: 'human', createdAt, updatedAt: createdAt });
+    const drafting = startPlan();
+    const earlyDraft = addDraft(drafting.id, { title: 'Early scout', kind: 'scout' });
+    insertTicket('tkt-early', 901, '2000-01-01T00:00:00.000Z');
+    planning.linkDraft(earlyDraft.id, { ticketId: 'tkt-early' });
+
+    const submitted = startPlan();
+    const before = addDraft(submitted.id, { title: 'Dispatched before submit' });
+    const after = addDraft(submitted.id, { title: 'Filed at submission' });
+    insertTicket('tkt-before', 902, '2000-01-01T00:00:00.000Z');
+    insertTicket('tkt-after', 903, '2999-01-01T00:00:00.000Z');
+    planning.submit(HUMAN, submitted.id);
+    planning.linkDraft(before.id, { ticketId: 'tkt-before' });
+    planning.linkDraft(after.id, { ticketId: 'tkt-after' });
+
+    expect(planning.planOriginForTicket('tkt-1')).toBeNull();
+    expect(planning.planOriginForTicket('tkt-early')).toMatchObject({ planId: drafting.id, planStatus: 'drafting', dispatched: true });
+    expect(planning.planOriginForTicket('tkt-before')).toMatchObject({ planId: submitted.id, planStatus: 'submitted', dispatched: true });
+    expect(planning.planOriginForTicket('tkt-after')).toMatchObject({ planId: submitted.id, planStatus: 'submitted', dispatched: false });
+    expect(planning.listPlanOrigins().map((o) => o.ticketId).sort()).toEqual(['tkt-after', 'tkt-before', 'tkt-early']);
+  });
+
   describe('dispatchDraft (VS-517)', () => {
     const addScout = (planId: string, over: Partial<Parameters<PlanningService['addDraft']>[2]> = {}) =>
       planning.addDraft(HUMAN, planId, { title: 'Scout the auth flow', kind: 'scout', suggestedTier: 'quick', targetRoleId: h.roleId, ...over });

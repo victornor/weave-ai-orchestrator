@@ -606,6 +606,21 @@ export interface PlanDraft {
 }
 
 /**
+ * VS-550: where a ticket came from a plan — the plan it was drafted in, and whether the draft
+ * became this ticket before the plan was submitted (`dispatched`, a planner running its own scout
+ * early) or at submission like every other draft. Read from `plan_drafts.created_ticket_id`; never
+ * stored on the ticket.
+ */
+export interface PlanOrigin {
+  ticketId: string;
+  planId: string;
+  planTitle: string | null;
+  planStatus: E.PlanStatus;
+  /** True when the linked draft was created before the plan was submitted — an early dispatch. */
+  dispatched: boolean;
+}
+
+/**
  * One entry in a workspace's changelog (PLAN §13.6). Derived from an `activity` row at read time, so
  * `summary` and `link` are rendered rather than stored — see `changelogEntry` in `@weave-ai/render`.
  */

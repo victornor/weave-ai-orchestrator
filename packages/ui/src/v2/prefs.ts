@@ -96,3 +96,30 @@ export function writeLiveHeight(px: number | null): void {
     /* private mode */
   }
 }
+
+/**
+ * The Roadmap page's expanded block ids (VS-548). Because a block is collapsed by default, the
+ * stored set is the *expanded* one: an absent, junk or unreadable value means every block is
+ * collapsed. One browser-wide key is enough because block ids are unique.
+ */
+const ROADMAP_EXPANDED_KEY = 'weave.v2.roadmap.expanded';
+
+export function readRoadmapExpanded(): ReadonlySet<string> {
+  try {
+    const raw = localStorage.getItem(ROADMAP_EXPANDED_KEY);
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    return new Set(parsed.filter((v): v is string => typeof v === 'string'));
+  } catch {
+    return new Set();
+  }
+}
+
+export function writeRoadmapExpanded(ids: ReadonlySet<string>): void {
+  try {
+    localStorage.setItem(ROADMAP_EXPANDED_KEY, JSON.stringify([...ids]));
+  } catch {
+    /* private mode */
+  }
+}

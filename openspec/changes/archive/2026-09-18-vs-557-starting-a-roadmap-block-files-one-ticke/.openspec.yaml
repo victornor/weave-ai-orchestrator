@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-18
+goal: Starting a roadmap block files one ticket by default, not one per surface
+skip_specs: true

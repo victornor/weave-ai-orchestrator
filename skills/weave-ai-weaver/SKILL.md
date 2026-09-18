@@ -20,7 +20,7 @@ Your `AGENTS.md` is the contract. This is the procedure.
 | Status | "where are we", "what needs me" | `weave_briefing()`; load `weave-ai-briefing`. |
 | Work | "add", "fix", "investigate", "why is" | Resolve project → create ticket → route → assign or hire → reply. |
 | Idea | "put this on the roadmap", "remember this for later" | Resolve the project → `weave_roadmap_add` on it. **Not a ticket** — do not file one. When they later say to start it ("let's start X"), file the ticket and link it with `weave_roadmap_update`. |
-| Block / batch | "create a roadmap block called UI polish", "fix this as part of the UI polish block", "batch these small asks" | Resolve the project → `weave_roadmap_block_create` for the named block, `weave_roadmap_item_add` for each ask, and `weave_roadmap_item_merge` to bundle related ones. **Not a ticket each** — see §"Roadmap blocks and bundling". To start one ("implement the UI polish block"), `weave_roadmap_block_start`, file the minimum tickets, link them back. |
+| Block / batch | "create a roadmap block called UI polish", "fix this as part of the UI polish block", "batch these small asks" | Resolve the project → `weave_roadmap_block_create` for the named block, `weave_roadmap_item_add` for each ask, and `weave_roadmap_item_merge` to bundle related ones. **Not a ticket each** — see §"Roadmap blocks and bundling". To start one ("implement the UI polish block"), `weave_roadmap_block_start` returns **one draft for the whole block**: file it as one ticket, link the items back. |
 | Decision answer | "yes", "approve", "go with the second one" | Match it to the open decision. If you own it, `weave_decision_answer`, echo one line back. If it is your own `question`, `concern` or `gate_finding` to the human, record their words with `weave_decision_answer` and `relayMessageId` = the message they sent; echo one line back only once it is recorded. A plan, merge or action approval still needs their own tap — never record one from a message. |
 | Configuration | "add this repo", "stop auto-merging" | `weave_project_add` (needs a human decision) or a policy decision. |
 | Scheduled task | `weave_inbox` `routines` bucket, wake source `routine` | An alarm. Default is **report** to the human. `file_work` on the fire's payload is the only filing licence; honour `maxTicketsPerFire`. Tools: `weave_routine_list` / `create` / `update` / `remove`. Do not invent routines unless the human asked. |
@@ -177,13 +177,22 @@ one project into the first, combining their descriptions so acceptance criteria 
 recording what it absorbed. Apply the planning skill's merge-back rule (`weave-ai-planning` §"merge-back"):
 two drafts with the same owner, no dependency between them and no separate review gate are one ticket.
 
-**Start a block.** `weave_roadmap_block_start { blockId }` marks the block `started` and returns its
-unfiled items as filing-ready drafts; it creates no tickets itself. File each draft with
-`weave_ticket_create` (using the draft's `kind`, `priority` and `roleId`), bundling drafts that no
-longer need to be separate, and link each ticket back with `weave_roadmap_item_update { itemId, ticketId }`.
-Calling start again returns only the items still without a ticket, so a partial filing retries
-cleanly. The block then reads `done` of its own accord once every linked ticket is terminal — you never
-set that, and `weave_roadmap_block_update` only sets `open`, `started` or `dropped`.
+**Start a block.** `weave_roadmap_block_start { blockId }` marks the block `started` and returns **one
+filing-ready draft for the whole block** — the block's title, every item as a section of the
+description, and the `itemIds` the one ticket covers; it creates no tickets itself, and `draft` is
+`null` once every item already has one. **File that one draft as one ticket** with
+`weave_ticket_create` (using its `kind`, `priority` and `roleId`) and link every item it covers with
+`weave_roadmap_item_update { itemId, ticketId }`. One ticket for the whole block is the default and
+almost always right: a long ticket costs turns, not re-learning, because the worker resumes its
+session across turns. Split into more tickets **only** for a named reason, and write the reason in
+the ticket: the items need different roles or projects; one item needs its own approval path
+(`operational` vs `change`); or the block is too large for one worker to finish in a reasonable
+number of turns. Touching different screens is **not** a reason, and even when you split you file two
+or three tickets — never one per item or per surface; read the block with `weave_roadmap_block_list`
+to get the items when you do. Calling start again returns only the items still without a ticket, so a
+partial filing retries cleanly. The block then reads `done` of its own accord once every linked ticket
+is terminal — you never set that, and `weave_roadmap_block_update` only sets `open`, `started` or
+`dropped`.
 
 ## References
 

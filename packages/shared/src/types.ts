@@ -524,14 +524,20 @@ export interface RoadmapBlock {
   items: RoadmapItem[];
 }
 
-/** A pending ticket returned by `start` as the fields a real ticket needs (VS-478). */
+/**
+ * The one filing-ready draft `start` returns for a block (VS-478, VS-557). Starting a block files
+ * **one ticket for the whole block** by default, so the draft carries the block's title, every
+ * still-unfiled item as a section of `description`, and the `itemIds` the one ticket covers.
+ * Splitting is the exception and a deliberate second step, never the default path.
+ */
 export interface RoadmapBlockDraft {
-  itemId: string;
   title: string;
   description: string;
   kind: E.TicketKind;
   priority: E.TicketPriority;
   roleId: string | null;
+  /** Every still-unfiled item this one ticket covers (VS-557). */
+  itemIds: string[];
 }
 
 

@@ -890,12 +890,14 @@ export function useRollbackCharter(): UseMutationResult<unknown, Error, { id: st
 
 /** `GET /workers` marks which ticket is an interactive session (VS-101), carries the worker's own
  *  pending scheduled wakeup (VS-317), and the live activity summary (VS-328) — all joined
- *  server-side, none part of `Agent` itself. */
+ *  server-side, none part of `Agent` itself. VS-554 adds the active session's last completed turn
+ *  context size. */
 export type WorkerListItem = Agent & {
   interactiveSession: boolean;
   scheduledWake: T.WorkerScheduledWake | null;
   activity?: WorkerActivitySummary['activity'];
   tests?: WorkerActivitySummary['tests'];
+  lastContextTokens?: number | null;
 };
 
 export function useWorkers(params: { status?: string; kind?: string; project?: string; role?: string; includeRetired?: boolean } = {}, wsOverride?: string): UseQueryResult<WorkerListItem[]> {

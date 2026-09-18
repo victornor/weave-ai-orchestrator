@@ -23,6 +23,19 @@ export function workerRoutes(): Hono<AppEnv> {
     const interactive = ticketIds.length
       ? new Set(ws.ctx.db.all<{ id: string }>(`SELECT id FROM tickets WHERE interactive_session = 1 AND id IN (${ticketIds.map(() => '?').join(',')})`, ticketIds).map((r) => r.id))
       : new Set<string>();
+    // VS-554: the active session's last turn context size, so a surface (the Live floor) can show
+    // how full a worker's window is while a new turn is running, when the run itself has no usage yet.
+    const agentIds = workers.map((w) => w.id);
+    const contextByAgent = new Map<string, number | null>();
+    if (agentIds.length) {
+      const sessions = ws.ctx.db.all<{ agentId: string; lastContextTokens: number | null }>(
+        `SELECT agent_id AS agentId, last_context_tokens AS lastContextTokens FROM agent_sessions
+           WHERE status = 'active' AND agent_id IN (${agentIds.map(() => '?').join(',')})
+           ORDER BY created_at DESC`,
+        agentIds,
+      );
+      for (const s of sessions) if (!contextByAgent.has(s.agentId)) contextByAgent.set(s.agentId, s.lastContextTokens ?? null);
+    }
     return c.json(workers.map((w) => {
       // VS-328: what the worker is doing now and its last test tally, so a fresh board load is correct.
       const activity = ws.services.activity.summaryFor(w.id);
@@ -36,6 +49,8 @@ export function workerRoutes(): Hono<AppEnv> {
         // VS-498: in an active stall/recovery cycle — distinct from `active`, so a board reading this
         // list can tell a stalled worker apart from one genuinely mid-turn.
         stalled: isWorkerStalled(ws.ctx, w.id),
+        // VS-554: the last completed turn's context size for this worker, null when it has none yet.
+        lastContextTokens: contextByAgent.get(w.id) ?? null,
       };
     }));
   });

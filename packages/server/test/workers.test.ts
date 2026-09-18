@@ -372,3 +372,28 @@ describe('session handover (VS-249)', () => {
     expect(endHandover).toHaveBeenCalledWith(expect.anything(), 'ag_1', 'debugged over USB');
   });
 });
+
+describe('GET /workers — session context size (VS-554)', () => {
+  function seedAgent(h: Harness, id: string): void {
+    h.db.run(
+      "INSERT INTO agents (id, workspace_id, kind, name, runtime_id, status, home_path, created_at, updated_at) VALUES (?, 'ws1', 'worker', ?, 'fake', 'active', '/tmp/home', 't0', 't0')",
+      [id, id],
+    );
+  }
+
+  it('carries the active session last context size, and null without one', async () => {
+    const { h, fetch } = app();
+    seedAgent(h, 'ag_ctx');
+    seedAgent(h, 'ag_no_ctx');
+    h.db.insert('agent_sessions', {
+      id: 'sess_ctx', agentId: 'ag_ctx', runtimeId: 'fake', status: 'active', turnCount: 1,
+      cumulativeUsageJson: {}, lastContextTokens: 123_456, createdAt: 't0', updatedAt: 't0',
+    });
+    h.impls.workers!['list'] = () => [worker({ id: 'ag_ctx' }), worker({ id: 'ag_no_ctx' })];
+
+    const res = await fetch('/api/w/ws1/workers', { headers: authed() });
+    const list: Array<{ id: string; lastContextTokens: number | null }> = await res.json();
+    expect(list.find((w) => w.id === 'ag_ctx')?.lastContextTokens).toBe(123_456);
+    expect(list.find((w) => w.id === 'ag_no_ctx')?.lastContextTokens).toBeNull();
+  });
+});

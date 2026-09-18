@@ -892,81 +892,63 @@ describe('supervisor scheduled passes', () => {
       expect(row?.delivery?.['openspecArchive']).toMatchObject({ state: 'landed' });
     });
 
-    it('raises an archive-backfill merge card for a pending pull request (VS-389)', async () => {
-      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
-      h.services.openspec = { archiveAfterMerge: vi.fn(async () => ({ archivedAs: null, skipped: null, changeName: 'add-dark-mode', branch: 'ac/archive-add-dark-mode', pendingPrUrl: 'https://example.com/pr/313', pendingPrNumber: 313 })) } as never;
-      const raiseArchiveBackfillCard = vi.fn(async () => ({ raised: true }));
-      h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, raiseArchiveBackfillCard, landArchiveBackfill: vi.fn(), comment: vi.fn() } as never;
-      const ticketId = seedTicket(h, { status: 'done', kind: 'change', openspecChangeName: 'add-dark-mode' });
-      const clone = join(h.ctx.paths.projects, h.projectSlug);
-      mkdirSync(join(clone, 'openspec', 'changes', 'add-dark-mode'), { recursive: true });
-
-      await supervisor.tick();
-
-      expect(raiseArchiveBackfillCard).toHaveBeenCalledWith({ kind: 'system', id: null }, ticketId, {
-        changeName: 'add-dark-mode', branch: 'ac/archive-add-dark-mode', prUrl: 'https://example.com/pr/313', number: 313,
-      });
-    });
-
-    it('retries landing an archive pull request that was already approved (VS-389)', async () => {
-      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
-      h.services.openspec = { archiveAfterMerge: vi.fn(async () => ({ archivedAs: null, skipped: null, changeName: 'add-dark-mode', branch: 'ac/archive-add-dark-mode', pendingPrUrl: 'https://example.com/pr/313', pendingPrNumber: 313 })) } as never;
-      const landArchiveBackfill = vi.fn(async () => ({ landed: true }));
-      h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, raiseArchiveBackfillCard: vi.fn(async () => ({ raised: false })), landArchiveBackfill, comment: vi.fn() } as never;
-      const ticketId = seedTicket(h, { status: 'done', kind: 'change', openspecChangeName: 'add-dark-mode' });
-      const clone = join(h.ctx.paths.projects, h.projectSlug);
-      mkdirSync(join(clone, 'openspec', 'changes', 'add-dark-mode'), { recursive: true });
+    const openArchiveCard = (ticketId: string): string => {
+      const id = newId();
       h.db.insert('decisions', {
-        id: newId(), workspaceId: h.workspaceId, ticketId, projectId: h.projectId, kind: 'merge_approval', owner: 'human',
-        title: 'Approve the spec archive', context: '', optionsJson: [], allowFreeText: 1, status: 'answered', answerKey: 'approve',
+        id, workspaceId: h.workspaceId, ticketId, projectId: h.projectId, kind: 'merge_approval', owner: 'human',
+        title: 'Approve the spec archive', context: '', optionsJson: [], allowFreeText: 1, status: 'open',
         correlationKey: `merge_approval:archive:${ticketId}:add-dark-mode`,
         targetJson: { archive: { changeName: 'add-dark-mode', branch: 'ac/archive-add-dark-mode', prUrl: 'https://example.com/pr/313' } },
         createdAt: nowIso(),
       });
+      return id;
+    };
+    const stubArchiveSweep = (landArchiveBackfill: ReturnType<typeof vi.fn>): void => {
+      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+      h.services.openspec = { archiveAfterMerge: vi.fn(async () => ({ archivedAs: null, skipped: null, changeName: 'add-dark-mode', branch: 'ac/archive-add-dark-mode', pendingPrUrl: 'https://example.com/pr/313', pendingPrNumber: 313 })) } as never;
+      h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, landArchiveBackfill, comment: vi.fn() } as never;
+    };
+
+    it('lands a pending archive pull request itself and raises no decision (VS-570)', async () => {
+      const landArchiveBackfill = vi.fn(async () => ({ landed: true }));
+      stubArchiveSweep(landArchiveBackfill);
+      const ticketId = seedTicket(h, { status: 'done', kind: 'change', openspecChangeName: 'add-dark-mode' });
+      mkdirSync(join(h.ctx.paths.projects, h.projectSlug, 'openspec', 'changes', 'add-dark-mode'), { recursive: true });
 
       await supervisor.tick();
 
       expect(landArchiveBackfill).toHaveBeenCalledWith({ kind: 'system', id: null }, {
         ticketId, changeName: 'add-dark-mode', branch: 'ac/archive-add-dark-mode', prUrl: 'https://example.com/pr/313',
       });
+      expect(h.db.all('SELECT id FROM decisions WHERE ticket_id = ?', [ticketId])).toHaveLength(0);
     });
 
-    it('retires an approved archive card whose pull request was replaced, and lands the fresh one (VS-389)', async () => {
-      h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
-      h.services.openspec = { archiveAfterMerge: vi.fn(async () => ({ archivedAs: null, skipped: null, changeName: 'add-dark-mode', branch: 'ac/archive-add-dark-mode', pendingPrUrl: 'https://example.com/pr/400', pendingPrNumber: 400 })) } as never;
+    it('withdraws an archive card an earlier version left open and lands the pull request (VS-570)', async () => {
       const landArchiveBackfill = vi.fn(async () => ({ landed: true }));
-      const comment = vi.fn();
-      h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, raiseArchiveBackfillCard: vi.fn(async () => ({ raised: false })), landArchiveBackfill, comment } as never;
+      stubArchiveSweep(landArchiveBackfill);
+      h.services.decisions = createDecisionsService(h.ctx, h.deps);
       const ticketId = seedTicket(h, { status: 'done', kind: 'change', openspecChangeName: 'add-dark-mode' });
-      const clone = join(h.ctx.paths.projects, h.projectSlug);
-      mkdirSync(join(clone, 'openspec', 'changes', 'add-dark-mode'), { recursive: true });
-      h.db.update('tickets', ticketId, { deliveryJson: { openspecArchive: { changeName: 'add-dark-mode', state: 'pending', pendingPrUrl: 'https://example.com/pr/400' } } });
-      const archiveCard = (prUrl: string, at: string): void => {
-        h.db.insert('decisions', {
-          id: newId(), workspaceId: h.workspaceId, ticketId, projectId: h.projectId, kind: 'merge_approval', owner: 'human',
-          title: 'Approve the spec archive', context: '', optionsJson: [], allowFreeText: 1, status: 'answered', answerKey: 'approve',
-          correlationKey: `merge_approval:archive:${ticketId}:add-dark-mode`,
-          targetJson: { archive: { changeName: 'add-dark-mode', branch: 'ac/archive-add-dark-mode', prUrl } },
-          createdAt: at,
-        });
-      };
-      archiveCard('https://example.com/pr/313', '2026-09-14T01:00:00.000Z');
+      mkdirSync(join(h.ctx.paths.projects, h.projectSlug, 'openspec', 'changes', 'add-dark-mode'), { recursive: true });
+      const cardId = openArchiveCard(ticketId);
 
       await supervisor.tick();
-      expect(landArchiveBackfill).not.toHaveBeenCalled();
-      expect(comment).toHaveBeenCalledTimes(1);
 
+      expect(h.db.get<{ status: string }>('SELECT status FROM decisions WHERE id = ?', [cardId])?.status).toBe('withdrawn');
+      expect(landArchiveBackfill).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries a deferred landing on the next sweep (VS-570)', async () => {
+      const landArchiveBackfill = vi.fn(async () => ({ landed: false, reason: 'required checks are pending' }));
+      stubArchiveSweep(landArchiveBackfill);
+      const ticketId = seedTicket(h, { status: 'done', kind: 'change', openspecChangeName: 'add-dark-mode' });
+      mkdirSync(join(h.ctx.paths.projects, h.projectSlug, 'openspec', 'changes', 'add-dark-mode'), { recursive: true });
+
+      await supervisor.tick();
       h.db.run("UPDATE meta SET value = '0' WHERE key = 'supervisor:reconcile_at'");
       await supervisor.tick();
-      expect(comment).toHaveBeenCalledTimes(1); // retired once, never again
 
-      // The fresh pull request's card is approved and is the one that lands.
-      archiveCard('https://example.com/pr/400', '2026-09-14T01:30:00.000Z');
-      h.db.run("UPDATE meta SET value = '0' WHERE key = 'supervisor:reconcile_at'");
-      await supervisor.tick();
-      expect(landArchiveBackfill).toHaveBeenCalledWith({ kind: 'system', id: null }, {
-        ticketId, changeName: 'add-dark-mode', branch: 'ac/archive-add-dark-mode', prUrl: 'https://example.com/pr/400',
-      });
+      expect(landArchiveBackfill).toHaveBeenCalledTimes(2);
+      expect(h.db.all('SELECT id FROM decisions WHERE ticket_id = ?', [ticketId])).toHaveLength(0);
     });
   });
 

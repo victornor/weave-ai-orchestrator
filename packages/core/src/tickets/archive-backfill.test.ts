@@ -16,8 +16,8 @@ const HUMAN: Actor = { kind: 'human', id: 'victor' };
 const CHANGE = 'add-dark-mode';
 const BRANCH = `ac/archive-${CHANGE}`;
 
-/** The archive-backfill merge card and its landing (VS-389). */
-describe('archive backfill merge cards (VS-389)', () => {
+/** The archive-backfill landing (VS-389); VS-570 removed its merge card. */
+describe('archive backfill landing (VS-389, VS-570)', () => {
   let h: TestHarness;
   let tickets: TicketsService;
   let decisions: DecisionsService;
@@ -114,105 +114,34 @@ describe('archive backfill merge cards (VS-389)', () => {
     return t.id;
   }
 
-  it('raises exactly one open card and does not land without approval', async () => {
+  it('lands a pending archive pull request with no decision of any kind (VS-570)', async () => {
     await pushArchiveBranch();
     const forge = archiveForge();
     h.ctx.registries.forges.set('github', forge);
     const ticketId = doneTicket();
 
-    const first = await tickets.raiseArchiveBackfillCard(AGENT, ticketId, { changeName: CHANGE, branch: BRANCH, prUrl: 'https://example.com/pr/313', number: 313 });
-    expect(first.raised).toBe(true);
-    const second = await tickets.raiseArchiveBackfillCard(AGENT, ticketId, { changeName: CHANGE, branch: BRANCH, prUrl: 'https://example.com/pr/313', number: 313 });
-    expect(second.raised).toBe(false);
-    expect(decisions.list({ ticketId, status: ['open'] })).toHaveLength(1);
+    const r = await tickets.landArchiveBackfill({ kind: 'system', id: null }, { ticketId, changeName: CHANGE, branch: BRANCH, prUrl: 'https://example.com/pr/313' });
 
-    await new Promise((r) => setImmediate(r));
-    expect(forge.mergePr).not.toHaveBeenCalled();
-    expect(tickets.get(ticketId).status).toBe('done');
-  });
-
-  it('approving the card lands the pull request and keeps the ticket done', async () => {
-    await pushArchiveBranch();
-    const forge = archiveForge();
-    h.ctx.registries.forges.set('github', forge);
-    const ticketId = doneTicket();
-    const { decisionId } = await tickets.raiseArchiveBackfillCard(AGENT, ticketId, { changeName: CHANGE, branch: BRANCH, prUrl: 'https://example.com/pr/313', number: 313 });
-    const d = decisions.get(decisionId!);
-    expect(d.ticketId).toBe(ticketId);
-
-    // VS-281: the weaver must mark a review-carrying card looked before its approving answer is accepted.
-    decisions.review({ kind: 'agent', id: h.conductorId, runId: 'run-c' }, d.id, { status: 'looked', note: 'the archive is clean' });
-    await decisions.answer(HUMAN, d.id, { key: 'approve' });
-
+    expect(r.landed).toBe(true);
     expect(forge.mergePr).toHaveBeenCalledTimes(1);
-    const spec = (await git(['show', 'main:openspec/specs/widgets/spec.md'], clone)).stdout;
-    expect(spec).toMatch(/A widget exists/);
+    expect((await git(['show', 'main:openspec/specs/widgets/spec.md'], clone)).stdout).toMatch(/A widget exists/);
     const t = tickets.get(ticketId);
     expect(t.status).toBe('done');
     expect(t.delivery?.['openspecArchive']).toMatchObject({ state: 'landed' });
+    expect(h.db.all('SELECT id FROM decisions WHERE ticket_id = ?', [ticketId])).toHaveLength(0);
   });
 
-  it('declining the card records the pull request and merges nothing', async () => {
+  it('lands the same way under YOLO, without waiting for a weaver review (VS-570)', async () => {
+    h.db.update('projects', h.projectId, { policiesJson: { deliveryMode: 'pr', yolo: true } });
     await pushArchiveBranch();
     const forge = archiveForge();
     h.ctx.registries.forges.set('github', forge);
     const ticketId = doneTicket();
-    const { decisionId } = await tickets.raiseArchiveBackfillCard(AGENT, ticketId, { changeName: CHANGE, branch: BRANCH, prUrl: 'https://example.com/pr/313', number: 313 });
-    decisions.review({ kind: 'agent', id: h.conductorId, runId: 'run-c' }, decisionId!, { status: 'looked', note: 'looks fine' });
-    await decisions.answer(HUMAN, decisionId!, { key: 'changes', text: 'wait for the release' });
 
-    expect(forge.mergePr).not.toHaveBeenCalled();
-    expect(tickets.get(ticketId).delivery?.['openspecArchive']).toMatchObject({ state: 'pending', declinedPrUrl: 'https://example.com/pr/313' });
-    // Not re-raised for the same pull request.
-    const again = await tickets.raiseArchiveBackfillCard(AGENT, ticketId, { changeName: CHANGE, branch: BRANCH, prUrl: 'https://example.com/pr/313', number: 313 });
-    expect(again.raised).toBe(false);
-  });
+    const r = await tickets.landArchiveBackfill({ kind: 'system', id: null }, { ticketId, changeName: CHANGE, branch: BRANCH, prUrl: 'https://example.com/pr/313' });
 
-  it('YOLO holds the archive card until reviewed, then grants it on the mark', async () => {
-    h.db.update('projects', h.projectId, { policiesJson: { deliveryMode: 'pr', yolo: true } });
-    await pushArchiveBranch();
-    // A fixed archive pull request head, so the recorded review head can be compared against it.
-    // (The archive landing itself is covered by the human-approval tests above; here the point is
-    // that the daemon's own grant is gated by the review.)
-    const ARCHIVE_HEAD = 'c'.repeat(40);
-    const forge = archiveForge({ prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const, headSha: ARCHIVE_HEAD })) });
-    h.ctx.registries.forges.set('github', forge);
-    const ticketId = doneTicket();
-
-    const { raised, decisionId } = await tickets.raiseArchiveBackfillCard(AGENT, ticketId, { changeName: CHANGE, branch: BRANCH, prUrl: 'https://example.com/pr/313', number: 313 });
-    expect(raised).toBe(true);
-    // VS-474: the card is left open and unseen — nothing is granted at raise time.
-    expect(forge.mergePr).not.toHaveBeenCalled();
-    expect(decisions.get(decisionId!)).toMatchObject({ status: 'open', weaverReviewStatus: 'unseen' });
-
-    // The weaver looks: the mark records the archive pull request's head and releases the grant.
-    await decisions.review({ kind: 'agent', id: h.conductorId, runId: 'run-c' }, decisionId!, {
-      status: 'looked', note: 'the archive is clean', reviewedHead: ARCHIVE_HEAD,
-    });
-    expect(decisions.get(decisionId!)).toMatchObject({ status: 'answered', answeredByKind: 'system', weaverReviewStatus: 'looked' });
-  });
-
-  it('YOLO holds the archive card when its pull request head moved after the mark', async () => {
-    h.db.update('projects', h.projectId, { policiesJson: { deliveryMode: 'pr', yolo: true } });
-    await pushArchiveBranch();
-    const ARCHIVE_HEAD = 'c'.repeat(40);
-    const forge = archiveForge({ prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const, headSha: ARCHIVE_HEAD })) });
-    h.ctx.registries.forges.set('github', forge);
-    const ticketId = doneTicket();
-
-    const { decisionId } = await tickets.raiseArchiveBackfillCard(AGENT, ticketId, { changeName: CHANGE, branch: BRANCH, prUrl: 'https://example.com/pr/313', number: 313 });
-    // Mark looked at a head that is no longer the archive pull request's head.
-    await decisions.review({ kind: 'agent', id: h.conductorId, runId: 'run-c' }, decisionId!, {
-      status: 'looked', note: 'reviewed the archive', reviewedHead: 'a'.repeat(40),
-    });
-    expect(decisions.get(decisionId!)?.status).toBe('open');
-    expect(forge.mergePr).not.toHaveBeenCalled();
-
-    // Re-marking looked at the current head releases it.
-    await decisions.review({ kind: 'agent', id: h.conductorId, runId: 'run-c' }, decisionId!, {
-      status: 'looked', note: 're-read at the new head', reviewedHead: ARCHIVE_HEAD,
-    });
-    expect(decisions.get(decisionId!)).toMatchObject({ status: 'answered', answeredByKind: 'system' });
+    expect(r.landed).toBe(true);
+    expect(h.db.all('SELECT id FROM decisions WHERE ticket_id = ?', [ticketId])).toHaveLength(0);
   });
 
   it('records a conflict and does not merge', async () => {

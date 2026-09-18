@@ -1309,43 +1309,23 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       let res: Awaited<ReturnType<CoreServices['openspec']['archiveAfterMerge']>>;
       try { res = await deps().openspec.archiveAfterMerge(t.id); }
       catch (e) { recordReconcileArchiveFailure(t, e); continue; }
-      // VS-389: a backfill that opens (or finds) a pull request instead of archiving in place raises
-      // the merge card that surfaces it, on the (already finished) ticket.
-      if (res.pendingPrUrl) {
-        try {
-          await deps().tickets.raiseArchiveBackfillCard(SYSTEM, t.id, {
-            changeName: res.changeName ?? t.changeName,
-            branch: res.branch ?? `ac/archive-${t.changeName}`,
-            prUrl: res.pendingPrUrl,
-            number: res.pendingPrNumber ?? null,
-          });
-        } catch (e) { recordReconcileArchiveFailure(t, e); }
-      }
-      // VS-389: retry any archive card already approved for this ticket whose pull request is the
-      // one still pending — a landing deferred by pending checks or a stale branch converges here.
-      // An approved card whose pull request is no longer the pending one (closed and replaced) is
-      // retired with a one-time note and never retried; `landArchiveBackfill` dedupes its own
-      // failures, so a standing failure cannot comment on every pass.
-      const approved = ctx.db.get<{ id: string; target: Record<string, unknown> | null }>(
-        "SELECT id, target_json FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND kind = 'merge_approval' AND status = 'answered' AND answer_key = 'approve' AND correlation_key LIKE 'merge_approval:archive:%' ORDER BY created_at DESC LIMIT 1",
-        [ctx.workspaceId, t.id],
-      );
-      const archive = approved?.target?.['archive'] as { changeName?: string; branch?: string; prUrl?: string } | undefined;
-      if (approved && archive?.branch && archive.prUrl) {
-        const stored = (t.delivery?.['openspecArchive'] ?? {}) as Record<string, unknown>;
-        const currentPr = res.pendingPrUrl ?? (typeof stored['pendingPrUrl'] === 'string' ? stored['pendingPrUrl'] : undefined);
-        if (currentPr && archive.prUrl === currentPr) {
-          await deps().tickets.landArchiveBackfill(SYSTEM, { ticketId: t.id, changeName: archive.changeName ?? t.changeName, branch: archive.branch, prUrl: archive.prUrl })
-            .catch((e: unknown) => recordReconcileArchiveFailure(t, e));
-        } else if (stored['staleCardPrUrl'] !== archive.prUrl) {
-          ctx.db.update('tickets', t.id, {
-            deliveryJson: { ...(t.delivery ?? {}), openspecArchive: { ...stored, staleCardPrUrl: archive.prUrl } },
-            updatedAt: nowIso(),
-          });
-          try { deps().tickets.comment(SYSTEM, t.id, `the spec archive card for ${archive.prUrl} was retired: it is no longer the pending archive pull request.`, 'status'); }
-          catch (e) { log.warn({ err: e, ticketId: t.id }, 'retiring a stale archive card failed'); }
-        }
-      }
+      // VS-570: a backfill that opens (or finds) a pull request is housekeeping for work the human
+      // already shipped, so the daemon lands it itself — no merge card. Any archive card an earlier
+      // version left open is withdrawn first. `landArchiveBackfill` never throws, defers on pending
+      // checks and records a standing failure once, so calling it on every pass is safe.
+      const pendingPr = res.pendingPrUrl ?? (typeof (t.delivery?.['openspecArchive'] as Record<string, unknown> | undefined)?.['pendingPrUrl'] === 'string'
+        ? (t.delivery?.['openspecArchive'] as Record<string, string>)['pendingPrUrl'] : undefined);
+      if (!pendingPr) continue;
+      try {
+        const stray = ctx.db.all<{ id: string }>(
+          "SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND kind = 'merge_approval' AND status = 'open' AND correlation_key LIKE 'merge_approval:archive:%'",
+          [ctx.workspaceId, t.id],
+        );
+        for (const d of stray) deps().decisions.withdraw(SYSTEM, d.id, 'the daemon lands spec archive backfills itself; no approval is needed');
+        await deps().tickets.landArchiveBackfill(SYSTEM, {
+          ticketId: t.id, changeName: res.changeName ?? t.changeName, branch: res.branch ?? `ac/archive-${t.changeName}`, prUrl: pendingPr,
+        });
+      } catch (e) { recordReconcileArchiveFailure(t, e); }
     }
   }
 

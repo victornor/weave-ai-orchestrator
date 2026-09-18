@@ -21,8 +21,7 @@ import { useDictationHotkey } from '../lib/dictationHotkey';
 import { dictationHint } from '../lib/dictationHint';
 import { projectColorVar } from '../lib/projectColor';
 import { usePrefersReducedMotion } from '../lib/streamReveal';
-import { VoiceMeter } from '../components/VoiceMeter';
-import { TranscribingIndicator } from '../components/TranscribingIndicator';
+import { DictationAlerts, DictationButton, DictationProgress } from './DictationControl';
 import { useDictationSession, type ComposerRegistration, type DictationSessionValue, type DictationTarget } from './DictationSession';
 import { cx } from '../lib/cx';
 
@@ -42,28 +41,10 @@ function AttachIcon(): React.ReactElement {
   );
 }
 
-function MicIcon({ slashed }: { slashed?: boolean }): React.ReactElement {
-  return (
-    <svg viewBox="0 0 16 16" className="size-3.5" aria-hidden>
-      <rect x="5.6" y="1.4" width="4.8" height="8.2" rx="2.4" fill="currentColor" />
-      <path d="M3.4 7.4a4.6 4.6 0 0 0 9.2 0M8 12v2.6" stroke="currentColor" strokeWidth="1.3" fill="none" strokeLinecap="round" />
-      {slashed ? <path d="M2.2 2.2 13.8 13.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /> : null}
-    </svg>
-  );
-}
-
 function SendIcon(): React.ReactElement {
   return (
     <svg viewBox="0 0 12 12" className="size-3.5" aria-hidden>
       <path d="M0 0 L12 6 L0 12 L2.6 6 Z" fill="currentColor" />
-    </svg>
-  );
-}
-
-function StopIcon(): React.ReactElement {
-  return (
-    <svg viewBox="0 0 12 12" className="size-3.5" aria-hidden>
-      <rect x="2.5" y="2.5" width="7" height="7" rx="1.4" fill="currentColor" />
     </svg>
   );
 }
@@ -396,26 +377,16 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
         onDrop={(e) => { if (!dragHasFiles(e.dataTransfer)) return; e.preventDefault(); dragDepth.current = 0; setDragActive(false); addFiles(Array.from(e.dataTransfer.files)); }}
         className={cx('flex items-end gap-2 rounded-r4 border bg-bg-input px-2.5 py-1.5', dragActive || listeningHere || transcribingHere ? 'border-accent' : 'border-line-2')}
       >
-        {listeningHere ? (
-          <div data-testid="v2-composer-listening" className="flex min-w-0 flex-1 items-center gap-2.5 py-1">
-            {dictation.metered ? (
-              <VoiceMeter analyser={dictation.analyser} active className="h-6 min-w-0 flex-1" />
-            ) : (
-              <span className="flex h-6 min-w-0 flex-1 items-center gap-2 text-micro text-text-3">
-                <span className="size-1.5 flex-none animate-pulse rounded-full bg-accent-link" aria-hidden />
-                Listening…
-              </span>
-            )}
-            <span className="ac-mono flex-none text-nano tabular-nums text-text-3">
-              {Math.floor(dictation.elapsed / 60)}:{String(dictation.elapsed % 60).padStart(2, '0')}
-            </span>
-          </div>
-        ) : transcribingHere ? (
-          // The mic is closed and the transcript is on its way (VS-441). Keeping this in the same
-          // slot as the listening meter means the box never flashes empty between the two.
-          <div data-testid="v2-composer-transcribing" className="flex min-w-0 flex-1 items-center py-1">
-            <TranscribingIndicator reducedMotion={reducedMotion} className="h-6 min-w-0 flex-1" />
-          </div>
+        {listeningHere || transcribingHere ? (
+          // The listening meter and the transcribing indicator share the input's slot, so the box
+          // never flashes empty between stopping and the transcript landing (VS-441).
+          <DictationProgress
+            dictation={dictation}
+            listening={listeningHere}
+            transcribing={transcribingHere}
+            reducedMotion={reducedMotion}
+            testId="v2-composer"
+          />
         ) : (
           <textarea
             ref={ta}
@@ -442,16 +413,12 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
         <button type="button" className={BUTTON} aria-label="Attach a file" disabled={disabled || submitting} onClick={() => fileInput.current?.click()}>
           <AttachIcon />
         </button>
-        <button
-          type="button"
-          className={cx(BUTTON, listeningHere && 'border-accent text-accent-link')}
-          aria-label={dictation.mode === 'unavailable' ? 'Dictation unavailable' : listeningHere ? 'Stop dictation' : 'Dictate'}
-          aria-pressed={listeningHere}
+        <DictationButton
+          dictation={dictation}
+          listening={listeningHere}
           disabled={disabled || submitting || dictationLocked}
           onClick={() => { if (listeningHere) ctl.stop(); else if (dictation.mode === 'unavailable') { setFreeText(true); setUnavailableNotice('Dictation is unavailable: this browser has no Web Speech API and the daemon has no transcription provider.'); } else { setUnavailableNotice(null); ctl.start(); } }}
-        >
-          {listeningHere ? <StopIcon /> : <MicIcon slashed={dictation.mode === 'unavailable'} />}
-        </button>
+        />
         <button
           type="button"
           className={cx(BUTTON, pendingSend && 'border-accent text-accent-link')}
@@ -467,8 +434,7 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
         </button>
       </div>
 
-      {dictation.error ? <p role="alert" className="rounded-r4 border border-blocked/35 px-3 py-2 text-micro text-text-1">{dictation.error}</p> : null}
-      {(ctl.pendingNotice ?? unavailableNotice) && !dictation.error ? <p role="status" className="rounded-r4 border border-line-1 px-3 py-2 text-micro text-text-3">{ctl.pendingNotice ?? unavailableNotice}</p> : null}
+      <DictationAlerts dictation={dictation} notice={ctl.pendingNotice ?? unavailableNotice} />
       {freeText && dictation.error ? (
         <p className="text-micro text-text-3">Type instead, or set a provider in Settings → Dictation.</p>
       ) : null}

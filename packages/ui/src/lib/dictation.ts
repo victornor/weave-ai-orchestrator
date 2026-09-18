@@ -56,19 +56,18 @@ export function mergeTranscript(acc: string, next: string): string {
 }
 
 /**
- * A dictated result of five words or fewer is discarded rather than inserted (VS-439): a stray
- * "yes", a cough, or a half-heard aside is far more likely than a deliberate short message, and
- * clearing the box by hand afterwards is worse than saying the whole thing again. The count is over
- * the whole session transcript and is applied when the session ends — interim words still appear
- * while talking.
+ * A dictated result below three words is discarded rather than inserted (VS-439, lowered by VS-552):
+ * a stray "yes" or a cough is far more likely than a deliberate one- or two-word message, while a
+ * short instruction like "yes do that" is worth keeping. The count is over the whole session
+ * transcript and is applied when the session ends — interim words still appear while talking.
  */
-export const DICTATION_MIN_WORDS = 6;
+export const DICTATION_MIN_WORDS = 3;
 
 /**
  * Whether a finished dictation is too short to insert. Words are whitespace-separated tokens that
  * contain at least one letter or digit; a punctuation-only token ("—", "…", "...") is noise, not a
- * word, and does not count toward `DICTATION_MIN_WORDS`. Both composers call this so V1 and V2
- * cannot drift (VS-439).
+ * word, and does not count toward `DICTATION_MIN_WORDS`. Every dictation surface — both composers
+ * and the decision cards — calls this so none can drift (VS-439, VS-552).
  */
 export function isDictationTooShort(text: string): boolean {
   const count = text.split(/\s+/).filter((token) => /[\p{L}\p{N}]/u.test(token)).length;

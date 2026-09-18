@@ -33,7 +33,9 @@ import { Markdown } from '../components/Markdown';
 import { PlanPreview } from '../components/PlanPreview';
 import { useTicketFor, useTicketWorkProducts } from '../api/hooks';
 import { ago } from '../lib/format';
+import { usePrefersReducedMotion } from '../lib/streamReveal';
 import { cx } from '../lib/cx';
+import { DictationAlerts, DictationButton, DictationProgress, useFieldDictation } from './DictationControl';
 import { WorkerFeed, useWorkerRun } from './WorkerFeed';
 
 export interface V2Answer {
@@ -185,19 +187,36 @@ function InputControl({ input, value, disabled, onChange }: {
   const [otherActive, setOtherActive] = useState(false);
   const other = input.type === 'single_choice' && input.allowOther === true;
   const otherSelected = other && (otherActive || (chosenOne !== '' && !choiceKeys.includes(chosenOne)));
+  // VS-552: a local dictation session for this field. Created for every input so the hook order is
+  // stable, but only the free-text branches render its control — a `secret` never does.
+  const reducedMotion = usePrefersReducedMotion();
+  const dictation = useFieldDictation({ value: chosenOne, writeValue: (text) => onChange(text) });
+  const dictating = dictation.dictation.listening;
+  const fieldRow = 'flex items-center gap-2';
+  const fieldColumn = 'flex flex-col gap-1';
   return (
-    <div className="flex flex-col gap-1">
+    <div className={fieldColumn}>
       <label htmlFor={input.type === 'single_choice' || input.type === 'multiselect' ? undefined : id} className="text-micro font-medium text-text-2">
         {input.label}
         {input.required ? <span className="ml-1 text-needs-you" aria-hidden>*</span> : null}
       </label>
       {input.description ? <p className="-mt-0.5 text-nano leading-snug text-text-3">{input.description}</p> : null}
       {input.type === 'multiline' ? (
-        <textarea
-          id={id} rows={3} disabled={disabled} value={typeof value === 'string' ? value : ''}
-          placeholder={input.placeholder} aria-required={input.required}
-          onChange={(e) => onChange(e.target.value)} className={cx(field, 'resize-y py-1.5')}
-        />
+        <div className={fieldColumn}>
+          <div className="flex items-start gap-2">
+            {dictating || dictation.dictation.transcribing ? (
+              <DictationProgress dictation={dictation.dictation} listening={dictating} transcribing={dictation.dictation.transcribing} reducedMotion={reducedMotion} className="py-1.5" />
+            ) : (
+              <textarea
+                id={id} rows={3} disabled={disabled} value={chosenOne}
+                placeholder={input.placeholder} aria-required={input.required}
+                onChange={(e) => onChange(e.target.value)} className={cx(field, 'min-w-0 flex-1 resize-y py-1.5')}
+              />
+            )}
+            <DictationButton dictation={dictation.dictation} listening={dictating} disabled={disabled} testId={`v2-dc-dictate-${input.key}`} onClick={() => (dictating ? dictation.stop() : dictation.start())} />
+          </div>
+          <DictationAlerts dictation={dictation.dictation} notice={dictation.pendingNotice} />
+        </div>
       ) : input.type === 'single_choice' ? (
         <div role="radiogroup" aria-label={input.label} className="flex flex-col gap-1">
           {(input.choices ?? []).map((c) => {
@@ -226,11 +245,21 @@ function InputControl({ input, value, disabled, onChange }: {
             </button>
           ) : null}
           {otherSelected ? (
-            <input
-              type="text" disabled={disabled} value={chosenOne} placeholder={input.placeholder}
-              aria-label={`${input.label} — your own answer`}
-              onChange={(e) => onChange(e.target.value)} className={cx(field, 'h-8')}
-            />
+            <div className={fieldColumn}>
+              <div className={fieldRow}>
+                {dictating || dictation.dictation.transcribing ? (
+                  <DictationProgress dictation={dictation.dictation} listening={dictating} transcribing={dictation.dictation.transcribing} reducedMotion={reducedMotion} className="py-1" />
+                ) : (
+                  <input
+                    type="text" disabled={disabled} value={chosenOne} placeholder={input.placeholder}
+                    aria-label={`${input.label} — your own answer`}
+                    onChange={(e) => onChange(e.target.value)} className={cx(field, 'h-8 min-w-0 flex-1')}
+                  />
+                )}
+                <DictationButton dictation={dictation.dictation} listening={dictating} disabled={disabled} testId={`v2-dc-dictate-${input.key}`} onClick={() => (dictating ? dictation.stop() : dictation.start())} />
+              </div>
+              <DictationAlerts dictation={dictation.dictation} notice={dictation.pendingNotice} />
+            </div>
           ) : null}
         </div>
       ) : input.type === 'multiselect' ? (
@@ -248,13 +277,29 @@ function InputControl({ input, value, disabled, onChange }: {
             );
           })}
         </div>
-      ) : (
+      ) : input.type === 'secret' ? (
         <input
-          id={id} type={input.type === 'secret' ? 'password' : 'text'} disabled={disabled}
-          value={typeof value === 'string' ? value : ''} placeholder={input.placeholder} aria-required={input.required}
-          autoComplete={input.type === 'secret' ? 'off' : undefined}
+          id={id} type="password" disabled={disabled}
+          value={chosenOne} placeholder={input.placeholder} aria-required={input.required}
+          autoComplete="off"
           onChange={(e) => onChange(e.target.value)} className={cx(field, 'h-8')}
         />
+      ) : (
+        <div className={fieldColumn}>
+          <div className={fieldRow}>
+            {dictating || dictation.dictation.transcribing ? (
+              <DictationProgress dictation={dictation.dictation} listening={dictating} transcribing={dictation.dictation.transcribing} reducedMotion={reducedMotion} className="py-1" />
+            ) : (
+              <input
+                id={id} type="text" disabled={disabled}
+                value={chosenOne} placeholder={input.placeholder} aria-required={input.required}
+                onChange={(e) => onChange(e.target.value)} className={cx(field, 'h-8 min-w-0 flex-1')}
+              />
+            )}
+            <DictationButton dictation={dictation.dictation} listening={dictating} disabled={disabled} testId={`v2-dc-dictate-${input.key}`} onClick={() => (dictating ? dictation.stop() : dictation.start())} />
+          </div>
+          <DictationAlerts dictation={dictation.dictation} notice={dictation.pendingNotice} />
+        </div>
       )}
       {input.type === 'secret' ? (
         <p className="text-nano text-text-4">
@@ -298,6 +343,9 @@ export function V2DecisionCard({
   const [selected, setSelected] = useState<string | null>(null);
   const [confirm, setConfirm] = useState('');
   const [values, setValues] = useState<DecisionAnswerInputs>(() => initialInputValues(decision.inputs ?? []));
+  // VS-552: the free-text answer's own local dictation session, the same control the composer uses.
+  const reducedMotion = usePrefersReducedMotion();
+  const answerDictation = useFieldDictation({ value: text, writeValue: setText });
 
   const review = weaverReviewCopy(decision);
   // Two distinct holds (VS-266 / VS-281): the weaver's stated concerns, and the weaver not having
@@ -514,11 +562,21 @@ export function V2DecisionCard({
         ) : null}
 
         {(freeText || (openEnded && !inert)) && !inert ? (
-          <textarea
-            autoFocus rows={2} value={text} onChange={(e) => setText(e.target.value)}
-            placeholder="Answer in your own words…" aria-label="Answer in your own words"
-            className="mb-2 w-full rounded-r4 border border-line-2 bg-bg-input px-2.5 py-1.5 text-meta text-text-1 outline-none placeholder:text-text-4"
-          />
+          <div className="mb-2 flex flex-col gap-1">
+            <div className="flex items-start gap-2">
+              {answerDictation.dictation.listening || answerDictation.dictation.transcribing ? (
+                <DictationProgress dictation={answerDictation.dictation} listening={answerDictation.dictation.listening} transcribing={answerDictation.dictation.transcribing} reducedMotion={reducedMotion} className="py-1.5" />
+              ) : (
+                <textarea
+                  autoFocus rows={2} value={text} onChange={(e) => setText(e.target.value)}
+                  placeholder="Answer in your own words…" aria-label="Answer in your own words"
+                  className="w-full min-w-0 flex-1 rounded-r4 border border-line-2 bg-bg-input px-2.5 py-1.5 text-meta text-text-1 outline-none placeholder:text-text-4"
+                />
+              )}
+              <DictationButton dictation={answerDictation.dictation} listening={answerDictation.dictation.listening} disabled={busy} testId="v2-dc-dictate-answer" onClick={() => (answerDictation.dictation.listening ? answerDictation.stop() : answerDictation.start())} />
+            </div>
+            <DictationAlerts dictation={answerDictation.dictation} notice={answerDictation.pendingNotice} />
+          </div>
         ) : null}
 
         {destructive && !inert ? (

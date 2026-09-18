@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-18
+goal: "Dictation: offer it on decision-card free-text answers, and discard only
+  below three words"

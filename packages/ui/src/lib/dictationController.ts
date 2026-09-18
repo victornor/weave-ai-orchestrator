@@ -2,7 +2,7 @@
  * One dictation session's behaviour, independent of where it is rendered (VS-450).
  *
  * The V2 chat composer and the shell-level dictation session both drive the same lifecycle: start a
- * session, stream the transcript into a draft, discard a result of five words or fewer (VS-439),
+ * session, stream the transcript into a draft, discard a result below three words (VS-439, VS-552),
  * reveal a long insert (VS-425), cancel on Escape (VS-489), and send the settled draft through the
  * same queued path the send arrow uses (VS-282, VS-416) — either from an explicit send or from the
  * keybinding's ending when the auto-send setting is on (VS-435, VS-494). Keeping it in one hook
@@ -209,7 +209,7 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
     if (reveal && opts.value !== `${reveal.prefix}${reveal.piece}`) stopReveal();
   }, [opts.value, reveal, stopReveal]);
 
-  // A session's outcome of five words or fewer never lands (VS-439), and a cancelled session never
+  // A session's outcome below three words never lands (VS-439, VS-552), and a cancelled session never
   // lands whatever its length (VS-489): once the attempt settles, put the draft back exactly as it
   // was before the mic opened. Declared before the queued send below, so the two run in the same
   // commit in that order.

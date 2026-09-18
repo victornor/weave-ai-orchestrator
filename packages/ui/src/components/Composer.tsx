@@ -133,7 +133,7 @@ export function Composer({
   const pendingSendRef = useRef(false);
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
   /**
-   * VS-439: a session whose transcript is five words or fewer is discarded instead of inserted.
+   * VS-439, VS-552: a session whose transcript is below three words is discarded instead of inserted.
    * `discarded` is the shared decision (also read by the queued send so a short result never
    * submits), `sessionTranscript` is the whole transcript the hook last handed over, and
    * `sessionRan` marks a session in flight so the settle effect only acts on a real attempt.
@@ -307,7 +307,7 @@ export function Composer({
     doSend(t);
   }, [disabled, text, dictation, doSend]);
 
-  // A session's outcome of five words or fewer never lands (VS-439): once the attempt settles, put
+  // A session's outcome below three words never lands (VS-439, VS-552): once the attempt settles, put
   // the draft back exactly as it was before the mic opened — taking every interim word shown while
   // talking with it. Declared before the queued send below, so the flag its check reads is set in
   // the same commit.

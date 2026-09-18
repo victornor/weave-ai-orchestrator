@@ -350,11 +350,11 @@ describe('sending from the V2 dictation bar (VS-450)', () => {
     expect((sends[0]!.body as { body: string }).body).toBe('auto send these words to the weaver');
   });
 
-  it('discards a five-word outcome and sends nothing (VS-439)', () => {
+  it('discards a two-word outcome and sends nothing (VS-439, VS-552)', () => {
     render(<Harness />);
     start();
     toggleRoute();
-    act(() => dict.onText?.('one two three four five', true));
+    act(() => dict.onText?.('one two', true));
     stopFromBar();
     act(() => dict.setSettled?.(true));
     expect(readDraft(draftKey('acme', 'thread:t1')).text).toBe('');

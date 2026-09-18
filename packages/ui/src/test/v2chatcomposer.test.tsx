@@ -698,41 +698,41 @@ describe('the V2 composer: the keybinding sends when auto-send is on, the mic ne
 });
 
 /**
- * VS-439: a session that ends with five words or fewer is discarded — the draft goes back exactly
+ * VS-439, VS-552: a session that ends below three words is discarded — the draft goes back exactly
  * as it was, nothing is inserted, the reveal never starts, and a queued send (VS-282) submits
  * nothing.
  */
-describe('the V2 composer discards a transcript of five words or fewer (VS-439)', () => {
-  it('restores the draft and inserts nothing when the speech outcome is five words', () => {
+describe('the V2 composer discards a transcript below three words (VS-439, VS-552)', () => {
+  it('restores the draft and inserts nothing when the speech outcome is two words', () => {
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} />);
     fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'typed first' } });
 
     dictate();
     // Interim words are on screen while talking — the textarea is the listening node then — and the
-    // five-word outcome takes them all back out when the session ends.
-    act(() => dict.onText?.('one two three', false));
+    // two-word outcome takes them all back out when the session ends.
+    act(() => dict.onText?.('one two', false));
     fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    finishSpeech('one two three four five');
+    finishSpeech('one two');
 
     expect(screen.getByLabelText('Message the weaver')).toHaveValue('typed first');
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('inserts a six-word speech outcome as before', async () => {
+  it('inserts a three-word speech outcome', async () => {
     render(<Harness onSubmit={vi.fn()} />);
     dictate();
     fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    finishSpeech('one two three four five six');
-    await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue('one two three four five six'));
+    finishSpeech('yes do that');
+    await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue('yes do that'));
   });
 
   it('does not start the reveal for a discarded insert', () => {
     render(<Harness onSubmit={vi.fn()} />);
     dictate();
     fireEvent.click(screen.getByRole('button', { name: 'Stop dictation' }));
-    // The five-word outcome restores the (empty) draft at once and is never animated in.
-    act(() => dict.onText?.('one two three four five', true));
+    // The two-word outcome restores the (empty) draft at once and is never animated in.
+    act(() => dict.onText?.('one two', true));
     expect(screen.getByLabelText('Message the weaver')).toHaveValue('');
   });
 
@@ -746,7 +746,7 @@ describe('the V2 composer discards a transcript of five words or fewer (VS-439)'
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(screen.getByRole('button', { name: 'Send queued' })).toBeInTheDocument();
 
-    finishTranscribe('one two three four five');
+    finishTranscribe('one two');
 
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.queryByRole('button', { name: 'Send queued' })).not.toBeInTheDocument();

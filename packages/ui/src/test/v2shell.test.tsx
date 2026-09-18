@@ -407,7 +407,50 @@ describe('the phone tab bar and More', () => {
     const dialog = screen.getByRole('dialog', { name: 'More' });
     expect(within(dialog).getByText('Everywhere')).toBeInTheDocument();
     expect(within(dialog).getByText('Usage')).toBeInTheDocument();
-    expect(within(dialog).getByText('Open V1')).toBeInTheDocument();
+    // The V2 → V1 row is gone (VS-559): V1 answers no address, so the shell offers no way back.
+    expect(within(dialog).queryByText('Open V1')).toBeNull();
+  });
+
+  it('switches workspace on a phone in two taps, listing every workspace with its count (VS-559)', () => {
+    state.workspaces = [
+      { id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 },
+      { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 5 },
+    ];
+    state.projectsByWs = { acme: [], beta: [] };
+    // Acme's live decisions (2) and Beta's (1) are the counts the switcher must show, not `needsYou`.
+    state.decisionsByWs = { acme: [{ id: 'd1' }, { id: 'd2' }], beta: [{ id: 'd3' }] };
+    mountShell();
+    // Tap one: the tab bar's More.
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'More' }));
+    const dialog = screen.getByRole('dialog', { name: 'More' });
+    expect(within(dialog).getByText('Workspaces')).toBeInTheDocument();
+
+    // Tap two: another workspace's row, which is the switch.
+    const betaRow = within(dialog).getByRole('link', { name: /Beta/ });
+    expect(betaRow).toHaveAttribute('href', '/w/beta/needs');
+    expect(betaRow).toHaveTextContent('1');
+
+    // The workspace being shown is marked; its row carries that workspace's own count.
+    const current = within(dialog)
+      .getAllByRole('link')
+      .find((a) => a.getAttribute('aria-current') === 'page');
+    expect(current).toHaveAttribute('href', '/w/acme/needs');
+    expect(current).toHaveTextContent('current');
+    expect(current).toHaveTextContent('2');
+  });
+
+  it('lists the workspaces from a global page too, so a phone can reach one from Everywhere (VS-559)', () => {
+    state.path = '/needs';
+    state.workspaces = [
+      { id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 },
+      { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 0 },
+    ];
+    state.projectsByWs = { acme: [], beta: [] };
+    state.decisionsByWs = { acme: [], beta: [] };
+    mountShell();
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'More' }));
+    const dialog = screen.getByRole('dialog', { name: 'More' });
+    expect(within(dialog).getByRole('link', { name: /Beta/ })).toHaveAttribute('href', '/w/beta/needs');
   });
 
   it('offers the knowledge graph and explorer only as Knowledge tabs, never in More (VS-371)', () => {

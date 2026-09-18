@@ -419,6 +419,22 @@ function MoreList({
             <MoreRow key={d.key} dest={d} scope={scope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} onNavigate={onNavigate} />
           ))}
         </MoreGroup>
+        {/* The rail that switches workspace on desktop is hidden at phone width, so the More list is
+            where another workspace is reached (VS-559). Every workspace, its open Needs-you count,
+            the current one marked; tapping a row opens that workspace's Needs you. */}
+        {workspaces.length > 0 ? (
+          <MoreGroup title="Workspaces">
+            {workspaces.map((w) => (
+              <WorkspaceSwitchRow
+                key={w.id}
+                workspace={w}
+                active={scope.kind === 'workspace' && scope.ws === w.id}
+                count={counts.needsByWs[w.id] ?? w.needsYou}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </MoreGroup>
+        ) : null}
         <MoreGroup title={workspaces.find((w) => w.id === (scope.kind === 'workspace' ? scope.ws : ''))?.name ?? 'Workspace'}>
           {[...V2_WORKSPACE, ...V2_KEPT.filter((d) => d.scopeKind === 'workspace'), ...plugins.map(pluginDest)].map((d) => (
             <MoreRow key={d.key} dest={d} scope={wsScope} fallbackWs={fallbackWs} activeKey={activeKey} counts={counts} onNavigate={onNavigate} />
@@ -451,9 +467,6 @@ function MoreList({
           <span className="text-ui text-text-2">Theme</span>
           <ThemeSwitch theme={theme} onTheme={onTheme} variant="expanded" />
         </div>
-        <A to="/" onClick={onNavigate} className="flex h-12 items-center px-3 text-ui text-text-2 hover:bg-bg-2">
-          Open V1
-        </A>
       </div>
     </div>
   );
@@ -465,6 +478,46 @@ function MoreGroup({ title, children }: { title: string; children: ReactNode }):
       <div className="ac-label px-3 pb-1.5">{title}</div>
       {children}
     </div>
+  );
+}
+
+/**
+ * A workspace in the phone More list's **Workspaces** group (VS-559): the phone's way to change
+ * workspace, since the rail that switches on desktop is `md:`-only. It carries the workspace's
+ * initial, its name and its open Needs-you count, marks the workspace being shown, and opens that
+ * workspace's Needs you screen. Two taps from any screen: More, then this row.
+ */
+function WorkspaceSwitchRow({
+  workspace,
+  active,
+  count,
+  onNavigate,
+}: {
+  workspace: WorkspaceListItem;
+  active: boolean;
+  count: number;
+  onNavigate: () => void;
+}): React.ReactElement {
+  return (
+    <A
+      to={`/w/${encodeURIComponent(workspace.id)}/needs`}
+      aria-current={active ? 'page' : undefined}
+      onClick={onNavigate}
+      className="flex h-12 items-center gap-3 rounded-r4 px-3 text-ui text-text-2 hover:bg-bg-2"
+    >
+      <span
+        className="ac-mono flex size-5 flex-none items-center justify-center rounded-r4 bg-bg-2 text-nano text-text-3"
+        aria-hidden
+      >
+        {workspace.name.slice(0, 1).toUpperCase()}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{workspace.name}</span>
+      {count > 0 ? <span className="ac-mono flex-none text-nano text-needs-you">{count}</span> : null}
+      {active ? <span className="flex-none text-micro font-medium text-accent-link">current</span> : null}
+      <span className="flex-none text-text-4" aria-hidden>
+        ›
+      </span>
+    </A>
   );
 }
 

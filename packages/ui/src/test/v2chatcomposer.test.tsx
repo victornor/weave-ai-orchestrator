@@ -82,7 +82,6 @@ function Harness({ onSubmit, clearOnSubmit = false, blocks = [], initialProject 
       onChange={setText}
       onSubmit={(t, f, o) => { const r = onSubmit(t, f, o); if (clearOnSubmit) setText(''); return r; }}
       onOpenSearch={vi.fn()}
-      onOpenPlan={vi.fn()}
     />
   );
 }
@@ -128,8 +127,7 @@ describe('the V2 chat composer', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeInTheDocument();
   });
 
-  it('renders a Plan button beside Search and calls onOpenPlan (VS-398)', () => {
-    const onOpenPlan = vi.fn();
+  it('no longer renders a Plan control — starting a plan is the chat tab strip (VS-556)', () => {
     render(
       <ChatComposer
         projects={PROJECTS}
@@ -139,15 +137,10 @@ describe('the V2 chat composer', () => {
         onChange={vi.fn()}
         onSubmit={vi.fn()}
         onOpenSearch={vi.fn()}
-        onOpenPlan={onOpenPlan}
       />,
     );
-    const search = screen.getByRole('button', { name: 'Search this conversation' });
-    const plan = screen.getByRole('button', { name: 'Plan a body of work interactively' });
-    expect(plan.textContent?.trim()).toBe('Plan');
-    expect(plan.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
-    fireEvent.click(plan);
-    expect(onOpenPlan).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Search this conversation' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Plan a body of work interactively' })).not.toBeInTheDocument();
   });
 
   it('hides the chat-only toolbar when no handlers are given and the scope is off', () => {

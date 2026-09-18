@@ -380,6 +380,27 @@ export function usePlans(projectId: string | null | undefined): UseQueryResult<{
   });
 }
 
+/**
+ * VS-556: the weaver chat's workspace-wide plan tab strip. There is no workspace-wide plans
+ * endpoint, so this fans one `usePlans`-shaped query out per project and flattens the results,
+ * keeping each project's plans together. A project that is loading or failed contributes no tabs
+ * rather than failing the strip.
+ */
+export function usePlansMany(projectIds: readonly string[]): { plans: PlanSummary[]; isLoading: boolean } {
+  const ws = useWs();
+  const results = useQueries({
+    queries: projectIds.map((projectId) => ({
+      queryKey: qk.plans(ws, projectId),
+      queryFn: () => api.ws<{ plans: PlanSummary[] }>(ws, `/projects/${projectId}/plans?status=drafting`),
+      enabled: Boolean(projectId),
+    })),
+  });
+  return {
+    plans: results.flatMap((r) => r.data?.plans ?? []),
+    isLoading: results.some((r) => r.isLoading),
+  };
+}
+
 /** VS-477: create a fresh drafting plan (with its own thread and planner) alongside any the project already has; the modal focuses the new tab. */
 export function useCreatePlan(): UseMutationResult<{ plan: Plan; agent: { id: string; status: string; runtimeId: string } }, Error, { projectId: string }> {
   const ws = useWs();

@@ -6,7 +6,7 @@
  * first press opens the mic and the next closes it. A press held past the threshold is
  * push-to-talk: releasing Space or either modifier stops. V1's `Composer` and V2's `ChatComposer`
  * both use this hook, so the two bindings cannot drift, and only a composer that still owns the key
- * passes `enabled: true` (VS-428's handoff to the Plan modal).
+ * passes `enabled: true` (VS-428's handoff to the plan surface).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 

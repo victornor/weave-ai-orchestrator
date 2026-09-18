@@ -48,7 +48,7 @@ const TABS = [
  * VS-495: a persistent session with no ticket has no ticket-comment history for `WorkerFeed` to
  * read — its conversation lives in its own thread instead, the same storage the weaver's own chat
  * uses. This renders that thread plainly: no live-run trace, no decision cards, no dispatch chips —
- * those are `ChatConversation`'s weaver/planner-only extras (see `PlanModal`), and a persistent
+ * those are `ChatConversation`'s weaver/planner-only extras (see `PlanTab`), and a persistent
  * session's ticketless turns raise none of them.
  */
 function SessionThreadFeed({ threadId, label }: { threadId: string; label: string }): React.ReactElement {

@@ -9,8 +9,8 @@
  *
  * VS-450: when a `DictationSessionProvider` is above it and this composer is the chat the session
  * belongs to, the dictation state comes from that shared session, so a dictation survives navigating
- * away and back. A composer that opts out (the Plan modal) or has no provider (V1, tests) keeps its
- * own local session exactly as before.
+ * away and back. A composer that opts out (a plan tab) or has no provider (V1, tests) keeps its own
+ * local session exactly as before.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { Project } from '@weave-ai/shared';
@@ -65,9 +65,8 @@ export interface ChatComposerProps {
   replyToMessageId?: string | null;
   onDismissReply?: () => void;
   onSubmit: (text: string, files: File[], opts: { projectId: string | null; blockId: string | null; replyToMessageId: string | null; idempotencyKey: string }) => void | Promise<void>;
-  /** The search and plan affordances are chat-only; each button hides when its handler is absent (the plan modal passes neither). */
+  /** The search affordance is chat-only; it hides when its handler is absent (a plan tab passes none). */
   onOpenSearch?: () => void;
-  onOpenPlan?: () => void;
   /** The project scope selector is chat-only; the plan modal is already bound to one project and hides it. */
   showScope?: boolean;
   /** The input's placeholder and accessible name; default to the weaver chat's wording. */
@@ -80,7 +79,7 @@ export interface ChatComposerProps {
   queuedCount?: number;
   /** The workspace and thread this composer belongs to; required to join the shared dictation session (VS-450). */
   dictationTarget?: DictationTarget | null;
-  /** False to keep a local dictation session — the Plan modal does this (VS-450). */
+  /** False to keep a local dictation session — a plan tab does this (VS-450). */
   sharedDictation?: boolean;
   /** Whether this is the focused pane's composer. Only the focused pane may start or show dictation (VS-489). */
   focused?: boolean;
@@ -107,7 +106,6 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
     onDismissReply,
     onSubmit,
     onOpenSearch,
-    onOpenPlan,
     showScope = true,
     placeholder = 'Message the weaver…',
     ariaLabel = 'Message the weaver',
@@ -291,14 +289,9 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
              Search
           </button>
         ) : null}
-        {onOpenPlan ? (
-          <button type="button" onClick={onOpenPlan} aria-label="Plan a body of work interactively" className="v2-tag flex-none text-text-3 hover:text-text-1">
-            Plan
-          </button>
-        ) : null}
         {showScope ? (
           <>
-            {onOpenSearch || onOpenPlan ? <span className="mx-0.5 h-3 w-px flex-none bg-line-2" aria-hidden /> : null}
+            {onOpenSearch ? <span className="mx-0.5 h-3 w-px flex-none bg-line-2" aria-hidden /> : null}
             <button
               type="button"
               onClick={() => onChangeProject(null)}

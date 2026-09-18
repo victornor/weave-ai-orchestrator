@@ -1,84 +1,30 @@
 # planning-sessions/v2-modal Specification
 
 ## Purpose
-Defines how captain reaches and uses the planning conversation from V2 chat: the entry point, the
-modal/sheet surface it opens, and how the live draft list behaves as captain and the planning agent
-both edit it.
+Defines how captain reaches and uses the planning conversation from the V2 weaver chat: the plan tab
+that holds it, the planner conversation it renders, and how the live draft list behaves as captain
+and the planning agent both edit it.
 
 ## Requirements
 
-### Requirement: A Plan entry point sits in the V2 chat composer's toolbar
-
-The V2 chat composer's toolbar SHALL include a control labelled **"Plan"** that opens the planning
-surface for the current project, positioned beside the existing search control. Secondary copy
-elsewhere (descriptions, documentation, tool text) MAY refer to the underlying concept as a "draft
-plan" or "planning session," but this control's own label SHALL remain "Plan."
-
-#### Scenario: The Plan control is present
-
-- **WHEN** captain views the V2 chat composer's toolbar
-- **THEN** a control labelled "Plan" is present beside the search control
-
-#### Scenario: The Plan control opens the planning surface
-
-- **WHEN** captain activates the Plan control
-- **THEN** the planning surface opens for the current project
-
-### Requirement: The planning surface is a modal on desktop and a full-screen sheet on phone
-
-On a desktop-sized viewport, the planning surface SHALL present as a modal. On a phone-sized viewport,
-it SHALL present as a full-screen sheet.
-
-#### Scenario: Desktop shows a modal
-
-- **WHEN** captain opens the planning surface on a desktop-sized viewport
-- **THEN** it presents as a modal over the current page, not a full-screen takeover
-
-#### Scenario: Phone shows a full-screen sheet
-
-- **WHEN** captain opens the planning surface on a phone-sized viewport
-- **THEN** it presents as a full-screen sheet
-
 ### Requirement: The planning surface shows the conversation and the draft list together
 
-The planning surface SHALL show the conversation with the planning agent and the current draft list at
-the same time, so captain can see the effect of the conversation on the list without switching views.
+A plan tab SHALL show the conversation with the planning agent and the current draft list at the same
+time, so captain can see the effect of the conversation on the list without leaving the tab. On a
+desktop-sized viewport the conversation and the draft list SHALL both be visible; on a phone-sized
+viewport the draft list SHALL remain reachable from within the tab, with the conversation and the
+draft list switched by a control in the tab rather than by leaving it.
 
 #### Scenario: Both panes are visible together on desktop
 
-- **WHEN** captain has the planning surface open on a desktop-sized viewport with drafts in the plan
+- **WHEN** captain has a plan tab focused on a desktop-sized viewport with drafts in the plan
 - **THEN** the conversation and the draft list are both visible without further navigation
 
-### Requirement: Captain can pick the plan's project, defaulting to the current one
+#### Scenario: The draft list is reachable on phone
 
-The planning surface SHALL let captain choose which project the surface is showing, defaulting to the
-project of the chat the Plan control was opened from. Each project's plans are shown as that
-project's own tabs; switching the selected project SHALL show that project's drafting plans and SHALL
-NOT create or discard a plan in either project.
-
-#### Scenario: Opening from a project's chat defaults to that project
-
-- **WHEN** captain opens the planning surface from a chat scoped to a specific project
-- **THEN** the surface shows that project's drafting plans
-
-#### Scenario: Switching project shows that project's plans
-
-- **WHEN** captain changes the selected project
-- **THEN** the surface shows the newly selected project's drafting plans and tabs, and the previously
-  shown project's plans are unchanged
-
-#### Scenario: Captain can change the project before drafting
-
-- **WHEN** captain changes the plan's project selection before any drafts exist in the currently
-  focused plan
-- **THEN** the surface shows the newly selected project's drafting plans, and the newly selected
-  project's own drafting plan is the one drafted into
-
-#### Scenario: A project with no drafting plan shows the empty state
-
-- **WHEN** captain selects a project that has no drafting plan
-- **THEN** the surface shows an empty state offering to start a new plan, and no plan is created
-  until captain asks for one
+- **WHEN** captain focuses a plan tab on a phone-sized viewport
+- **THEN** a control in the tab switches between the conversation and the plan's draft list, and the
+  draft list is reachable without leaving the tab
 
 ### Requirement: Captain can edit any field of any draft, including the tier
 
@@ -129,15 +75,14 @@ made directly by captain, without requiring a manual reload.
 
 ### Requirement: The planning surface never widens to fit a child
 
-The planning surface SHALL constrain the width of its conversation pane so that no child — the
-dictation meter or any other — can widen the pane or the surface beyond the surface's own laid-out
-size. A child that cannot fit SHALL be clipped or scrolled inside the pane, not allowed to grow it.
+A plan tab SHALL constrain the width of its conversation pane so that no child — the dictation meter
+or any other — can widen the pane or the tab beyond the tab's own laid-out size. A child that cannot
+fit SHALL be clipped or scrolled inside the pane, not allowed to grow it.
 
 #### Scenario: Listening does not widen the pane
 
-- **WHEN** captain starts dictation in the planning surface's composer
-- **THEN** the conversation pane and the planning surface keep the widths they had before dictation
-  started
+- **WHEN** captain starts dictation in a plan tab's composer
+- **THEN** the conversation pane and the tab keep the widths they had before dictation started
 
 #### Scenario: The pane is width-constrained
 
@@ -146,30 +91,42 @@ size. A child that cannot fit SHALL be clipped or scrolled inside the pane, not 
 
 ### Requirement: The planning surface shows one tab per drafting plan
 
-The planning surface SHALL show one tab for each of the selected project's `drafting` plans,
-persisted server-side so the set of tabs survives a page reload and is the same on another device.
-The surface SHALL mark which tab is focused.
+The weaver chat SHALL show the weaver conversation as its first tab and, after it, one tab for each
+`drafting` plan in the workspace — every project's, not only the chat's selected project. Each plan
+tab SHALL be tagged with its plan's project so tabs from different projects can be told apart. The
+set of tabs SHALL be persisted server-side, so it survives a page reload and is the same on another
+device, and the strip SHALL mark which tab is focused. When the workspace has no drafting plan the
+strip SHALL show the weaver tab and the **New plan** control only.
 
 #### Scenario: A tab per drafting plan
 
-- **WHEN** the selected project has three drafting plans
-- **THEN** the surface shows three tabs, one per plan, with the focused one marked
+- **WHEN** the workspace has three drafting plans, across two projects
+- **THEN** the chat shows the weaver tab plus three plan tabs, one per plan, each tagged with its
+  project, with the focused one marked
 
 #### Scenario: Tabs survive a reload
 
-- **WHEN** captain has two drafting plans open as tabs and reloads the page
-- **THEN** the same two tabs are shown, still one per plan
+- **WHEN** captain has two drafting plans open as tabs — plus the weaver tab — and reloads the page
+- **THEN** the same tabs are shown, still one per plan plus the weaver tab, with the last-focused one
+  selected where the device remembers one
 
 #### Scenario: Submitting a plan closes its tab and keeps the others
 
 - **WHEN** captain submits one of several drafting plans
-- **THEN** that plan's tab is gone, its other tabs remain, and the surface focuses one of them
+- **THEN** that plan's tab is gone, its other tabs and the weaver tab remain, and the chat focuses one
+  of them
+
+#### Scenario: A workspace with no drafting plan shows the weaver tab only
+
+- **WHEN** the workspace has no drafting plan
+- **THEN** the strip shows the weaver tab and the **New plan** control, and no plan is created until
+  captain asks for one
 
 ### Requirement: Captain can start a new plan from the surface
 
-The planning surface SHALL provide a **New plan** control that creates a fresh drafting plan for the
-selected project, with its own conversation and planner, and focuses its tab. A project SHALL be
-allowed to hold several drafting plans at once.
+The weaver chat's tab strip SHALL provide a **New plan** control that creates a fresh drafting plan
+for the chat's selected project, with its own conversation and planner, and focuses its tab. A
+project SHALL be allowed to hold several drafting plans at once.
 
 #### Scenario: New plan adds and focuses a tab
 
@@ -184,8 +141,9 @@ allowed to hold several drafting plans at once.
 
 ### Requirement: Switching tabs changes the plan the surface shows
 
-Activating a plan's tab SHALL switch the surface's conversation, draft list and planner to that plan.
-The switch SHALL NOT submit, discard or otherwise change either plan.
+Activating a tab SHALL switch the chat's content to that tab: the weaver conversation for the weaver
+tab, and the plan's conversation, draft list and planner for a plan tab. The switch SHALL NOT submit,
+discard or otherwise change either plan.
 
 #### Scenario: Switching loads that plan's conversation and drafts
 
@@ -249,22 +207,21 @@ renamed title SHALL persist server-side and SHALL NOT be replaced by a later aut
 
 ### Requirement: The last-focused plan tab is remembered on the device
 
-The planning surface SHALL remember, on the device, which plan tab captain last focused for a
-project, and SHALL focus that tab when the surface is next opened for that project, when that plan is
-still a drafting plan. When the remembered plan is gone, the surface SHALL focus another of the
-project's drafting plans, or the empty state when there are none.
+The chat SHALL remember, on the device, which tab captain last focused in a workspace — a plan tab or
+the weaver tab — and SHALL focus that tab when the chat is next opened in that workspace. When the
+remembered plan is no longer a drafting plan, the chat SHALL focus another plan tab, or the weaver
+tab when none remains.
 
 #### Scenario: Reopening focuses the last-focused tab
 
-- **WHEN** captain focuses a plan tab, closes the surface, and opens it again for the same project
-- **THEN** that same plan's tab is focused
+- **WHEN** captain focuses a plan tab, leaves the chat, and opens it again for the same workspace
+- **THEN** that same plan's tab is focused, or the weaver tab when that was the last-focused tab
 
 #### Scenario: A remembered plan that is gone falls back
 
-- **WHEN** the plan remembered for a project has been submitted or discarded, and the surface is
-  opened for that project
-- **THEN** the surface focuses another of the project's drafting plans, or the empty state when none
-  remains
+- **WHEN** the plan remembered for the workspace has been submitted or discarded, and the chat is
+  opened for that workspace
+- **THEN** the chat focuses another plan tab, or the weaver tab when none remains
 
 ### Requirement: A scout draft in a drafting plan can be dispatched from the planning surface
 
@@ -308,3 +265,88 @@ work page to see it.
 
 - **WHEN** captain views a scout draft that has already been dispatched
 - **THEN** no Dispatch action is shown for it, replaced by its current state
+
+### Requirement: The planning surface is a tab in the weaver chat
+
+A plan's planning surface SHALL render as a tab in the V2 weaver chat beside the weaver tab, never as
+a modal, overlay or full-screen sheet. Selecting a plan tab SHALL show that plan's conversation and
+draft list in the chat's content area, with the weaver conversation's own tab remaining available;
+selecting a tab SHALL NOT submit, discard or otherwise change any plan. On a phone-sized viewport a
+plan tab SHALL use the screen's width, the same as the weaver tab, and SHALL NOT leave the plan's
+draft list unreachable.
+
+#### Scenario: The planning surface is not a modal
+
+- **WHEN** captain starts or opens a plan
+- **THEN** the plan appears as a tab in the weaver chat and no modal, overlay or full-screen sheet is
+  shown
+
+#### Scenario: Selecting a plan tab shows it in the chat
+
+- **WHEN** captain selects a plan's tab
+- **THEN** the chat's content area shows that plan's conversation and draft list, and the weaver
+  tab remains available in the strip
+
+#### Scenario: Selecting a tab does not change any plan
+
+- **WHEN** captain switches from one plan tab to another and back
+- **THEN** neither plan is submitted, discarded or otherwise changed by the visits
+
+#### Scenario: A phone plan tab fills the width
+
+- **WHEN** captain opens a plan tab on a phone-sized viewport
+- **THEN** the tab uses the screen's width, the same as the weaver tab, with the plan's draft list
+  reachable from within the tab
+
+### Requirement: A plan tab's conversation renders exactly like the weaver chat
+
+A plan tab's conversation SHALL render through the same message list, per-turn turn summary, live
+working trace, markdown, attachment rows and stick-to-bottom follow as the weaver chat, differing
+only in its actor name ("Planner") and in the weaver-only affordances it omits — inline decision
+cards, dispatch chips, the reply control and the unattributed-worker row. Its composer SHALL carry
+the same attach, dictate and send controls as the weaver chat and SHALL send to the plan's planner;
+it SHALL NOT offer the chat's project scope selector, being bound to the plan's own project.
+
+#### Scenario: The plan conversation matches the weaver chat
+
+- **WHEN** the planning agent's turn produced a message with tool calls, tokens and a context figure
+- **THEN** the plan tab renders the same message list, turn-summary line and working trace the weaver
+  chat would for the same turn, naming the actor "Planner"
+
+#### Scenario: Attachments behave identically
+
+- **WHEN** captain attaches an image or text file in a plan tab's composer and sends
+- **THEN** it is uploaded with the message and rendered as an attachment row exactly as the weaver
+  chat renders one
+
+#### Scenario: The plan composer has no project selector
+
+- **WHEN** a plan tab's composer is shown
+- **THEN** it offers attach, dictate and send, and does not offer the chat's project scope selector
+
+#### Scenario: The plan composer sends to the planner
+
+- **WHEN** captain sends a message from a plan tab's composer
+- **THEN** it is posted to that plan's planner conversation
+
+### Requirement: New plan is created in the chat's selected project
+
+The **New plan** control SHALL create the fresh drafting plan in the project selected in the weaver
+composer, defaulting to the workspace's first project when the composer is on `Auto`. Changing the
+chat's project scope SHALL change where a subsequent **New plan** is created and SHALL NOT create,
+discard or re-scope any existing plan.
+
+#### Scenario: New plan uses the selected project
+
+- **WHEN** the weaver composer is scoped to a project and captain activates **New plan**
+- **THEN** the new drafting plan belongs to that project
+
+#### Scenario: Auto defaults to the workspace's first project
+
+- **WHEN** the weaver composer is on `Auto` and captain activates **New plan**
+- **THEN** the new drafting plan belongs to the workspace's first project
+
+#### Scenario: Changing the scope does not change existing plans
+
+- **WHEN** captain changes the chat's project scope while plans already exist
+- **THEN** no plan is created, discarded or re-scoped by the change

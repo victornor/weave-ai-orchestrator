@@ -20,6 +20,7 @@ const state = vi.hoisted(() => ({
   tickets: [] as Ticket[],
   workers: [] as Agent[],
   roadmapBlocks: [] as Array<{ id: string; reportedStatus: string; title: string }>,
+  planTabs: [] as Array<{ id: string; projectId: string; title: string | null; titleSource: string; status: string; draftCount: number; createdAt: string; updatedAt: string }>,
   search: [] as Array<{ messageId: string; authorKind: string; authorId: string | null; createdAt: string; snippet: string }>,
   context: [] as ThreadMessage[],
   events: [] as unknown[],
@@ -124,6 +125,7 @@ vi.mock('../api/hooks', () => ({
   // throws on the first hook call.
   useStartOrResumePlan: () => ({ mutate: vi.fn() }),
   usePlans: () => ({ data: { plans: [] } }),
+  usePlansMany: () => ({ plans: state.planTabs, isLoading: false }),
   useCreatePlan: () => ({ mutate: vi.fn(), isPending: false }),
   useActivatePlan: () => ({ mutate: vi.fn(), isPending: false }),
   useRenamePlan: () => ({ mutate: vi.fn(), isPending: false }),
@@ -237,6 +239,7 @@ beforeEach(() => {
     agent({ id: 'w2', name: 'Plugin Engineer #2', status: 'active', ticketId: null }),
   ];
   state.roadmapBlocks = [];
+  state.planTabs = [];
   state.search = [];
   state.context = [];
   state.events = [];
@@ -348,6 +351,28 @@ describe('the V2 Chat screen', () => {
     state.width = 500;
     utils.rerender(<V2ChatPage />);
     expect(document.querySelector('[data-decisions-pane]')).toBeNull();
+  });
+
+  it('shows a tab per drafting plan in the workspace, tagged with its project, and switches to it (VS-556)', async () => {
+    state.planTabs = [
+      { id: 'plan_1', projectId: 'p1', title: 'API work', titleSource: 'human', status: 'drafting', draftCount: 0, createdAt: '', updatedAt: '' },
+    ];
+    render(<V2ChatPage />);
+    await screen.findByLabelText('Message the weaver');
+
+    // The weaver conversation is the first tab and is selected; the plan has its own tab, project-tagged.
+    const weaver = screen.getByRole('tab', { name: 'Weaver chat' });
+    expect(weaver).toHaveAttribute('aria-selected', 'true');
+    const planTab = screen.getByRole('tab', { name: 'Plan: API work' });
+    expect(planTab.textContent).toContain('web');
+    expect(screen.getByRole('button', { name: 'New plan' })).toBeInTheDocument();
+
+    // Selecting the plan tab swaps the chat's content for the plan surface; the weaver composer goes.
+    fireEvent.click(planTab);
+    expect(screen.getByRole('tab', { name: 'Plan: API work' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Weaver chat' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.queryByLabelText('Message the weaver')).toBeNull();
+    expect(screen.getByLabelText('Message the planner')).toBeInTheDocument();
   });
 
   it('reports running workers, waiting decisions and the session limit in its status bar', async () => {

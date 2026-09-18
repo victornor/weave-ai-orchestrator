@@ -50,7 +50,8 @@ import { V2DispatchChip, V2WorkerChip } from './ChatChips';
 import { V2DecisionCard, type V2Answer } from './DecisionCard';
 import { useExitPresence } from './motion';
 import { SearchPanel } from './SearchPanel';
-import { PlanModal } from './PlanModal';
+import { PlanTab } from './PlanTab';
+import { PlanTabStrip, usePlanTabs } from './PlanTabs';
 import { DIVIDER_MAX, DIVIDER_MIN, clampDivider, readDivider, shouldSplit, useElementWidth, writeDivider } from './chatSplit';
 
 /** The answer shown in a note: the chosen option's label, else the first line of the free text. */
@@ -326,7 +327,6 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // (VS-440), while a resumed run still waits for its events so the ones already there stay whole.
   const [live, setLive] = useState<{ id: string; running: boolean; fromStart: boolean } | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
-  const [planOpen, setPlanOpen] = useState(false);
   const [anchor, setAnchor] = useState<string | null>(null);
   const [answerError, setAnswerError] = useState<string | null>(null);
   // A decision answered from this screen's own inline card, so the conversation swaps the card for
@@ -454,8 +454,14 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   );
 
   const rowRuns = useMemo(() => new Set((messages.data ?? []).map((m) => m.runId).filter((id): id is string => Boolean(id))), [messages.data]);
-  // The live section's own clearing is shared with the Plan modal's planner chat (VS-442).
+  // The live section's own clearing is shared with a plan tab's planner chat (VS-442).
   useLiveRunSettle(live, setLive, rowRuns);
+
+  // VS-556: the chat's tab strip — the weaver conversation as a tab, one tab per drafting plan in
+  // the workspace, and New plan (created in the composer's selected project).
+  const { tabs: planTabs, focused: chatTab, plannerRuntimeId, isCreating, focusWeaver, focusPlan, createPlan, renamePlan, discardPlan, onPlanGone } = usePlanTabs({ projects: projects.data ?? [] });
+  const newPlanProjectId = draft.projectId ?? projects.data?.[0]?.id ?? null;
+  const newPlan = useCallback((): void => { if (newPlanProjectId) createPlan(newPlanProjectId); }, [newPlanProjectId, createPlan]);
 
   const compactionAt = (runtimes.data ?? []).find((r) => r.id === conductorRuntime)?.capabilities['contextCompactionAt'] as number | undefined;
 
@@ -693,6 +699,20 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <PlanTabStrip
+        projects={projects.data ?? []}
+        tabs={planTabs}
+        focused={chatTab}
+        busy={isCreating}
+        onFocusWeaver={focusWeaver}
+        onFocusPlan={focusPlan}
+        onNewPlan={newPlan}
+        onRename={renamePlan}
+        onDiscard={discardPlan}
+      />
+
+      {chatTab.kind === 'weaver' ? (
+        <>
       <ChatStatusBar
         running={running}
         needs={openDecisionCount}
@@ -764,8 +784,6 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                 onDismissReply={() => patch({ replyToId: null })}
                 onSubmit={send}
                 onOpenSearch={() => setSearchOpen(true)}
-                onOpenPlan={() => setPlanOpen(true)}
-                hotkey={!planOpen}
                 focused={focused}
                 dictationTarget={fetchId ? { ws, threadId: fetchId, projectId: draft.projectId ?? null, replyToMessageId: draft.replyToId ?? null } : null}
                 queuedReason={compacting ? 'Compacting the conversation — your message is queued until it finishes' : offline ? 'Offline — your message is queued' : working ? 'Weaver is replying — your message is queued' : null}
@@ -800,12 +818,19 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
         onClose={() => setSearchOpen(false)}
         onSelect={(messageId) => { setAnchor(messageId); setSearchOpen(false); }}
       />
-      <PlanModal
-        open={planOpen}
-        onClose={() => setPlanOpen(false)}
-        projects={projects.data ?? []}
-        projectId={draft.projectId ?? null}
-      />
+        </>
+      ) : (
+        <PlanTab
+          key={chatTab.planId}
+          ws={ws}
+          projectId={chatTab.projectId}
+          planId={chatTab.planId}
+          projects={projects.data ?? []}
+          focused={focused}
+          plannerRuntimeId={plannerRuntimeId}
+          onSubmitted={onPlanGone}
+        />
+      )}
     </div>
   );
 }

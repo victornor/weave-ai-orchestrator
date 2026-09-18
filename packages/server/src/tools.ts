@@ -448,7 +448,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_ticket_attachment_put', scope: 'all', input: z.object({ id: ticketId, path: z.string().min(1), label: z.string().max(200).optional() }),
-    description: 'Attach a file by path from the allowed workspace, project, or worker worktree. The daemon reads and stores the bytes; do not transcribe base64.',
+    description: 'Attach a file by path from the allowed workspace, project, worker worktree, or your own home directory. Attach rendered evidence (screenshots, captures) to the ticket so a reviewer sees it on the approval card instead of citing a path; the daemon reads and stores the bytes, so never transcribe base64.',
     handler: (ctx, i) => {
       const attachment = svc(ctx).tickets.putAttachment(ctx.actor, writeTicket(ctx, i.id).id, { path: i.path, label: i.label });
       return ticketAttachmentView(ctx, attachment);

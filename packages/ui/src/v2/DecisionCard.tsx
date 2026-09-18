@@ -31,6 +31,7 @@ import { DocumentPreview } from '../components/DocumentPreview';
 import { CiChip } from '../components/CiChip';
 import { Markdown } from '../components/Markdown';
 import { PlanPreview } from '../components/PlanPreview';
+import { TicketEvidence } from '../components/TicketEvidence';
 import { useTicketFor, useTicketWorkProducts } from '../api/hooks';
 import { ago } from '../lib/format';
 import { usePrefersReducedMotion } from '../lib/streamReveal';
@@ -73,6 +74,9 @@ export interface V2DecisionCardProps {
 
 /** Named kinds whose actions are purpose-built rather than the option list. */
 const NAMED: NamedCardKind[] = ['plan_approval', 'merge_approval', 'hire_approval', 'discard_approval', 'action_approval'];
+
+/** The approval kinds that show the ticket's attached evidence (VS-555). */
+const EVIDENCE_KINDS = new Set<string>(['plan_approval', 'merge_approval', 'action_approval']);
 
 /** The header phrase, neutral text — no status glyph (HANDOFF §6). */
 function headerLabel(d: Decision, asker?: 'weaver' | 'worker'): string {
@@ -391,7 +395,10 @@ export function V2DecisionCard({
   // and blockers) and the worker's current run, rather than counting from the weaver's review
   // (VS-430). The detail query is enabled only while the row is on screen.
   const heldRowVisible = concerns && !inert;
-  const detail = useTicketFor(ws ?? undefined, decision.ticketId ?? '', heldRowVisible && Boolean(decision.ticketId));
+  // VS-555: an approval card shows the ticket's attached evidence, so the detail query is enabled for
+  // the three approval kinds as well as the held-revision row.
+  const showsEvidence = EVIDENCE_KINDS.has(decision.kind) && Boolean(decision.ticketId);
+  const detail = useTicketFor(ws ?? undefined, decision.ticketId ?? '', (heldRowVisible || showsEvidence) && Boolean(decision.ticketId));
   const heldWorker = detail.data?.worker ?? null;
   const { run: heldRun } = useWorkerRun(heldWorker?.id ?? askedBy, ws ?? undefined);
   const heldRow = heldRevisionRow({
@@ -458,6 +465,8 @@ export function V2DecisionCard({
       <div className={narrow ? 'p-2.5' : 'p-3'}>
         <h3 className="mb-1 text-ui font-semibold leading-snug tracking-head text-text-strong">{title}</h3>
         {decision.context ? <Markdown source={decision.context} className="mb-2 text-meta leading-normal text-text-2" /> : null}
+
+        {showsEvidence ? <TicketEvidence attachments={detail.data?.attachments} className="mb-2" /> : null}
 
         {docTarget && decision.kind !== 'plan_approval' ? <DocumentPreview decision={decision} ws={ws ?? undefined} /> : null}
         {decision.kind === 'plan_approval' && !inert ? (plan ?? <PlanPreview decision={decision} ws={ws ?? undefined} />) : null}

@@ -24,7 +24,7 @@ import { basename, dirname, extname, join } from 'node:path';
 import { flattenWakes } from '../prompts/index.js';
 import type { Wakeup } from '@weave-ai/shared';
 import { ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, guessOutboundMediaType } from '@weave-ai/shared';
-import { assertAttachablePath, resolveOutboundAttachmentRoots } from '../threads/outboundAttachments.js';
+import { actingAgentHome, assertAttachablePath, assertNotHiddenUnderHome, resolveOutboundAttachmentRoots } from '../threads/outboundAttachments.js';
 import { sanitizeAttachmentFilename, sha256, writeGeneratedAttachment } from '../threads/attachmentStorage.js';
 
 function ticketBranchFor(t: { identifier: string; title: string }): string {
@@ -1408,7 +1408,11 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     putAttachment(actor, id, input) {
       const t = get(id);
       const roots = resolveOutboundAttachmentRoots(ctx);
-      const source = assertAttachablePath(ctx, input.path, roots);
+      // The acting agent's own home is an extra source (VS-555): a worker writes a render where the
+      // worker rules say to, outside `work/`, and can attach it. It is guarded, not merely appended.
+      const home = actingAgentHome(ctx, actor);
+      const source = assertAttachablePath(ctx, input.path, home ? [...roots, home] : roots);
+      assertNotHiddenUnderHome(source, home, roots);
       const stat = statSync(source);
       if (stat.size > ATTACHMENT_MAX_OUTBOUND_FILE_BYTES) {
         throw new OcError('validation', `"${input.path}" cannot be attached: file is ${stat.size} bytes, over the ${ATTACHMENT_MAX_OUTBOUND_FILE_BYTES}-byte per-file cap`, { max: ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, actual: stat.size });

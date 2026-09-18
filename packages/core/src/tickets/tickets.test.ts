@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -82,6 +82,46 @@ describe('tickets', () => {
     writeFileSync(large, Buffer.alloc(10 * 1024 * 1024 + 1));
     expect(() => tickets.putAttachment(AGENT, ticket.id, { path: large })).toThrow(/per-file cap/);
     expect(tickets.attachments(ticket.id)).toHaveLength(0);
+  });
+
+  it('accepts a capture in the acting worker\'s own home but refuses config, another home, and escapes (VS-555)', () => {
+    const ticket = make();
+    const me = h.addWorker(ticket.id);
+    const other = h.addWorker(null);
+    const myHome = join(h.ctx.paths.workers, me);
+    const otherHome = join(h.ctx.paths.workers, other);
+    mkdirSync(join(myHome, 'shots'), { recursive: true });
+    mkdirSync(otherHome, { recursive: true });
+
+    // A render saved where the worker rules say to save it — its own home, outside `work/`.
+    const shot = join(myHome, 'shots', 'capture.png');
+    writeFileSync(shot, Buffer.from('png-bytes'));
+    expect(tickets.putAttachment({ kind: 'agent', id: me, runId: 'r' }, ticket.id, { path: shot }).label).toBe('capture.png');
+
+    // A dot-directory under the same home — where every runtime keeps its config — is refused.
+    mkdirSync(join(myHome, '.config', 'opencode'), { recursive: true });
+    const cfg = join(myHome, '.config', 'opencode', 'opencode.json');
+    writeFileSync(cfg, '{}');
+    expect(() => tickets.putAttachment({ kind: 'agent', id: me, runId: 'r' }, ticket.id, { path: cfg })).toThrow(/hidden files and runtime config/);
+
+    // Another worker's home is never this worker's source.
+    const theirs = join(otherHome, 'capture.png');
+    writeFileSync(theirs, Buffer.from('png-bytes'));
+    expect(() => tickets.putAttachment({ kind: 'agent', id: me, runId: 'r' }, ticket.id, { path: theirs })).toThrow(/outside/);
+  });
+
+  it('refuses a symlink in the worker\'s home that points outside it (VS-555)', () => {
+    const ticket = make();
+    const me = h.addWorker(ticket.id);
+    const myHome = join(h.ctx.paths.workers, me);
+    mkdirSync(myHome, { recursive: true });
+    const outside = mkdtempSync(join(tmpdir(), 'ac-outside-'));
+    const secret = join(outside, 'owner-config.json');
+    writeFileSync(secret, '{}');
+    const escape = join(myHome, 'capture.png');
+    symlinkSync(secret, escape);
+    expect(() => tickets.putAttachment({ kind: 'agent', id: me, runId: 'r' }, ticket.id, { path: escape })).toThrow(/outside/);
+    rmSync(outside, { recursive: true, force: true });
   });
 
   it('removes the generated file when metadata persistence fails', () => {

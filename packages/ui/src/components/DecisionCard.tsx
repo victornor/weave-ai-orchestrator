@@ -9,7 +9,8 @@ import { DocumentPreview } from './DocumentPreview';
 import { HandoverCommand } from './HandoverCommand';
 import { Markdown } from './Markdown';
 import { StatusGlyph } from './StatusGlyph';
-import { useHandoverCommandFor, useStartHandoverFor } from '../api/hooks';
+import { TicketEvidence } from './TicketEvidence';
+import { useHandoverCommandFor, useStartHandoverFor, useTicketFor } from '../api/hooks';
 import { useToast } from './Toast';
 import { clock } from '../lib/format';
 import { cx } from '../lib/cx';
@@ -74,6 +75,9 @@ interface Target {
 
 /** Decisions with a purpose-built body and buttons; everything else takes the option-list path. */
 const NAMED_VARIANTS = ['plan_approval', 'merge_approval', 'hire_approval', 'discard_approval', 'action_approval'];
+
+/** The approval kinds that show the ticket's attached evidence (VS-555). */
+const EVIDENCE_KINDS = new Set<string>(['plan_approval', 'merge_approval', 'action_approval']);
 
 const HEAD: Record<string, { label: string; status: UiStatus }> = {
   plan_approval: { label: 'Plan approval', status: 'needs-you' },
@@ -314,6 +318,9 @@ export function DecisionCard({ decision, ticketIdentifier, projectLabel, project
   // The document a decision target points at (VS-224), parsed from the untyped record: the
   // rendering is driven by this, never by the decision's kind.
   const docTarget = documentTarget(decision);
+  // VS-555: a plan, merge or action approval shows the ticket's attached evidence in the card.
+  const showsEvidence = EVIDENCE_KINDS.has(decision.kind) && Boolean(decision.ticketId);
+  const evidence = useTicketFor(ws ?? undefined, decision.ticketId ?? '', showsEvidence).data?.attachments;
   const inputs = decision.inputs ?? [];
   const destructive = decision.kind === 'discard_approval';
   // A decision belonging to no project is the workspace's, and says so: an absent label and one that
@@ -417,6 +424,8 @@ export function DecisionCard({ decision, ticketIdentifier, projectLabel, project
         ) : decision.context ? (
           <Markdown source={decision.context} className={cx(section, 'text-meta leading-relaxed text-text-2')} />
         ) : null}
+
+        {showsEvidence ? <TicketEvidence attachments={evidence} className={section} /> : null}
 
         {/* plan approval — the proposal's task list */}
         {target.tasks?.length ? (

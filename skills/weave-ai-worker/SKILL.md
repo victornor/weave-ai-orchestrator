@@ -92,6 +92,10 @@ Commit early and clearly. Never end a turn holding work you would mind losing. N
 
 Delivery and the exact merge sequence: `references/delivery.md`.
 
+## Attach rendered evidence to the ticket
+
+A visual change is judged by its render, and the human decides from the ticket's approval card — not from a path in a report. Save your screenshots and other captures in your **home directory, outside `work/`** (which stays clean), and attach each one with `weave_ticket_attachment_put(id, { path })` before you ask for approval. The images then appear on the plan, merge and action approval cards themselves. A non-image — a zip, a video, a log — attaches just as well and shows as a labelled download. Never leave a capture in a scratch directory and cite its path: it will be gone by the time the card is reviewed, and the card will show nothing.
+
 ## Never run a coding CLI against live credentials
 
 **Do not launch `claude`, `codex`, `gemini`, `opencode` or any other coding CLI from inside a ticket** — not to try something out, not for a read-only probe, not to confirm a fact "against the real thing".

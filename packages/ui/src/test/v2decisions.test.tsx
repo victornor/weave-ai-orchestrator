@@ -5,7 +5,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps, ReactNode } from 'react';
-import type { Run } from '@weave-ai/shared';
+import type { Run, TicketAttachment } from '@weave-ai/shared';
 import { agent, decision as makeDecision, run as makeRun, ticket, workProduct } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -15,6 +15,7 @@ const state = vi.hoisted(() => ({
     ticket: ReturnType<typeof ticket>;
     worker: ReturnType<typeof agent> | null;
     blockers: ReturnType<typeof ticket>[];
+    attachments?: TicketAttachment[];
   } | null,
 }));
 
@@ -48,6 +49,22 @@ function renderCard(props: Partial<ComponentProps<typeof V2DecisionCard>> = {}) 
   const onAnswer = vi.fn();
   const utils = render(<V2DecisionCard decision={makeDecision()} ws="ws1" onAnswer={onAnswer} {...props} />);
   return { onAnswer, ...utils };
+}
+
+function attachment(over: Partial<TicketAttachment> = {}): TicketAttachment {
+  const id = over.id ?? 'att1';
+  return {
+    id,
+    ticketId: 'tk_1',
+    label: 'capture.png',
+    mediaType: 'image/png',
+    byteSize: 1234,
+    sha256: 'sha',
+    storageKey: `${id}.png`,
+    createdAt: '2026-09-18T01:00:00.000Z',
+    ...over,
+    url: over.url ?? `/api/w/ws1/tickets/tk_1/attachments/${id}`,
+  };
 }
 
 beforeEach(() => {
@@ -523,5 +540,34 @@ describe('the merge card\'s Review changes control (VS-452)', () => {
     mergePr();
     renderCard({ decision: makeDecision({ kind: 'plan_approval' }), ticketIdentifier: 'ACME-42', projectSlug: 'api' });
     expect(screen.queryByRole('link', { name: 'Review changes' })).toBeNull();
+  });
+});
+
+describe('the approval card evidence (VS-555)', () => {
+  it('shows the ticket\'s image and non-image attachments', () => {
+    state.detail = {
+      ticket: ticket(),
+      worker: null,
+      blockers: [],
+      attachments: [
+        attachment({ id: 'shot', label: 'dashboard.png' }),
+        attachment({ id: 'zip', label: 'logs.zip', mediaType: 'application/zip' }),
+      ],
+    };
+    renderCard({ decision: makeDecision({ kind: 'merge_approval', ticketId: 'tk_1' }) });
+    expect(screen.getByAltText('dashboard.png')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /logs\.zip/ })).toBeInTheDocument();
+  });
+
+  it('renders unchanged for a ticket with no attachments', () => {
+    state.detail = { ticket: ticket(), worker: null, blockers: [], attachments: [] };
+    renderCard({ decision: makeDecision({ kind: 'merge_approval', ticketId: 'tk_1' }) });
+    expect(document.querySelector('[data-v2-section="evidence"]')).toBeNull();
+  });
+
+  it('does not show evidence on a non-approval card', () => {
+    state.detail = { ticket: ticket(), worker: null, blockers: [], attachments: [attachment({ id: 'x', label: 'x.png' })] };
+    renderCard({ decision: makeDecision({ kind: 'question', ticketId: 'tk_1' }) });
+    expect(document.querySelector('[data-v2-section="evidence"]')).toBeNull();
   });
 });

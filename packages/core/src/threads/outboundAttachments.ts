@@ -73,6 +73,44 @@ export function assertAttachablePath(ctx: WorkspaceContext, rawPath: string, roo
   return resolved;
 }
 
+/**
+ * VS-555: the extra root a *ticket* attachment may read from — the acting agent's own home, live or
+ * archived, and only that agent's. Returns the realpath-resolved directory, or null when the actor is
+ * not an agent or has no home on disk. Deliberately separate from `resolveOutboundAttachmentRoots`,
+ * which must stay exactly as it is for `weave_human_send`'s chat boundary.
+ */
+export function actingAgentHome(ctx: WorkspaceContext, actor: { kind: string; id: string | null }): string | null {
+  if (actor.kind !== 'agent' || !actor.id) return null;
+  for (const base of [ctx.paths.workers, ctx.paths.archive]) {
+    const home = tryRealpath(join(base, actor.id));
+    if (!home) continue;
+    try {
+      if (statSync(home).isDirectory()) return home;
+    } catch {
+      /* not readable as a directory; try the next base */
+    }
+  }
+  return null;
+}
+
+/**
+ * A worker home is not safe to read wholesale: it holds the runtime's config, and some of that config
+ * symlinks into the owner's own config. `assertAttachablePath` compares real paths, so a symlink that
+ * resolves out of the home is already refused by containment; this closes what is left. A path that
+ * resolves under the home and not under one of the standard roots (whose own rules apply, notably the
+ * worktree allowance) is refused when any segment relative to the home is hidden — a dotfile or a
+ * dot-directory, which is where every runtime keeps its config. Dotfiles and config trees can never
+ * be attached, and a hidden symlink cannot be used to reach one.
+ */
+export function assertNotHiddenUnderHome(resolved: string, home: string | null, standardRoots: string[]): void {
+  if (!home || !isUnderRoot(resolved, home)) return;
+  if (standardRoots.some((root) => isUnderRoot(resolved, root))) return;
+  const segments = resolved.slice(home.length).split(sep).filter(Boolean);
+  if (segments.some((segment) => segment.startsWith('.'))) {
+    throw new OcError('validation', `"${resolved}" cannot be attached: hidden files and runtime config under an agent home are not attachable`);
+  }
+}
+
 export interface OutboundFileEntry { path: string }
 export interface OutboundZipEntry { paths: string[]; zipName?: string }
 export type OutboundAttachmentInput = OutboundFileEntry | OutboundZipEntry;

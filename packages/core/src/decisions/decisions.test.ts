@@ -366,6 +366,81 @@ describe('decisions', () => {
     expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'merge_approved')).toBe(true);
   });
 
+  describe('the merge card names where the work lands (VS-568)', () => {
+    async function mergeCardFor(landingBranch: string | null): Promise<{ title: string; label: string | undefined }> {
+      h.db.update('projects', h.projectId, { landingBranch });
+      const t = ticket({ kind: 'task' });
+      tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'https://example.com/pr/9' });
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      await tickets.transition(HUMAN, t.id, { to: 'in_review' });
+      const d = decisions.list({ ticketId: t.id }).find((x) => x.kind === 'merge_approval')!;
+      return { title: d.title, label: d.options.find((o) => o.key === 'approve')?.label };
+    }
+
+    it('says Land on edge when the project lands on edge', async () => {
+      const card = await mergeCardFor('edge');
+      expect(card.title).toMatch(/^Land on edge for /);
+      expect(card.label).toBe('Land on edge');
+    });
+
+    it('keeps the plain merge copy when landing is the default branch', async () => {
+      const card = await mergeCardFor(null);
+      expect(card.title).toMatch(/^Approve the merge for /);
+      expect(card.label).toBe('Approve merge');
+    });
+  });
+
+  describe('promotion approval (VS-568)', () => {
+    const promote = () => decisions.create(HUMAN, { kind: 'promotion_approval', projectId: h.projectId, title: 'Promote edge to main', correlationKey: `promotion_approval:${h.projectId}`, options: [{ key: 'approve', label: 'Promote edge to main' }, { key: 'decline', label: 'Not now' }] });
+    let execute: ReturnType<typeof vi.fn>;
+    beforeEach(() => {
+      execute = vi.fn(async () => ({ promotedHead: 'abc' }));
+      h.services.promotion = { execute, currentHead: vi.fn(async () => 'abc') } as never;
+    });
+
+    it('belongs to a project and no ticket, and is human-owned', () => {
+      const d = promote();
+      expect(d).toMatchObject({ ticketId: null, projectId: h.projectId, owner: 'human', status: 'open' });
+    });
+
+    it('is held until the weaver reviews it, and promotes nothing meanwhile', async () => {
+      const d = promote();
+      await expect(decisions.answer(HUMAN, d.id, { key: 'approve' })).rejects.toMatchObject({ code: 'revision_pending' });
+      expect(execute).not.toHaveBeenCalled();
+      expect(decisions.get(d.id).status).toBe('open');
+    });
+
+    it('promotes on a human approval after review', async () => {
+      const d = promote();
+      await markLooked(d.id);
+      await decisions.answer(HUMAN, d.id, { key: 'approve' });
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(decisions.get(d.id).status).toBe('answered');
+    });
+
+    it('leaves the card open when the promotion is refused', async () => {
+      const d = promote();
+      await markLooked(d.id);
+      execute.mockRejectedValueOnce(new Error('edge is behind main'));
+      await expect(decisions.answer(HUMAN, d.id, { key: 'approve' })).rejects.toThrow(/behind main/);
+      expect(decisions.get(d.id).status).toBe('open');
+    });
+
+    it('declining never promotes', async () => {
+      const d = promote();
+      await decisions.answer(HUMAN, d.id, { key: 'decline' });
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it('YOLO does not answer it: a looked mark leaves it open', async () => {
+      h.db.update('projects', h.projectId, { policiesJson: { yolo: true } });
+      const d = promote();
+      await markLooked(d.id);
+      expect(decisions.get(d.id).status).toBe('open');
+      expect(execute).not.toHaveBeenCalled();
+    });
+  });
+
   it('merge approval changes sends the ticket back to in_progress', async () => {
     const t = ticket();
     tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'u' });

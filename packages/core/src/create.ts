@@ -5,6 +5,7 @@ import { createDecisionsService } from './decisions/index.js';
 import { createKnowledgeService, createKnowledgeUsageService } from './knowledge/index.js';
 import { createSpecsService } from './specs/index.js';
 import { createOpenSpecService } from './openspec/index.js';
+import { createPromotionService } from './promotion/index.js';
 import { createAccountsService, createUsageService } from './usage/index.js';
 import { createThreadsService } from './threads/index.js';
 import { createBriefingService } from './briefing/index.js';
@@ -30,6 +31,7 @@ export function createCore(ctx: WorkspaceContext): CoreServices {
   let services: CoreServices;
   const deps = () => services;
   services = {
+    promotion: createPromotionService(ctx, deps),
     tickets: createTicketsService(ctx, deps), decisions: createDecisionsService(ctx, deps), knowledge: createKnowledgeService(ctx, deps), specs: createSpecsService(ctx, deps),
     openspec: createOpenSpecService(ctx, deps), usage: createUsageService(ctx, deps), knowledgeUsage: createKnowledgeUsageService(ctx, deps), accounts: createAccountsService(ctx), threads: createThreadsService(ctx, deps), briefing: createBriefingService(ctx, deps),
     wake: createWakeService(ctx, deps), runs: createRunsService(ctx, deps), dispatcher: createDispatcher(ctx, deps), supervisor: createSupervisor(ctx, deps),

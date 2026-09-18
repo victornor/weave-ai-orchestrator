@@ -663,7 +663,7 @@ export function DecisionCard({ decision, ticketIdentifier, projectLabel, project
                   withholds the approving action while the weaver has not reviewed it. */}
               {awaitsReview ? null : (
                 <Button variant="primary" size="thumb" compact={compact} className="flex-1" disabled={busy || missing.length > 0 || held} onClick={() => answer(NAMED_CARD_OPTION_KEYS.merge_approval.approve)}>
-                  Approve merge
+                  {landLabel(decision, NAMED_CARD_OPTION_KEYS.merge_approval.approve)}
                 </Button>
               )}
               {held || awaitsReview ? (
@@ -761,4 +761,10 @@ export function DecisionCard({ decision, ticketIdentifier, projectLabel, project
       </div>
     </article>
   );
+}
+
+/** VS-568: a merge card on a land-then-promote project names its landing branch ("Land on edge"); every other card keeps "Approve merge". */
+function landLabel(decision: { options?: Array<{ key: string; label: string }> }, approveKey: string): string {
+  const label = (decision.options ?? []).find((o) => o.key === approveKey)?.label;
+  return label?.startsWith('Land on ') ? label : 'Approve merge';
 }

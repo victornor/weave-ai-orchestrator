@@ -55,6 +55,7 @@ const KIND_LABEL: Record<string, string> = {
   plan_approval: 'Plans',
   merge_approval: 'Merges',
   action_approval: 'Actions',
+  promotion_approval: 'Promotions',
   hire_approval: 'Hires',
   discard_approval: 'Discards',
   retry_approval: 'Retries',

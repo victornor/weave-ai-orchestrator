@@ -1,7 +1,8 @@
 import { OcError, landingBranchOf, type Project, type Ticket, type WorkspaceConfig } from '@weave-ai/shared';
 import { git } from '../util/git.js';
 
-export interface LandResult { mode: 'pr' | 'local-branch'; landed: boolean; head: string | null; detail: string }
+/** `landing` is the branch the work landed on; `landingHead` is that branch's commit that contains it (VS-568). */
+export interface LandResult { mode: 'pr' | 'local-branch'; landed: boolean; head: string | null; detail: string; landing: string; landingHead: string | null }
 export interface LandOpts { mergeCommit?: string }
 
 type MergeCommitStatus = 'ancestor' | 'not_ancestor' | 'unresolvable' | 'omitted';
@@ -136,7 +137,7 @@ export async function landDelivery(config: WorkspaceConfig, project: Project, ti
     const ff = await git(['merge', '--ff-only', branch], clone, 120_000);
     if (!ff.ok) throw new OcError('merge_unverified', `branch ${branch} is not fast-forwardable onto ${landing}; rebase it onto ${landing} and retry`, { branch, landing, stderr: ff.stderr.trim().slice(0, 300) });
     const head = (await git(['rev-parse', 'HEAD'], clone)).stdout.trim();
-    return { mode, landed: true, head, detail: `fast-forwarded ${landing} to ${branch}` };
+    return { mode, landed: true, head, detail: `fast-forwarded ${landing} to ${branch}`, landing, landingHead: head || null };
   }
   // pr mode: the worker merged on the forge; verify by fetching and checking what the branch left behind.
   await git(['fetch', 'origin'], clone, 300_000);
@@ -145,7 +146,7 @@ export async function landDelivery(config: WorkspaceConfig, project: Project, ti
   const branchHead = (await git(['rev-parse', branch], clone)).stdout.trim();
   const landingHead = (await revParse(clone, landingRef)) ?? (await revParse(clone, landing));
   const attempt = await verifyContained(clone, branchHead, landingRef, opts?.mergeCommit);
-  if (attempt.detail) return { mode, landed: true, head: branchHead || null, detail: attempt.detail };
+  if (attempt.detail) return { mode, landed: true, head: branchHead || null, detail: attempt.detail, landing, landingHead };
 
   const details = {
     branch,

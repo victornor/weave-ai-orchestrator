@@ -891,7 +891,35 @@ export interface SecretsService {
   clear(actor: Actor, name: string): void;
 }
 
+/** One finished ticket waiting on, or included in, a promotion (VS-568). */
+export interface PromotionTicket { id: string; identifier: string; title: string }
+export interface PromotionStatus {
+  /** False when the project's landing branch is its default branch: there is nothing to promote. */
+  applicable: boolean;
+  landing: string; defaultBranch: string; landingHead: string | null; defaultHead: string | null;
+  /** Commits landing holds that the default branch lacks, and the reverse (a hotfix landed directly). */
+  ahead: number; behind: number;
+  commits: Array<{ sha: string; subject: string }>; behindCommits: Array<{ sha: string; subject: string }>;
+  tickets: PromotionTicket[];
+  /** Ahead, not behind: a fast-forward is possible. */
+  canPromote: boolean;
+  /** Why the card cannot offer Promote, naming the conflict; null when it can. */
+  heldReason: string | null;
+  notes: string[];
+}
+/** Land-then-promote's second half (VS-568): the only path that pushes a project's default branch. */
+export interface PromotionService {
+  status(projectId: string): Promise<PromotionStatus>;
+  /** Raise the project's `promotion_approval` for the human; supersedes an earlier open one. */
+  request(actor: Actor, projectId: string): Promise<S.Decision>;
+  /** The landing head a promotion card is about to promote, for the weaver's review mark. */
+  currentHead(d: S.Decision): Promise<string | null>;
+  /** Fast-forward the default branch to the reviewed landing head. Throws, leaving the card open, on any refusal. */
+  execute(actor: Actor, d: S.Decision): Promise<{ promotedHead: string }>;
+}
+
 export interface CoreServices {
+  promotion: PromotionService;
   tickets: TicketsService; decisions: DecisionsService; projects: ProjectsService; roles: RolesService; workers: WorkersService;
   wake: WakeService; runs: RunsService; dispatcher: Dispatcher; supervisor: Supervisor; knowledge: KnowledgeService; specs: SpecsService;
   openspec: OpenSpecService; usage: UsageService; knowledgeUsage: KnowledgeUsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;

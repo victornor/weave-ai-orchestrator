@@ -821,6 +821,31 @@ export function useProjectSync(id: string): UseQueryResult<ProjectSync> {
   return useQuery({ queryKey: qk.projectSync(ws, id), queryFn: () => api.ws<ProjectSync>(ws, `/projects/${id}/sync`), staleTime: 60_000 });
 }
 
+/** Land-then-promote (VS-568): how far a project's landing branch is ahead of its default branch. */
+export interface ProjectPromotion {
+  applicable: boolean; landing: string; defaultBranch: string; ahead: number; behind: number;
+  tickets: Array<{ id: string; identifier: string; title: string }>;
+  canPromote: boolean; heldReason: string | null; notes: string[];
+}
+
+export function useProjectPromotion(id: string): UseQueryResult<ProjectPromotion> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.projectPromotion(ws, id), queryFn: () => api.ws<ProjectPromotion>(ws, `/projects/${id}/promotion`), staleTime: 60_000 });
+}
+
+/** Raises the project's promotion approval for the human; the daemon pushes only after it is answered. */
+export function useRequestPromotion(id: string): UseMutationResult<Decision, Error, void> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.ws<Decision>(ws, `/projects/${id}/promotion`, { method: 'POST' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.projectPromotion(ws, id) });
+      void qc.invalidateQueries({ queryKey: ['w', ws, 'decisions'] });
+    },
+  });
+}
+
 /** The existing fetch-and-fast-forward (VS-131), now with a UI entry point: resolves `behind`, reports rather than resolving `diverged`. */
 export function useProjectFetch(id: string): UseMutationResult<{ head: string; fastForwarded: boolean }, Error, void> {
   const ws = useWs();

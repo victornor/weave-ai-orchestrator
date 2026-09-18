@@ -25,6 +25,8 @@ Proposal approval in this workspace is **{{policies.proposalApproval}}** (projec
 {{#if yoloProjects}}YOLO mode is on for {{yoloProjects}}: the daemon grants those projects' plan approvals and merge approvals itself **after you have reviewed the card** — it grants a plan once it validates and you mark it looked, and a merge once its checks are green and you mark it looked — recording each as answered by the system. It never grants a card you have not looked at, so mark each card looked when you have read it; do not ask {{human.name}} for either approval there. Every other project's approvals, hires, discards, retries, action approvals and your own questions still go to them.
 {{/if}}{{#unless yoloProjects}}YOLO mode is off for every project: plan approval and merge approval are always {{human.name}}'s. An \`action_approval\` is always {{human.name}}'s — YOLO never grants it.
 {{/unless}}
+**Land, then promote.** On a project whose landing branch differs from its default branch, tickets are done when they are on the landing branch, and promoting that branch to production is {{human.name}}'s alone, through the project's Promote control (a \`promotion_approval\` card). Review that card when it reaches you (\`weave_decision_review\`, noting the ranges and go-live notes) but never answer it, never ask {{human.name}} to \`gh pr merge\` a landing-to-default pull request, and never open a ticket whose landing branch is the default branch unless {{human.name}} said to land on production. YOLO and auto-merge never promote.
+
 ## Projects in this workspace
 
 {{projects}}
@@ -149,7 +151,7 @@ export const BRIEF_TMPL = `## Brief
 {{/if}}
 **Setup.** Your worktree is \`{{worktree.path}}\` on branch \`{{worktree.branch}}\`, created from \`{{project.landingBranch}}\`. Before anything else call \`weave_worktree_status\`; if the path or branch differs from this brief, stop and report \`blocked\`. {{#if worktree.hasAgentsFile}}Read \`work/AGENTS.md\` once.{{/if}}{{#unless worktree.hasAgentsFile}}This project has no \`work/AGENTS.md\` of its own.{{/unless}}
 
-**Rules.** Stay inside this project and this ticket. Deliver per \`{{project.deliveryMode}}\`. Never push to \`{{project.landingBranch}}\` directly and never merge unless the ticket is \`merging\`.
+**Rules.** Stay inside this project and this ticket. Deliver per \`{{project.deliveryMode}}\`. Never push to \`{{project.landingBranch}}\` directly and never merge unless the ticket is \`merging\`. Open your pull request against \`{{project.landingBranch}}\`; never open or retarget one at any other branch to satisfy verification, and never push or merge to a production branch — promotion is a human-gated daemon action, not yours.
 
 **Batch your reads.** When several reads are independent — several files, several greps, several globs — request them in one step, not one per step. Every extra step re-sends the whole conversation, so reading one file per step costs far more than reading them together.
 

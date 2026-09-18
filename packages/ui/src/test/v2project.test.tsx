@@ -48,6 +48,9 @@ vi.mock('../api/hooks', () => ({
   useProjects: () => ({ data: [state.project], isLoading: false }),
   useWorkspaceSummary: () => ({ data: { config: {}, workspace: { ticketPrefix: 'ACME' } }, isLoading: false }),
   useProjectSync: () => ({ data: { syncState: 'in_sync', behindBy: 0 } }),
+  useProjectPromotion: () => ({ data: { applicable: false } }),
+  useRequestPromotion: () => ({ mutate: () => undefined, isPending: false, isSuccess: false, isError: false }),
+
   useProjectFetch: () => ({ mutate: vi.fn(), isPending: false }),
   useKnowledgeDoc: () => ({ isLoading: false, data: { body: '## Current focus\nShip the V2 kept screens', tokenEstimate: 12, budgetTokens: 100, lastCuratedAt: null, curationPending: false } }),
   useKnowledgeDocs: () => ({ isLoading: false, data: [{ scope: 'project', path: 'p1/PROJECT.md', slug: 'project-kb', title: 'Project KB', updatedAt: '2026-09-01T00:00:00.000Z' }] }),

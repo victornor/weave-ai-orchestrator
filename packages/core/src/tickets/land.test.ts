@@ -225,6 +225,17 @@ describe('landDelivery', () => {
       expect(r.detail).toContain('origin/edge');
     });
 
+    it('records the branch it landed on and that branch\'s own head, for the on-edge badge and the promotion range (VS-568)', async () => {
+      await branchOnOrigin('edge');
+      await multiCommitBranch();
+      await squashMergeOnOrigin('edge');
+
+      const r = await landDelivery(config, project({ landingBranch: 'edge' }), ticket(), BRANCH);
+      const edgeHead = (await git(['rev-parse', 'origin/edge'], clone)).stdout.trim();
+      expect(r.landing).toBe('edge');
+      expect(r.landingHead).toBe(edgeHead);
+    });
+
     it("refuses when the branch reached the default branch but not the declared landing branch", async () => {
       await branchOnOrigin('edge');
       await multiCommitBranch();

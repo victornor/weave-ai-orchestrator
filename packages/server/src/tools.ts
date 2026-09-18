@@ -1021,7 +1021,9 @@ export const TOOLS: ToolDef[] = [
       // actually land — the archive pull request for an archive-backfill card, otherwise the ticket's
       // own pull request — so the daemon's grant can require it was reviewed.
       const d = svc(ctx).decisions.get(i.decisionId);
-      const reviewedHead = d.kind === 'merge_approval' && d.ticketId ? await svc(ctx).tickets.approvalDeliveryHead(d) : null;
+      const reviewedHead = d.kind === 'promotion_approval'
+        ? await svc(ctx).promotion.currentHead(d)
+        : d.kind === 'merge_approval' && d.ticketId ? await svc(ctx).tickets.approvalDeliveryHead(d) : null;
       return svc(ctx).decisions.review(ctx.actor, i.decisionId, { status: i.status, note: i.note, waitingOn: i.waitingOn ?? null, reviewedHead });
     },
   },

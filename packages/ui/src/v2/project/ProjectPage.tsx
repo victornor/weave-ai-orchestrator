@@ -11,7 +11,7 @@ import { projectLabel } from '@weave-ai/shared';
 import { V2Page } from '../V2Page';
 import { A, useGo } from '../../app/link';
 import { useWs } from '../../api/context';
-import { useKnowledgeDoc, useProjectFetch, useProjectSync, useProjects, useWorkspaceSummary } from '../../api/hooks';
+import { useKnowledgeDoc, useProjectFetch, useProjectPromotion, useProjectSync, useRequestPromotion, useProjects, useWorkspaceSummary } from '../../api/hooks';
 import { Markdown } from '../../components/Markdown';
 import { SkeletonRows } from '../../components/Skeleton';
 import { EmptyState } from '../../components/States';
@@ -81,6 +81,7 @@ export function V2ProjectScreen(): React.ReactElement {
             {projectYolo(project) ? <span className="v2-tag text-needs-you">YOLO mode — the daemon grants this project's plan and merge approvals; action approvals still come to you</span> : null}
             <ProjectSyncStatus projectId={project.id} />
           </div>
+          <PromoteControl projectId={project.id} />
           <CurrentFocus projectId={project.id} />
         </section>
 
@@ -124,6 +125,34 @@ function ProjectSyncStatus({ projectId }: { projectId: string }): React.ReactEle
         {fetchMutation.isPending ? 'Syncing…' : 'Sync'}
       </button>
     </span>
+  );
+}
+
+/**
+ * Land-then-promote (VS-568): for a project whose landing branch differs from its default branch, how
+ * far landing is ahead, which tickets wait, and the one control that raises the promotion approval.
+ * Tapping it asks the human (a card in Needs you); nothing here pushes.
+ */
+function PromoteControl({ projectId }: { projectId: string }): React.ReactElement | null {
+  const promotion = useProjectPromotion(projectId);
+  const request = useRequestPromotion(projectId);
+  const p = promotion.data;
+  if (!p?.applicable) return null;
+  const waiting = p.tickets.length;
+  return (
+    <div aria-label="Promotion" className="flex flex-wrap items-center gap-2.5">
+      <span className="v2-tag text-text-2">{p.landing} is {p.ahead} commit{p.ahead === 1 ? '' : 's'} ahead of {p.defaultBranch}</span>
+      {waiting ? <span className="text-micro text-text-2">{waiting} ticket{waiting === 1 ? '' : 's'} waiting: {p.tickets.slice(0, 6).map((t) => t.identifier).join(', ')}{waiting > 6 ? '…' : ''}</span> : null}
+      {p.behind > 0 ? <span className="v2-tag text-failed">{p.landing} is behind {p.defaultBranch} by {p.behind}</span> : null}
+      {p.heldReason ? <span className="text-micro text-text-2">{p.heldReason}</span> : null}
+      {p.ahead > 0 ? (
+        <button type="button" onClick={() => request.mutate()} disabled={request.isPending || request.isSuccess}
+          className="rounded-r4 border border-line-2 px-2 py-1 text-micro text-text-2 hover:bg-bg-2 disabled:opacity-45">
+          {request.isSuccess ? 'Promotion raised: see Needs you' : request.isPending ? 'Raising…' : `Promote ${p.landing} to ${p.defaultBranch}`}
+        </button>
+      ) : <span className="text-micro text-text-3">nothing to promote</span>}
+      {request.isError ? <span className="text-micro text-failed">{request.error.message}</span> : null}
+    </div>
   );
 }
 

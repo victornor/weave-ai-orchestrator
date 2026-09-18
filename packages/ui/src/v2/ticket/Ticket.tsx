@@ -6,7 +6,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import { isActiveRun, openspecArchive, projectLabel, ticketUiStatus, carriesWeaverReview, type Project, type Run, type Ticket, type TicketAttachment } from '@weave-ai/shared';
+import { deliveryBadgeOf, isActiveRun, openspecArchive, projectLabel, ticketUiStatus, carriesWeaverReview, type Project, type Run, type Ticket, type TicketAttachment } from '@weave-ai/shared';
 import { workerPauseDetail } from '@weave-ai/render';
 import { A, useGo, useSearchParams } from '../../app/link';
 import { useWs } from '../../api/context';
@@ -176,6 +176,7 @@ function TicketHeader({
   liveLine: LiveActivityLineModel | null;
 }): React.ReactElement {
   const { ticket, project, worker } = detail;
+  const deliveryBadge = deliveryBadgeOf(project ?? null, ticket);
   // VS-550: same label as Work — the live worker while one holds the ticket, else the role that did
   // it, so a landed ticket names a role instead of reading `unassigned`.
   const assigneeLabel = ticketAssigneeLabel({
@@ -203,6 +204,7 @@ function TicketHeader({
           <StatusGlyph status={ui} size="xs" pulse={ui === 'working'} />
           {statusText(ticket.status)}
         </span>
+        {deliveryBadge ? <span className="v2-tag text-text-2" data-v2-delivery-badge={deliveryBadge.state}>{deliveryBadge.state === 'in_production' ? 'in production' : `on ${deliveryBadge.branch}`}</span> : null}
         {ticket.interactiveSession ? <Badge tone="accent">interactive</Badge> : null}
         {awaitsReview ? <span className="v2-tag text-text-3" data-v2-awaits-review>Waiting on the weaver&rsquo;s review</span> : null}
         <div className="flex-1" />

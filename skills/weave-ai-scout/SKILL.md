@@ -7,7 +7,7 @@ description: How to run an investigation ticket in Weave AI — the deliverable 
 
 A `scout` ticket asks a question. **The report is the deliverable.** Your worktree is a laboratory: experiment freely in it, commit scratch work to a throwaway branch if it helps you think, and expect none of it to survive. The report is the only thing that does.
 
-Flow: `todo → in_progress → done`. There is no propose phase, no approval, no PR, no merge.
+Flow: `todo → done` — deliver straight from `todo` when the investigation finishes in one turn; `in_progress` is an optional marker if it spans turns. There is no propose phase, no approval, no PR, no merge.
 
 ## Rules
 

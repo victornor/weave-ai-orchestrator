@@ -1055,6 +1055,47 @@ describe('workers', () => {
       const plan = startPlan();
       await expect(workers.retirePlanner(plan.id)).resolves.toBeUndefined();
     });
+
+    describe('a replaced planner keeps the plan conversation (VS-567)', () => {
+      const threadAgent = (): string => h.db.get<{ agentId: string }>('SELECT agent_id FROM channel_threads WHERE id = ?', ['th1'])!.agentId;
+
+      it('ensurePlanner rebinds the plan thread to the replacement, and a message wakes it', async () => {
+        const plan = startPlan();
+        const first = await workers.ensurePlanner(HUMAN, plan.id);
+        expect(threadAgent()).toBe(first.id);
+        await workers.retirePlanner(plan.id);
+        const second = await workers.ensurePlanner(HUMAN, plan.id);
+
+        expect(second.id).not.toBe(first.id);
+        expect(threadAgent()).toBe(second.id);
+        wake.calls.length = 0;
+        await h.services.threads!.inbound(HUMAN, 'th1', 'continue the plan');
+        expect(wake.calls).toEqual([expect.objectContaining({ agentId: second.id, input: expect.objectContaining({ source: 'human_message' }) })]);
+      });
+
+      it('repairs a thread still bound to a retired planner and replays its skipped message once', async () => {
+        const plan = startPlan();
+        const first = await workers.ensurePlanner(HUMAN, plan.id);
+        await workers.retirePlanner(plan.id);
+        const second = await workers.ensurePlanner(HUMAN, plan.id);
+        // The state the 2026-09-18 upgrade left behind: plan re-pointed, thread not.
+        h.db.run('UPDATE channel_threads SET agent_id = ? WHERE id = ?', [first.id, 'th1']);
+        h.db.insert('wakeups', {
+          id: 'w_skipped', workspaceId: h.workspaceId, agentId: first.id, source: 'human_message', reason: 'message from captain',
+          payloadJson: { threadId: 'th1', messageId: 'm_old', body: 'the skipped message' }, status: 'skipped', skipReason: 'agent_retired', createdAt: nowIso(),
+        });
+        wake.calls.length = 0;
+
+        await h.services.threads!.inbound(HUMAN, 'th1', 'are you there');
+        expect(threadAgent()).toBe(second.id);
+        expect(wake.calls.map((c) => c.agentId)).toEqual([second.id, second.id]);
+        expect(wake.calls[0]!.input).toMatchObject({ payload: expect.objectContaining({ messageId: 'm_old' }), idempotencyKey: 'replay:m_old' });
+
+        wake.calls.length = 0;
+        await h.services.threads!.inbound(HUMAN, 'th1', 'again');
+        expect(wake.calls).toHaveLength(1);
+      });
+    });
   });
 
   describe('list kind filter (VS-525)', () => {

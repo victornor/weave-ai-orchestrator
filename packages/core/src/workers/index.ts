@@ -363,6 +363,8 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         ctx.db.update('agents', id, { status: 'active', updatedAt: nowIso() });
         sessions.forTurn({ id, kind: 'planner', runtimeId: setting.runtime }, 'persistent', ctx.toolContractHash?.('planner'));
         deps().planning.setAgent(plan.id, id);
+        // VS-567: a replacement planner takes over the plan's existing conversation.
+        ctx.db.run('UPDATE channel_threads SET agent_id = ? WHERE id = ? AND agent_id != ?', [id, plan.threadId, id]);
       } catch (e) {
         log.error({ err: String(e), planId }, 'planner spawn failed; rolling back');
         try {

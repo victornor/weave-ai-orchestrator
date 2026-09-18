@@ -124,13 +124,7 @@ export interface TicketsService {
   /** Move `in_review` tickets with auto_merge on to `merging` once their delivery is ready (local-branch: immediately; pr: CI green or no CI). Returns how many advanced. */
   autoMergeSweep(): Promise<number>;
   /**
-   * VS-389: raise the merge approval for a finished ticket's OpenSpec archive-backfill pull request.
-   * Exactly one open card per pull request; a pull request a `changes` answer declined is not
-   * re-raised. Under YOLO the daemon answers the card itself. The ticket stays `done`.
-   */
-  raiseArchiveBackfillCard(actor: Actor, ticketId: string, archive: { changeName: string; branch: string; prUrl: string; number?: number | null }): Promise<{ raised: boolean; decisionId?: string }>;
-  /**
-   * VS-389: land an approved archive-backfill pull request under the project's landing lock, reusing
+   * VS-389/VS-570: land an archive-backfill pull request under the project's landing lock, reusing
    * the archive-then-merge machinery (rebase when stale, respect required checks). Records the
    * outcome on the ticket and never throws; `landed` says whether it merged, `closed` that the pull
    * request was closed unmerged. Repeats of a standing failure are logged, not re-commented.

@@ -1688,17 +1688,17 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           const res = await deps().openspec.archiveAfterMerge(t.id);
           archivedAs = res.archivedAs;
           skipped = res.skipped;
-          // VS-389: a backfill for a PR-delivery project opens a pull request instead of archiving
-          // in place; surface it as a merge card on the (already finished) ticket.
+          // VS-570: a backfill for a PR-delivery project opens a pull request instead of archiving
+          // in place; the daemon lands it itself, with no card for a human to approve.
           if (res.pendingPrUrl) {
             try {
-              await service.raiseArchiveBackfillCard(actor, t.id, {
+              await service.landArchiveBackfill(actor, {
+                ticketId: t.id,
                 changeName: res.changeName ?? t.openspecChangeName ?? '',
                 branch: res.branch ?? `ac/archive-${res.changeName ?? t.openspecChangeName}`,
                 prUrl: res.pendingPrUrl,
-                number: res.pendingPrNumber ?? null,
               });
-            } catch (e) { log.warn({ err: e, ticketId: t.id }, 'raising the archive backfill card failed'); }
+            } catch (e) { log.warn({ err: e, ticketId: t.id }, 'landing the archive backfill failed'); }
           }
         }
       } catch (e) {
@@ -1843,39 +1843,6 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         ctx.events.emit('ticket.updated', 'ticket', t.id, get(t.id));
       });
       return { landed: true };
-    },
-
-    /**
-     * VS-389: raise the one open merge approval for a finished ticket's archive-backfill pull
-     * request. A pull request a `changes` answer declined is not re-raised; under YOLO the daemon
-     * answers the card itself, exactly as it does for a ticket merge.
-     */
-    async raiseArchiveBackfillCard(actor, ticketId, a) {
-      const t = get(ticketId);
-      const correlationKey = `merge_approval:archive:${t.id}:${a.changeName}`;
-      const open = db.get<{ id: string }>(
-        "SELECT id FROM decisions WHERE workspace_id = ? AND ticket_id = ? AND correlation_key = ? AND status = 'open'",
-        [ws, t.id, correlationKey],
-      );
-      if (open) return { raised: false };
-      const existing = ((t.delivery ?? {}) as Record<string, unknown>)['openspecArchive'] as Record<string, unknown> | undefined;
-      if (existing?.['declinedPrUrl'] === a.prUrl) return { raised: false };
-      const d = deps().decisions.create(actor, {
-        ticketId: t.id, kind: 'merge_approval', owner: 'human',
-        title: `Approve the spec archive for ${t.identifier}`,
-        context: `The OpenSpec change ${a.changeName} was left behind when ${t.identifier} merged. This pull request archives it: ${a.prUrl}`,
-        options: [
-          { key: NAMED_CARD_OPTION_KEYS.merge_approval.approve, label: 'Approve merge', recommended: true },
-          { key: NAMED_CARD_OPTION_KEYS.merge_approval.changes, label: 'Request changes', description: 'Leave the archive pull request open.' },
-        ],
-        allowFreeText: true,
-        correlationKey,
-        target: { archive: { changeName: a.changeName, branch: a.branch, prUrl: a.prUrl, number: a.number ?? null } },
-        attachToTerminal: true,
-      });
-      // VS-474: the archive card is left open and unseen; under YOLO it is granted only after the
-      // weaver marks it looked at, through `onReviewLooked`.
-      return { raised: true, decisionId: d.id };
     },
 
     /** VS-389: record that a human declined an archive-backfill merge; the pull request stays open. */

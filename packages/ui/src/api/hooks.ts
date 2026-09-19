@@ -821,9 +821,17 @@ export function useProjectSync(id: string): UseQueryResult<ProjectSync> {
   return useQuery({ queryKey: qk.projectSync(ws, id), queryFn: () => api.ws<ProjectSync>(ws, `/projects/${id}/sync`), staleTime: 60_000 });
 }
 
-/** Land-then-promote (VS-568): how far a project's landing branch is ahead of its default branch. */
+/** Land-then-promote (VS-568, VS-584): what a project's landing branch would promote, and how. */
 export interface ProjectPromotion {
   applicable: boolean; landing: string; defaultBranch: string; ahead: number; behind: number;
+  /** VS-584: the honest content — the tree diff `default...landing`. Empty when already shipped. */
+  changedFiles: number; additions: number; deletions: number;
+  /** VS-584: the strategy resolved from policy and forge, and the promotion in flight (if any). */
+  strategy: 'pull-request' | 'direct-push';
+  promotion: {
+    state: 'open' | 'pending' | 'held' | 'merged'; prUrl: string | null; mergeMethod: string | null;
+    heldReason: string | null; updatedAt: string;
+  } | null;
   tickets: Array<{ id: string; identifier: string; title: string }>;
   canPromote: boolean; heldReason: string | null; notes: string[];
 }

@@ -48,6 +48,74 @@ describe('promotion', () => {
   };
   const card = (over: Partial<Decision> = {}): Decision => ({ id: 'd1', projectId: h.projectId, kind: 'promotion_approval', weaverReviewedHeadSha: null, ...over }) as Decision;
 
+  /** A commit on `main` whose tree equals `edge`'s — a squash promotion, with no back-merge. */
+  const squashPromote = async (): Promise<string> => {
+    const other = join(dir, `other-${newId()}`);
+    await git(['clone', remote, other], dir);
+    await git(['config', 'user.email', 't@example.com'], other);
+    await git(['config', 'user.name', 'T'], other);
+    await git(['checkout', 'main'], other);
+    await git(['merge', '--squash', 'origin/edge'], other);
+    await git(['commit', '-m', 'squash edge'], other);
+    await git(['push', 'origin', 'main'], other);
+    return run(other, 'rev-parse', 'HEAD');
+  };
+
+  interface FakeForgeOpts {
+    existing?: { url: string; number: number } | null;
+    ciState?: 'pending' | 'success' | 'failure' | 'none';
+    repoState?: 'open' | 'merged' | 'closed';
+    mergeCommit?: string;
+    mergeSettings?: { merge: boolean; squash: boolean; rebase: boolean } | null;
+    hasCi?: boolean | null;
+    failMerge?: boolean;
+  }
+  /** A forge that records what it was asked to do, mutable between calls so a sweep can see a new state. */
+  const fakeForge = (opts: FakeForgeOpts = {}) => {
+    const calls = { created: [] as Array<Record<string, unknown>>, merged: [] as Array<{ url: string; method: string }> };
+    const pr = { url: 'https://forge.example/pr/1', number: 1 };
+    let state: 'open' | 'merged' | 'closed' = opts.repoState ?? 'open';
+    const forge = {
+      id: 'github',
+      detect: async () => true,
+      pullRequestForBranch: async () => opts.existing ?? null,
+      createPullRequest: async (_cwd: string, o: Record<string, unknown>) => { calls.created.push(o); return pr; },
+      prState: async () => ({
+        state, mergeCommit: state === 'merged' ? (opts.mergeCommit ?? 'm'.repeat(40)) : undefined,
+        ciState: opts.ciState ?? 'success', checkDetails: [], headSha: 'h'.repeat(40), isDraft: false,
+      }),
+      mergePr: async (_cwd: string, url: string, method: string) => {
+        calls.merged.push({ url, method });
+        if (opts.failMerge) throw new Error('merge refused by a repository rule');
+        state = 'merged';
+        return { mergeCommit: opts.mergeCommit ?? 'm'.repeat(40) };
+      },
+      repoMergeSettings: async () => (opts.mergeSettings === undefined ? { merge: true, squash: true, rebase: true } : opts.mergeSettings),
+      hasCiWorkflows: async () => (opts.hasCi === undefined ? false : opts.hasCi),
+    };
+    h.ctx.registries.forges.set('github', forge as never);
+    return { forge, calls };
+  };
+
+  /** A real decision row, so `execute`'s progress writes and `advance`'s query have something to land on. */
+  const openPromotionDecision = (target: Record<string, unknown>): string => {
+    h.db.insert('decisions', {
+      id: 'd1', workspaceId: h.workspaceId, ticketId: null, projectId: h.projectId, kind: 'promotion_approval',
+      owner: 'human', title: 'Promote edge to main', context: '', optionsJson: [{ key: 'approve', label: 'Promote' }],
+      inputsJson: [], allowFreeText: true, status: 'answered', answerKey: 'approve', answeredByKind: 'human', answeredById: 'victor',
+      answeredAt: '2026-09-19T00:00:01.000Z', targetJson: target, correlationKey: `promotion_approval:${h.projectId}`, createdAt: '2026-09-19T00:00:00.000Z',
+    });
+    return 'd1';
+  };
+  const recordOf = (): Record<string, unknown> | null => {
+    const row = h.db.get<{ target: Record<string, unknown> | null }>('SELECT target_json FROM decisions WHERE id = ?', ['d1']);
+    return (row?.target?.['promotion'] as Record<string, unknown>) ?? null;
+  };
+  const setPolicies = (policies: Record<string, unknown>): void => {
+    const base = (h.services.projects as unknown as { get: () => Project }).get();
+    h.services.projects = { get: () => ({ ...base, policies: { ...(base.policies ?? {}), ...policies } }) } as never;
+  };
+
   beforeEach(async () => {
     h = makeHarness();
     created = [];
@@ -159,5 +227,109 @@ describe('promotion', () => {
     writeFileSync(join(remote, '.git', 'hooks', 'pre-receive'), '#!/bin/sh\necho "main-source-guard: only edge may update main" >&2\nexit 1\n', { mode: 0o755 });
     const failure = promotion.execute(HUMAN, card({ weaverReviewedHeadSha: sha }));
     await expect(failure).rejects.toThrow(/main-source-guard/);
+    // VS-584: a rejected direct push names the pull-request route rather than dead-ending.
+    await expect(promotion.execute(HUMAN, card({ weaverReviewedHeadSha: sha }))).rejects.toThrow(/pull request/i);
+  });
+
+  it('reports the tree diff as the honest content, and nothing to promote after a squash', async () => {
+    const sha = await landOn('edge', 'a.txt');
+    doneTicket('Add a', sha);
+    const before = await promotion.status(h.projectId);
+    expect(before).toMatchObject({ changedFiles: 1, canPromote: true });
+    expect(before.additions).toBeGreaterThan(0);
+    await squashPromote();
+    const after = await promotion.status(h.projectId);
+    expect(after.changedFiles).toBe(0);
+    expect(after.canPromote).toBe(false);
+    await expect(promotion.request(HUMAN, h.projectId)).rejects.toThrow(/nothing to promote/);
+  });
+
+  it('promotes through a pull request: opens it, merges it, and stamps the tickets', async () => {
+    const sha = await landOn('edge', 'a.txt');
+    const id = doneTicket('Add a', sha);
+    const { calls } = fakeForge({ ciState: 'success' });
+    const res = await promotion.execute(HUMAN, card({ weaverReviewedHeadSha: sha }));
+    expect(res.promotedHead).toBe(sha);
+    expect(res.pending).toBeFalsy();
+    expect(calls.created).toHaveLength(1);
+    expect(calls.created[0]).toMatchObject({ branch: 'edge', base: 'main' });
+    expect(String(calls.created[0]!['title'])).toContain('Promote edge to main');
+    expect(String(calls.created[0]!['body'])).toContain('Add a');
+    expect(calls.merged).toEqual([{ url: 'https://forge.example/pr/1', method: 'squash' }]);
+    const delivery = h.db.get<{ delivery: Record<string, unknown> }>('SELECT delivery_json FROM tickets WHERE id = ?', [id])!.delivery;
+    expect(typeof delivery['promotedAt']).toBe('string');
+  });
+
+  it('reuses the open promotion pull request instead of opening another', async () => {
+    const sha = await landOn('edge', 'a.txt');
+    doneTicket('Add a', sha);
+    const { calls } = fakeForge({ existing: { url: 'https://forge.example/pr/9', number: 9 }, ciState: 'success' });
+    await promotion.execute(HUMAN, card({ weaverReviewedHeadSha: sha }));
+    expect(calls.created).toHaveLength(0);
+    expect(calls.merged).toEqual([{ url: 'https://forge.example/pr/9', method: 'squash' }]);
+  });
+
+  it('records an in-flight promotion when checks are pending, and advance merges it once they resolve', async () => {
+    const sha = await landOn('edge', 'a.txt');
+    const id = doneTicket('Add a', sha);
+    openPromotionDecision({ promotion: { state: 'open', landingHead: sha } });
+    const opts: FakeForgeOpts = { ciState: 'pending' };
+    const { calls } = fakeForge(opts);
+    const res = await promotion.execute(HUMAN, card({ weaverReviewedHeadSha: sha }));
+    expect(res.pending).toBe(true);
+    expect(calls.merged).toHaveLength(0);
+    expect(recordOf()).toMatchObject({ state: 'pending', prUrl: 'https://forge.example/pr/1' });
+    // The checks resolve; the supervisor's sweep completes it without a second human answer.
+    opts.ciState = 'success';
+    await promotion.advance();
+    expect(calls.merged).toHaveLength(1);
+    expect(recordOf()).toMatchObject({ state: 'merged' });
+    const delivery = h.db.get<{ delivery: Record<string, unknown> }>('SELECT delivery_json FROM tickets WHERE id = ?', [id])!.delivery;
+    expect(typeof delivery['promotedAt']).toBe('string');
+  });
+
+  it('holds and leaves the card open when a required check failed', async () => {
+    const sha = await landOn('edge', 'a.txt');
+    doneTicket('Add a', sha);
+    openPromotionDecision({ promotion: { state: 'open', landingHead: sha } });
+    const { calls } = fakeForge({ ciState: 'failure' });
+    await expect(promotion.execute(HUMAN, card({ weaverReviewedHeadSha: sha }))).rejects.toMatchObject({ code: 'conflict' });
+    expect(calls.merged).toHaveLength(0);
+    expect(recordOf()).toMatchObject({ state: 'held' });
+    expect(String(recordOf()!['heldReason'])).toMatch(/checks failed/);
+  });
+
+  it('holds a pull request the repository refuses to merge, and never forces it', async () => {
+    const sha = await landOn('edge', 'a.txt');
+    doneTicket('Add a', sha);
+    openPromotionDecision({ promotion: { state: 'open', landingHead: sha } });
+    const { calls } = fakeForge({ ciState: 'success', failMerge: true });
+    await expect(promotion.execute(HUMAN, card({ weaverReviewedHeadSha: sha }))).rejects.toMatchObject({ code: 'conflict' });
+    expect(calls.merged).toHaveLength(1);
+    expect(recordOf()).toMatchObject({ state: 'held' });
+  });
+
+  it('uses the direct push when the policy says so even with a forge available', async () => {
+    const sha = await landOn('edge', 'a.txt');
+    doneTicket('Add a', sha);
+    setPolicies({ promotionMode: 'direct-push' });
+    const { calls } = fakeForge({ ciState: 'success' });
+    const res = await promotion.execute(HUMAN, card({ weaverReviewedHeadSha: sha }));
+    expect(res.promotedHead).toBe(sha);
+    expect(calls.created).toHaveLength(0);
+    expect(calls.merged).toHaveLength(0);
+    expect(await run(remote, 'rev-parse', 'main')).toBe(sha);
+  });
+
+  it('advance holds an in-flight promotion whose landing moved past the reviewed head', async () => {
+    const sha = await landOn('edge', 'a.txt');
+    doneTicket('Add a', sha);
+    openPromotionDecision({ promotion: { state: 'pending', prUrl: 'https://forge.example/pr/1', mergeMethod: 'squash', landingHead: sha, updatedAt: '2026-09-19T00:00:00.000Z' } });
+    await landOn('edge', 'b.txt');
+    const { calls } = fakeForge({ ciState: 'success' });
+    await promotion.advance();
+    expect(calls.merged).toHaveLength(0);
+    expect(recordOf()).toMatchObject({ state: 'held' });
+    expect(String(recordOf()!['heldReason'])).toMatch(/moved/);
   });
 });

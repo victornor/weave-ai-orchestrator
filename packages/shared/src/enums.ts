@@ -44,6 +44,15 @@ export type DeliveryMode = (typeof DELIVERY_MODES)[number];
 export const MERGE_METHODS = ['squash', 'merge', 'rebase'] as const;
 export type MergeMethod = (typeof MERGE_METHODS)[number];
 
+/**
+ * VS-584: how a project promotes its landing branch to its default branch. `auto` uses a pull request
+ * whenever a forge able to open one is available and a direct push otherwise; `pull-request` and
+ * `direct-push` pin the strategy. `auto` never selects a direct push where a forge can act, so a
+ * repository that requires a pull request is never bypassed by default.
+ */
+export const PROMOTION_MODES = ['auto', 'pull-request', 'direct-push'] as const;
+export type PromotionMode = (typeof PROMOTION_MODES)[number];
+
 export const APPROVAL_OWNERS = ['human', 'weaver', 'none'] as const;
 export type ApprovalOwner = (typeof APPROVAL_OWNERS)[number];
 

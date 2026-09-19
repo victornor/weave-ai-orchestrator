@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { DELIVERY_MODES, MERGE_METHODS, APPROVAL_OWNERS, ARCHIVE_COMMITS, SESSION_POLICIES, PERMISSION_MODES, WORKTREE_PROVIDERS } from './enums.js';
-import type { ModelSource } from './enums.js';
+import { DELIVERY_MODES, MERGE_METHODS, PROMOTION_MODES, APPROVAL_OWNERS, ARCHIVE_COMMITS, SESSION_POLICIES, PERMISSION_MODES, WORKTREE_PROVIDERS } from './enums.js';
+import type { ModelSource, PromotionMode } from './enums.js';
 
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'kebab-case slug');
 const envRef = z.string().regex(/^\$\{[A-Z0-9_]+\}$/, 'must be an ${ENV_VAR} reference, never a literal secret');
@@ -85,8 +85,19 @@ export const ProjectPoliciesSchema = z.object({
   mergeConcurrency: z.number().int().min(1).max(8).default(1),
   /** YOLO mode for this project (PLAN §15, VS-382); off unless this project sets it true. */
   yolo: z.boolean(),
-  /** What going live does, shown verbatim on the promotion card when landing differs from default (VS-568). */
+  /**
+   * What going live does, shown verbatim on the promotion card and carried into the promotion pull
+   * request's body when landing differs from default (VS-568, VS-584).
+   */
   promotionNotes: z.array(z.string().min(1).max(300)).max(12),
+  /**
+   * VS-584: how this project promotes landing to default. `auto` (the default) promotes by pull request
+   * wherever a forge that can open one is available, and by fast-forward direct push only when it is not.
+   * `direct-push` is an explicit opt-in for a project whose repository allows it.
+   */
+  promotionMode: z.enum(PROMOTION_MODES).default('auto'),
+  /** VS-584: the promotion pull request's title; generated from the branches when unset. */
+  promotionPrTitle: z.string().min(1).max(120),
 }).partial();
 export type ProjectPolicies = z.infer<typeof ProjectPoliciesSchema>;
 
@@ -114,6 +125,43 @@ export function yoloEnabled(policies: Record<string, unknown> | null | undefined
   if (raw === undefined || raw === null) return false;
   const parsed = ProjectPoliciesSchema.shape.yolo.safeParse(raw);
   return parsed.success && parsed.data === true;
+}
+
+/** The promotion mode of a project that has not configured one: derive it from the forge, safely. */
+export const DEFAULT_PROMOTION_MODE: PromotionMode = 'auto';
+
+/**
+ * VS-584: a project's promotion mode. Policies reach core as an untyped record, so an absent, malformed
+ * or out-of-range value falls back to `auto` — never to `direct-push`, which is what a bad value would
+ * otherwise turn into.
+ */
+export function promotionModeOf(policies: Record<string, unknown> | null | undefined): PromotionMode {
+  const raw = (policies as { promotionMode?: unknown } | null | undefined)?.promotionMode;
+  const parsed = ProjectPoliciesSchema.shape.promotionMode.safeParse(raw);
+  return parsed.success && parsed.data !== undefined ? parsed.data : DEFAULT_PROMOTION_MODE;
+}
+
+/**
+ * VS-584: the resolved promotion strategy. `auto` promotes by pull request whenever a forge that can
+ * open one is available, and only falls back to a fast-forward direct push when it is not — so a
+ * repository whose protections require a pull request is never bypassed by default.
+ */
+export function promotionStrategyOf(
+  policies: Record<string, unknown> | null | undefined,
+  forgeCanOpenPullRequests: boolean,
+): 'pull-request' | 'direct-push' {
+  const mode = promotionModeOf(policies);
+  if (mode === 'pull-request') return 'pull-request';
+  if (mode === 'direct-push') return 'direct-push';
+  return forgeCanOpenPullRequests ? 'pull-request' : 'direct-push';
+}
+
+/** VS-584: a project's promotion pull-request title, or null when it has not declared one. */
+export function promotionPrTitleOf(policies: Record<string, unknown> | null | undefined): string | null {
+  const raw = (policies as { promotionPrTitle?: unknown } | null | undefined)?.promotionPrTitle;
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return trimmed ? trimmed : null;
 }
 
 export const ProjectConfigSchema = z.object({

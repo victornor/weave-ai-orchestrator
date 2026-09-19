@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
-import { compactionThreshold, DEFAULT_MERGE_CONCURRENCY, DEFAULT_MODEL_SETTING, DEFAULT_WORKER_TIERS, DEFAULT_WORKSPACE_MODELS, DaemonConfigSchema, DaemonModelsSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkerModelOptionSchema, WORKER_MEMORY_MIN_MB, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, deriveWorkerMemoryMb, isWorkerOptionConfigured, mergeConcurrencyOf, resolveWorkerMemoryMb, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
+import { compactionThreshold, DEFAULT_MERGE_CONCURRENCY, DEFAULT_MODEL_SETTING, DEFAULT_PROMOTION_MODE, DEFAULT_WORKER_TIERS, DEFAULT_WORKSPACE_MODELS, DaemonConfigSchema, DaemonModelsSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, promotionModeOf, promotionPrTitleOf, promotionStrategyOf, RoleSpecSchema, WorkerModelOptionSchema, WORKER_MEMORY_MIN_MB, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, deriveWorkerMemoryMb, isWorkerOptionConfigured, mergeConcurrencyOf, resolveWorkerMemoryMb, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
 
 describe('automatic compaction policy', () => {
   it('is a fraction of the window for percent and the exact number for tokens', () => {
@@ -69,6 +69,43 @@ describe('project policies: mergeConcurrency', () => {
     expect(mergeConcurrencyOf(undefined)).toBe(DEFAULT_MERGE_CONCURRENCY);
     expect(mergeConcurrencyOf({ mergeConcurrency: 0 })).toBe(DEFAULT_MERGE_CONCURRENCY);
     expect(mergeConcurrencyOf({ mergeConcurrency: 'two' })).toBe(DEFAULT_MERGE_CONCURRENCY);
+  });
+});
+
+describe('project policies: promotion strategy (VS-584)', () => {
+  it('leaves the mode unset when the policies block does not mention it', () => {
+    expect(ProjectPoliciesSchema.parse({}).promotionMode).toBeUndefined();
+    expect(ProjectPoliciesSchema.parse({ promotionMode: 'pull-request' }).promotionMode).toBe('pull-request');
+  });
+
+  it('rejects an unknown mode', () => {
+    expect(ProjectPoliciesSchema.safeParse({ promotionMode: 'push' }).success).toBe(false);
+  });
+
+  it('defaults an absent or unusable mode to auto, never to a direct push', () => {
+    expect(promotionModeOf({})).toBe(DEFAULT_PROMOTION_MODE);
+    expect(promotionModeOf(null)).toBe(DEFAULT_PROMOTION_MODE);
+    expect(promotionModeOf(undefined)).toBe(DEFAULT_PROMOTION_MODE);
+    expect(promotionModeOf({ promotionMode: 'nonsense' })).toBe(DEFAULT_PROMOTION_MODE);
+  });
+
+  it('resolves auto to a pull request when a forge can open one, and to a direct push when none can', () => {
+    expect(promotionStrategyOf({}, true)).toBe('pull-request');
+    expect(promotionStrategyOf({}, false)).toBe('direct-push');
+    expect(promotionStrategyOf({ promotionMode: 'auto' }, true)).toBe('pull-request');
+  });
+
+  it('honours an explicit mode regardless of the forge', () => {
+    expect(promotionStrategyOf({ promotionMode: 'pull-request' }, false)).toBe('pull-request');
+    expect(promotionStrategyOf({ promotionMode: 'direct-push' }, true)).toBe('direct-push');
+  });
+
+  it('reads a declared pull-request title, and null when none is usable', () => {
+    expect(promotionPrTitleOf({ promotionPrTitle: 'Edge' })).toBe('Edge');
+    expect(promotionPrTitleOf({ promotionPrTitle: '  Edge  ' })).toBe('Edge');
+    expect(promotionPrTitleOf({})).toBeNull();
+    expect(promotionPrTitleOf({ promotionPrTitle: '' })).toBeNull();
+    expect(promotionPrTitleOf({ promotionPrTitle: 7 })).toBeNull();
   });
 });
 

@@ -6,12 +6,14 @@ import { nowIso } from '@weave-ai/db';
 import {
   AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents, OcError, landingBranchOf,
   isWorkerOptionConfigured, isProgressRunEvent, MCP_SERVER_NAME, PLANNER_TOOLS, FIRST_TURN_TOOLS,
-  TERMINAL_TICKET_STATUSES,
+  TERMINAL_TICKET_STATUSES, resolveWorkerMemoryMb,
   type Agent, type AgentKind, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
   type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
 } from '@weave-ai/shared';
-import type { McpServerConfig, RuntimeEvent, TurnHandle, TurnInput, TurnResult } from '@weave-ai/runtime-sdk';
-import { truncate } from '@weave-ai/runtime-sdk';
+import type { ContainmentRequest, McpServerConfig, RuntimeEvent, TurnHandle, TurnInput, TurnResult } from '@weave-ai/runtime-sdk';
+import { readScopeMemoryPeak, releaseScope, scopeUnitName, systemdScopeAvailable, truncate } from '@weave-ai/runtime-sdk';
+import { baseMemoryMb } from './memory.js';
+import { recordActivity } from '../events.js';
 import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { createSessions, type SessionsService } from '../sessions/index.js';
@@ -41,13 +43,32 @@ export const PLANNER_ALLOWLIST = [...PLANNER_TOOLS, 'Read', 'Grep', 'Glob'];
 
 const PAYLOAD_LIMIT = 8 * 1024;
 const RETRY_BACKOFF_MS = [30_000, 120_000, 600_000];
+
+/**
+ * VS-579: the parallelism a worker's test runner may use by default. A full suite that otherwise
+ * takes one worker per core is what took the daemon down on 2026-09-19; these are only defaults,
+ * filled for keys the daemon environment does not already set, and a project's own command-line
+ * value still wins because it is set in the child shell.
+ */
+export function testParallelismDefaults(env: Record<string, string | undefined>): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (env['VITEST_MAX_WORKERS'] === undefined) out['VITEST_MAX_WORKERS'] = '4';
+  if (env['VITEST_MAX_THREADS'] === undefined) out['VITEST_MAX_THREADS'] = '4';
+  if (env['UV_THREADPOOL_SIZE'] === undefined) out['UV_THREADPOOL_SIZE'] = '4';
+  return out;
+}
 /**
  * The families the system retries by itself. `provider_quota` is deliberately absent (VS-56, ADR
  * 0010): a usage limit is not transient the way an upstream 503 is — the runtime has already said
  * the window is exhausted — so the ladder could only fail three more times at rising cost before
  * reaching the same card. A quota failure parks the worker on its first occurrence instead.
  */
-const RETRYABLE: RunErrorFamily[] = ['transient_upstream'];
+export const RETRYABLE: RunErrorFamily[] = ['transient_upstream', 'resource'];
+
+/** VS-579: the run error code a worker killed for exceeding its memory limit carries. */
+export const WORKER_MEMORY_ERROR_CODE = 'worker_memory_limit';
+/** How close to the limit a scope's peak must be before an unattributed SIGKILL is read as memory. */
+const MEMORY_KILL_PEAK_RATIO = 0.9;
 
 // ---------- redaction ----------
 
@@ -371,6 +392,9 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
 
   let result: TurnResult | null = null;
   let failure: { code: string; family: RunErrorFamily; message: string } | null = null;
+  // VS-579: whether this turn actually ran contained, and the limit/peak to attribute a kill to.
+  let contained = false;
+  let memory: { limitMb: number; peakBytes: number | null } | null = null;
   let promptOptions: TurnPromptOptions = { ...(opts.promptOptions ?? {}) };
   // VS-518: set when this turn's runtime reports compacting the session on its own. It keeps the
   // turn's possibly pre-compaction `usage.contextTokens` out of `last_context_tokens` (the adapter
@@ -432,6 +456,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       [AC_ENV.AGENT_KIND]: agent.kind,
       [AC_ENV.WORKSPACE_ID]: ctx.workspaceId,
       [AC_ENV.WAKE_REASON]: wakes.map((w) => `${w.source}:${w.reason}`).join('; ').slice(0, 400),
+      ...(agent.kind === 'worker' ? testParallelismDefaults(process.env) : {}),
       ...(agent.roleId ? { [AC_ENV.ROLE_ID]: agent.roleId } : {}),
       ...(agent.projectId ? { [AC_ENV.PROJECT_ID]: agent.projectId } : {}),
       ...(agent.ticketId ? { [AC_ENV.TICKET_ID]: agent.ticketId } : {}),
@@ -484,6 +509,20 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     reconcileCredential();
     const turnTimeoutMs = (ctx.config.defaults.turnTimeoutSec ?? 2700) * 1000;
 
+    // VS-579: a worker turn is contained in its own memory-limited scope. The limit is resolved
+    // here (role override → workspace default → machine-derived) and the machine is asked once for
+    // the base memory; a non-worker agent is never contained.
+    const workerMemory = agent.kind === 'worker'
+      ? resolveWorkerMemoryMb({
+        roleMb: role?.memoryLimitMb ?? null,
+        workspaceMb: ctx.config.defaults.workerMemoryMb ?? null,
+        baseMemoryMb: baseMemoryMb(),
+        maxConcurrentRuns: ctx.config.defaults.maxConcurrentRuns ?? 6,
+      })
+      : null;
+    const containment: ContainmentRequest | undefined = workerMemory ? { runId, memoryMb: workerMemory.mb } : undefined;
+    contained = containment !== undefined && systemdScopeAvailable();
+
     const input: TurnInput = {
       runId,
       turnEpoch: run.turnEpoch,
@@ -516,6 +555,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       model: setting.model ?? null,
       effort: setting.effort ?? null,
       configHome,
+      containment,
     };
 
     // 5. spawn + stream
@@ -566,6 +606,14 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
         },
       );
     });
+    // VS-579: read the scope's peak before the transient unit is reset, so a SIGKILL can be told
+    // apart from a memory kill with evidence rather than an assumption.
+    if (workerMemory) {
+      const peakBytes = contained ? await readScopeMemoryPeak(scopeUnitName(runId)) : null;
+      memory = { limitMb: workerMemory.mb, peakBytes };
+      // The turn is over and its peak read: drop the transient scope so a failed unit does not linger.
+      if (contained) releaseScope(scopeUnitName(runId));
+    }
   } catch (e) {
     const err = e as Error & { ocFamily?: RunErrorFamily; ocCode?: string };
     failure = { code: err.ocCode ?? 'engine_error', family: err.ocFamily ?? 'tooling', message: truncate(err.message, 4000) };
@@ -590,6 +638,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     sessionId: sessions.active(agent.id)?.id ?? null,
     cancelled: state.active.get(runId)?.cancelled ?? null,
     compactedInTurn: adapterCompacted,
+    memory,
     record,
   });
   await afterTurnHooks(ctx, deps, agent, ticket);
@@ -617,12 +666,14 @@ async function afterTurnHooks(ctx: WorkspaceContext, deps: () => CoreServices, a
   }
 }
 
-interface FinalizeInput {
+export interface FinalizeInput {
   run: Run; agent: Agent; role: Role | null; project: Project | null; ticket: Ticket | null; wakes: Wakeup[];
   result: TurnResult | null; failure: { code: string; family: RunErrorFamily; message: string } | null; report: RunReport | null;
   durationMs: number; sessionId: string | null; cancelled: { mode: 'interrupt' | 'kill'; cause?: 'message' } | null;
   /** VS-518: this turn's runtime reported compacting the session, so its context observation is not trustworthy. */
   compactedInTurn?: boolean;
+  /** VS-579: the worker memory limit in force and the contained scope's peak, when contained. */
+  memory?: { limitMb: number; peakBytes: number | null } | null;
   record: (type: RunEvent['type'], payload: Record<string, unknown>, stream?: 'stdout' | 'stderr' | 'runtime' | 'system', level?: string) => void;
 }
 
@@ -636,11 +687,20 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   // child process can be signalled, so a runtime that exits on that signal is caught here.
   const shuttingDown = runState(ctx).shuttingDown;
 
+  const memoryKilled = isMemoryKill(f, shuttingDown);
+
   let status: Run['status'] = 'succeeded';
   let errorCode: string | null = null;
   let errorFamily: RunErrorFamily | null = null;
   if (f.failure) { status = 'failed'; errorCode = f.failure.code; errorFamily = f.failure.family; }
   else if (r?.timedOut) { status = 'timed_out'; errorCode = 'timeout'; errorFamily = 'tooling'; }
+  else if (memoryKilled) {
+    // VS-579: the worker's own scope was killed with its peak at the limit — a memory kill, not the
+    // ambiguous interrupt a bare SIGKILL used to be labelled.
+    status = 'failed';
+    errorCode = WORKER_MEMORY_ERROR_CODE;
+    errorFamily = 'resource';
+  }
   else if (r?.error) { status = 'failed'; errorCode = r.error.code; errorFamily = r.error.family; }
   else if (r && r.exitCode !== 0 && r.exitCode !== null) { status = 'failed'; errorCode = `exit_${r.exitCode}`; errorFamily = 'unknown'; }
   if (shuttingDown && (f.cancelled !== null || status !== 'succeeded')) {
@@ -676,7 +736,11 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
     if (est !== null) { costCents = est; costStatus = 'estimated'; }
   }
   const liveness = classifyLiveness(status, f.report, f.ticket?.status ?? null);
-  const summary = f.report?.summary ?? (r?.finalText ? r.finalText.slice(0, 1000) : f.failure?.message ?? null);
+  const memoryMessage = memoryKilled && f.memory
+    ? `worker exceeded its memory limit (peak ${fmtMemoryMb(f.memory.peakBytes)} of ${f.memory.limitMb} MB)`
+    : null;
+  const failureMessage = memoryMessage ?? f.failure?.message ?? r?.error?.message ?? null;
+  const summary = f.report?.summary ?? memoryMessage ?? (r?.finalText ? r.finalText.slice(0, 1000) : f.failure?.message ?? null);
 
   // VS-137: an authentication failure that keeps recurring on one worker, with the runtime confirmed
   // healthy enough to release every other agent in between, is a fact about the worker rather than
@@ -734,7 +798,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
       turnEpoch: f.run.turnEpoch,
       turnCount: f.agent.turnCount + 1,
       lastRunAt: now,
-      errorText: status === 'succeeded' ? null : (f.failure?.message ?? r?.error?.message ?? errorCode),
+      errorText: status === 'succeeded' ? null : (failureMessage ?? errorCode),
       // The agent took a turn, so whatever paused it is spent: the pause reason and its structured
       // twin are cleared together, always. `parkForHuman` below may set them again for this failure.
       ...(agentStatus === 'active' ? { pauseReason: null, pauseDetailJson: null } : {}),
@@ -779,6 +843,10 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   try { deps().activity.finish(f.agent.id); } catch { /* activity service unavailable */ }
   try { deps().routines.onRunFinalized(f.wakes); } catch { /* routines service unavailable */ }
 
+  // VS-579: a memory kill is legible on the ticket (every time) and filed as an incident when it
+  // repeats on the same ticket. Neither touches the retry below — the ladder still runs.
+  if (memoryKilled) recordMemoryKill(ctx, deps, f, runId, memoryMessage);
+
   // An authentication failure is not this turn's problem but the runtime's: one credential is shared
   // per host, so retrying can only fail again and parking would raise a card per worker for one
   // outage. It leaves the ladder entirely and gates the runtime once instead (VS-75). Nothing here
@@ -789,9 +857,9 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   // confirmed healthy in between — at that point it is this worker's own problem, not the runtime's,
   // and it is put to the human exactly as the retry ladder does when its own attempts are spent.
   if (errorFamily === 'auth' && authFailuresExhausted) {
-    parkForHuman(ctx, deps, f, errorFamily, errorCode, f.failure?.message ?? r?.error?.message ?? null);
+    parkForHuman(ctx, deps, f, errorFamily, errorCode, failureMessage);
   } else if (errorFamily === 'auth') {
-    gateRuntimeForLogin(ctx, deps, { runtimeId: f.run.runtimeId, agentId: f.agent.id, agentName: f.agent.name, runId, ticketId: f.agent.ticketId }, f.failure?.message ?? r?.error?.message ?? null);
+    gateRuntimeForLogin(ctx, deps, { runtimeId: f.run.runtimeId, agentId: f.agent.id, agentName: f.agent.name, runId, ticketId: f.agent.ticketId }, failureMessage);
   } else if (errorFamily && RETRYABLE.includes(errorFamily)) {
     // Retry the transient family with backoff (30 s / 2 min / 10 min, max 3).
     // A usage limit is not in RETRYABLE and falls through to parking below.
@@ -810,10 +878,10 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
       } catch (e) { log.warn({ err: String(e) }, 'failed to schedule retry wake'); }
     } else {
       log.warn({ runId, errorFamily }, 'retry budget exhausted');
-      parkForHuman(ctx, deps, f, errorFamily, errorCode, f.failure?.message ?? r?.error?.message ?? null);
+      parkForHuman(ctx, deps, f, errorFamily, errorCode, failureMessage);
     }
   } else if (status === 'failed' && f.agent.kind === 'worker' && errorFamily !== 'model_refusal') {
-    parkForHuman(ctx, deps, f, errorFamily, errorCode, f.failure?.message ?? r?.error?.message ?? null);
+    parkForHuman(ctx, deps, f, errorFamily, errorCode, failureMessage);
   }
   // A turn that ran proves this runtime's credential works, so a gate left over from an earlier
   // outage is stale: clear it here rather than waiting for the supervisor's next probe.
@@ -872,6 +940,75 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
 
   log.info({ status, liveness, turnEpoch: f.run.turnEpoch, agentId: f.agent.id }, 'run finished');
   return finalRun;
+}
+
+/** `n MB`, or `unknown` when the scope's peak could not be read. */
+function fmtMemoryMb(bytes: number | null): string {
+  if (bytes === null || !Number.isFinite(bytes)) return 'unknown';
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+/**
+ * VS-579: an unattributed SIGKILL whose contained scope peaked at (or near) the limit is a memory
+ * kill. A human cancel, a daemon shutdown and a watchdog cut are excluded before this is consulted —
+ * the caller checks them first — so a deliberate kill is never relabelled as memory.
+ */
+export function isMemoryKill(f: FinalizeInput, shuttingDown: { reason: string; at: string } | null): boolean {
+  if (shuttingDown || f.cancelled) return false;
+  if (!f.memory || !f.result) return false;
+  const r = f.result;
+  if (r.signal !== 'SIGKILL' && r.exitCode !== 137) return false;
+  const peak = f.memory.peakBytes;
+  if (peak === null) return false;
+  return peak >= f.memory.limitMb * 1024 * 1024 * MEMORY_KILL_PEAK_RATIO;
+}
+
+/**
+ * VS-579: the human-facing trace of a memory kill — an activity entry on every kill, and one system
+ * incident once the same ticket has been memory-killed more than once with no incident open. Filing
+ * never suppresses the retry ladder (the caller runs it after this).
+ */
+export function recordMemoryKill(ctx: WorkspaceContext, deps: () => CoreServices, f: FinalizeInput, runId: string, message: string | null): void {
+  const log = ctx.log('run').child({ runId });
+  const peakBytes = f.memory?.peakBytes ?? null;
+  const limitMb = f.memory?.limitMb ?? null;
+  try {
+    recordActivity(ctx.db, ctx.workspaceId, { kind: 'system', id: null }, 'worker.memory_limit', 'agent', f.agent.id,
+      { runId, limitMb, peakBytes, peakMb: peakBytes === null ? null : Math.round(peakBytes / (1024 * 1024)) },
+      f.agent.ticketId ?? null, f.agent.projectId ?? null);
+  } catch (e) { log.warn({ err: String(e) }, 'memory-kill activity could not be recorded'); }
+
+  const ticketId = f.agent.ticketId ?? null;
+  if (!ticketId) return;
+  try {
+    const prior = ctx.db.get<{ n: number }>(
+      'SELECT COUNT(*) n FROM runs WHERE agent_id = ? AND id != ? AND error_code = ?',
+      [f.agent.id, runId, WORKER_MEMORY_ERROR_CODE],
+    )?.n ?? 0;
+    if (prior < 1) return;
+    const incidents = deps().incidents;
+    if (!incidents) return;
+    const open = incidents.list({ status: 'open', limit: 200 }).items;
+    if (open.some((i) => i.ticketId === ticketId && i.title.startsWith('Worker memory'))) return;
+    incidents.create({
+      reporterKind: 'system',
+      title: `Worker memory limit repeated${f.ticket ? ` on ${f.ticket.identifier}` : ''}`,
+      whatFailed: message ?? 'a worker was killed for exceeding its memory limit',
+      tryingToDo: "run a worker turn without one worker's memory use threatening the daemon or its peers",
+      evidence: [
+        `run: ${runId}`,
+        `limit: ${limitMb ?? 'unknown'} MB`,
+        `peak: ${fmtMemoryMb(peakBytes)}`,
+        f.agent.roleId ? `role: ${f.agent.roleId}` : null,
+      ].filter(Boolean).join('\n'),
+      workspaceId: ctx.workspaceId,
+      projectId: f.agent.projectId ?? null,
+      ticketId,
+      agentId: f.agent.id,
+      runId,
+      roleId: f.agent.roleId ?? null,
+    });
+  } catch (e) { log.warn({ err: String(e) }, 'memory-kill incident could not be filed'); }
 }
 
 /**

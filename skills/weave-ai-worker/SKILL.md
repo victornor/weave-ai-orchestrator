@@ -92,6 +92,10 @@ Commit early and clearly. Never end a turn holding work you would mind losing. N
 
 Delivery and the exact merge sequence: `references/delivery.md`.
 
+## Test runners are capped by default
+
+The daemon gives every worker turn conservative test-runner parallelism defaults — `VITEST_MAX_WORKERS=4`, `VITEST_MAX_THREADS=4` and `UV_THREADPOOL_SIZE=4` — so a full suite cannot spawn one worker per CPU core and exhaust the host. A value already in the environment is never overridden, and a value your own command sets (for example `VITEST_MAX_WORKERS=8 vitest run`) wins, because it is set in the shell that runs the test. Raise a cap deliberately that way when a run is genuinely starved, and remember the turn is also held inside its own memory limit, so a suite that blows past it is killed rather than allowed to thrash the machine.
+
 ## Attach rendered evidence to the ticket
 
 A visual change is judged by its render, and the human decides from the ticket's approval card — not from a path in a report. Save your screenshots and other captures in your **home directory, outside `work/`** (which stays clean), and attach each one with `weave_ticket_attachment_put(id, { path })` before you ask for approval. The images then appear on the plan, merge and action approval cards themselves. A non-image — a zip, a video, a log — attaches just as well and shows as a labelled download. Never leave a capture in a scratch directory and cite its path: it will be gone by the time the card is reviewed, and the card will show nothing.

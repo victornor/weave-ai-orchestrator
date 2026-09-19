@@ -29,7 +29,7 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `ac_session` httpOn
 
 ## Workspace
 - `GET /api/events?after=<base64url cursor map>` SSE stream for all loaded workspaces (`event: <type>`, `id: <base64url workspace cursor map>`, `data: WorkspaceEvent`); one connection per document, heartbeat comment every 15 s; invalid or oversized cursors start at the current tail
-- `GET /api/w/:ws` → workspace + config summary · `PATCH /api/w/:ws/config` (partial `workspace.yaml`; a `defaults.yolo` key is refused — YOLO is per project, set through `PATCH /api/w/:ws/projects/:id` as `policies.yolo`, VS-382) · `POST /api/w/:ws/pause` · `POST /api/w/:ws/resume`
+- `GET /api/w/:ws` → workspace + config summary, plus `workerMemory: { mb, source: 'workspace' | 'derived' }` — the worker memory limit every role inherits and where it came from (VS-579); a role's own `memoryLimitMb` overrides it per role · `PATCH /api/w/:ws/config` (partial `workspace.yaml`; `defaults.workerMemoryMb` takes a whole number of MB (≥1024) or `null` to derive it; a `defaults.yolo` key is refused — YOLO is per project, set through `PATCH /api/w/:ws/projects/:id` as `policies.yolo`, VS-382) · `POST /api/w/:ws/pause` · `POST /api/w/:ws/resume`
 - `GET /api/w/:ws/events?after=<seq>` SSE stream (`event: <type>`, `id: <seq>`, `data: WorkspaceEvent`); heartbeat comment every 15 s
 - `POST /api/w/:ws/export` `{ out? }` → `{ path, workspace, roles, knowledgeFiles, tickets }` (portable package: `workspace.yaml`, `roles/**`, `knowledge/**`, `tickets/*.md`; no db, no runs, no secrets)
 - `GET /api/w/:ws/briefing`

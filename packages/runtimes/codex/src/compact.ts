@@ -35,6 +35,8 @@ export async function compactCodexThread(input: CompactSessionInput): Promise<Co
   const launch = launchCommand('codex', childEnv(overlay));
 
   return await new Promise<CompactSessionResult>((resolve) => {
+    // VS-579: out-of-band compaction is a short-lived helper, not a worker turn, so it stays in the
+    // daemon's control group — the per-worker memory scope is applied by `spawnLines` on turns.
     const child = spawn(launch.cmd, ['app-server'], { cwd: input.cwd, env: launch.env, stdio: ['pipe', 'pipe', 'pipe'] });
     let buf = '';
     let stderr = '';

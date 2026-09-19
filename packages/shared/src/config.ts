@@ -5,6 +5,41 @@ import type { ModelSource } from './enums.js';
 const slug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'kebab-case slug');
 const envRef = z.string().regex(/^\$\{[A-Z0-9_]+\}$/, 'must be an ${ENV_VAR} reference, never a literal secret');
 
+/**
+ * VS-579: a worker's memory limit in MB, a floor so a worker always has usable room and a ceiling
+ * that is only a sanity bound (the real upper bound is the machine, checked when it is resolved).
+ * `null` means "not configured" — derive it from the machine, never "no limit".
+ */
+export const WORKER_MEMORY_MIN_MB = 1024;
+export const WORKER_MEMORY_MAX_MB = 1_048_576;
+
+/** How much of the machine the simultaneous workers may take before the daemon and the OS need room. */
+export const WORKER_MEMORY_SHARE = 0.8;
+
+/** The derived default: a share of the base memory split across the runs that may go at once, floored. */
+export function deriveWorkerMemoryMb(baseMemoryMb: number, maxConcurrentRuns: number): number {
+  const runs = Math.max(1, Math.floor(maxConcurrentRuns));
+  return Math.max(WORKER_MEMORY_MIN_MB, Math.floor((baseMemoryMb * WORKER_MEMORY_SHARE) / runs));
+}
+
+export interface WorkerMemoryResolution {
+  mb: number;
+  source: 'role' | 'workspace' | 'derived';
+}
+
+/**
+ * VS-579: the limit in force for a worker — the role's override, else the workspace default, else
+ * the machine-derived value. A caller passes the base memory it wants the derivation to use (the
+ * host's total, or the daemon's own cgroup ceiling when it runs inside a container).
+ */
+export function resolveWorkerMemoryMb(input: {
+  roleMb?: number | null; workspaceMb?: number | null; baseMemoryMb: number; maxConcurrentRuns: number;
+}): WorkerMemoryResolution {
+  if (input.roleMb != null) return { mb: input.roleMb, source: 'role' };
+  if (input.workspaceMb != null) return { mb: input.workspaceMb, source: 'workspace' };
+  return { mb: deriveWorkerMemoryMb(input.baseMemoryMb, input.maxConcurrentRuns), source: 'derived' };
+}
+
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
@@ -324,6 +359,11 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
   autoMerge: z.boolean().default(false),
   worktrees: z.enum(WORKTREE_PROVIDERS).default('worktrunk'),
   maxConcurrentRuns: z.number().int().min(1).default(6),
+  /**
+   * VS-579: a worker turn's memory limit in MB. `null` means derive it from the machine and
+   * `maxConcurrentRuns` (see `deriveWorkerMemoryMb`); a role may override this per role.
+   */
+  workerMemoryMb: z.number().int().min(WORKER_MEMORY_MIN_MB).max(WORKER_MEMORY_MAX_MB).nullable().default(null),
   turnTimeoutSec: z.number().int().min(60).default(2700),
   silenceTimeoutSec: z.number().int().min(60).default(600),
   spawnWaitWarnSec: z.number().int().default(600),
@@ -475,6 +515,8 @@ export const RoleSpecSchema = z.object({
   rules: z.array(z.string()).default([]),
   sessionPolicy: z.enum(SESSION_POLICIES).default('per_ticket'),
   maxWorkers: z.number().int().min(1).max(32).default(2),
+  /** VS-579: this role's worker memory limit in MB, or `null` to inherit the workspace default. */
+  memoryLimitMb: z.number().int().min(WORKER_MEMORY_MIN_MB).max(WORKER_MEMORY_MAX_MB).nullable().default(null),
   permission: z.object({ mode: z.enum(PERMISSION_MODES).default('auto'), allowed: z.array(z.string()).default([]), denied: z.array(z.string()).default([]) }).default({}),
   secrets: z.array(z.string()).default([]),
   notes: z.string().optional(),

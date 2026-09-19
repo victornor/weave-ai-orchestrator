@@ -6,6 +6,7 @@ import type * as S from '@weave-ai/shared';
 import type { ForgeChangedFile, ForgeCheck, ForgePullRequest } from '@weave-ai/plugin-sdk';
 import type { DiffFileStatus, DiffHunk } from '@weave-ai/render';
 import type { WorkerActivityService } from './activity/index.js';
+import type { IncidentsService } from './incidents/index.js';
 
 export interface Actor { kind: 'human' | 'agent' | 'system'; id: string | null; runId?: string | null }
 export interface Page<T> { items: T[]; total: number }
@@ -925,6 +926,12 @@ export interface CoreServices {
   activity: WorkerActivityService;
   /** VS-398: a captain-authored, pre-ticket draft plan and its ordered draft tickets. */
   planning: PlanningService;
+  /**
+   * VS-579: the daemon-level incident service, when the process provides one (the server does; a
+   * bare core test may not). Used for incidents the daemon files itself, such as a repeated worker
+   * memory kill — never for an agent's own `weave_incident`.
+   */
+  incidents?: IncidentsService;
 }
 
 export interface PlanDraftInput {

@@ -41,7 +41,7 @@ function rowToSpec(ctx: WorkspaceContext, role: Role): RoleSpec {
     title: role.title ?? undefined, icon: role.icon ?? undefined,
     charterSummary: role.charterSummary, scope: role.scopeText,
     responsibilities: role.responsibilities, capabilities: role.capabilities, rules: role.rules,
-    sessionPolicy: role.sessionPolicy, maxWorkers: role.maxWorkers,
+    sessionPolicy: role.sessionPolicy, maxWorkers: role.maxWorkers, memoryLimitMb: role.memoryLimitMb,
     permission: role.permission, secrets: role.secrets, createdBy: role.createdBy,
   });
 }
@@ -99,7 +99,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
       name: spec.name, title: spec.title ?? null, icon: spec.icon ?? null, charterSummary: spec.charterSummary, scopeText: spec.scope,
       responsibilitiesJson: spec.responsibilities, capabilitiesJson: spec.capabilities, rulesJson: spec.rules,
       sessionPolicy: spec.sessionPolicy,
-      maxWorkers: spec.maxWorkers, permissionJson: spec.permission, secretsJson: spec.secrets,
+      maxWorkers: spec.maxWorkers, memoryLimitMb: spec.memoryLimitMb, permissionJson: spec.permission, secretsJson: spec.secrets,
       specRevision: role.specRevision + 1, updatedAt: nowIso(),
     });
     return get(role.id);
@@ -134,7 +134,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
           title: spec.title ?? null, icon: spec.icon ?? null, charterSummary: spec.charterSummary, scopeText: spec.scope,
           responsibilitiesJson: spec.responsibilities, capabilitiesJson: spec.capabilities, rulesJson: spec.rules,
           permissionJson: spec.permission,
-          sessionPolicy: spec.sessionPolicy, maxWorkers: spec.maxWorkers, secretsJson: spec.secrets,
+          sessionPolicy: spec.sessionPolicy, maxWorkers: spec.maxWorkers, memoryLimitMb: spec.memoryLimitMb, secretsJson: spec.secrets,
           status: autoActivate ? 'active' : 'pending_activation', specRevision: 1, createdBy: spec.createdBy,
           createdAt: now, updatedAt: now,
         });

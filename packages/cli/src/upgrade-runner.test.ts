@@ -346,6 +346,9 @@ describe('restartCommand (VS-316)', () => {
       const outcome = restartCommand('/cfg', { run, readCgroup: () => '' });
       await outcome.run();
       expect(calls).toEqual([
+        // VS-579: the pre-migration guard correction adds the oomd-avoid line to the legacy unit
+        // and reloads, before the migration copies it forward.
+        ['systemctl', '--user', 'daemon-reload'],
         ['systemctl', '--user', 'daemon-reload'],
         ['systemctl', '--user', 'enable', SERVICE_NAME],
         ['systemctl', '--user', 'stop', 'agent-conductor.service'],
@@ -359,7 +362,7 @@ describe('restartCommand (VS-316)', () => {
       expect(existsSync(legacyPath)).toBe(true); // not retired yet — only finalizeMigration() does that
 
       await outcome.finalizeMigration();
-      expect(calls.slice(4)).toEqual([
+      expect(calls.slice(5)).toEqual([
         ['systemctl', '--user', 'disable', 'agent-conductor.service'],
         ['systemctl', '--user', 'daemon-reload'],
       ]);
@@ -392,6 +395,7 @@ describe('restartCommand (VS-316)', () => {
       // The fallback-start call happens, then prepare's leftovers (the new unit file, its would-be
       // enablement) are undone — a later upgrade must not find a stray weave-ai.service (PR #265 review).
       expect(calls).toEqual([
+        ['systemctl', '--user', 'daemon-reload'],
         ['systemctl', '--user', 'daemon-reload'],
         ['systemctl', '--user', 'enable', SERVICE_NAME],
         ['systemctl', '--user', 'stop', 'agent-conductor.service'],
@@ -444,6 +448,7 @@ describe('restartCommand (VS-316)', () => {
       expect(outcome.migrationOutcome()).toBe('prepare_failed');
       expect(calls).toEqual([
         ['systemctl', '--user', 'daemon-reload'],
+        ['systemctl', '--user', 'daemon-reload'],
         ['systemctl', '--user', 'stop', SERVICE_NAME],
         ['systemctl', '--user', 'disable', SERVICE_NAME],
         ['systemctl', '--user', 'daemon-reload'],
@@ -494,7 +499,11 @@ describe('restartCommand (VS-316)', () => {
       const outcome = restartCommand('/cfg', { run, readCgroup: () => '' });
       expect(outcome.how).not.toContain('migrate');
       await outcome.run();
-      expect(calls).toEqual([['systemctl', '--user', 'restart', SERVICE_NAME]]);
+      // VS-579: the unit predates the oomd-avoid guard, so the pre-restart correction writes it and reloads.
+      expect(calls).toEqual([
+        ['systemctl', '--user', 'daemon-reload'],
+        ['systemctl', '--user', 'restart', SERVICE_NAME],
+      ]);
       expect(outcome.migrationOutcome()).toBeNull();
     });
 

@@ -11,7 +11,7 @@ export const AGENT_KINDS = ['weaver', 'worker', 'planner', 'session'] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
 
 /** Who filed a system incident (VS-174). Same values as AgentKind; a separate name so a call site cannot mix them up with an agent's live kind. */
-export const INCIDENT_REPORTER_KINDS = ['weaver', 'worker', 'planner', 'session'] as const;
+export const INCIDENT_REPORTER_KINDS = ['weaver', 'worker', 'planner', 'session', 'system'] as const;
 export type IncidentReporterKind = (typeof INCIDENT_REPORTER_KINDS)[number];
 
 /** `weave_incident_list`'s `status` filter (VS-271); `list()` itself applies no default. */
@@ -198,7 +198,7 @@ export type RunSortKey = (typeof RUN_SORT_KEYS)[number];
 export const RUN_SORT_DIRS = ['asc', 'desc'] as const;
 export type RunSortDir = (typeof RUN_SORT_DIRS)[number];
 
-export const RUN_ERROR_FAMILIES = ['transient_upstream', 'provider_quota', 'model_refusal', 'auth', 'tooling', 'unknown'] as const;
+export const RUN_ERROR_FAMILIES = ['transient_upstream', 'provider_quota', 'model_refusal', 'auth', 'tooling', 'resource', 'unknown'] as const;
 export type RunErrorFamily = (typeof RUN_ERROR_FAMILIES)[number];
 
 export const RUN_LIVENESS = ['advanced', 'plan_only', 'empty', 'idle', 'blocked', 'needs_decision', 'failed'] as const;

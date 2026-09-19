@@ -9,7 +9,7 @@ function role(over: Partial<Role> = {}): Role {
   return {
     id: 'r1', workspaceId: 'alpha', projectId: 'p1', slug: 'pe', name: 'Platform Engineer', title: null, icon: null,
     charterSummary: '', scopeText: '', responsibilities: [], capabilities: [], rules: [], permission: {},
-    sessionPolicy: 'per_ticket', maxWorkers: 2, secrets: [], status: 'active', pauseReason: null, specRevision: 1,
+    sessionPolicy: 'per_ticket', maxWorkers: 2, memoryLimitMb: null, secrets: [], status: 'active', pauseReason: null, specRevision: 1,
     createdBy: 'c', createdAt: '', updatedAt: '', ...over,
   };
 }

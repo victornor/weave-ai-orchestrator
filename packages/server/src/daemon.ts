@@ -20,7 +20,7 @@ import {
   isNamespacedToolName, PLUGIN_ID_RE, PluginDataService, ARTIFACT_KIT_CSS, generateV2PluginCss,
   type Registries, type WorkspaceContext, type PluginRuntime,
 } from '@weave-ai/core';
-import type { AuthService, CoreServices } from '@weave-ai/core';
+import type { AuthService, CoreServices, IncidentsService } from '@weave-ai/core';
 import type { ChannelAdapter, SurfaceAdapter } from '@weave-ai/plugin-sdk';
 import type { RuntimeAdapter } from '@weave-ai/runtime-sdk';
 import type { WeaveAIPlugin, PluginHost, AgentToolDefinition, WorktreeProvider, ForgeAdapter } from '@weave-ai/plugin-sdk';
@@ -138,10 +138,10 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   };
   loopback.setDeps({ ...deps, listener: 'loopback' });
 
-  const admin = makeAdmin(configDir, isolated, daemonCfg, registries, workspaces, loopback.url, pushKeys);
+  const admin = makeAdmin(configDir, isolated, daemonCfg, registries, workspaces, loopback.url, pushKeys, incidents);
   const registry = workspaceLoader.readRegistry(configDir);
   for (const entry of registry.workspaces) {
-    try { await loadWorkspaceInto(workspaces, entry.path, { daemon: daemonCfg, registries, loopbackUrl: loopback.url, daemonConfigDir: configDir, isolated, pushKeys, ...dirs() }); }
+    try { await loadWorkspaceInto(workspaces, entry.path, { daemon: daemonCfg, registries, loopbackUrl: loopback.url, daemonConfigDir: configDir, isolated, pushKeys, incidents, ...dirs() }); }
     catch (e) { log.error({ err: e, workspace: entry.id, path: entry.path }, 'workspace failed to load'); }
   }
 
@@ -257,10 +257,13 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
 async function loadWorkspaceInto(
   workspaces: Map<string, WorkspaceRuntime>,
   path: string,
-  opts: { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; v2ThemeCss: string; daemonConfigDir: string; isolated: boolean; pushKeys: PushKeys | null },
+  opts: { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; v2ThemeCss: string; daemonConfigDir: string; isolated: boolean; pushKeys: PushKeys | null; incidents?: IncidentsService },
 ): Promise<WorkspaceRuntime> {
   const ctx: WorkspaceContext = await workspaceLoader.loadWorkspace(path, opts);
   const services: CoreServices = createCore(ctx);
+  // VS-579: the run engine files daemon-level incidents it observes itself (a repeated worker
+  // memory kill); the server owns the incidents service, so it hands it to this workspace's core.
+  if (opts.incidents) services.incidents = opts.incidents;
   // `:ws` in the API is the slug from workspace.yaml; the db id is a ULID. Both resolve.
   const runtime: WorkspaceRuntime = { id: ctx.config.id, ctx, services, channels: null, webhooks: null, push: null };
   workspaces.set(ctx.config.id, runtime);
@@ -318,9 +321,9 @@ export async function cancelRunningRuns(ws: WorkspaceRuntime): Promise<void> {
 
 function makeAdmin(
   configDir: string, isolated: boolean, daemon: DaemonConfig, registries: Registries, workspaces: Map<string, WorkspaceRuntime>,
-  loopbackUrl: string, pushKeys: PushKeys | null,
+  loopbackUrl: string, pushKeys: PushKeys | null, incidents: IncidentsService,
 ): WorkspaceAdmin {
-  const opts = () => ({ daemon, registries, loopbackUrl, daemonConfigDir: configDir, isolated, pushKeys, ...dirs() });
+  const opts = () => ({ daemon, registries, loopbackUrl, daemonConfigDir: configDir, isolated, pushKeys, incidents, ...dirs() });
   const remember = (id: string, path: string): void => {
     const registry = workspaceLoader.readRegistry(configDir);
     if (!registry.workspaces.some((w) => w.id === id)) registry.workspaces.push({ id, path });

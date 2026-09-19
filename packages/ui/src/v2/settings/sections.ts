@@ -28,6 +28,7 @@ export const V2_WORKSPACE_SECTIONS: V2SettingsSection[] = [
   { key: 'models', label: 'Models', scope: 'workspace' },
   { key: 'projects', label: 'Projects', scope: 'workspace' },
   { key: 'knowledge', label: 'Knowledge', scope: 'workspace' },
+  { key: 'worker-memory', label: 'Worker memory', scope: 'workspace' },
   { key: 'approvals', label: 'Approvals', scope: 'workspace' },
   { key: 'channels', label: 'Channels', scope: 'workspace' },
   { key: 'presentation', label: 'Presentation', scope: 'workspace' },

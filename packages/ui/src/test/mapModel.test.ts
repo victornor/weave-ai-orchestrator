@@ -21,6 +21,7 @@ function role(over: Partial<Role> = {}): Role {
     permission: {},
     sessionPolicy: 'per_ticket',
     maxWorkers: 2,
+    memoryLimitMb: null,
     secrets: [],
     status: 'active',
     pauseReason: null,

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
-import { compactionThreshold, DEFAULT_MERGE_CONCURRENCY, DEFAULT_MODEL_SETTING, DEFAULT_WORKER_TIERS, DEFAULT_WORKSPACE_MODELS, DaemonConfigSchema, DaemonModelsSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkerModelOptionSchema, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, isWorkerOptionConfigured, mergeConcurrencyOf, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
+import { compactionThreshold, DEFAULT_MERGE_CONCURRENCY, DEFAULT_MODEL_SETTING, DEFAULT_WORKER_TIERS, DEFAULT_WORKSPACE_MODELS, DaemonConfigSchema, DaemonModelsSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, RoleSpecSchema, WorkerModelOptionSchema, WORKER_MEMORY_MIN_MB, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, deriveWorkerMemoryMb, isWorkerOptionConfigured, mergeConcurrencyOf, resolveWorkerMemoryMb, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
 
 describe('automatic compaction policy', () => {
   it('is a fraction of the window for percent and the exact number for tokens', () => {
@@ -556,5 +556,27 @@ describe('toLegacySpelling / daemonConfigToLegacySpelling (VS-263 Decision 6)', 
     expect(legacy['createdBy']).toBe('conductor');
     const reparsed = RoleSpecSchema.parse(legacy);
     expect(reparsed.createdBy).toBe('weaver');
+  });
+});
+
+describe('worker memory limits (VS-579)', () => {
+  it('defaults to null, meaning derive, and refuses a value below the floor', () => {
+    expect(WorkspaceDefaultsSchema.parse({}).workerMemoryMb).toBeNull();
+    expect(RoleSpecSchema.parse({ id: 'r', name: 'R', project: 'p', charterSummary: 'x', scope: 'y' }).memoryLimitMb).toBeNull();
+    expect(WorkspaceDefaultsSchema.safeParse({ workerMemoryMb: WORKER_MEMORY_MIN_MB - 1 }).success).toBe(false);
+    expect(WorkspaceDefaultsSchema.safeParse({ workerMemoryMb: 4096 }).data?.workerMemoryMb).toBe(4096);
+  });
+
+  it('derives a share of memory split across the run concurrency', () => {
+    expect(deriveWorkerMemoryMb(60 * 1024, 6)).toBe(Math.floor((60 * 1024 * 0.8) / 6));
+    expect(deriveWorkerMemoryMb(1024, 6)).toBe(WORKER_MEMORY_MIN_MB);
+  });
+
+  it('resolves role over workspace over derived, and reports the source', () => {
+    const base = { baseMemoryMb: 60 * 1024, maxConcurrentRuns: 6 };
+    expect(resolveWorkerMemoryMb({ ...base, roleMb: 2048, workspaceMb: 4096 })).toEqual({ mb: 2048, source: 'role' });
+    expect(resolveWorkerMemoryMb({ ...base, workspaceMb: 4096 })).toEqual({ mb: 4096, source: 'workspace' });
+    expect(resolveWorkerMemoryMb({ ...base }).source).toBe('derived');
+    expect(resolveWorkerMemoryMb({ ...base, roleMb: null, workspaceMb: null }).mb).toBe(deriveWorkerMemoryMb(60 * 1024, 6));
   });
 });

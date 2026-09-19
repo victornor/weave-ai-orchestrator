@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
 import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, SELF_WAKE_STALL_GRACE_MS, type Agent, type KnowledgeScope, type Run, type Ticket } from '@weave-ai/shared';
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
+import { scopeUnitName, stopScope, systemdScopeAvailable } from '@weave-ai/runtime-sdk';
 import { formatAge } from '@weave-ai/render';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
@@ -190,6 +191,10 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     const running = ctx.db.all<Run>("SELECT * FROM runs WHERE workspace_id = ? AND status = 'running'", [ctx.workspaceId]);
     for (const run of running) {
       if (state.active.has(run.id)) continue;
+      // VS-579: a worker turn lives in its own transient scope, a sibling of this unit rather than a
+      // child — so a daemon restart does NOT take it down the way it used to. Stop the orphaned scope
+      // first; the pgid kill below is the fallback for an uncontained spawn.
+      if (systemdScopeAvailable()) stopScope(scopeUnitName(run.id));
       // A run that is still 'running' at boot belonged to a dead daemon: its process (if alive) is an unsupervised orphan. Kill the group, then recover.
       if (processAlive(run.pid)) {
         const target = run.pgid ?? run.pid;

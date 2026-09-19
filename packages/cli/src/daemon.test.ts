@@ -12,7 +12,7 @@ import { SERVICE_NAME, CONDUCTOR_DEPRECATION, cliShimTarget, dataHome, readCliSh
 import {
   assessListenConflict, ensureUnitRestartAlways, installService, isRunning, localDaemonCheck, onTargetRelease,
   pidFile, preflightRestart, reconcileDetachedDaemon, renderServiceUnit, restartSafetyChecks, startDaemonService,
-  stopDaemon, stopDaemonService, systemdMainPid, verifyRestart, withRestartAlways, type CommandResult, type RunCommand,
+  stopDaemon, stopDaemonService, systemdMainPid, verifyRestart, withManagedOOMPreference, withRestartAlways, type CommandResult, type RunCommand,
 } from './daemon.js';
 
 // VS-388: record any real `spawnSync` so a test can prove the guard refused before it could run.
@@ -40,6 +40,26 @@ describe('renderServiceUnit (VS-262, VS-376)', () => {
     expect(unit).toContain('Restart=always');
     expect(unit).not.toContain('Restart=on-failure');
     expect(unit).toContain('RestartSec=3');
+  });
+
+  it('marks the daemon unit avoid for systemd-oomd (VS-579)', () => {
+    expect(renderServiceUnit('/bin/node')).toContain('ManagedOOMPreference=avoid');
+  });
+});
+
+describe('withManagedOOMPreference (VS-579)', () => {
+  it('adds the line under [Service] when absent', () => {
+    const next = withManagedOOMPreference('[Service]\nRestart=always\n');
+    expect(next).toContain('ManagedOOMPreference=avoid');
+  });
+
+  it('leaves an existing correct value untouched and corrects a wrong one', () => {
+    expect(withManagedOOMPreference('[Service]\nManagedOOMPreference=avoid\n')).toBe('[Service]\nManagedOOMPreference=avoid\n');
+    expect(withManagedOOMPreference('[Service]\nManagedOOMPreference=none\n')).toBe('[Service]\nManagedOOMPreference=avoid\n');
+  });
+
+  it('does nothing without a [Service] section', () => {
+    expect(withManagedOOMPreference('[Unit]\nDescription=x\n')).toBe('[Unit]\nDescription=x\n');
   });
 });
 
@@ -179,8 +199,16 @@ describe('unit restart policy and systemd lifecycle (VS-376)', () => {
     expect(calls).toEqual([['systemctl', '--user', 'daemon-reload']]);
   });
 
-  it('leaves an always unit alone, with no reload', () => {
+  it('adds the oomd avoid line to an installed unit that predates it (VS-579)', () => {
     const path = installUnit('[Service]\nRestart=always\n');
+    const { run, calls } = fake();
+    expect(ensureUnitRestartAlways(run)).toEqual({ unit: SERVICE_NAME, path, changed: true });
+    expect(readFileSync(path, 'utf8')).toContain('ManagedOOMPreference=avoid');
+    expect(calls).toEqual([['systemctl', '--user', 'daemon-reload']]);
+  });
+
+  it('leaves a unit carrying both guards alone, with no reload', () => {
+    const path = installUnit('[Service]\nRestart=always\nManagedOOMPreference=avoid\n');
     const { run, calls } = fake();
     expect(ensureUnitRestartAlways(run)).toEqual({ unit: SERVICE_NAME, path, changed: false });
     expect(calls).toEqual([]);

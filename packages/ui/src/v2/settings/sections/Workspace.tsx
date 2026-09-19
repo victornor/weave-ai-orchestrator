@@ -2,7 +2,7 @@
  * The workspace Settings sections that are new or read-only (VS-348): the Weaver descriptions, the
  * Approvals defaults, and Knowledge (real budgets plus the read-only curation description).
  */
-import { APPROVAL_OWNERS, DELIVERY_MODES, WorkspaceDefaultsSchema } from '@weave-ai/shared';
+import { APPROVAL_OWNERS, DELIVERY_MODES, WORKER_MEMORY_MIN_MB, WorkspaceDefaultsSchema } from '@weave-ai/shared';
 import { usePatchConfig, useWorkspaceSummary } from '../../../api/hooks';
 import type * as T from '../../../api/types';
 import { CommitStatus } from '../../../components/CommitStatus';
@@ -152,6 +152,62 @@ export function ApprovalsSection(): React.ReactElement {
           </select>
         </label>
       </div>
+    </div>
+  );
+}
+
+/**
+ * VS-579: the worker memory limit — the effective value, where it came from, and the one control
+ * that sets the workspace default (a role may override it).
+ */
+export function WorkerMemorySection(): React.ReactElement {
+  const summary = useWorkspaceSummary();
+  const patch = usePatchConfig();
+  const defaults = (summary.data?.config?.['defaults'] ?? {}) as Record<string, unknown>;
+  const configured = defaults['workerMemoryMb'];
+  const effective = summary.data?.workerMemory;
+  const field = useCommittableField({
+    value: configured === undefined || configured === null ? '' : String(configured),
+    onCommit: async (raw) => {
+      const text = raw.trim();
+      if (!text) { await patch.mutateAsync({ defaults: { workerMemoryMb: null } }); return; }
+      const n = Number(text);
+      if (!Number.isInteger(n) || n < WORKER_MEMORY_MIN_MB) {
+        throw new Error(`Enter a whole number of at least ${WORKER_MEMORY_MIN_MB} MB, or clear the field to derive it.`);
+      }
+      await patch.mutateAsync({ defaults: { workerMemoryMb: n } });
+    },
+  });
+  const sourceLabel = effective?.source === 'derived' ? 'derived' : effective?.source === 'workspace' ? 'workspace' : '—';
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-micro leading-relaxed text-text-3">
+        Each worker turn runs in its own memory-limited scope, so one runaway worker cannot take down the daemon. A role may override this with its own limit.
+      </p>
+      <div className="v2-card divide-y divide-line-1">
+        <label className="v2-form-row">
+          <span className="ac-label">Workspace default (MB)</span>
+          <div className="flex items-center gap-2">
+            <input
+              aria-label="Worker memory limit (MB)"
+              inputMode="numeric"
+              className="v2-input"
+              placeholder="derived"
+              value={field.draft}
+              onChange={(e) => field.onChange(e.target.value)}
+              onBlur={field.onBlur}
+              onKeyDown={field.onKeyDown}
+            />
+            <CommitStatus status={field.status} error={field.error} onSave={field.commitNow} />
+          </div>
+        </label>
+        <div className="flex items-center gap-3 px-3.5 py-3">
+          <span className="min-w-0 flex-1 text-meta text-text-1">Effective limit</span>
+          <span className="text-meta text-text-2">{effective ? `${effective.mb} MB` : '—'}</span>
+          <span className="v2-tag text-text-2">{sourceLabel}</span>
+        </div>
+      </div>
+      <p className="text-micro text-text-3">Clear the field and save to return to the derived default; a value below {WORKER_MEMORY_MIN_MB} MB is refused.</p>
     </div>
   );
 }

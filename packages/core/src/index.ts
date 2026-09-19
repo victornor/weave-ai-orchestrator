@@ -24,6 +24,7 @@ export {
 } from './incidents/index.js';
 export { signRunToken, verifyRunToken, runTokenSecret, peekWorkspaceId, isRunToken, RUN_TOKEN_PREFIX, RUN_TOKEN_TTL_SECONDS, type RunTokenClaims } from './runs/runtoken.js';
 export { describeLiveInput, type LiveInputStatus } from './runs/active.js';
+export { baseMemoryMb, effectiveWorkspaceWorkerMemory } from './runs/memory.js';
 export { isWorkerStalled, getWorkerStallState, type WorkerStallState } from './supervisor/stall-state.js';
 export * from './workspace/index.js';
 export { registerBuiltinWorktreeProviders, GitWorktreeProvider, WorktrunkProvider, landedWorkTest, renderWtConfig, writeWtConfig, type LandedInput, type LandedVerdict } from './worktrees/index.js';

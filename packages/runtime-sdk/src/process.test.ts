@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { classifyError, spawnLines } from './process.js';
+import { classifyError, resolveSpawnTarget, spawnLines } from './process.js';
 
 const fixture = (name: string): string =>
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', name), 'utf8').trim();
@@ -108,5 +108,20 @@ describe('classifyError', () => {
   it('does not classify a bare mention of "usage" as quota (VS-251)', () => {
     const err = classifyError(1, 'Usage: cursor-agent [options]\n\nRun with --help for more information.');
     expect(err?.family).not.toBe('provider_quota');
+  });
+});
+
+describe('resolveSpawnTarget (VS-579)', () => {
+  it('wraps the command in a scope when containment is requested and available', () => {
+    const target = resolveSpawnTarget('/usr/bin/claude', ['-p'], { runId: 'r1', memoryMb: 2048 }, true);
+    expect(target.cmd).toBe('systemd-run');
+    expect(target.scopeUnit).toBe('ac-run-r1.scope');
+    expect(target.args.slice(-2)).toEqual(['/usr/bin/claude', '-p']);
+    expect(target.args.join(' ')).toContain('MemoryMax=2048M');
+  });
+
+  it('spawns the command unchanged when containment is off or unavailable', () => {
+    expect(resolveSpawnTarget('/usr/bin/claude', ['-p'], { runId: 'r1', memoryMb: 2048 }, false)).toEqual({ cmd: '/usr/bin/claude', args: ['-p'], scopeUnit: null });
+    expect(resolveSpawnTarget('/usr/bin/claude', ['-p'], undefined, true)).toEqual({ cmd: '/usr/bin/claude', args: ['-p'], scopeUnit: null });
   });
 });

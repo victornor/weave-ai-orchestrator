@@ -1,5 +1,7 @@
 import type { AccountLimitWindow, AgentKind, BillingType, RunErrorFamily, RunEventType, PermissionMode, SessionPolicy } from '@weave-ai/shared';
+import type { ContainmentRequest } from './containment.js';
 export type { RunErrorFamily, RunEventType };
+export type { ContainmentRequest } from './containment.js';
 
 export type JsonSchema = Record<string, unknown>;
 export type SessionRef = Record<string, unknown>;
@@ -39,6 +41,11 @@ export interface TurnInput {
    */
   permission: { mode: PermissionMode; allowedTools?: string[]; deniedTools?: string[]; firstTurn?: boolean };
   model?: string | null; effort?: string | null; configHome?: string;
+  /**
+   * VS-579: when set, the adapter spawns this turn inside a memory-limited systemd scope. Absent
+   * (a non-worker agent, or a host with no systemd user manager) means a plain spawn as before.
+   */
+  containment?: ContainmentRequest;
 }
 export interface RuntimeEvent { seq?: number; ts: string; type: RunEventType; payload: Record<string, unknown> }
 export interface TurnSink { onSpawn(info: { pid: number; pgid: number | null }): void; onEvent(ev: RuntimeEvent): void; onRaw(stream: 'stdout' | 'stderr', chunk: string): void }
@@ -212,5 +219,6 @@ export interface RuntimeAdapter {
 }
 export * from './launch.js';
 export * from './process.js';
+export * from './containment.js';
 export * from './testkit.js';
 export * from './fsutil.js';

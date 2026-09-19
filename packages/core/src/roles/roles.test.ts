@@ -309,4 +309,21 @@ describe('roles', () => {
       expect(roles.get('api-backend').permission.mode).toBe('restricted');
     });
   });
+
+  describe('worker memory limit (VS-579)', () => {
+    it('persists a per-role limit to the row and role.yaml, and null means inherit', async () => {
+      const { role } = await roles.hire(CONDUCTOR, spec({ memoryLimitMb: 3072 }));
+      expect(role.memoryLimitMb).toBe(3072);
+      expect(readRoleSpec(h.ctx, role.id)?.memoryLimitMb).toBe(3072);
+      const yaml = YAML.parse(readFileSync(join(h.ctx.paths.roles, 'api-backend', 'role.yaml'), 'utf8')) as RoleSpec;
+      expect(yaml.memoryLimitMb).toBe(3072);
+
+      const raised = await roles.update(CONDUCTOR, role.id, { memoryLimitMb: 4096 }, 'raise the limit');
+      expect(raised.role.memoryLimitMb).toBe(4096);
+
+      const cleared = await roles.update(CONDUCTOR, role.id, { memoryLimitMb: null }, 'inherit again');
+      expect(cleared.role.memoryLimitMb).toBeNull();
+      expect(readRoleSpec(h.ctx, role.id)?.memoryLimitMb).toBeNull();
+    });
+  });
 });

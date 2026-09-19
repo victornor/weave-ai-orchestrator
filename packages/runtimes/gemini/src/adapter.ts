@@ -85,6 +85,7 @@ export const adapter: RuntimeAdapter = {
       env: { ...(process.env as Record<string, string>), ...built.env },
       stdin: built.stdin,
       timeoutMs: input.limits.timeoutMs,
+      containment: input.containment,
       onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
       onLine: (stream, line) => {
         sink.onRaw(stream, line);

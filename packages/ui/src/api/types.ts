@@ -219,6 +219,8 @@ export interface WorkspacePlugin {
 export interface WorkspaceSummary {
   workspace: Workspace;
   config: Record<string, unknown>;
+  /** VS-579: the worker memory limit every role inherits, and where it came from. */
+  workerMemory?: { mb: number; source: 'role' | 'workspace' | 'derived' };
   counts?: { projects: number; workers: number; openTickets: number; needsYou: number };
   plugins?: WorkspacePlugin[];
 }

@@ -55,6 +55,8 @@ export async function compactOpenCodeSession(input: CompactSessionInput): Promis
   const launch = launchCommand('opencode', childEnv(overlay));
 
   return await new Promise<CompactSessionResult>((resolve) => {
+    // VS-579: out-of-band compaction is a short-lived helper, not a worker turn, so it stays in the
+    // daemon's control group — the per-worker memory scope is applied by `spawnLines` on turns.
     const child = spawn(launch.cmd, ['serve', '--hostname', '127.0.0.1', '--port', '0'], { cwd: input.cwd, env: launch.env, stdio: ['ignore', 'pipe', 'pipe'] });
     let settled = false;
     let buf = '';

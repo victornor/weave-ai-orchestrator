@@ -105,6 +105,7 @@ export const adapter: RuntimeAdapter = {
       stdin: built.stdin,
       stdinMode: 'close',
       timeoutMs: input.limits.timeoutMs,
+      containment: input.containment,
       onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
       onLine: (stream, line) => {
         sawOutput = true;

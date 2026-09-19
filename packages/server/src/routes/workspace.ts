@@ -2,7 +2,7 @@ import { resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { nowIso } from '@weave-ai/db';
-import { exportWorkspace } from '@weave-ai/core';
+import { effectiveWorkspaceWorkerMemory, exportWorkspace } from '@weave-ai/core';
 import { OcError, WorkspaceConfigSchema } from '@weave-ai/shared';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { body } from '../http.js';
@@ -16,7 +16,11 @@ export function workspaceRoutes(deps: AppDeps): Hono<AppEnv> {
     const ws = c.get('ws');
     return c.json({
       id: ws.id, name: ws.ctx.config.name, ticketPrefix: ws.ctx.config.ticketPrefix, root: ws.ctx.paths.root, rootPath: ws.ctx.paths.root,
-      status: statusOf(ws), config: ws.ctx.config, loopbackUrl: ws.ctx.loopbackUrl,
+      status: statusOf(ws), config: ws.ctx.config,
+      // VS-579: the worker memory limit every role inherits and where it came from (`role` is not
+      // possible here — that is per role), so Settings can show the effective value, not only the raw key.
+      workerMemory: effectiveWorkspaceWorkerMemory(ws.ctx.config),
+      loopbackUrl: ws.ctx.loopbackUrl,
       channels: [...Object.keys(ws.ctx.config.channels)],
       // VS-334: this workspace's own loaded plugins — workspace-configured and daemon-wide alike —
       // for the Settings management list and the web app's "Plugins" nav section / page route.

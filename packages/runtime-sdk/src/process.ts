@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { truncate, whichSync } from './fsutil.js';
+import { containCommand, containmentPrefix, scopeUnitName, stopScope, systemdScopeAvailable, type ContainmentRequest } from './containment.js';
 
 export interface SpawnOpts {
   cmd: string; args: string[]; cwd: string; env: Record<string, string>; stdin?: string | null; timeoutMs: number;
@@ -10,12 +11,34 @@ export interface SpawnOpts {
    * protocol requires a readable stdin to keep running. Ended on process close and on `cancel`.
    */
   stdinMode?: 'close' | 'open';
+  /**
+   * VS-579: when set and a systemd user manager is reachable, the CLI runs inside its own
+   * memory-limited transient scope instead of the daemon's control group. Ignored otherwise.
+   */
+  containment?: ContainmentRequest;
 }
 export interface SpawnOutcome { exitCode: number | null; signal: string | null; timedOut: boolean; stdout: string; stderr: string }
+export interface SpawnHandle {
+  done: Promise<SpawnOutcome>; cancel(mode: 'interrupt' | 'kill'): Promise<void>; write(line: string): boolean; endStdin(): void; child: ChildProcess;
+  /** The transient scope this turn ran in, or null when it ran uncontained. */
+  scopeUnit: string | null;
+}
 
-/** Spawn a CLI in its own process group, stream lines, kill the whole group on timeout/cancel. */
-export function spawnLines(opts: SpawnOpts): { done: Promise<SpawnOutcome>; cancel(mode: 'interrupt' | 'kill'): Promise<void>; write(line: string): boolean; endStdin(): void; child: ChildProcess } {
-  const child = spawn(whichSync(opts.cmd) ?? opts.cmd, opts.args, { cwd: opts.cwd, env: opts.env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+/**
+ * What to spawn for a turn: the command itself, or a `systemd-run` wrapper when containment is
+ * requested and a user manager is available. Pure, so the wiring is testable without spawning.
+ */
+export function resolveSpawnTarget(cmd: string, args: string[], containment: ContainmentRequest | undefined, available: boolean): { cmd: string; args: string[]; scopeUnit: string | null } {
+  if (!containment || !available) return { cmd, args, scopeUnit: null };
+  const wrapped = containCommand(cmd, args, containmentPrefix(containment));
+  return { cmd: wrapped.cmd, args: wrapped.args, scopeUnit: scopeUnitName(containment.runId) };
+}
+
+/** Spawn a CLI in its own process group — inside a memory-limited scope when asked and available — stream lines, kill the whole tree on timeout/cancel. */
+export function spawnLines(opts: SpawnOpts): SpawnHandle {
+  const target = resolveSpawnTarget(whichSync(opts.cmd) ?? opts.cmd, opts.args, opts.containment, systemdScopeAvailable());
+  const unit = target.scopeUnit;
+  const child = spawn(target.cmd, target.args, { cwd: opts.cwd, env: opts.env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
   if (child.pid && opts.onSpawn) opts.onSpawn(child.pid);
   let timedOut = false; let stdout = ''; let stderr = ''; let stdinEnded = false;
   const buf: Record<'stdout' | 'stderr', string> = { stdout: '', stderr: '' };
@@ -50,8 +73,15 @@ export function spawnLines(opts: SpawnOpts): { done: Promise<SpawnOutcome>; canc
     child.on('error', () => { clearTimeout(timer); resolve({ exitCode: -1, signal: null, timedOut, stdout, stderr: stderr + '\nspawn error' }); });
   });
   return {
-    done, child, write, endStdin,
-    cancel: async (mode) => { endStdin(); killGroup(mode === 'kill' ? 'SIGKILL' : 'SIGINT'); if (mode === 'interrupt') setTimeout(() => killGroup('SIGKILL'), 30000).unref(); },
+    done, child, write, endStdin, scopeUnit: unit,
+    cancel: async (mode) => {
+      endStdin();
+      // A contained tree is ended by stopping its scope, which reaches processes whatever their
+      // group; the group signal remains as the fallback for uncontained spawns and a scope queue.
+      if (unit) stopScope(unit);
+      killGroup(mode === 'kill' ? 'SIGKILL' : 'SIGINT');
+      if (mode === 'interrupt') setTimeout(() => killGroup('SIGKILL'), 30000).unref();
+    },
   };
 }
 

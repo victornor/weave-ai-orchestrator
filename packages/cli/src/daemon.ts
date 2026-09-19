@@ -158,6 +158,9 @@ export function renderServiceUnit(bin: string): string {
     // honoured by systemd and is not restarted.
     'Restart=always',
     'RestartSec=3',
+    // VS-579: worker turns run in their own scopes, so this unit holds only the daemon. `avoid`
+    // keeps systemd-oomd from preferring the daemon over a worker scope when both are candidates.
+    'ManagedOOMPreference=avoid',
     'KillSignal=SIGTERM',
     // VS-262: must comfortably exceed shutdown()'s own bounded drain-then-cancel sequence — see
     // stopDaemon's default and this ticket's design.md, Decision 2.
@@ -263,6 +266,8 @@ export function installService(): { path: string; unit: string; commands: string
 
 /** The one `Restart=` value the unit must carry so an unexpected exit — clean or not — comes back. */
 export const RESTART_ALWAYS = 'Restart=always';
+/** VS-579: the daemon unit must tell systemd-oomd to prefer a worker scope over the daemon. */
+export const MANAGED_OOM_AVOID = 'ManagedOOMPreference=avoid';
 
 /**
  * VS-376: pure — force an existing `Restart=` line to `always`. A unit with no `Restart=` line at
@@ -271,6 +276,19 @@ export const RESTART_ALWAYS = 'Restart=always';
  */
 export function withRestartAlways(content: string): string {
   return content.replace(/^Restart=(.*)$/m, (line, value: string) => (value.trim() === 'always' ? line : RESTART_ALWAYS));
+}
+
+/**
+ * VS-579: add `ManagedOOMPreference=avoid` under `[Service]` when it is absent or set to something
+ * else, so a host that installed its unit before this change is corrected too. Pure.
+ */
+export function withManagedOOMPreference(content: string): string {
+  if (/^ManagedOOMPreference=/m.test(content)) {
+    return content.replace(/^ManagedOOMPreference=(.*)$/m, (line, value: string) => (value.trim() === 'avoid' ? line : MANAGED_OOM_AVOID));
+  }
+  const service = /^\[Service\]\s*$/m;
+  if (!service.test(content)) return content;
+  return content.replace(/^\[Service\]\s*$/m, `[Service]\n${MANAGED_OOM_AVOID}`);
 }
 
 export interface UnitRestartRewrite { unit: string; path: string; changed: boolean }
@@ -285,7 +303,9 @@ export function ensureUnitRestartAlways(run: RunCommand = realRun, unit: Install
   if (!unit) return null;
   let content: string;
   try { content = readFileSync(unit.path, 'utf8'); } catch { return null; }
-  const next = withRestartAlways(content);
+  // VS-579: correct both guards — the restart policy and the oomd preference — in one rewrite, so
+  // an upgrade fixes a host installed before either existed.
+  const next = withManagedOOMPreference(withRestartAlways(content));
   if (next === content) return { unit: unit.name, path: unit.path, changed: false };
   writeFileSync(unit.path, next);
   run('systemctl', ['--user', 'daemon-reload']);

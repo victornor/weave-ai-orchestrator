@@ -8,6 +8,7 @@ import type { CapabilityDetail, CapabilitySummary, SpecChangeSummary } from '../
 
 const state = vi.hoisted(() => ({
   search: {} as Record<string, string | undefined>,
+  projects: [{ id: 'p1', slug: 'web', name: 'web', openspecEnabled: true }] as Array<{ id: string; slug: string; name: string; openspecEnabled: boolean }>,
   capabilities: [] as CapabilitySummary[],
   changes: [] as SpecChangeSummary[],
   capability: null as CapabilityDetail | null,
@@ -21,7 +22,7 @@ vi.mock('../app/link', () => ({
   useGo: () => vi.fn(),
 }));
 vi.mock('../api/hooks', () => ({
-  useProjects: () => ({ data: [{ id: 'p1', slug: 'web', name: 'web' }] }),
+  useProjects: () => ({ data: state.projects }),
   useCapabilities: () => ({ data: state.capabilities, isLoading: false, isError: false }),
   useSpecChanges: () => ({ data: state.changes, isLoading: false, isError: false }),
   useCapability: () => ({ data: state.capability, isLoading: false, isError: state.capability === null }),
@@ -32,6 +33,7 @@ const { KnowledgeSpecsPage } = await import('../v2/knowledge/KnowledgeSpecs');
 
 beforeEach(() => {
   state.search = { project: 'p1' };
+  state.projects = [{ id: 'p1', slug: 'web', name: 'web', openspecEnabled: true }];
   state.capabilities = [];
   state.changes = [];
   state.capability = null;
@@ -73,6 +75,14 @@ describe('the V2 Specs tab', () => {
     expect(screen.getByText('The system SHALL accept an email and password.')).toBeInTheDocument();
     expect(screen.getByText('Change history')).toBeInTheDocument();
     expect(screen.getByText('acme-1-login')).toBeInTheDocument();
+  });
+
+  it('says the mode is off for a project with OpenSpec disabled (VS-578)', () => {
+    state.projects = [{ id: 'p1', slug: 'web', name: 'web', openspecEnabled: false }];
+    state.capabilities = [];
+    render(<KnowledgeSpecsPage />);
+    expect(screen.getByText(/OpenSpec is off for this project/)).toBeInTheDocument();
+    expect(screen.queryByText('No capabilities yet.')).not.toBeInTheDocument();
   });
 
   it('renders its view again after a remount', () => {

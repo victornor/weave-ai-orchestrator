@@ -196,6 +196,31 @@ describe('weave project set-landing-branch (VS-122)', () => {
   });
 });
 
+describe('weave project set-openspec (VS-578)', () => {
+  it('turns the mode off and reports it', async () => {
+    routes['PATCH /api/w/ws1/projects/api'] = () => ({ body: project({ status: 'ready', openspecEnabled: false }) });
+
+    const { out } = await cli('project', 'set-openspec', 'api', 'off');
+    const patched = calls.find((c) => c.method === 'PATCH' && c.path === '/api/w/ws1/projects/api');
+    expect(patched?.body).toEqual({ openspec: { enabled: false } });
+    expect(out).toContain('updated api: openspec = disabled');
+  });
+
+  it('turns the mode on and reports it', async () => {
+    routes['PATCH /api/w/ws1/projects/api'] = () => ({ body: project({ status: 'ready', openspecEnabled: true }) });
+
+    const { out } = await cli('project', 'set-openspec', 'api', 'on');
+    expect(out).toContain('updated api: openspec = enabled');
+  });
+
+  it('rejects a state that is not on or off, without sending a request', async () => {
+    const { err } = await cli('project', 'set-openspec', 'api', 'maybe');
+    expect(err).toContain('state must be on or off');
+    expect(calls.some((c) => c.method === 'PATCH')).toBe(false);
+    expect(process.exitCode).toBeGreaterThan(0);
+  });
+});
+
 describe('weave project retry', () => {
   it('posts the retry and follows the new job', async () => {
     routes['POST /api/w/ws1/projects/api/retry'] = () => ({ status: 202, body: { project: project(), jobId: 'j1' } });

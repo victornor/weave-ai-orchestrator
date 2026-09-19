@@ -399,9 +399,41 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     { key: NAMED_CARD_OPTION_KEYS.plan_approval.reject, label: 'Reject', description: 'Cancel the ticket.' },
   ];
 
+  /**
+   * VS-578: the ticket document a worker records its short plan in when the project's OpenSpec mode
+   * is off. A fast-path `change` ticket has no OpenSpec change, so `plan` stays daemon-owned and the
+   * worker writes this key; the daemon publishes it as the `plan` document on `proposed`.
+   */
+  const FAST_PATH_PLAN_KEY = 'approach';
+
+  /** The latest revision of a ticket document's non-empty body, or null. */
+  function latestDocumentBody(ticketId: string, key: string): string | null {
+    const row = db.get<{ body: string }>(
+      `SELECT r.body FROM ticket_documents d JOIN ticket_document_revisions r ON r.document_id = d.id AND r.revision = d.current_revision
+        WHERE d.ticket_id = ? AND d.key = ?`,
+      [ticketId, key],
+    );
+    const body = row?.body?.trim();
+    return body ? body : null;
+  }
+
+  /**
+   * VS-578: the plan for a `change` ticket on an OpenSpec-off project, rendered from the worker's
+   * short plan document. Throws the validation the worker has to fix when nothing is recorded, so
+   * the fast path still keeps a reviewed plan without four OpenSpec artifacts.
+   */
+  function fastPathPlan(t: Ticket): string {
+    const body = latestDocumentBody(t.id, FAST_PATH_PLAN_KEY);
+    if (!body) {
+      throw new OcError('validation', `this project has OpenSpec off, so ${t.identifier} needs a short plan before \`proposed\`: write the ticket document \`${FAST_PATH_PLAN_KEY}\` (a few sentences of approach)`, { ticketId: t.id, key: FAST_PATH_PLAN_KEY });
+    }
+    return `# Plan for ${t.identifier}\n\n${body}\n`;
+  }
+
   /** The context line every plan-approval card carries; a caller may append its own suffix. */
   function planApprovalContext(t: Ticket): string {
-    return `OpenSpec change \`${t.openspecChangeName ?? ''}\` is planning-complete and validates. Review the plan document.`;
+    if (!t.openspecChangeName) return 'A short plan is recorded and ready for review. Review the plan document.';
+    return `OpenSpec change \`${t.openspecChangeName}\` is planning-complete and validates. Review the plan document.`;
   }
 
   /**
@@ -710,11 +742,18 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     }
     let planBody: string | null = null;
     if (to === 'proposed' && t.kind === 'change') {
-      const res = await deps().openspec.validateForProposed(t.id);
-      if (!res.ok) {
-        throw new OcError('openspec_validation_failed', 'OpenSpec planning is not complete or validation failed', { issues: res.issues });
+      // VS-578: the ticket's own binding decides its path, never the project's live mode, so a flip
+      // cannot strand a ticket in flight. A bound ticket validates OpenSpec as before; an unbound one
+      // is on the fast path and must have recorded its short plan.
+      if (t.openspecChangeName) {
+        const res = await deps().openspec.validateForProposed(t.id);
+        if (!res.ok) {
+          throw new OcError('openspec_validation_failed', 'OpenSpec planning is not complete or validation failed', { issues: res.issues });
+        }
+        planBody = res.plan;
+      } else {
+        planBody = fastPathPlan(t);
       }
-      planBody = res.plan;
     }
 
     const now = nowIso();
@@ -1970,27 +2009,39 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
      * on. Called at the end of a worker's turn: re-render the plan from the worker's worktree, and when
      * it differs from the stored document, publish it and raise a fresh approval exactly as the
      * `proposing → proposed` transition does — the write supersedes the open card. Invalid artifacts
-     * publish nothing and surface their issues; an unchanged plan is a no-op. Never throws: a
-     * republish failure must not fail the finished run.
+     * publish nothing and surface their issues; an unchanged plan is a no-op. VS-578 extends this to
+     * an unbound (`change`, OpenSpec-off) ticket, whose plan is its short `approach` document. Never
+     * throws: a republish failure must not fail the finished run.
      */
     async republishRevisedPlan(actor: Actor, ticketId: string) {
       const t = get(ticketId);
-      if (t.status !== 'proposed' || t.kind !== 'change' || !t.openspecChangeName) {
+      if (t.status !== 'proposed' || t.kind !== 'change') {
         return { republished: false, reason: 'not proposed' } as const;
       }
       try {
-        const res = await deps().openspec.validateForProposed(t.id);
-        if (!res.ok) {
-          systemComment(t.id, `the plan was revised but does not validate, so it was not republished:\n${res.issues.map((i) => `- ${i.message}`).join('\n')}`, actor);
-          wake(conductorId(), 'system', `${t.identifier}: a revised plan failed validation and was not republished`, { ticketId: t.id });
-          return { republished: false, reason: 'validation failed' } as const;
+        // VS-578: an unbound ticket is on the fast path — its plan is its short `approach` document,
+        // and a revision republishes exactly as the OpenSpec plan does. No approach document yet is
+        // nothing to republish, not a validation failure.
+        let plan: string;
+        if (t.openspecChangeName) {
+          const res = await deps().openspec.validateForProposed(t.id);
+          if (!res.ok) {
+            systemComment(t.id, `the plan was revised but does not validate, so it was not republished:\n${res.issues.map((i) => `- ${i.message}`).join('\n')}`, actor);
+            wake(conductorId(), 'system', `${t.identifier}: a revised plan failed validation and was not republished`, { ticketId: t.id });
+            return { republished: false, reason: 'validation failed' } as const;
+          }
+          plan = res.plan;
+        } else {
+          const body = latestDocumentBody(t.id, FAST_PATH_PLAN_KEY);
+          if (!body) return { republished: false, reason: 'no plan' } as const;
+          plan = `# Plan for ${t.identifier}\n\n${body}\n`;
         }
         const current = db.get<{ body: string }>(
           `SELECT r.body FROM ticket_documents d JOIN ticket_document_revisions r ON r.document_id = d.id AND r.revision = d.current_revision
             WHERE d.ticket_id = ? AND d.key = 'plan'`,
           [t.id],
         );
-        if (current?.body === res.plan) return { republished: false, reason: 'unchanged' } as const;
+        if (current?.body === plan) return { republished: false, reason: 'unchanged' } as const;
         // `validateForProposed` shells out and takes seconds; the human can approve the still-open card
         // during that await, moving the ticket to `approved` (or beyond). Re-read the status *inside*
         // the write transaction, so a republish can never land a new plan revision or a fresh card on a
@@ -1998,7 +2049,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         const written = tx(db, () => {
           const still = db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [t.id])?.status;
           if (still !== 'proposed') return null;
-          const w = putDocument(actor, t.id, 'plan', res.plan, { system: true });
+          const w = putDocument(actor, t.id, 'plan', plan, { system: true });
           recordActivity(db, ws, actor, 'ticket.plan_republished', 'ticket', t.id, { revision: w.revision }, t.id);
           return w;
         });

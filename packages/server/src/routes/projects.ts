@@ -59,6 +59,8 @@ const AddSchema = z.object({
   // VS-358's creation checkbox sends this; without it here the strict parse rejects the body and the
   // checkbox silently does nothing (fixed VS-359, which rides the same checkbox for its public warning).
   knowledgeRepo: ProjectConfigSchema.shape.knowledgeRepo.optional(),
+  // VS-578: the add form's OpenSpec choice; absent means the schema default (on).
+  openspec: ProjectConfigSchema.shape.openspec.optional(),
 // Strict: a project carries no runtime or model since VS-77, and a body that still sends one is a
 // caller that would otherwise believe it had chosen something. Ticket-level autoMerge is not a
 // project field — Auto-merge default is policies.autoMergeDefault (VS-153).

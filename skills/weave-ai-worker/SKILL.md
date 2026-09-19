@@ -22,9 +22,9 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 
 | Status | What this turn is for | Ends with |
 |---|---|---|
-| `todo` (`change`) | Create the named OpenSpec change if absent; run the propose workflow. No code. | `weave_ticket_transition(id, "proposed")` |
+| `todo` (`change`) | OpenSpec on: create the named change if absent and run the propose workflow — no code. OpenSpec off: record a short plan (the `approach` document) — no proposal, design, spec deltas or tasks file. | `weave_ticket_transition(id, "proposed")` |
 | `proposing` | Fix the validation issues or the revision feedback on the ticket. | request `proposed` again |
-| `approved` | Run the apply workflow: implement pending tasks, tick them, commit. | `in_review` when all tasks are done — straight from `approved` if one turn, or via `in_progress` if it spans turns |
+| `approved` | OpenSpec on: run the apply workflow, implement and tick pending tasks, commit. OpenSpec off: implement and test the approved plan, commit. | `in_review` when the work is done — straight from `approved` if one turn, or via `in_progress` if it spans turns |
 | `in_progress` | Keep applying. When every task is done, deliver. | `weave_ticket_transition(id, "in_review")` with a work product |
 | `in_review` | Nothing, normally — you are waiting on the human. Answer comments. | `weave_report({state:"paused"})` or an idle report |
 | `merging` | The merge procedure (`references/delivery.md`). | `weave_ticket_merge_done` |
@@ -34,7 +34,7 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 | `todo` (`operational`) | Write an `action` document (commands, host/service, expected outcome) and wait for human `action_approval` — YOLO does not grant it. After approval, execute, write a `report` of what actually happened, update the knowledge base. A later `approve` of an `action` revision that already has a `report` is not a second authorisation to run. Repo docs are a follow-up `change`. Never finish with unlanded commits. | `done` |
 | `blocked` | A resolving wake (an answer, a message, a human comment, a resume) that starts your turn makes the daemon return the ticket to the status it was blocked from — do not transition it back yourself. Re-block with a routable path only if you are still stuck; otherwise continue. | the status the work resumes in |
 
-For `change` tickets also load `weave-ai-openspec` — it holds the propose/apply mapping and what never to do.
+**OpenSpec is a per-project mode.** Read `weave_ticket_get(id).openspecChangeName`: a `change` ticket bound to a change (non-null) runs the OpenSpec flow — also load `weave-ai-openspec`. A `change` ticket with no change name is on a project whose OpenSpec mode is off: it takes the fast path — record a short plan as the ticket document `approach` (`weave_ticket_document_put(id, "approach", body)`), request `proposed`, then implement and open the PR with no proposal, design, spec deltas, tasks file, validation or archive. A project's mode can be read from its config (`openspec.enabled`) or with `weave_project_list`.
 
 While a `change` ticket is `proposed`, you can be woken to answer weaver concerns or steering. Revise the planning artifacts; you do not transition the ticket. The daemon republishes the changed plan at the end of your turn, superseding the held approval with a fresh one. Never move the ticket back to `proposing` by hand — requesting `proposed` applies only when the ticket is already in `proposing` (the `revise` path).
 

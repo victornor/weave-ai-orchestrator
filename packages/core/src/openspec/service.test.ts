@@ -69,7 +69,7 @@ describe('OpenSpecService.statusFor', () => {
     const svc = createOpenSpecService(harness.ctx, harness.deps);
     const status = await svc.statusFor(ticketId);
     expect(status).toEqual({
-      changeName: CHANGE, planningComplete: true,
+      enabled: true, changeName: CHANGE, planningComplete: true,
       artifacts: [{ id: 'proposal', status: 'done' }, { id: 'tasks', status: 'done' }],
       tasks: { total: 4, complete: 2 }, applyState: 'ready', validation: { ok: true, issues: [] }, archived: true,
     });
@@ -110,7 +110,7 @@ describe('OpenSpecService.statusFor', () => {
     mkdirSync(join(clone, 'openspec', 'changes', CHANGE), { recursive: true });
     mkdirSync(join(clone, 'openspec', 'changes', 'archive', `2026-09-01-${CHANGE}`), { recursive: true });
     // The same status `statusFor` computes, serialised with every object's keys in a different order.
-    const stored = `{"archived":true,"validation":{"issues":[],"ok":true},"applyState":"ready","tasks":{"complete":2,"total":4},"artifacts":[{"status":"done","id":"proposal"},{"status":"done","id":"tasks"}],"planningComplete":true,"changeName":${JSON.stringify(CHANGE)}}`;
+    const stored = `{"enabled":true,"archived":true,"validation":{"issues":[],"ok":true},"applyState":"ready","tasks":{"complete":2,"total":4},"artifacts":[{"status":"done","id":"proposal"},{"status":"done","id":"tasks"}],"planningComplete":true,"changeName":${JSON.stringify(CHANGE)}}`;
     harness.db.run('UPDATE tickets SET openspec_state_json = ? WHERE id = ?', [stored, ticketId]);
     const updates = vi.spyOn(harness.ctx.db, 'update');
 
@@ -142,11 +142,11 @@ describe('OpenSpecService.statusFor', () => {
     const zero = { planningComplete: false, artifacts: [], tasks: null, applyState: null, validation: null, archived: false };
 
     const a = setup(READY_CASES, { changeName: null });
-    expect(await createOpenSpecService(a.harness.ctx, a.harness.deps).statusFor(a.ticketId)).toEqual({ changeName: '', ...zero });
+    expect(await createOpenSpecService(a.harness.ctx, a.harness.deps).statusFor(a.ticketId)).toEqual({ enabled: false, changeName: '', ...zero });
     a.harness.cleanup(); h = null;
 
     const b = setup(READY_CASES);   // no openspec/ directory in the clone
-    expect(await createOpenSpecService(b.harness.ctx, b.harness.deps).statusFor(b.ticketId)).toEqual({ changeName: CHANGE, ...zero });
+    expect(await createOpenSpecService(b.harness.ctx, b.harness.deps).statusFor(b.ticketId)).toEqual({ enabled: true, changeName: CHANGE, ...zero });
     expect(b.bin.calls()).toEqual([]);
   });
 

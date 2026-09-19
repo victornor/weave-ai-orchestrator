@@ -671,7 +671,7 @@ export interface SpecsService {
   graph(projectId: string): { nodes: Array<{ id: string; kind: 'capability' | 'change' | 'ticket'; label: string; status?: string }>; edges: Array<{ from: string; to: string; kind: 'touches' | 'belongs_to' }> };
   search(query: string, projectId?: string | null): Array<{ kind: string; projectId: string; ref: string; title: string; snippet: string }>;
 }
-export interface OpenSpecStatus { changeName: string; planningComplete: boolean; artifacts: Array<{ id: string; status: string }>; tasks: { total: number; complete: number } | null; applyState: 'blocked' | 'ready' | 'all_done' | null; validation: { ok: boolean; issues: Array<{ level: string; message: string; path?: string }> } | null; archived: boolean }
+export interface OpenSpecStatus { enabled: boolean; changeName: string; planningComplete: boolean; artifacts: Array<{ id: string; status: string }>; tasks: { total: number; complete: number } | null; applyState: 'blocked' | 'ready' | 'all_done' | null; validation: { ok: boolean; issues: Array<{ level: string; message: string; path?: string }> } | null; archived: boolean }
 export interface OpenSpecService {
   statusFor(ticketId: string): Promise<OpenSpecStatus>;
   validateForProposed(ticketId: string): Promise<{ ok: true; plan: string } | { ok: false; issues: Array<{ level: string; message: string; path?: string }> }>;

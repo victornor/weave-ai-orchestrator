@@ -42,8 +42,13 @@ export function ticketWorktree(db: Db, workspaceId: string, ticketId: string): s
   return p && existsSync(p) ? p : null;
 }
 
-export function zeroStatus(changeName: string): OpenSpecStatus {
-  return { changeName, planningComplete: false, artifacts: [], tasks: null, applyState: null, validation: null, archived: false };
+/**
+ * VS-578: `enabled` is false only when the ticket is not on the OpenSpec path at all (no bound
+ * change) — a bound ticket whose `openspec/` directory is missing is still enabled and gets the
+ * zeroed-but-enabled status, so callers can tell "OpenSpec is off here" from "planning not started".
+ */
+export function zeroStatus(changeName: string, enabled = false): OpenSpecStatus {
+  return { enabled, changeName, planningComplete: false, artifacts: [], tasks: null, applyState: null, validation: null, archived: false };
 }
 
 /**
@@ -116,10 +121,12 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
 
   return {
     async statusFor(ticketId) {
+      const t0 = deps().tickets.get(ticketId);
       const r = resolve(ticketId);
       if (!r) {
-        const t = deps().tickets.get(ticketId);
-        return zeroStatus(t.openspecChangeName ?? '');
+        // VS-578: a ticket with no bound change is off the OpenSpec path (an OpenSpec-off project,
+        // or a kind that never binds); a bound ticket whose directory is missing is still enabled.
+        return zeroStatus(t0.openspecChangeName ?? '', t0.openspecChangeName != null);
       }
       const { ticket, project, changeName, cwd } = r;
       const o = { cwd, root: cwd };
@@ -131,6 +138,7 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
       ]);
       const entry = counts.find((c) => c.name === changeName);
       const status = {
+        enabled: true,
         changeName,
         planningComplete: change?.isPlanningComplete === true,
         artifacts: (change?.artifacts ?? []).map((a) => ({ id: a.id, status: a.status })),

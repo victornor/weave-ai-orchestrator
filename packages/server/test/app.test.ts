@@ -341,6 +341,21 @@ describe('routes', () => {
     expect(seen!.knowledgeRepo).toEqual({ enabled: true });
   });
 
+  it('accepts the OpenSpec choice when adding a project (VS-578)', async () => {
+    const { h, fetch } = app();
+    let seen: { openspec?: { enabled: boolean } } | null = null;
+    h.impls.projects!['startAdd'] = (_actor: unknown, cfg: { openspec?: { enabled: boolean } }) => {
+      seen = cfg;
+      return { project: { id: 'p_new', slug: 'new' }, jobId: 'job1' };
+    };
+    const res = await fetch('/api/w/ws1/projects', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }),
+      body: JSON.stringify({ url: 'git@github.com:acme/new.git', openspec: { enabled: false } }),
+    });
+    expect(res.status).toBe(202);
+    expect(seen!.openspec).toEqual({ enabled: false });
+  });
+
   it("carries a waiting ticket's own merge queue position on its detail payload", async () => {
     const { h, fetch } = app();
     h.tickets.set('tk_1', ticket({ status: 'merging', mergeQueuedAt: '2026-09-01T11:00:00.000Z' }));
@@ -411,6 +426,21 @@ describe('routes', () => {
 
     const res = await fetch('/api/w/ws1/tickets/tk_1', { headers: authed() });
     await expect(res.json()).resolves.toMatchObject({ worker: null });
+  });
+
+  it('reports no openspecState for a ticket whose project has OpenSpec off (VS-578)', async () => {
+    const { h, fetch } = app();
+    h.impls.openspec!['statusFor'] = async () => ({ enabled: false, changeName: '', planningComplete: false, artifacts: [], tasks: null, applyState: null, validation: null, archived: false });
+    const res = await fetch('/api/w/ws1/tickets/tk_1', { headers: authed() });
+    await expect(res.json()).resolves.toMatchObject({ openspecState: null });
+  });
+
+  it('still reports openspecState for a ticket on the OpenSpec path (VS-578)', async () => {
+    const { h, fetch } = app();
+    const status = { enabled: true, changeName: 'acme-42-dark-mode', planningComplete: true, artifacts: [], tasks: null, applyState: null, validation: null, archived: false };
+    h.impls.openspec!['statusFor'] = async () => status;
+    const res = await fetch('/api/w/ws1/tickets/tk_1', { headers: authed() });
+    await expect(res.json()).resolves.toMatchObject({ openspecState: status });
   });
 
   it('serves the briefing snapshot', async () => {

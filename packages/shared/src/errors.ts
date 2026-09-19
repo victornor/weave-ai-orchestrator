@@ -1,7 +1,7 @@
 export const ERROR_CODES = [
   'not_found', 'conflict', 'forbidden', 'unauthorized', 'validation', 'invalid_disposition', 'missing_action_path', 'not_checked_out',
   'wrong_status', 'budget_exceeded', 'duplicate_entry', 'entry_too_long', 'runtime_unreachable', 'model_unconfigured', 'worktree_dirty', 'worktree_not_landed',
-  'openspec_validation_failed', 'openspec_not_found', 'openspec_archive_blocked', 'merge_not_approved', 'merge_unverified', 'merge_checks_pending', 'role_full', 'auth_bad_credentials',
+  'openspec_validation_failed', 'openspec_not_found', 'openspec_archive_blocked', 'openspec_disabled', 'merge_not_approved', 'merge_unverified', 'merge_checks_pending', 'role_full', 'auth_bad_credentials',
   'auth_locked', 'auth_session_expired', 'auth_totp_required', 'auth_totp_invalid', 'net_daemon_unreachable', 'internal',
   'ambiguous_install_path', 'revision_pending', 'unavailable',
 ] as const;
@@ -16,7 +16,7 @@ export class OcError extends Error {
   static status(code: ErrorCode): number {
     switch (code) {
       case 'not_found': case 'openspec_not_found': return 404;
-      case 'conflict': case 'wrong_status': case 'duplicate_entry': case 'revision_pending': case 'merge_checks_pending': return 409;
+      case 'conflict': case 'wrong_status': case 'duplicate_entry': case 'revision_pending': case 'merge_checks_pending': case 'openspec_disabled': return 409;
       case 'forbidden': case 'merge_not_approved': return 403;
       case 'unauthorized': case 'auth_bad_credentials': case 'auth_session_expired': case 'auth_totp_required': case 'auth_totp_invalid': return 401;
       case 'auth_locked': return 429;

@@ -38,6 +38,7 @@ Call `weave_worker_models` first: when the workspace has a configured worker opt
 
 - **title** — imperative, ≤ 70 characters, no ticket id, no project name. "Add dark mode to the dashboard", not "Dark mode".
 - **kind** — `change` when code changes are implied (the default for real work); `task` for a chore with no spec consequence; `scout` when the request is diagnostic or the answer would change what to build; `question` when someone must answer but nothing changes; `operational` when the work changes a running system (deploy, upgrade, restart) and has no diff to review — the worker gates with `action_approval` before acting.
+- **OpenSpec is a per-project mode** (default on). A `change` ticket on a project with it off skips the proposal, spec deltas, tasks and archive and instead records one short plan before implementation, so do not expect OpenSpec artifacts or a `weave_openspec_status` plan for it. Read a project's mode from its config (`openspec.enabled`) or `weave_project_list`.
 - **priority** — `critical` (production is broken or someone is blocked), `high` (this week), `medium` (default), `low` (whenever).
 - **summary** — one sentence, ≤ 200 characters, why the ticket exists. Shown on the plan-approval card so the human can decide without opening it. Always set it when you file a ticket; never derive it from the description later.
 - **description** — always these five headings:

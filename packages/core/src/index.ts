@@ -12,6 +12,7 @@ export { createRolesService, readRoleSpec } from './roles/index.js';
 export { nextAfter, parseSchedule } from './routines/schedule.js';
 export { createChangelogService } from './changelog/index.js';
 export { createKnowledgeUsageService } from './knowledge/index.js';
+export { createSpecsService } from './specs/index.js';
 export { createPullRequestsService, PR_CACHE_TTL_MS, PR_LIST_LIMIT, PR_WINDOW_DAYS } from './pull-requests/index.js';
 export { createThreadsService, REPLY_EXCERPT_CHARS, resolveOutboundAttachments, readAttachmentBytes, type OutboundAttachmentInput, type ResolvedOutboundAttachment } from './threads/index.js';
 export { createHistoryReader, HISTORY_GIT_SUBCOMMANDS } from './projects/history.js';

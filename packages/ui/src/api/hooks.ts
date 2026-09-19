@@ -751,7 +751,7 @@ export function useWorkspacePlugins(ids: readonly string[]): Record<string, T.Wo
   }, [ids, results]);
 }
 
-export function useAddProject(): UseMutationResult<Project, Error, { url: string; id?: string; runtime?: string; maxWorkers?: number; setupCommand?: string; policies?: { autoMergeDefault?: boolean }; knowledgeRepo?: { enabled: boolean } }> {
+export function useAddProject(): UseMutationResult<Project, Error, { url: string; id?: string; runtime?: string; maxWorkers?: number; setupCommand?: string; policies?: { autoMergeDefault?: boolean }; knowledgeRepo?: { enabled: boolean }; openspec?: { enabled: boolean } }> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({

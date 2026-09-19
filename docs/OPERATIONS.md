@@ -593,8 +593,33 @@ Everything keeps working — a missing binary is never fatal — but `change` ti
 
 Fix: `weave doctor --install` (or `npm i -g @fission-ai/openspec` by hand), confirm with `openspec --version`, then re-run
 `weave project fetch` (which reindexes) or `POST /api/w/<ws>/specs/<project>/reindex`. If the binary is
-somewhere unusual, point the daemon at it with `AC_OPENSPEC_BIN=/path/to/openspec` in the unit. To
-opt a project out entirely, set `openspec: { enabled: false }` on it.
+somewhere unusual, point the daemon at it with `AC_OPENSPEC_BIN=/path/to/openspec` in the unit.
+
+### OpenSpec is optional per project (VS-578)
+
+Every project has an OpenSpec mode, **on by default**. It is a project property, set from the
+project config key `openspec.enabled`, the Settings Projects section, or `weave project
+set-openspec <id> on|off`.
+
+- **On** (default, and the right choice for production and customer-facing projects): a `change`
+  ticket is bound to an OpenSpec change and runs propose → plan approval → apply → merge → archive.
+  Nothing about this flow changed.
+- **Off** (the fast path, for internal projects where the ceremony is overkill): a `change` ticket
+  has no proposal, design, spec deltas, tasks file, validation or archive step. It still has one
+  reviewed plan — the worker records a short plan as the ticket document `approach`, the daemon
+  publishes it as the plan document, and the plan approval is raised as usual — then implements,
+  tests and opens the pull request. Merge approval is unchanged.
+
+The ticket's own binding decides its path, so flipping the mode never breaks work in flight: a ticket
+already bound to a change keeps its OpenSpec flow, and a ticket created while the mode was off is
+never retroactively asked for spec deltas. Turning the mode on for an existing project whose repo has
+no `openspec/` runs the same best-effort `openspec init` the add pipeline uses; on a protected default
+branch that push is refused, so adopt OpenSpec through your own pull request instead.
+
+When the mode is off, `weave_openspec_status` reports `enabled: false`, `weave_spec_*` and
+`/specs/<project>` return `openspec_disabled`, the ticket page shows no OpenSpec panel, the Specs view
+says the mode is off, and the weaver is not warned about a missing `openspec` binary while no project
+needs it.
 
 ### Workers stall or pile up
 

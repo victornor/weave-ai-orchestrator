@@ -25,10 +25,18 @@ export function KnowledgeSpecsPage(): React.ReactElement {
   const activeProject = project || projectList[0]?.id || '';
   const [capability, setCapability] = useState<string | null>(null);
   const [change, setChange] = useState<string | null>(null);
+  // VS-578: an OpenSpec-off project has no capability or change index; say so rather than showing an
+  // empty "No capabilities yet", which reads as a project that simply has none.
+  const openspecOff = projectList.find((p) => p.id === activeProject)?.openspecEnabled === false;
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-4 p-4 md:p-5">
-      {change && activeProject ? (
+      {openspecOff ? (
+        <Empty
+          title="OpenSpec is off for this project."
+          detail="Its change tickets use a short plan instead of proposals and specs. Turn the mode on in project settings to browse specs."
+        />
+      ) : change && activeProject ? (
         <ChangePage project={activeProject} name={change} onBack={() => setChange(null)} />
       ) : capability && activeProject ? (
         <CapabilityPage project={activeProject} capability={capability} onBack={() => setCapability(null)} onOpenChange={setChange} />

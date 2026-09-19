@@ -369,6 +369,14 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       await upsertConfigBlock({ ...(nextName === '' ? { ...merged, name: undefined } : merged), knowledgeRepo: { enabled: knowledgeRepoEnabled } });
       recordActivity(ctx.db, ctx.workspaceId, actor, 'project.update', 'project', project.id, { patch: Object.keys(patch) });
       ctx.events.emit('project.updated', 'project', project.id, { slug: project.slug });
+      // VS-578: turning OpenSpec on for an existing ready project whose repo never adopted it needs the
+      // `openspec/` scaffold, or its change tickets would fail the proposed gate. Run the same
+      // best-effort bootstrap the add pipeline uses; it must not block the PATCH or fail the request.
+      if (merged.openspec.enabled && !Boolean(project.openspecEnabled) && project.status === 'ready' && existsSync(project.clonePath)) {
+        const fresh = get(project.id);
+        void bootstrapOpenSpec(fresh).catch((e: unknown) => log.warn({ err: String(e), project: fresh.slug }, 'OpenSpec bootstrap on enable failed'));
+        recordActivity(ctx.db, ctx.workspaceId, actor, 'project.openspec_enabled', 'project', project.id, { bootstrap: 'started' });
+      }
       return get(project.id);
     },
 

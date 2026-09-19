@@ -170,6 +170,21 @@ Example: weave project set-policy api deliveryMode=pr requireCi=false`)
         fields(Object.entries(policies).map(([k, v]) => [k, String(v)] as [string, string]));
       });
     }));
+
+  project
+    .command('set-openspec')
+    .argument('<id>', 'project id')
+    .argument('<state>', 'on or off')
+    .description("turn a project's OpenSpec mode on or off after it was added (VS-578)")
+    .action(async (id: string, state: string, _opts: unknown, command: Command) => run(async () => {
+      if (state !== 'on' && state !== 'off') throw new ApiError('validation', 'state must be on or off', 400);
+      const { client } = await session(command);
+      const updated = await client.patch<Record<string, unknown>>(client.w(`/projects/${encodeURIComponent(id)}`), { openspec: { enabled: state === 'on' } });
+      emit(updated, () => {
+        write(`${style.ok('updated')} ${id}: openspec = ${updated['openspecEnabled'] === true ? 'enabled' : 'disabled'}`);
+        write(style.dim('applies to tickets created from now on; tickets already bound to a change keep their OpenSpec flow'));
+      });
+    }));
 }
 
 /** `true`/`false` and plain integers are typed; everything else stays a string. */

@@ -771,7 +771,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_openspec_status', scope: 'all', input: z.object({ ticketId: ticketId }),
-    description: 'The daemon view of the OpenSpec change bound to a ticket: planning complete, artifacts, tasks, validation.',
+    description: 'The daemon view of the OpenSpec change bound to a ticket: planning complete, artifacts, tasks, validation. `enabled: false` means the ticket is not on the OpenSpec path (its project has OpenSpec off).',
     handler: (ctx, i) => svc(ctx).openspec.statusFor(readTicket(ctx, i.ticketId).id),
   },
   {
@@ -1077,9 +1077,13 @@ export const TOOLS: ToolDef[] = [
       id: z.string().min(1), url: z.string().min(1), name: z.string().optional(), defaultBranch: z.string().default('main'),
       landingBranch: z.string().optional(),
       runtime: z.string().optional(), maxWorkers: z.number().int().min(1).max(32).default(4), setupCommand: z.string().optional(),
+      openspecEnabled: z.boolean().optional(),
     }),
-    description: 'Add a project: clone, init OpenSpec, seed the project KB and open the scout ticket. Requires a human decision first.',
-    handler: (ctx, i) => svc(ctx).projects.add(ctx.actor, { ...i, warmPaths: [], openspec: { enabled: true }, policies: {} }),
+    description: 'Add a project: clone, seed the project KB and open the scout ticket. OpenSpec is adopted unless `openspecEnabled` is false. Requires a human decision first.',
+    handler: (ctx, i) => {
+      const { openspecEnabled, ...rest } = i;
+      return svc(ctx).projects.add(ctx.actor, { ...rest, warmPaths: [], openspec: { enabled: openspecEnabled ?? true }, policies: {} });
+    },
   },
   {
     name: 'weave_usage', scope: 'weaver', input: UsageSchema,

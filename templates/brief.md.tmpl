@@ -25,6 +25,9 @@ Kind `{{ticket.kind}}` · priority `{{ticket.priority}}`
 {{#if ticket.openspecChange}}
 **OpenSpec change:** `{{ticket.openspecChange}}` — this is the change name for this ticket. Create it in `work/` with `openspec new change "{{ticket.openspecChange}}" --goal "{{ticket.title}}" --json` if it does not exist yet. Do not ask, and never work in a differently named change. Load `weave-ai-openspec`.
 {{/if}}
+{{#if fastPath}}
+**OpenSpec is off for this project.** No proposal, design, spec delta or tasks file. Record a short plan — a few sentences of approach — as the ticket document `approach` with `weave_ticket_document_put(id, "approach", body)`, then request `proposed`. The Plan tab and the plan-approval card show it.
+{{/if}}
 
 ## Setup
 
@@ -86,7 +89,7 @@ For reference, this is what "done" means per kind and delivery mode:
 
 | Kind | Delivery | Done means |
 |---|---|---|
-| `change` | `pr` | Planning artifacts complete and validating → `proposed`. After approval, all tasks in `tasks.md` implemented and ticked, committed on `{{worktree.branch}}`, pushed, PR open and recorded with `weave_ticket_work_product` → `in_review`. After the human approves, the ticket becomes `merging`: sync with `{{project.landingBranch}}`, resolve conflicts yourself, re-run tests and lint, `gh pr merge --{{project.mergeMethod}}`, then `weave_ticket_merge_done`. |
+| `change` | `pr` | {{#if openspecPath}}Planning artifacts complete and validating{{/if}}{{#unless openspecPath}}A short plan recorded and ready for review{{/unless}} → `proposed`. After approval, {{#if openspecPath}}all tasks in `tasks.md` implemented and ticked{{/if}}{{#unless openspecPath}}the plan implemented and tested{{/unless}}, committed on `{{worktree.branch}}`, pushed, PR open and recorded with `weave_ticket_work_product` → `in_review`. After the human approves, the ticket becomes `merging`: sync with `{{project.landingBranch}}`, resolve conflicts yourself, re-run tests and lint, `gh pr merge --{{project.mergeMethod}}`, then `weave_ticket_merge_done`. |
 | `change` | `local-branch` | Same up to `in_review`, but nothing is pushed: record a `branch` work product instead of a PR. In `merging`, rebase onto `{{project.landingBranch}}`, re-run checks, then `weave_ticket_merge_done` — the daemon fast-forwards the primary clone. |
 | `task` | `pr` | Choose the ending that matches what you produced. With a diff to land: implemented and committed on `{{worktree.branch}}`, tests and lint green, PR open and recorded → `in_review`; merge as above once the ticket is `merging`. With nothing that needs landing: state the ending and why in the transition note → `done` — no PR, no merge approval (`done` is refused while commits are unlanded). |
 | `task` | `local-branch` | Choose the ending that matches what you produced. With a diff to land: implemented, committed, checks green, `branch` work product → `in_review`; merge on approval. With nothing that needs landing: state the ending and why in the transition note → `done` (`done` is refused while commits are unlanded). |
@@ -94,7 +97,7 @@ For reference, this is what "done" means per kind and delivery mode:
 | `operational` | any | Write the action (`weave_ticket_document_put(id, "action", body)`: commands, host/service, expected outcome) and wait for human `action_approval` — YOLO does not grant it. After approval, execute, write a `report` of what actually happened (including if it differed), update the knowledge base. A later `approve` of an `action` revision that already has a `report` is not a second authorisation to run. Repo docs are a follow-up `change`. Never push, never open a PR. `done` is refused while commits are unlanded. |
 | `question` | any | The answer is a ticket comment, with its evidence → `done`. |
 
-The daemon verifies the gates: a `proposed` transition is rejected unless the OpenSpec change validates, and `weave_ticket_merge_done` is rejected unless the ticket is in `merging`.
+The daemon verifies the gates: a `proposed` transition is rejected unless {{#if openspecPath}}the OpenSpec change validates{{/if}}{{#unless openspecPath}}a short plan is recorded{{/unless}}, and `weave_ticket_merge_done` is rejected unless the ticket is in `merging`.
 {{/unless}}
 
 {{#if brief.relaunchNote}}

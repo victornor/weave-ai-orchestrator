@@ -232,6 +232,23 @@ describe('spec index', () => {
     expect(b.harness.db.get<{ n: number }>('SELECT COUNT(*) n FROM spec_capabilities')!.n).toBe(0);
   });
 
+  it('treats a project whose OpenSpec mode is off as nothing to index or read (VS-578)', async () => {
+    const a = setup();
+    fixture(a.harness, a.clone);
+    const svc = createSpecsService(a.harness.ctx, a.harness.deps);
+    await svc.index(a.harness.projectId);
+    expect(a.harness.db.get<{ n: number }>('SELECT COUNT(*) n FROM spec_capabilities')!.n).toBeGreaterThan(0);
+
+    a.harness.db.update('projects', a.harness.projectId, { openspecEnabled: 0 });
+    await expect(svc.index(a.harness.projectId)).resolves.toEqual({ capabilities: 0, changes: 0 });
+    expect(a.harness.db.get<{ n: number }>('SELECT COUNT(*) n FROM spec_capabilities')!.n).toBe(0);
+    expect(a.harness.db.get<{ n: number }>('SELECT COUNT(*) n FROM spec_changes')!.n).toBe(0);
+
+    expect(() => svc.listCapabilities(a.harness.projectId)).toThrow(expect.objectContaining({ code: 'openspec_disabled' }));
+    expect(() => svc.getCapability(a.harness.projectId, 'auth')).toThrow(expect.objectContaining({ code: 'openspec_disabled' }));
+    expect(() => svc.search('login', a.harness.projectId)).toThrow(expect.objectContaining({ code: 'openspec_disabled' }));
+  });
+
   it('drops capabilities that disappeared from the project', async () => {
     const { harness, clone } = setup([
       { match: ['list', '--specs'], json: { specs: [] } },

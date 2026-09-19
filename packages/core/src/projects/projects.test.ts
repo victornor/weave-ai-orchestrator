@@ -96,6 +96,23 @@ describe('projects', () => {
     expect(updated.maxWorkers).toBe(8);
   });
 
+  it('flips the OpenSpec mode on an existing project, without bootstrapping when the clone is not ready (VS-578)', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, quick(src));
+    expect(Boolean(projects.get(project.id).openspecEnabled)).toBe(false);
+
+    // Turning it on for a project whose clone is not ready writes the flag; the best-effort
+    // `openspec init` bootstrap is reserved for a ready clone.
+    h.db.update('projects', project.id, { status: 'error' });
+    const on = await projects.update(HUMAN, project.id, { openspec: { enabled: true } });
+    expect(Boolean(on.openspecEnabled)).toBe(true);
+    expect(saved[saved.length - 1]!.projects[0]!.openspec).toEqual({ enabled: true });
+
+    const off = await projects.update(HUMAN, project.id, { openspec: { enabled: false } });
+    expect(Boolean(off.openspecEnabled)).toBe(false);
+    expect(saved[saved.length - 1]!.projects[0]!.openspec).toEqual({ enabled: false });
+  });
+
   it('leaves landingBranch unset when a project declares none', async () => {
     const src = await sourceRepo();
     const project = await projects.add(HUMAN, cfg(src));

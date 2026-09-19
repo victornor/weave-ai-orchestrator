@@ -345,6 +345,9 @@ describe('YOLO mode', () => {
       setPolicies({ yolo: true }, web);
 
       const mine = change({ projectId: web, assigneeRoleId: null });
+      // VS-578: `web` has OpenSpec on, so its `change` tickets are bound to a change; this fixture
+      // creates one without a role, so bind it here as the spawn-time binder would.
+      h.db.update('tickets', mine.id, { openspecChangeName: 'tst-1-mine' });
       expect((await propose(mine)).status).toBe('proposed');
       // VS-474: the review is what releases the daemon's grant.
       await markLooked(only(mine.id, 'plan_approval')!.id, 'the plan is sound');

@@ -33,7 +33,7 @@ references/: `tools.md` (every `weave_*` tool with input/output), `delivery.md`,
 
 ## weave-ai-openspec (workers)
 
-Trigger: a `change` (or `task` with tracker) ticket.
+Trigger: a `change` (or `task` with tracker) ticket that has a bound change — OpenSpec is a per-project mode, default on. A project with it off has no bound change and uses the worker skill's fast path instead (one short plan, then implement).
 
 - Mapping table: ticket status → OpenSpec workflow to invoke → what "done with this phase" means → transition to request.
 - The change name is given in the turn prompt and in `weave_ticket_get(...).openspecChangeName`; it exists; never ask whether to create or continue it; never pick a different change.

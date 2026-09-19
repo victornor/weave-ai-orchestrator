@@ -111,7 +111,12 @@ export function createBriefingService(ctx: WorkspaceContext): BriefingService {
 
     // VS-318: a required/recommended host tool the daemon cannot find is a warning the weaver reads,
     // read synchronously from the last detection snapshot rather than probing on every briefing.
-    out.push(...hostToolWarnings());
+    // VS-578: the `openspec` warning only matters while some non-archived project still has the mode on.
+    const openspecNeeded = (ctx.db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM projects WHERE workspace_id = ? AND status != 'archived' AND openspec_enabled = 1",
+      [ctx.workspaceId],
+    )?.n ?? 0) > 0;
+    out.push(...hostToolWarnings(openspecNeeded));
 
     return out;
   };

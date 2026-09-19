@@ -50,7 +50,10 @@ export function ticketRoutes(): Hono<AppEnv> {
   app.get('/:id', async (c) => {
     const s = c.get('ws').services;
     const ticket = s.tickets.get(c.req.param('id'));
-    const openspecState = await s.openspec.statusFor(ticket.id).catch(() => null);
+    // VS-578: a ticket not on the OpenSpec path (its project has OpenSpec off) reports no state, so
+    // the UI renders no OpenSpec panel; a host-tool failure still degrades to null as before.
+    const status = await s.openspec.statusFor(ticket.id).catch(() => null);
+    const openspecState = status && status.enabled ? status : null;
     const workerId = ticket.workerId ?? s.tickets.lastWorker(ticket.id)?.id ?? null;
     return c.json({
       ticket,

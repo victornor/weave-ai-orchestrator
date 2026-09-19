@@ -318,6 +318,7 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | `weave project list \| show <id> \| remove <id> \| fetch [id]` | projects; `fetch` fast-forwards the primary clone |
 | `weave project set-policy <id> <key>=<value>...` | per-project policies (`deliveryMode`, `mergeMethod`, `requireCi`, …) |
 | `weave project set-landing-branch <id> [branch] \| --clear` | set, change or clear the branch tickets' work is expected to reach, after the project was added |
+| `weave project set-openspec <id> on\|off` | turn a project's OpenSpec mode on or off after it was added; tickets already bound to a change keep their flow (VS-578) |
 | `weave runtime list \| detect \| models <id> \| login <id> [--print]` | coding CLIs and their auth |
 
 ### Talking and deciding

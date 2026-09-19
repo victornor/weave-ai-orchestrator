@@ -28,6 +28,7 @@ const state = vi.hoisted(() => ({
   worker: null as Agent | null,
   role: null as Role | null,
   plan: null as PlanOrigin | null,
+  openspecState: null as null | { changeName: string | null; state: string | null; tasks: Array<{ text: string; done: boolean }>; validated?: boolean },
   onEvent: undefined as ((e: unknown) => void) | undefined,
 }));
 
@@ -64,7 +65,7 @@ vi.mock('../api/hooks', () => ({
             children: [],
             documents: state.documents,
             workProducts: state.products,
-            openspecState: null,
+            openspecState: state.openspecState,
             mergeQueue: { position: null, concurrency: 1 },
             plan: state.plan,
             usage,
@@ -132,6 +133,7 @@ beforeEach(() => {
   state.answerError = null;
   state.go = vi.fn();
   state.workers = [];
+  state.openspecState = null;
   state.onEvent = undefined;
 });
 
@@ -186,6 +188,19 @@ describe('V2 ticket tabs', () => {
     renderScreen();
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('aria-selected', 'true');
     expect(document.querySelector('[data-v2-overview-page]')).toBeTruthy();
+  });
+
+  it('shows no OpenSpec task panel for a ticket with no OpenSpec state (VS-578)', () => {
+    renderScreen();
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    expect(screen.queryByText(/OpenSpec ·/)).not.toBeInTheDocument();
+  });
+
+  it('shows the OpenSpec task panel for a ticket on the OpenSpec path (VS-578)', () => {
+    state.openspecState = { changeName: 'acme-42-dark-mode', state: 'in-progress', tasks: [{ text: 'one thing', done: true }] };
+    renderScreen();
+    fireEvent.click(screen.getByRole('tab', { name: 'Overview' }));
+    expect(screen.getByText(/OpenSpec ·/)).toBeInTheDocument();
   });
 
   it('shows a pending spec archive with its link in Work (VS-389)', () => {

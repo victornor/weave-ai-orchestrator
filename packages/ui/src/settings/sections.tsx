@@ -497,6 +497,11 @@ function ActiveProjectRow({
     patch.mutate({ id: p.id, patch: { knowledgeRepo: { enabled: next === 'on' } } });
   };
 
+  /** VS-578: the per-project OpenSpec mode, a direct toggle; the daemon applies it to tickets created afterwards. */
+  const changeOpenspec = (next: 'on' | 'off'): void => {
+    patch.mutate({ id: p.id, patch: { openspec: { enabled: next === 'on' } } });
+  };
+
   return (
     <div className="px-3.5 py-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -687,6 +692,18 @@ function ActiveProjectRow({
               </select>
             </label>
           )}
+          <label className="flex items-center justify-between gap-2">
+            <span className="ac-label">OpenSpec</span>
+            <select
+              aria-label={`openspec for ${p.slug}`}
+              className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+              value={p.openspecEnabled ? 'on' : 'off'}
+              onChange={(e) => changeOpenspec(e.target.value === 'on' ? 'on' : 'off')}
+            >
+              <option value="on">on</option>
+              <option value="off">off</option>
+            </select>
+          </label>
           <Field label="Merge concurrency" hint="How many of this project's tickets may be in the active merge step at once.">
             <div className="flex items-center gap-2">
               <input
@@ -769,6 +786,8 @@ export function ProjectsSection(): React.ReactElement {
   const [setupCommand, setSetupCommand] = useState('');
   const [autoMergeDefault, setAutoMergeDefault] = useState(false);
   const [knowledgeRepoEnabled, setKnowledgeRepoEnabled] = useState(false);
+  // VS-578: OpenSpec defaults on for a new project.
+  const [openspecEnabled, setOpenspecEnabled] = useState(true);
   const [createPublicWarning, setCreatePublicWarning] = useState(false);
   const repoInfo = useRepoInfo();
   const config = useWorkspaceSummary().data?.config ?? {};
@@ -836,6 +855,15 @@ export function ProjectsSection(): React.ReactElement {
           />
           Commit this project&apos;s knowledge to its own repo, at <code className="ac-mono">.weave/knowledge/</code>.
         </label>
+        <label className="mt-1 flex items-center gap-2 text-micro text-text-2">
+          <input
+            type="checkbox"
+            aria-label="Use OpenSpec"
+            checked={openspecEnabled}
+            onChange={(e) => setOpenspecEnabled(e.target.checked)}
+          />
+          Use OpenSpec for this project&apos;s change tickets (proposal, specs, tasks, archive). Turn it off for internal projects that want the fast path.
+        </label>
         {createPublicWarning ? (
           <div className="mt-1 text-micro text-stalled" role="status" aria-label="public repository warning">
             This repository is public — its knowledge would be committed where anyone can read it.
@@ -846,7 +874,7 @@ export function ProjectsSection(): React.ReactElement {
           disabled={!url || !maxWorkersValid || add.isPending}
           onClick={() =>
             add.mutate(
-              { url, maxWorkers, ...(setupCommand ? { setupCommand } : {}), policies: { autoMergeDefault }, knowledgeRepo: { enabled: knowledgeRepoEnabled } },
+              { url, maxWorkers, ...(setupCommand ? { setupCommand } : {}), policies: { autoMergeDefault }, knowledgeRepo: { enabled: knowledgeRepoEnabled }, openspec: { enabled: openspecEnabled } },
               {
                 onSuccess: () => {
                   toast.push({ title: 'Cloning…', detail: url, status: 'working' });

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  assembleHostPath, detectHostTool, ensureHostToolPath, extractLoginPath, loginShellPath, resolveOnPath, shellFor,
+  assembleHostPath, detectHostTool, detectHostTools, ensureHostToolPath, extractLoginPath, hostToolWarnings, loginShellPath, resolveOnPath, shellFor,
 } from './host.js';
 
 const ORIGINAL_PATH = process.env['PATH'];
@@ -159,6 +159,20 @@ describe('ensureHostToolPath with a bare PATH', () => {
     expect((process.env['PATH'] ?? '').split(':')).toContain(b);
     await ensureHostToolPath([a], { shell: silent, inherited: BARE });
     expect((process.env['PATH'] ?? '').split(':')).not.toContain(b);
+  });
+});
+
+describe('hostToolWarnings (VS-578)', () => {
+  it('omits the openspec warning when no project needs OpenSpec', async () => {
+    // An empty PATH plus a bogus openspec override makes every tool unavailable in the snapshot.
+    const empty = scratch('ac-vs578-empty-');
+    process.env['PATH'] = empty;
+    process.env['AC_OPENSPEC_BIN'] = join(empty, 'openspec');
+    await detectHostTools();
+    expect(hostToolWarnings(true).some((w) => w.includes('openspec'))).toBe(true);
+    expect(hostToolWarnings(false).some((w) => w.includes('openspec'))).toBe(false);
+    // Every other unavailable tool is still reported regardless of the flag.
+    expect(hostToolWarnings(false).some((w) => w.includes('git'))).toBe(true);
   });
 });
 

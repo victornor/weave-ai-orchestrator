@@ -5,6 +5,8 @@ description: How an Weave AI ticket maps onto the OpenSpec propose/apply workflo
 
 # OpenSpec, as Weave AI drives it
 
+> **Only for OpenSpec-on projects.** Load this when your ticket has a bound change: `weave_ticket_get(id).openspecChangeName` is non-null. If it is null the project's OpenSpec mode is off and you take the worker skill's fast path instead — record one short plan as the ticket document `approach`, then implement and open the PR. No proposal, design, spec deltas, tasks file, validation or archive. Never create a change for a project whose mode is off.
+
 Your ticket is bound to exactly one OpenSpec change. Its name is in your brief and in `weave_ticket_get(id).openspecChangeName`. **Never ask whether to create or continue a change, never pick a different name, and never work in someone else's change.** If the change does not exist yet in `work/`, create it and move on:
 
 ```

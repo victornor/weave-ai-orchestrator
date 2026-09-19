@@ -143,6 +143,10 @@ export interface WorkerTemplateData extends Record<string, unknown> {
   worktree: { path: string; branch: string; hasAgentsFile: boolean; hasOpenspecConfig: boolean; verifiedFreshAt: string | null };
   brief: { definitionOfDone: string; relaunchNote: string | null; noWorktree: boolean };
   knowledge: { shared: string; project: string };
+  /** VS-578: true when this ticket runs the OpenSpec flow — bound to a change, or its project's mode is on. */
+  openspecPath: boolean;
+  /** VS-578: true for a `change` ticket that takes the short-plan fast path (OpenSpec off, no bound change). */
+  fastPath: boolean;
 }
 
 export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agent: S.Agent, opts: { relaunchNote?: string | null } = {}): WorkerTemplateData {
@@ -180,11 +184,15 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
       // The brief must never claim a project-repo file exists that the daemon has not actually
       // checked for (VS-211) — many projects have no AGENTS.md or OpenSpec config of their own.
       hasAgentsFile: Boolean(agent.worktreePath && existsSync(join(agent.worktreePath, 'AGENTS.md'))),
-      hasOpenspecConfig: Boolean(agent.worktreePath && existsSync(join(agent.worktreePath, 'openspec', 'config.yaml'))),
+      // VS-578: a bound ticket on a project whose mode was since turned off still reads the OpenSpec
+      // config, so the on-disk check is paired with "is this ticket on the OpenSpec path".
+      hasOpenspecConfig: Boolean(agent.worktreePath && (p?.openspecEnabled || t?.openspecChangeName) && existsSync(join(agent.worktreePath, 'openspec', 'config.yaml'))),
       verifiedFreshAt: t?.originKind === 'curation' ? (p?.lastFetchedAt ?? null) : null,
     },
     brief: { definitionOfDone: definitionOfDone((t?.kind ?? 'task') as S.TicketKind, deliveryMode), relaunchNote: opts.relaunchNote ?? null, noWorktree: !agent.worktreePath },
     knowledge: inlineKnowledge(ctx, deps, agent),
+    openspecPath: Boolean(t?.openspecChangeName) || Boolean(p?.openspecEnabled),
+    fastPath: (t?.kind === 'change') && !(Boolean(t?.openspecChangeName) || Boolean(p?.openspecEnabled)),
   };
 }
 

@@ -1324,6 +1324,7 @@ weave project add <git-url> [--id] [--branch] [--no-follow]              clone, 
 weave project retry <id> [--no-follow]              re-run a failed add against whatever is already on disk
 weave project list|show|remove|fetch|set-policy <key>=<value>...
 weave project set-landing-branch <id> [branch] [--clear]        set/change/clear the landing branch after creation (VS-122); applies to the next ticket action, no restart needed
+weave project set-openspec <id> on|off                         turn a project's OpenSpec mode on/off after creation (VS-578); applies to tickets created afterwards, tickets already bound to a change keep their flow
 weave runtime list|detect|login <id>              runtime availability and auth per workspace
 weave role list|show|activate|pause|resume|retire|charter show|charter rollback|memory show
 weave worker list|show|pause|resume|relaunch|cancel|purge|handover|handback --note <note>   handover/handback (VS-249): take a worker's session for your own terminal, or give it back

@@ -169,6 +169,33 @@ describe('prompt rendering', () => {
       expect(brief).not.toMatch(/\{\{|\}\}/);
       expect(instructions).not.toMatch(/\{\{[#/]?[a-z]/i);
     });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('with the shipped templates: a fast-path change ticket on an OpenSpec-off project is told the short plan, not the OpenSpec flow (VS-578)', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      h.db.update('projects', h.projectId, { openspecEnabled: 0 });
+      const dir = mkdtempSync(join(tmpdir(), 'ac-worktree-'));
+      dirs.push(dir);
+      mkdirSync(join(dir, 'openspec'), { recursive: true });
+      writeFileSync(join(dir, 'openspec', 'config.yaml'), 'schema: spec-driven\n', 'utf8');
+      const id = newId();
+      const now = nowIso();
+      h.db.insert('tickets', {
+        id, workspaceId: h.workspaceId, projectId: h.projectId, number: 950, identifier: 'TST-950', kind: 'change',
+        title: 'Fast path', description: '', status: 'todo', priority: 'medium', assigneeRoleId: h.roleId, createdByKind: 'human', createdAt: now, updatedAt: now,
+      });
+      const wid = h.addWorker(id, { branch: 'ac/tst-950-fast-path', worktreePath: dir });
+      const w = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [wid])!;
+
+      const brief = renderBrief(h.ctx, h.deps, w);
+      expect(brief).toContain('OpenSpec is off for this project');
+      expect(brief).not.toContain('- `work/openspec/config.yaml` —');
+      expect(brief).not.toMatch(/\{\{|\}\}/);
+      const instructions = renderWorkerInstructions(h.ctx, h.deps, w);
+      expect(instructions).toContain('record a short plan as the ticket document `approach`');
+      expect(instructions).not.toContain('OpenSpec context and rules are in `work/openspec/config.yaml`.');
+      expect(instructions).not.toContain('weave-ai-openspec');
+      expect(instructions).not.toMatch(/\{\{[#/]?[a-z]/i);
+    });
   });
 
   it('renders the weaver instructions with the live portfolio', () => {

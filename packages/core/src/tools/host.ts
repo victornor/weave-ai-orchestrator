@@ -66,11 +66,16 @@ let snapshot: Record<HostToolId, HostTool> | null = null;
 
 export function hostToolsSnapshot(): Record<HostToolId, HostTool> | null { return snapshot; }
 
-/** Warning lines for required/recommended tools that are unavailable, read synchronously. */
-export function hostToolWarnings(): string[] {
+/**
+ * Warning lines for required/recommended tools that are unavailable, read synchronously.
+ * VS-578: `openspecNeeded` is false when no live project has its OpenSpec mode on, so the weaver is
+ * not told a binary is missing that nothing in the workspace would use. Every other tool is unchanged.
+ */
+export function hostToolWarnings(openspecNeeded = true): string[] {
   if (!snapshot) return [];
   const path = process.env['PATH'] ?? '';
   return HOST_TOOL_IDS
+    .filter((id) => id !== 'openspec' || openspecNeeded)
     .map((id) => snapshot![id])
     .filter((t) => !t.available)
     .map((t) => `the ${t.id} host tool (${t.need}) was not found on the daemon's PATH: ${path}`);

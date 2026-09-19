@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-19
+goal: "Make OpenSpec optional per project (default on): a fast change-ticket
+  path for projects with it off"

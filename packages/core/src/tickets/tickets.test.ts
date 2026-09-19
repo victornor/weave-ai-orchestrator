@@ -746,6 +746,90 @@ describe('tickets', () => {
       expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'ticket_assigned')).toBe(true);
     });
 
+    describe('the fast path when OpenSpec is off (VS-578)', () => {
+      /** A ticket that started while the project had OpenSpec off: never bound to a change. */
+      const offPathTicket = () => {
+        const t = make();
+        h.db.update('tickets', t.id, { openspecChangeName: null, status: 'proposing' });
+        h.db.update('projects', h.projectId, { openspecEnabled: 0 });
+        return tickets.get(t.id);
+      };
+
+      it('publishes the short plan document and opens a plan_approval without calling openspec', async () => {
+        const t = offPathTicket();
+        tickets.putDocument(AGENT, t.id, 'approach', 'Change the settings default and update the test.');
+        const next = await tickets.transition(AGENT, t.id, { to: 'proposed' });
+        expect(next.status).toBe('proposed');
+        expect(openspec.validateForProposed).not.toHaveBeenCalled();
+        expect(tickets.getDocument(t.id, 'plan')?.body).toContain('Change the settings default');
+        expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'plan_approval', owner: 'human' }));
+        // The card must not name a change that does not exist.
+        const planCall = decisions.create.mock.calls.find((c) => c[1]?.kind === 'plan_approval');
+        expect(String(planCall?.[1]?.context)).not.toContain('OpenSpec change');
+      });
+
+      it('refuses proposed without a short plan', async () => {
+        const t = offPathTicket();
+        await expect(tickets.transition(AGENT, t.id, { to: 'proposed' })).rejects.toMatchObject({ code: 'validation' });
+        expect(tickets.get(t.id).status).toBe('proposing');
+        expect(openspec.validateForProposed).not.toHaveBeenCalled();
+      });
+
+      it('auto-approves the fast-path plan when the policy is none', async () => {
+        h.db.update('projects', h.projectId, { policiesJson: { proposalApproval: 'none' } });
+        const t = offPathTicket();
+        tickets.putDocument(AGENT, t.id, 'approach', 'Do the thing.');
+        const next = await tickets.transition(AGENT, t.id, { to: 'proposed' });
+        expect(next.status).toBe('approved');
+        expect(openspec.validateForProposed).not.toHaveBeenCalled();
+      });
+
+      it('a ticket bound before the project turned off keeps the OpenSpec path', async () => {
+        const t = make();
+        h.db.update('projects', h.projectId, { openspecEnabled: 0 });
+        h.db.update('tickets', t.id, { status: 'proposing' });
+        const next = await tickets.transition(AGENT, t.id, { to: 'proposed' });
+        expect(next.status).toBe('proposed');
+        expect(openspec.validateForProposed).toHaveBeenCalledWith(t.id);
+      });
+
+      it('a ticket created while off is not retro-required after the project turns back on', async () => {
+        const t = offPathTicket();
+        h.db.update('projects', h.projectId, { openspecEnabled: 1 });
+        tickets.putDocument(AGENT, t.id, 'approach', 'A short plan.');
+        const next = await tickets.transition(AGENT, t.id, { to: 'proposed' });
+        expect(next.status).toBe('proposed');
+        expect(openspec.validateForProposed).not.toHaveBeenCalled();
+      });
+
+      it('delivers and merges with no OpenSpec artifact or gate error', async () => {
+        const t = offPathTicket();
+        h.db.update('projects', h.projectId, { policiesJson: { deliveryMode: 'local-branch' } });
+        tickets.putDocument(AGENT, t.id, 'approach', 'Do it.');
+        expect((await tickets.transition(AGENT, t.id, { to: 'proposed' })).status).toBe('proposed');
+        await tickets.transition(AGENT, t.id, { to: 'approved' });
+        tickets.addWorkProduct(AGENT, t.id, { type: 'branch', url: 'ac/x' });
+        expect((await tickets.transition(AGENT, t.id, { to: 'in_review' })).status).toBe('in_review');
+        // The merge queue admits it; go straight to merging as the existing merge tests do.
+        h.db.update('tickets', t.id, { status: 'merging' });
+        const done = await tickets.mergeDone(AGENT, t.id, { mergeCommit: 'abc1234', method: 'merge' });
+        expect(done.status).toBe('done');
+        expect(openspec.validateForProposed).not.toHaveBeenCalled();
+      });
+
+      it('republishes a revised short plan while the ticket is still proposed', async () => {
+        const t = offPathTicket();
+        tickets.putDocument(AGENT, t.id, 'approach', 'First approach.');
+        await tickets.transition(AGENT, t.id, { to: 'proposed' });
+        decisions.create.mockClear();
+        tickets.putDocument(AGENT, t.id, 'approach', 'Second, better approach.');
+        const res = await tickets.republishRevisedPlan(SYSTEM, t.id);
+        expect(res.republished).toBe(true);
+        expect(tickets.getDocument(t.id, 'plan')?.body).toContain('Second, better approach');
+        expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'plan_approval' }));
+      });
+    });
+
     it('supersedes an open plan approval when the daemon writes a newer plan revision', () => {
       // `{ system: true }` simulates transition()'s own internal write — the one legitimate writer.
       const t = make();

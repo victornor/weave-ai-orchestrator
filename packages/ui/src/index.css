@@ -931,6 +931,15 @@ a.v2-link:hover {
   color: var(--text-1);
 }
 
+/* The open conversation's role row under a project (VS-581), marked in place. It deliberately does
+   not carry `aria-current="page"`: the navigation's one highlighted row on a session page is the
+   owning Roles destination, so this is a secondary mark, not a second current page. */
+.v2-row-child-current {
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-weight: 500;
+}
+
 /* The sidebar's own scroll region; the rail is a column that fills its height. */
 .v2-rail-scroll {
   overflow-y: auto;

@@ -5,15 +5,16 @@
  */
 import { useMemo, useState, type ReactNode } from 'react';
 import { Outlet, useRouterState } from '@tanstack/react-router';
-import { projectLabel, type Project } from '@weave-ai/shared';
+import { projectLabel, type Project, type Role } from '@weave-ai/shared';
 import { A } from '../app/link';
 import { cx } from '../lib/cx';
 import { projectColorVar } from '../lib/projectColor';
 import { FanInStreams } from '../api/context';
-import { useDaemonUpdate, useDaemonUpgrade, useMe, useWorkspacePlugins, useWorkspaceProjects, useWorkspaces, type WorkspaceProjectsState } from '../api/hooks';
+import { useDaemonUpdate, useDaemonUpgrade, useMe, useRolesMany, useWorkersMany, useWorkspacePlugins, useWorkspaceProjects, useWorkspaces, type WorkspaceProjectsState, type WorkerListItem } from '../api/hooks';
 import { WeaveMark } from '../components/WeaveMark';
 import type { WorkspaceListItem, WorkspacePlugin } from '../api/types';
 import { V2Glyph } from './Glyph';
+import { RoleChatRow, roleNavRows, workerFromRoleChatPath } from './roleChat';
 import {
   activeNavKey,
   V2_EVERYWHERE,
@@ -255,15 +256,19 @@ function RailFooter({
 }
 
 /**
- * A project's row and its secondary **Roadmap** child link (VS-478). One component so the desktop
- * rail and the phone More list render the same pair, and the project's Roadmap page is reachable on
- * both. The project row is the highlighted row on either its overview or its roadmap, because
- * `activeNavKey` maps `p/<slug>` and `p/<slug>/roadmap` to the same `project:<slug>` key.
+ * A project's row and its secondary child rows (VS-478, VS-581): the **Roadmap** link, then one row
+ * per role of that project, each opening that role's persistent chat. One component so the desktop
+ * rail and the phone More list render the same rows. The project row is the highlighted row on
+ * either its overview or its roadmap, because `activeNavKey` maps `p/<slug>` and `p/<slug>/roadmap`
+ * to the same `project:<slug>` key.
  */
 function ProjectRow({
   ws,
   project,
   siblingIds,
+  roles,
+  sessionByRole,
+  activeRoleId,
   active,
   onNavigate,
   tall,
@@ -271,12 +276,16 @@ function ProjectRow({
   ws: string;
   project: Project;
   siblingIds: string[];
+  roles: readonly Role[];
+  sessionByRole: Record<string, WorkerListItem>;
+  activeRoleId: string | null;
   active: boolean;
   onNavigate?: () => void;
   tall?: boolean;
 }): React.ReactElement {
   const base = `/w/${encodeURIComponent(ws)}/p/${encodeURIComponent(project.slug)}`;
   const row = cx('v2-row', tall && 'min-h-11');
+  const { shown, hiddenCount } = roleNavRows(roles, { activeRoleId });
   return (
     <div className="flex flex-col">
       <A to={base} aria-current={active ? 'page' : undefined} className={row} onClick={onNavigate}>
@@ -287,6 +296,27 @@ function ProjectRow({
       <A to={`${base}/roadmap`} className={cx(row, 'v2-row-child')} onClick={onNavigate}>
         <span className="flex-1 truncate">Roadmap</span>
       </A>
+      {shown.map((role) => (
+        <RoleChatRow
+          key={role.id}
+          role={role}
+          session={sessionByRole[role.id] ?? null}
+          ws={ws}
+          onNavigate={onNavigate}
+          tall={tall}
+          current={role.id === activeRoleId}
+        />
+      ))}
+      {hiddenCount > 0 ? (
+        <A
+          to={base}
+          className={cx(row, 'v2-row-child')}
+          onClick={onNavigate}
+          title={`${hiddenCount} more role${hiddenCount === 1 ? '' : 's'}`}
+        >
+          <span className="flex-1 truncate">+{hiddenCount} more role{hiddenCount === 1 ? '' : 's'}</span>
+        </A>
+      ) : null}
     </div>
   );
 }
@@ -298,6 +328,9 @@ function WorkspaceGroups({
   counts,
   projectsByWs,
   pluginsByWs,
+  rolesByProject,
+  sessionByRole,
+  activeRoleId,
   onNavigate,
 }: {
   workspaces: WorkspaceListItem[];
@@ -306,6 +339,9 @@ function WorkspaceGroups({
   counts: V2Counts;
   projectsByWs: Record<string, WorkspaceProjectsState>;
   pluginsByWs: Record<string, WorkspacePlugin[]>;
+  rolesByProject: Record<string, Role[]>;
+  sessionByRole: Record<string, WorkerListItem>;
+  activeRoleId: string | null;
   onNavigate?: () => void;
 }): React.ReactElement {
   const [collapsedWs, setCollapsedWs] = useState<Record<string, boolean>>({});
@@ -358,6 +394,9 @@ function WorkspaceGroups({
                     ws={w.id}
                     project={p}
                     siblingIds={siblingIds}
+                    roles={rolesByProject[p.id] ?? []}
+                    sessionByRole={sessionByRole}
+                    activeRoleId={activeRoleId}
                     active={isActive && activeKey === projectRowKey(p.slug)}
                     onNavigate={onNavigate}
                   />
@@ -390,6 +429,9 @@ function MoreList({
   workspaces,
   projects,
   plugins,
+  rolesByProject,
+  sessionByRole,
+  activeRoleId,
   update,
   theme,
   onTheme,
@@ -402,6 +444,9 @@ function MoreList({
   workspaces: WorkspaceListItem[];
   projects: Project[];
   plugins: WorkspacePlugin[];
+  rolesByProject: Record<string, Role[]>;
+  sessionByRole: Record<string, WorkerListItem>;
+  activeRoleId: string | null;
   update: UpdateEntry | null;
   theme: V2Theme;
   onTheme: (t: V2Theme) => void;
@@ -450,6 +495,9 @@ function MoreList({
                 ws={projectWs}
                 project={p}
                 siblingIds={siblingIds}
+                roles={rolesByProject[p.id] ?? []}
+                sessionByRole={sessionByRole}
+                activeRoleId={activeRoleId}
                 active={activeKey === projectRowKey(p.slug)}
                 onNavigate={onNavigate}
                 tall
@@ -567,6 +615,23 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
   const ids = useMemo(() => list.map((w) => w.id), [list]);
   const projectsByWs = useWorkspaceProjects(ids);
   const pluginsByWs = useWorkspacePlugins(ids);
+  // VS-581: each listed workspace's roles and persistent-session agents, so a project row can offer
+  // its roles' chats. Read per workspace like the project and plugin reads above; a role row under a
+  // non-current workspace opens against that workspace, never the one being shown.
+  const roleQueries = useRolesMany(ids);
+  const sessionQueries = useWorkersMany(ids, { kind: 'session' });
+  const rolesByProject: Record<string, Role[]> = {};
+  const sessionByRole: Record<string, WorkerListItem> = {};
+  const sessionById: Record<string, WorkerListItem> = {};
+  list.forEach((_w, i) => {
+    for (const role of roleQueries[i]?.data ?? []) (rolesByProject[role.projectId] ??= []).push(role);
+    for (const session of sessionQueries[i]?.data ?? []) {
+      sessionById[session.id] = session;
+      if (session.roleId) sessionByRole[session.roleId] = session;
+    }
+  });
+  const workerOnPath = workerFromRoleChatPath(path);
+  const activeRoleId = workerOnPath ? (sessionById[workerOnPath]?.roleId ?? null) : null;
   const counts = useV2Counts(scope);
   const me = useMe();
   // The rail's update entry is one derivation of the daemon's release state, shared with V1 (VS-421).
@@ -677,6 +742,9 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
             counts={counts}
             projectsByWs={projectsByWs}
             pluginsByWs={pluginsByWs}
+            rolesByProject={rolesByProject}
+            sessionByRole={sessionByRole}
+            activeRoleId={activeRoleId}
           />
           <RailFooter theme={theme} onTheme={onTheme} username={username} />
         </aside>
@@ -726,6 +794,9 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
               workspaces={list}
               projects={projectsByWs[fallbackWs]?.projects ?? []}
               plugins={pluginsByWs[fallbackWs] ?? []}
+              rolesByProject={rolesByProject}
+              sessionByRole={sessionByRole}
+              activeRoleId={activeRoleId}
               update={update}
               theme={theme}
               onTheme={onTheme}

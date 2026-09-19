@@ -4,9 +4,13 @@
  * called or when it is offered. The opening call is the same `usePersistentSession` open-or-resume
  * the Roles page used before this change — this module is not a second implementation of it.
  *
+ * VS-581: the same open-or-resume is exposed as `useRoleChatOpen`, and a second presentation,
+ * `RoleChatRow`, renders it as a child row under a project in the V2 sidebar and the phone More list.
+ * The open is shared; only the chrome differs.
+ *
  * The pure helpers (`roleChatActionLabel`, `roleChatStateLabel`, `roleChatBlockedReason`,
- * `sessionForRole`) are exported so the states are testable without a browser, the pattern
- * `RolesPage.tsx` already uses for its own helpers.
+ * `sessionForRole`, `roleNavRows`) are exported so the states are testable without a browser, the
+ * pattern `RolesPage.tsx` already uses for its own helpers.
  */
 import type { Agent, Role } from '@weave-ai/shared';
 import { useGo } from '../app/link';
@@ -14,6 +18,7 @@ import { usePersistentSession } from '../api/hooks';
 import { messageOf } from '../components/States';
 import { cx } from '../lib/cx';
 import { statusText } from '../lib/format';
+import { roleStateLabel } from '../lib/roleState';
 
 /** The action the control offers: opening an existing conversation, or starting a new one. */
 export function roleChatActionLabel(hasSession: boolean): string {
@@ -50,10 +55,61 @@ export function sessionForRole(sessions: readonly Agent[], roleId: string): Agen
   return sessions.find((s) => s.kind === 'session' && s.roleId === roleId) ?? null;
 }
 
+/** How many role rows a sidebar project block shows before it summarises the rest (VS-581). */
+export const ROLE_NAV_CAP = 5;
+
+/**
+ * The role rows a project's sidebar block shows, and how many it leaves to the overview. The cap
+ * keeps a project with many roles tidy; the role whose session is the page currently shown is always
+ * included, even past the cap, so opening a conversation never hides its own row.
+ */
+export function roleNavRows(
+  roles: readonly Role[],
+  opts: { cap?: number; activeRoleId?: string | null } = {},
+): { shown: Role[]; hiddenCount: number } {
+  const cap = opts.cap ?? ROLE_NAV_CAP;
+  const shown = roles.filter((role, i) => i < cap || role.id === opts.activeRoleId);
+  return { shown, hiddenCount: roles.length - shown.length };
+}
+
+/**
+ * The worker id named by a `/w/<ws>/workers/<id>` path, or `null` (VS-581). Pure, so the sidebar's
+ * "which role's conversation is open" can be tested without a router.
+ */
+export function workerFromRoleChatPath(pathname: string): string | null {
+  const m = /^\/w\/[^/]+\/workers\/([^/]+)\/?$/.exec(pathname);
+  return m ? decodeURIComponent(m[1] ?? '') : null;
+}
+
+/**
+ * The open-or-resume call every role-chat surface makes (VS-525, VS-581): resolve the role's session,
+ * creating it on first use, and navigate to it. `ws` is the session's workspace — the sidebar passes
+ * its project's own workspace because the shell is above the provider and spans workspaces.
+ */
+export function useRoleChatOpen(ws: string): {
+  open: (role: Pick<Role, 'id' | 'projectId'>, workerModelId?: string) => void;
+  isPending: boolean;
+  isError: boolean;
+  error: unknown;
+} {
+  const go = useGo();
+  const persistentSession = usePersistentSession(ws);
+  return {
+    open: (role, workerModelId) =>
+      persistentSession.mutate(
+        { projectId: role.projectId, roleId: role.id, ...(workerModelId ? { workerModelId } : {}) },
+        { onSuccess: ({ agent }) => go('/w/$ws/workers/$workerId', { params: { ws, workerId: agent.id } }) },
+      ),
+    isPending: persistentSession.isPending,
+    isError: persistentSession.isError,
+    error: persistentSession.error,
+  };
+}
+
 /**
  * The button (or the reason there is none) that opens `role`'s persistent session. It owns the
- * open-or-resume mutation and the navigation to the session's worker page; the page owns the read
- * that says whether the session already exists.
+ * open-or-resume call and the navigation to the session's worker page; the page owns the read that
+ * says whether the session already exists.
  */
 export function RoleChatControl({
   role,
@@ -69,37 +125,92 @@ export function RoleChatControl({
   workerModelId?: string;
   className?: string;
 }): React.ReactElement {
-  const go = useGo();
-  const persistentSession = usePersistentSession();
+  const chat = useRoleChatOpen(ws);
 
   const blocked = roleChatBlockedReason(role);
   if (blocked) {
     return <span className={cx('text-micro text-text-3', className)}>{blocked}</span>;
   }
 
-  const onOpen = (): void => {
-    persistentSession.mutate(
-      { projectId: role.projectId, roleId: role.id, ...(workerModelId ? { workerModelId } : {}) },
-      { onSuccess: ({ agent }) => go('/w/$ws/workers/$workerId', { params: { ws, workerId: agent.id } }) },
-    );
-  };
-
   return (
     <span className={cx('inline-flex flex-col items-start gap-0.5', className)}>
       <button
         type="button"
-        disabled={persistentSession.isPending}
+        disabled={chat.isPending}
         title={roleChatStateLabel(session !== null)}
-        onClick={onOpen}
+        onClick={() => chat.open(role, workerModelId)}
         className="flex-none text-micro text-accent-link hover:text-text-1 disabled:opacity-40"
       >
         {roleChatActionLabel(session !== null)}
       </button>
-      {persistentSession.isError ? (
+      {chat.isError ? (
         <span role="status" className="text-nano text-blocked">
-          The chat was not opened: {messageOf(persistentSession.error)}
+          The chat was not opened: {messageOf(chat.error as Error)}
         </span>
       ) : null}
     </span>
+  );
+}
+
+/**
+ * A role's row in the V2 sidebar and the phone More list (VS-581), in the same child-row style as the
+ * project's Roadmap row. An active role is a button that opens its persistent conversation through
+ * the same `useRoleChatOpen` the shared control uses. A role that cannot chat is a static,
+ * non-actionable row that carries the reason as its title and accessible name. `current` marks the
+ * role whose session is the page shown.
+ */
+export function RoleChatRow({
+  role,
+  session,
+  ws,
+  onNavigate,
+  tall,
+  current,
+}: {
+  role: Pick<Role, 'id' | 'projectId' | 'name' | 'status'>;
+  session: Agent | null;
+  ws: string;
+  onNavigate?: () => void;
+  tall?: boolean;
+  current?: boolean;
+}): React.ReactElement {
+  const chat = useRoleChatOpen(ws);
+  const blocked = roleChatBlockedReason(role);
+  const rowClass = cx('v2-row v2-row-child', tall && 'min-h-11', current && 'v2-row-child-current');
+
+  if (blocked) {
+    return (
+      <span
+        className={cx(rowClass, 'cursor-default text-text-4')}
+        title={blocked}
+        aria-label={`${role.name} — ${blocked}`}
+        data-role-chat-blocked={role.id}
+      >
+        <span className="min-w-0 flex-1 truncate">{role.name}</span>
+        <span className="ac-mono flex-none text-nano">{roleStateLabel(role.status)}</span>
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={chat.isPending}
+      title={roleChatStateLabel(session !== null)}
+      onClick={() => {
+        onNavigate?.();
+        chat.open(role);
+      }}
+      data-role-chat-row={role.id}
+      data-role-chat-current={current ? 'true' : undefined}
+      className={cx(rowClass, 'disabled:opacity-40')}
+    >
+      <span className="min-w-0 flex-1 truncate">{role.name}</span>
+      {chat.isError ? (
+        <span role="status" className="flex-none text-nano text-blocked" title={messageOf(chat.error as Error)}>
+          not opened
+        </span>
+      ) : null}
+    </button>
   );
 }

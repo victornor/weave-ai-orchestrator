@@ -1,5 +1,5 @@
 import type {
-  ForgeAdapter, ForgeCheck, ForgeCheckState, ForgeChangedFile, ForgeMergeState, ForgePullRequest, ForgePullRequestDetail,
+  ForgeAdapter, ForgeCheck, ForgeCheckState, ForgeChangedFile, ForgeMergeState, ForgePullRequest, ForgePullRequestDetail, RepoMergeSettings,
 } from '@weave-ai/plugin-sdk';
 import { OcError } from '@weave-ai/shared';
 import { sh } from '../util/exec.js';
@@ -195,6 +195,19 @@ export function pullRequestFromGh(doc: GhPr): ForgePullRequest { return toPullRe
 }
 
 /**
+ * VS-584: which merge methods a repository allows, from `gh api repos/{owner}/{repo}`. GitHub returns
+ * `allow_merge_commit`, `allow_squash_merge` and `allow_rebase_merge` booleans. `null` on any body we
+ * cannot read — "the forge cannot say", never a guess that would let a disallowed method through.
+ * Pure and exported for the mapping tests.
+ */
+export function mergeSettingsFromGh(stdout: string): RepoMergeSettings | null {
+  let doc: { allow_merge_commit?: boolean; allow_squash_merge?: boolean; allow_rebase_merge?: boolean };
+  try { doc = JSON.parse(stdout) as typeof doc; } catch { return null; }
+  if (typeof doc.allow_merge_commit !== 'boolean' && typeof doc.allow_squash_merge !== 'boolean' && typeof doc.allow_rebase_merge !== 'boolean') return null;
+  return { merge: doc.allow_merge_commit === true, squash: doc.allow_squash_merge === true, rebase: doc.allow_rebase_merge === true };
+}
+
+/**
  * VS-466: the rolled-up state of a pull request's checks. `success` requires a completed `SUCCESS`
  * for every check a run reported; `SKIPPED` entries carry no signal and are ignored (see
  * `checkOutcome`), so an all-skipped draft run reads `none`, not `success`. A `failure` anywhere
@@ -383,5 +396,12 @@ export class GhForge implements ForgeAdapter {
     const r = await sh('gh', ['api', 'repos/{owner}/{repo}/actions/runners'], { cwd, timeoutMs: 30_000, env: { NO_COLOR: '1' } });
     if (!r.ok) return null;
     return runnerLabelsFromGh(r.stdout);
+  }
+
+  /** VS-584: which merge methods the repository allows, or `null` when `gh` cannot answer. */
+  async repoMergeSettings(cwd: string): Promise<RepoMergeSettings | null> {
+    const r = await sh('gh', ['api', 'repos/{owner}/{repo}'], { cwd, timeoutMs: 30_000, env: { NO_COLOR: '1' } });
+    if (!r.ok) return null;
+    return mergeSettingsFromGh(r.stdout);
   }
 }

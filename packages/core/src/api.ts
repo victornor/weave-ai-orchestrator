@@ -888,6 +888,23 @@ export interface SecretsService {
 
 /** One finished ticket waiting on, or included in, a promotion (VS-568). */
 export interface PromotionTicket { id: string; identifier: string; title: string }
+/** VS-584: how a promotion reaches the default branch. */
+export type PromotionStrategy = 'pull-request' | 'direct-push';
+/** VS-584: the lifecycle of a promotion record. `open` is a raised card; `pending` is a pull request awaiting checks. */
+export type PromotionState = 'open' | 'pending' | 'held' | 'merged';
+/** VS-584: the promotion in flight (or last run) for a project, carried on the decision and read back by the surface. */
+export interface PromotionRecord {
+  state: PromotionState;
+  strategy: PromotionStrategy;
+  prUrl: string | null;
+  mergeMethod: string | null;
+  landingHead: string | null;
+  defaultHead: string | null;
+  heldReason: string | null;
+  /** When a pending pull request first waited, so the no-CI grace is bounded. */
+  pendingSince?: string | null;
+  updatedAt: string;
+}
 export interface PromotionStatus {
   /** False when the project's landing branch is its default branch: there is nothing to promote. */
   applicable: boolean;
@@ -896,21 +913,33 @@ export interface PromotionStatus {
   ahead: number; behind: number;
   commits: Array<{ sha: string; subject: string }>; behindCommits: Array<{ sha: string; subject: string }>;
   tickets: PromotionTicket[];
-  /** Ahead, not behind: a fast-forward is possible. */
+  /** VS-584: the content being promoted — the tree diff `default...landing`. Empty when already shipped. */
+  changedFiles: number; additions: number; deletions: number;
+  /** VS-584: how this promotion will run, resolved from the project's policy and the forge. */
+  strategy: PromotionStrategy;
+  /** Ahead, not behind: a fast-forward is possible. For a pull request, `behind` does not block. */
   canPromote: boolean;
   /** Why the card cannot offer Promote, naming the conflict; null when it can. */
   heldReason: string | null;
   notes: string[];
+  /** VS-584: the in-flight or last promotion, for the project's promotion surface. */
+  promotion: PromotionRecord | null;
 }
-/** Land-then-promote's second half (VS-568): the only path that pushes a project's default branch. */
+/** Land-then-promote's second half (VS-568, VS-584): the only path that lands a project's default branch. */
 export interface PromotionService {
   status(projectId: string): Promise<PromotionStatus>;
   /** Raise the project's `promotion_approval` for the human; supersedes an earlier open one. */
   request(actor: Actor, projectId: string): Promise<S.Decision>;
   /** The landing head a promotion card is about to promote, for the weaver's review mark. */
   currentHead(d: S.Decision): Promise<string | null>;
-  /** Fast-forward the default branch to the reviewed landing head. Throws, leaving the card open, on any refusal. */
-  execute(actor: Actor, d: S.Decision): Promise<{ promotedHead: string }>;
+  /**
+   * Promote the reviewed landing head. A direct push or a merge whose checks are already green completes
+   * here; a pull request whose checks are still running returns `pending` and is finished by `advance`.
+   * Throws, leaving the card open, on any refusal.
+   */
+  execute(actor: Actor, d: S.Decision): Promise<{ promotedHead: string | null; prUrl?: string; pending?: boolean }>;
+  /** VS-584: complete in-flight promotions whose checks have resolved; called on the supervisor's cadence. */
+  advance(): Promise<number>;
 }
 
 export interface CoreServices {

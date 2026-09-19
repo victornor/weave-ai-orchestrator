@@ -10,7 +10,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GhForge, checkTally, parsePullRequestUrl, pullRequestDetailFromGh, pullRequestFromGh, pullRequestRunsFromGh, repoVisibilityFromGh, runnerLabelsFromGh, workflowCountFromGh } from './gh.js';
+import { GhForge, checkTally, mergeSettingsFromGh, parsePullRequestUrl, pullRequestDetailFromGh, pullRequestFromGh, pullRequestRunsFromGh, repoVisibilityFromGh, runnerLabelsFromGh, workflowCountFromGh } from './gh.js';
 
 let home: string;
 
@@ -580,5 +580,27 @@ describe('the pull_request-run mapping (VS-467)', () => {
     const rollup = ['lint', 'typecheck', 'test-core (shard 1/4)', 'test-core (shard 2/4)', 'test-core (shard 3/4)', 'test-core (shard 4/4)', 'test-ui', 'test-core']
       .map((name) => ({ name, workflowName: 'CI', status: 'COMPLETED', conclusion: 'SUCCESS' }));
     expect(pullRequestFromGh({ ...DRAFT, statusCheckRollup: rollup }).checks).toBe('success');
+  });
+});
+
+describe('repoMergeSettings (VS-584)', () => {
+  it('maps the repository merge-method flags', () => {
+    expect(mergeSettingsFromGh(JSON.stringify({ allow_merge_commit: true, allow_squash_merge: true, allow_rebase_merge: false })))
+      .toEqual({ merge: true, squash: true, rebase: false });
+    expect(mergeSettingsFromGh(JSON.stringify({ allow_merge_commit: false, allow_squash_merge: false, allow_rebase_merge: false })))
+      .toEqual({ merge: false, squash: false, rebase: false });
+  });
+
+  it('answers null when the body is not the repository document', () => {
+    expect(mergeSettingsFromGh('not json')).toBeNull();
+    expect(mergeSettingsFromGh('{}')).toBeNull();
+  });
+
+  it('asks gh for the repository and answers null when it fails', async () => {
+    fakeGh(JSON.stringify({ allow_merge_commit: false, allow_squash_merge: true, allow_rebase_merge: false }));
+    await expect(new GhForge().repoMergeSettings(home)).resolves.toEqual({ merge: false, squash: true, rebase: false });
+    expect(argsList()).toContain('repos/{owner}/{repo}');
+    fakeGh('', 1, 'HTTP 404');
+    await expect(new GhForge().repoMergeSettings(home)).resolves.toBeNull();
   });
 });

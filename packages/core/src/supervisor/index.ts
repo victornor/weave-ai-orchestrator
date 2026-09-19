@@ -1451,6 +1451,9 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         await pumpMergeQueues().catch((e) => log.error({ err: String(e) }, 'merge queue pump failed'));
         if (due('supervisor:merge_ci_at', MERGE_POLL_EVERY_MS)) {
           await wakeMergingOnProgress().catch((e) => log.error({ err: String(e) }, 'merge-slot progress wake failed'));
+          // VS-584: complete a promotion pull request whose checks have resolved — the human's
+          // approval is already recorded, so no card is waiting to be answered again.
+          await deps().promotion.advance().catch((e) => log.error({ err: String(e) }, 'promotion advance failed'));
         }
         await retireFinished().catch((e) => log.error({ err: String(e) }, 'retire pass failed'));
         await retireIdleSessions().catch((e) => log.error({ err: String(e) }, 'idle session retire pass failed'));

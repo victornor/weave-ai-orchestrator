@@ -16,7 +16,7 @@ import { createChangelogService } from '../changelog/index.js';
 import { createModelsService } from '../models/index.js';
 import { createSecretsService } from '../secrets/index.js';
 import { createPullRequestsService } from '../pull-requests/index.js';
-
+import { createPromotionService } from '../promotion/index.js';
 export interface TestHarness {
   ctx: WorkspaceContext;
   db: Db;
@@ -116,6 +116,9 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
   // Real as well (VS-97): it reads this harness's own db and its own (empty) forge registry, so a
   // suite that has registered no forge gets the same `no_forge` answer a project without one gets.
   services.pullRequests = createPullRequestsService(ctx, () => deps());
+  // VS-584: real too — it reads this harness's own db and forge registry, so a suite that ticks the
+  // supervisor has an `advance()` that is a genuine no-op rather than a missing service.
+  services.promotion = createPromotionService(ctx, () => deps());
   const deps = (): CoreServices =>
     new Proxy({} as CoreServices, {
       get: (_t, prop: string | symbol) => {

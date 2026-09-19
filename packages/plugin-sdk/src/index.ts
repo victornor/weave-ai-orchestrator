@@ -112,7 +112,16 @@ export interface ForgeAdapter {
    * label no online runner serves says so in the alarm. A forge that cannot answer omits it.
    */
   runnerStatus?(cwd: string): Promise<{ onlineLabels: string[] } | null>;
+  /**
+   * Optional (VS-584): which merge methods the repository allows, or `null` when the forge cannot say.
+   * A promotion merges through the repository's rules rather than around them, so it asks before
+   * choosing a method; `null` means "unknown", and the caller uses its configured method.
+   */
+  repoMergeSettings?(cwd: string): Promise<RepoMergeSettings | null>;
 }
+
+/** VS-584: the merge methods a repository permits, from its own settings. */
+export interface RepoMergeSettings { merge: boolean; squash: boolean; rebase: boolean }
 export interface Logger { debug(msg: string, data?: Record<string, unknown>): void; info(msg: string, data?: Record<string, unknown>): void; warn(msg: string, data?: Record<string, unknown>): void; error(msg: string, data?: Record<string, unknown>): void }
 /** A plugin's own namespaced, durable document store (VS-334). One value per key, JSON-shaped. */
 export interface PluginStore {

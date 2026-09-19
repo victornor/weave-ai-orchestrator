@@ -4,7 +4,7 @@
  */
 import { tmpdir } from 'node:os';
 import { Db } from '@weave-ai/db';
-import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPullRequestsService, createRegistries, createRoadmapService, createPlanningService, createRoutinesService, createPluginRegistry, getLogger, initLogger } from '@weave-ai/core';
+import { EventBus, createChangelogService, createHistoryReader, createIncidentsService, createJobsService, createKnowledgeUsageService, createModelsService, createPromotionService, createPullRequestsService, createRegistries, createRoadmapService, createPlanningService, createRoutinesService, createPluginRegistry, getLogger, initLogger } from '@weave-ai/core';
 import type { Actor, CoreServices, HistoryQuery, WorkspaceContext } from '@weave-ai/core';
 import type { AuthService } from '@weave-ai/core';
 import {
@@ -373,6 +373,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   // And the pull requests (VS-97): a read-only join over this fake's own db and forge registry, so a
   // route test registers a fake forge to get a list and registers none to get the no-forge answer.
   (services as { pullRequests: CoreServices['pullRequests'] }).pullRequests = createPullRequestsService(ctx, () => services as unknown as CoreServices);
+  (services as { promotion: CoreServices['promotion'] }).promotion = createPromotionService(ctx, () => services as unknown as CoreServices);
   // And knowledge usage (VS-110): a real read/write projection over this fake's own db, so a tool or
   // route test asserts on the rows it really wrote rather than on a hand-written double.
   (services as { knowledgeUsage: CoreServices['knowledgeUsage'] }).knowledgeUsage = createKnowledgeUsageService(ctx, () => services as unknown as CoreServices);

@@ -129,28 +129,32 @@ function ProjectSyncStatus({ projectId }: { projectId: string }): React.ReactEle
 }
 
 /**
- * Land-then-promote (VS-568): for a project whose landing branch differs from its default branch, how
- * far landing is ahead, which tickets wait, and the one control that raises the promotion approval.
- * Tapping it asks the human (a card in Needs you); nothing here pushes.
+ * Land-then-promote (VS-568, VS-584): what a project's landing branch would promote, which tickets
+ * wait, the pull request's progress once approval has opened one, and the one control that raises the
+ * promotion approval. Tapping it asks the human (a card in Needs you); nothing here pushes.
  */
-function PromoteControl({ projectId }: { projectId: string }): React.ReactElement | null {
+export function PromoteControl({ projectId }: { projectId: string }): React.ReactElement | null {
   const promotion = useProjectPromotion(projectId);
   const request = useRequestPromotion(projectId);
   const p = promotion.data;
   if (!p?.applicable) return null;
   const waiting = p.tickets.length;
+  const held = p.promotion?.state === 'held' ? (p.promotion.heldReason ?? p.heldReason) : p.heldReason;
+  const inFlight = p.promotion?.state === 'pending';
   return (
     <div aria-label="Promotion" className="flex flex-wrap items-center gap-2.5">
-      <span className="v2-tag text-text-2">{p.landing} is {p.ahead} commit{p.ahead === 1 ? '' : 's'} ahead of {p.defaultBranch}</span>
+      <span className="v2-tag text-text-2">{p.changedFiles} file{p.changedFiles === 1 ? '' : 's'} changed to promote {p.landing} → {p.defaultBranch} ({p.strategy === 'pull-request' ? 'via pull request' : 'fast-forward'})</span>
       {waiting ? <span className="text-micro text-text-2">{waiting} ticket{waiting === 1 ? '' : 's'} waiting: {p.tickets.slice(0, 6).map((t) => t.identifier).join(', ')}{waiting > 6 ? '…' : ''}</span> : null}
       {p.behind > 0 ? <span className="v2-tag text-failed">{p.landing} is behind {p.defaultBranch} by {p.behind}</span> : null}
-      {p.heldReason ? <span className="text-micro text-text-2">{p.heldReason}</span> : null}
-      {p.ahead > 0 ? (
+      {inFlight && p.promotion?.prUrl ? <a href={p.promotion.prUrl} target="_blank" rel="noreferrer" className="text-micro text-accent">promotion PR open — checks running</a> : null}
+      {p.promotion?.state === 'merged' ? <span className="text-micro text-text-2">promoted</span> : null}
+      {held ? <span className="text-micro text-text-2">{held}</span> : null}
+      {p.changedFiles > 0 && !inFlight ? (
         <button type="button" onClick={() => request.mutate()} disabled={request.isPending || request.isSuccess}
           className="rounded-r4 border border-line-2 px-2 py-1 text-micro text-text-2 hover:bg-bg-2 disabled:opacity-45">
           {request.isSuccess ? 'Promotion raised: see Needs you' : request.isPending ? 'Raising…' : `Promote ${p.landing} to ${p.defaultBranch}`}
         </button>
-      ) : <span className="text-micro text-text-3">nothing to promote</span>}
+      ) : !inFlight ? <span className="text-micro text-text-3">nothing to promote</span> : null}
       {request.isError ? <span className="text-micro text-failed">{request.error.message}</span> : null}
     </div>
   );

@@ -59,6 +59,11 @@ Two declarations, one resolver:
 - Promoting a landing branch to the default branch (`edge` → `main`) stays entirely outside this: no
   worker, and no part of the daemon, ever pushes or merges that promotion. It remains the human's own
   step, exactly as it is today.
+  **Superseded by VS-568 and VS-584 (2026-09):** promotion is now a project-scoped `promotion_approval`,
+  owned by the human and reviewed by the weaver, and the daemon promotes on that approval — through a
+  pull request wherever a forge can open one, and by fast-forward direct push only where none can. No
+  worker and no other daemon path pushes or merges into the default branch. The paragraph above records
+  the position at the time of this ADR; the promotion capability's spec holds the current contract.
 
 ## Consequences
 

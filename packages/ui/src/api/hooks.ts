@@ -1107,9 +1107,13 @@ export function useStartSession(): UseMutationResult<Agent, Error, { ticketId: s
  * VS-495: a role's persistent, no-ticket session — idempotent, returns the role's existing live
  * session and its thread if it already has one rather than creating a second. VS-526: `workerModelId`
  * is the catalog option the session runs on; omit it for the workspace's workers setting.
+ *
+ * VS-581: `wsOverride` names the session's own workspace. The V2 shell's rail sits above the
+ * workspace provider and spans every workspace, so a role row under a non-current workspace must
+ * pass it; a surface inside a provider omits it.
  */
-export function usePersistentSession(): UseMutationResult<{ agent: Agent; thread: ChannelThread }, Error, { projectId: string; roleId: string; workerModelId?: string | null }> {
-  const ws = useWs();
+export function usePersistentSession(wsOverride?: string): UseMutationResult<{ agent: Agent; thread: ChannelThread }, Error, { projectId: string; roleId: string; workerModelId?: string | null }> {
+  const ws = useHookWs(wsOverride);
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body) => api.ws<{ agent: Agent; thread: ChannelThread }>(ws, '/workers/persistent-session', { method: 'POST', body }),

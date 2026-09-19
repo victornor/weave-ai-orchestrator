@@ -8,6 +8,8 @@ const state = vi.hoisted(() => ({
   path: '/w/acme/work',
   workspaces: [{ id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 }],
   projectsByWs: { acme: [{ id: 'p1', slug: 'weave-services-plugin', name: 'Weave Services plugin' }] } as Record<string, Array<{ id: string; slug: string; name: string }>>,
+  rolesByWs: {} as Record<string, Array<{ id: string; projectId: string; name: string; status: string }>>,
+  sessionsByWs: {} as Record<string, Array<{ id: string; kind: string; roleId: string | null }>>,
   workersByWs: {
     acme: [
       { id: 'w1', kind: 'worker', ticketId: 't1', status: 'running', createdAt: '2026-09-13T00:00:00Z' },
@@ -21,6 +23,8 @@ const state = vi.hoisted(() => ({
   upgrade: null as Upgrade | null,
   fanIn: [] as string[][],
   barVisible: false,
+  go: vi.fn(),
+  persistentSession: vi.fn(),
 }));
 
 // The dictation session lives above the shell (VS-450); the shell only reads whether the bar is up.
@@ -48,7 +52,7 @@ vi.mock('../app/link', () => ({
       {children}
     </a>
   ),
-  useGo: () => () => undefined,
+  useGo: () => state.go,
 }));
 
 vi.mock('../api/hooks', () => ({
@@ -57,7 +61,10 @@ vi.mock('../api/hooks', () => ({
     Object.fromEntries(ids.map((id) => [id, { status: 'success', projects: state.projectsByWs[id] ?? [] }])),
   useWorkspacePlugins: (ids: readonly string[]) =>
     Object.fromEntries(ids.map((id) => [id, state.pluginsByWs[id] ?? []])),
-  useWorkersMany: (ids: readonly string[]) => ids.map((id) => ({ data: state.workersByWs[id] ?? [] })),
+  useRolesMany: (ids: readonly string[]) => ids.map((id) => ({ data: state.rolesByWs[id] ?? [] })),
+  useWorkersMany: (ids: readonly string[], params?: { kind?: string }) =>
+    ids.map((id) => ({ data: (params?.kind === 'session' ? state.sessionsByWs[id] : state.workersByWs[id]) ?? [] })),
+  usePersistentSession: () => ({ mutate: state.persistentSession, isPending: false, isError: false, error: null }),
   useDecisionsMany: (ids: readonly string[]) => ids.map((id) => (id in state.decisionsByWs ? { data: state.decisionsByWs[id] } : { data: undefined })),
   useIncidents: () => ({ data: { items: state.incidents, total: state.incidents.length } }),
   useMe: () => ({
@@ -92,6 +99,13 @@ beforeEach(() => {
   state.upgrade = null;
   state.fanIn = [];
   state.barVisible = false;
+  state.rolesByWs = {};
+  state.sessionsByWs = {};
+  state.go.mockClear();
+  state.persistentSession.mockReset();
+  state.persistentSession.mockImplementation(
+    (_body: unknown, opts?: { onSuccess?: (r: { agent: { id: string } }) => void }) => opts?.onSuccess?.({ agent: { id: 'a_new' } }),
+  );
   onTheme.mockClear();
   localStorage.clear();
 });
@@ -657,5 +671,86 @@ describe('every V2 nav surface renders the Lucide icon set (VS-420)', () => {
     }
     // More is a menu, so it gets its own mark rather than the Settings glyph (VS-420).
     expect(within(nav).getByRole('button', { name: 'More' }).querySelector('svg[data-v2-glyph="more"]')).not.toBeNull();
+  });
+});
+
+describe('role chats under each project in the rail and the phone More list (VS-581)', () => {
+  const project = { id: 'p1', slug: 'agent-conductor', name: 'WeaveAI' };
+
+  beforeEach(() => {
+    state.projectsByWs = { acme: [project] };
+    state.rolesByWs = {
+      acme: [
+        { id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'active' },
+        { id: 'r2', projectId: 'p1', name: 'Codebase Scout', status: 'active' },
+        { id: 'r3', projectId: 'p1', name: 'Old Hand', status: 'paused' },
+      ],
+    };
+  });
+
+  it('lists each role under the project’s Roadmap row, opens an active one, and disables a paused one', () => {
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).getByRole('link', { name: 'Roadmap' })).toHaveAttribute('href', '/w/acme/p/agent-conductor/roadmap');
+    expect(within(rail).getByRole('button', { name: 'Backend Engineer' })).toHaveAttribute('data-role-chat-row', 'r1');
+    expect(within(rail).getByRole('button', { name: 'Codebase Scout' })).toBeInTheDocument();
+    // The paused role keeps its row but is not actionable, and carries its reason.
+    expect(within(rail).queryByRole('button', { name: 'Old Hand' })).toBeNull();
+    expect(within(rail).getByTitle(/paused/i)).toHaveAttribute('data-role-chat-blocked', 'r3');
+
+    fireEvent.click(within(rail).getByRole('button', { name: 'Backend Engineer' }));
+    expect(state.persistentSession).toHaveBeenCalledWith(
+      { projectId: 'p1', roleId: 'r1' },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'acme', workerId: 'a_new' } });
+  });
+
+  it('caps a project’s roles and summarises the rest with a row to the overview', () => {
+    state.rolesByWs = {
+      acme: Array.from({ length: 7 }, (_v, i) => ({ id: `r${i}`, projectId: 'p1', name: `Role ${i}`, status: 'active' })),
+    };
+    mountShell();
+    const rail = screen.getByRole('complementary');
+    expect(within(rail).getAllByRole('button', { name: /^Role \d/ })).toHaveLength(5);
+    expect(within(rail).getByRole('link', { name: '+2 more roles' })).toHaveAttribute('href', '/w/acme/p/agent-conductor');
+  });
+
+  it('adds no role row for a project with no roles', () => {
+    state.rolesByWs = { acme: [] };
+    mountShell();
+    expect(screen.getByRole('complementary').querySelector('[data-role-chat-row]')).toBeNull();
+    expect(screen.getByRole('complementary').querySelector('[data-role-chat-blocked]')).toBeNull();
+  });
+
+  it('marks the role whose conversation is the page shown', () => {
+    state.sessionsByWs = { acme: [{ id: 'a1', kind: 'session', roleId: 'r1' }] };
+    state.path = '/w/acme/workers/a1';
+    mountShell();
+    expect(within(screen.getByRole('complementary')).getByRole('button', { name: 'Backend Engineer' })).toHaveAttribute('data-role-chat-current', 'true');
+  });
+
+  it('opens a role under a workspace the app is not showing against that workspace', () => {
+    state.workspaces = [
+      { id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 0 },
+      { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 0 },
+    ];
+    state.projectsByWs = { acme: [], beta: [{ id: 'p2', slug: 'fernwood', name: 'Fernwood' }] };
+    state.decisionsByWs = { acme: [], beta: [] };
+    state.rolesByWs = { beta: [{ id: 'r9', projectId: 'p2', name: 'Beta Engineer', status: 'active' }] };
+    state.path = '/w/acme/work';
+    mountShell();
+    fireEvent.click(within(screen.getByRole('complementary')).getByRole('button', { name: 'Beta Engineer' }));
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'beta', workerId: 'a_new' } });
+  });
+
+  it('carries the same rows in the phone More list', () => {
+    mountShell();
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('button', { name: 'More' }));
+    const dialog = screen.getByRole('dialog', { name: 'More' });
+    const row = within(dialog).getByRole('button', { name: 'Backend Engineer' });
+    expect(row).toHaveAttribute('data-role-chat-row', 'r1');
+    fireEvent.click(row);
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'acme', workerId: 'a_new' } });
   });
 });

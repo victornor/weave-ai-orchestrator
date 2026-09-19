@@ -32,7 +32,7 @@ vi.mock('../api/hooks', () => ({
   }),
 }));
 
-const { RoleChatControl, roleChatActionLabel, roleChatStateLabel, roleChatBlockedReason, sessionForRole } =
+const { RoleChatControl, RoleChatRow, roleChatActionLabel, roleChatStateLabel, roleChatBlockedReason, sessionForRole, roleNavRows, workerFromRoleChatPath } =
   await import('../v2/roleChat');
 
 beforeEach(() => {
@@ -98,5 +98,63 @@ describe('the shared role-chat control', () => {
     state.error = 'nope';
     render(<RoleChatControl role={role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'active' })} session={null} ws="ws1" />);
     expect(screen.getByText('The chat was not opened: nope')).toBeInTheDocument();
+  });
+});
+
+describe('the sidebar role row list (VS-581)', () => {
+  const roles = (n: number): ReturnType<typeof role>[] =>
+    Array.from({ length: n }, (_v, i) => role({ id: `r${i}`, name: `Role ${i}`, status: 'active' }));
+
+  it('shows nothing for a project with no roles', () => {
+    expect(roleNavRows([])).toEqual({ shown: [], hiddenCount: 0 });
+  });
+
+  it('caps the shown rows and counts the rest', () => {
+    const { shown, hiddenCount } = roleNavRows(roles(7));
+    expect(shown).toHaveLength(5);
+    expect(hiddenCount).toBe(2);
+  });
+
+  it('always includes the role whose conversation is open, even past the cap', () => {
+    const list = roles(4);
+    const { shown, hiddenCount } = roleNavRows(list, { cap: 2, activeRoleId: 'r3' });
+    expect(shown.map((r) => r.id)).toEqual(['r0', 'r1', 'r3']);
+    expect(hiddenCount).toBe(1);
+  });
+
+  it('reads the worker id from a session address and nothing from another address', () => {
+    expect(workerFromRoleChatPath('/w/acme/workers/a1')).toBe('a1');
+    expect(workerFromRoleChatPath('/w/acme/workers/a1/')).toBe('a1');
+    expect(workerFromRoleChatPath('/w/acme/roles')).toBeNull();
+    expect(workerFromRoleChatPath('/w/acme/workers/a1/extra')).toBeNull();
+  });
+});
+
+describe('the sidebar role row (VS-581)', () => {
+  it('opens an active role’s conversation in the row’s own workspace', () => {
+    render(<RoleChatRow role={role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'active' })} session={null} ws="acme" />);
+    const row = screen.getByRole('button', { name: 'Backend Engineer' });
+    expect(row).toHaveAttribute('data-role-chat-row', 'r1');
+    expect(row).toHaveAttribute('title', 'No conversation yet');
+    fireEvent.click(row);
+    expect(state.persistentSession).toHaveBeenCalledWith(
+      { projectId: 'p1', roleId: 'r1' },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'acme', workerId: 'a_new' } });
+  });
+
+  it('marks the role whose session is the page shown', () => {
+    render(<RoleChatRow role={role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'active' })} session={agent({ id: 'a1', kind: 'session', roleId: 'r1' })} ws="acme" current />);
+    expect(screen.getByRole('button', { name: 'Backend Engineer' })).toHaveAttribute('data-role-chat-current', 'true');
+  });
+
+  it('renders a paused role as a non-actionable row carrying its reason', () => {
+    render(<RoleChatRow role={role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'paused' })} session={null} ws="acme" />);
+    expect(screen.queryByRole('button')).toBeNull();
+    const row = screen.getByTitle(/paused/i);
+    expect(row).toHaveAttribute('data-role-chat-blocked', 'r1');
+    expect(row).toHaveTextContent('Backend Engineer');
+    expect(state.persistentSession).not.toHaveBeenCalled();
   });
 });

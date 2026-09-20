@@ -13,10 +13,10 @@ let dir: string; let mock: MockProvider; let mcp: MockMcp | undefined;
 beforeEach(async () => { dir = mkdtempSync(join(tmpdir(), 'wa-loop-')); mkdirSync(join(dir, 'wt')); mock = await startMockProvider(); });
 afterEach(async () => { await mock.close(); await mcp?.close(); mcp = undefined; rmSync(dir, { recursive: true, force: true }); });
 
-function makeInit(over: { prompt?: string; options?: Record<string, unknown>; mcpServers?: InitMessage['mcpServers']; toolEnv?: Record<string, string>; maxTurns?: number; session?: string; mode?: 'auto' | 'restricted' | 'bypass' } = {}): InitMessage {
+function makeInit(over: { prompt?: string; options?: Record<string, unknown>; mcpServers?: InitMessage['mcpServers']; toolEnv?: Record<string, string>; maxTurns?: number; session?: string; mode?: 'auto' | 'restricted' | 'bypass'; permission?: Partial<InitMessage['run']['permission']> } = {}): InitMessage {
   return {
     type: 'init', v: 1,
-    run: { runId: 'run-abc123', turnEpoch: 1, cwd: dir, worktree: { path: join(dir, 'wt'), branch: 'ac/x' }, limits: { timeoutMs: 600_000, ...(over.maxTurns ? { maxTurns: over.maxTurns } : {}) }, permission: { mode: over.mode ?? 'auto' }, model: 'mock-model', options: over.options ?? {}, spillDir: join(dir, 'spill') },
+    run: { runId: 'run-abc123', turnEpoch: 1, cwd: dir, worktree: { path: join(dir, 'wt'), branch: 'ac/x' }, limits: { timeoutMs: 600_000, ...(over.maxTurns ? { maxTurns: over.maxTurns } : {}) }, permission: { mode: over.mode ?? 'auto', ...over.permission }, model: 'mock-model', options: over.options ?? {}, spillDir: join(dir, 'spill') },
     provider: { id: 'mock', baseUrl: mock.baseUrl, auth: 'bearer', headers: {}, apiKey: KEY },
     prompt: over.prompt ?? 'hello', systemPrompt: { text: 'HOME INSTRUCTIONS', mode: 'inject' },
     session: { path: join(dir, over.session ?? 's.jsonl'), id: 'sess1' }, mcpServers: over.mcpServers ?? {}, toolEnv: { PATH: process.env['PATH'] ?? '', ...over.toolEnv },
@@ -124,15 +124,15 @@ describe('a turn', () => {
     const h = harness();
     await runAgentTurn(makeInit(), h.io, new AbortController().signal, fast);
     const results = h.events.filter((e) => e.type === 'tool.result').map((e) => String(e.payload['content']));
-    expect(results[0]).toMatch(/^Error: unknown tool "nope"\. Available: read, bash/);
+    expect(results[0]).toMatch(/^Error: unknown tool "nope"\. Available: read, write, edit, bash, grep, glob/);
     expect(results[1]).toMatch(/^Error: arguments for read are not valid JSON/);
     assertValidHistory(join(dir, 's.jsonl'));
   });
 
-  it('gives a restricted turn no shell', async () => {
+  it('gives a restricted turn only the read-only core tools', async () => {
     mock.script({ chunks: textChunks('x') });
     await runAgentTurn(makeInit({ mode: 'restricted' }), harness().io, new AbortController().signal, fast);
-    expect((mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name)).toEqual(['read']);
+    expect((mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name)).toEqual(['read', 'grep', 'glob']);
   });
 
   it('stops at the step cap with resource/max_steps', async () => {
@@ -147,6 +147,64 @@ describe('a turn', () => {
     const r = await runAgentTurn(makeInit(), harness().io, new AbortController().signal, fast);
     expect(r.usage!.inputTokens).toBeGreaterThan(0);
     expect(r.usage!.outputTokens).toBeGreaterThan(0);
+  });
+});
+
+describe('tools, permissions and events', () => {
+  it('reads then edits a file, emitting file.changed between the call and its result', async () => {
+    writeFileSync(join(dir, 'wt', 'a.txt'), 'alpha\nbeta\n');
+    mock.script(
+      { chunks: toolCallChunks([{ id: 'r1', name: 'read', args: '{"path":"a.txt"}' }, { id: 'e1', name: 'edit', args: '{"path":"a.txt","old_string":"alpha","new_string":"ALPHA"}' }]) },
+      { chunks: textChunks('done') },
+    );
+    const h = harness();
+    const r = await runAgentTurn(makeInit(), h.io, new AbortController().signal, fast);
+    expect(r.exitCode).toBe(0);
+    expect(readFileSync(join(dir, 'wt', 'a.txt'), 'utf8')).toBe('ALPHA\nbeta\n');
+    const types = h.types();
+    expect(types.indexOf('file.changed')).toBeGreaterThan(types.lastIndexOf('tool.call'));
+    expect(types.lastIndexOf('tool.result')).toBeGreaterThan(types.indexOf('file.changed'));
+    const changed = h.events.find((e) => e.type === 'file.changed')!;
+    expect(changed.payload).toMatchObject({ changeType: 'modified', additions: 1, deletions: 1 });
+    expect(String(changed.payload['diff'])).toContain('@@');
+    assertValidHistory(join(dir, 's.jsonl'));
+  });
+
+  it('refuses a deny-patterned command in auto without running it', async () => {
+    mock.script({ chunks: toolCallChunks([{ id: 'b1', name: 'bash', args: '{"command":"pkill -f x"}' }]) }, { chunks: textChunks('ok') });
+    const h = harness();
+    await runAgentTurn(makeInit(), h.io, new AbortController().signal, fast);
+    const denied = h.events.find((e) => e.type === 'tool.denied')!;
+    expect(denied.payload).toMatchObject({ name: 'bash' });
+    expect(String(denied.payload['reason'])).toContain('pkill');
+    expect(h.types()).not.toContain('tool.result');
+    expect(h.types()).not.toContain('command.executed');
+  });
+
+  it('denies a tool the mode removed and answers with the permission text', async () => {
+    mock.script({ chunks: toolCallChunks([{ id: 'w1', name: 'write', args: '{"path":"a.txt","content":"x"}' }]) }, { chunks: textChunks('ok') });
+    const h = harness();
+    await runAgentTurn(makeInit({ mode: 'restricted' }), h.io, new AbortController().signal, fast);
+    const denied = h.events.find((e) => e.type === 'tool.denied')!;
+    expect(String(denied.payload['reason'])).toContain('restricted');
+    const s = Session.open({ path: join(dir, 's.jsonl'), id: 'x', cwd: dir });
+    expect(s.messages.find((m) => m.role === 'toolResult')).toMatchObject({ text: expect.stringContaining('Denied by permission mode "restricted"') });
+    s.close();
+  });
+
+  it('restricted keeps the MCP tools in the request body', async () => {
+    mcp = await startMockMcp([{ name: 'weave_ticket_get' }], () => 'ok');
+    mock.script({ chunks: textChunks('x') });
+    await runAgentTurn(makeInit({ mode: 'restricted', mcpServers: { 'weave-ai': { url: mcp.url } } }), harness().io, new AbortController().signal, fast);
+    expect((mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name)).toEqual(['read', 'grep', 'glob', 'weave_ticket_get']);
+  });
+
+  it('matches the Claude alias in a deny list', async () => {
+    mock.script({ chunks: toolCallChunks([{ id: 'b1', name: 'bash', args: '{"command":"echo hi"}' }]) }, { chunks: textChunks('ok') });
+    const h = harness();
+    await runAgentTurn(makeInit({ permission: { deniedTools: ['Bash'] } }), h.io, new AbortController().signal, fast);
+    expect(h.events.find((e) => e.type === 'tool.denied')).toBeDefined();
+    expect(h.types()).not.toContain('command.executed');
   });
 });
 

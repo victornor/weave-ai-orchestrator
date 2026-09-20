@@ -284,7 +284,7 @@ describe('roles', () => {
 
     it('holds a permission change for the hire policy and applies it only when approved', async () => {
       await roles.hire(CONDUCTOR, spec(), { autoActivate: true });
-      const result = await roles.requestUpdate(CONDUCTOR, 'api-backend', { scope: 'Same patch scope.', permission: { mode: 'restricted', allowed: [], denied: [] } }, 'tighten it');
+      const result = await roles.requestUpdate(CONDUCTOR, 'api-backend', { scope: 'Same patch scope.', permission: { mode: 'restricted', allowed: [], denied: [], bashDeny: [] } }, 'tighten it');
       expect(result.applied).toBe(false);
       expect(result.decisionId).toBe('d1');
       const raised = created.at(-1)!;
@@ -303,7 +303,7 @@ describe('roles', () => {
     it('applies a permission change directly when hireApproval is none', async () => {
       h.ctx.config.defaults.hireApproval = 'none';
       await roles.hire(CONDUCTOR, spec(), { autoActivate: true });
-      const result = await roles.requestUpdate(CONDUCTOR, 'api-backend', { permission: { mode: 'restricted', allowed: [], denied: [] } }, 'tighten it');
+      const result = await roles.requestUpdate(CONDUCTOR, 'api-backend', { permission: { mode: 'restricted', allowed: [], denied: [], bashDeny: [] } }, 'tighten it');
       expect(result.applied).toBe(true);
       expect(result.decisionId).toBeNull();
       expect(roles.get('api-backend').permission.mode).toBe('restricted');

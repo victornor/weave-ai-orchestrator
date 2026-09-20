@@ -189,3 +189,12 @@ describe('a turn that cannot start', () => {
     expect(k.spawns).toEqual([]);
   });
 });
+
+describe('the S2 events', () => {
+  it('keeps file.changed, command.executed and tool.denied instead of folding them into runtime.raw', () => {
+    for (const type of ['file.changed', 'command.executed', 'tool.denied']) {
+      const line = parseChildLine(JSON.stringify({ t: 'event', ev: { ts: '2026-09-20T00:00:00Z', type, payload: { path: 'a.ts' } } }));
+      expect(line).toMatchObject({ kind: 'event', ev: { type } });
+    }
+  });
+});

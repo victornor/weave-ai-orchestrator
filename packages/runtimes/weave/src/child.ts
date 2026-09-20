@@ -45,8 +45,9 @@ export function buildInit(input: TurnInput, p: { providerId: string; modelId: st
     run: {
       runId: input.runId, turnEpoch: input.turnEpoch, cwd: input.cwd, worktree: input.worktree,
       limits: { timeoutMs: input.limits.timeoutMs, ...(input.limits.maxTurns !== undefined ? { maxTurns: input.limits.maxTurns } : {}) },
-      permission: { mode: input.permission.mode, ...(input.permission.allowedTools ? { allowedTools: input.permission.allowedTools } : {}), ...(input.permission.deniedTools ? { deniedTools: input.permission.deniedTools } : {}), ...(input.permission.firstTurn ? { firstTurn: true } : {}) },
+      permission: { mode: input.permission.mode, ...(input.permission.allowedTools ? { allowedTools: input.permission.allowedTools } : {}), ...(input.permission.deniedTools ? { deniedTools: input.permission.deniedTools } : {}), ...(input.permission.bashDeny ? { bashDeny: input.permission.bashDeny } : {}), ...(input.permission.firstTurn ? { firstTurn: true } : {}) },
       model: p.modelId, effort: input.effort ?? null, options: input.options, spillDir: p.layout.spillDir,
+      ...(input.configHome ? { configHome: input.configHome } : {}),
     },
     provider: {
       id: p.providerId, baseUrl: p.profile.baseUrl, auth: p.profile.auth, headers: p.headers, ...(p.profile.query ? { query: p.profile.query } : {}), ...(p.apiKey ? { apiKey: p.apiKey } : {}),

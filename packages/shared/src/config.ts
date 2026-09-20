@@ -651,7 +651,7 @@ export const RoleSpecSchema = z.object({
   maxWorkers: z.number().int().min(1).max(32).default(2),
   /** VS-579: this role's worker memory limit in MB, or `null` to inherit the workspace default. */
   memoryLimitMb: z.number().int().min(WORKER_MEMORY_MIN_MB).max(WORKER_MEMORY_MAX_MB).nullable().default(null),
-  permission: z.object({ mode: z.enum(PERMISSION_MODES).default('auto'), allowed: z.array(z.string()).default([]), denied: z.array(z.string()).default([]) }).default({}),
+  permission: z.object({ mode: z.enum(PERMISSION_MODES).default('auto'), allowed: z.array(z.string()).default([]), denied: z.array(z.string()).default([]), bashDeny: z.array(z.string()).default([]) }).default({}),
   secrets: z.array(z.string()).default([]),
   notes: z.string().optional(),
   createdBy: legacyCreatedBy.default('weaver'),

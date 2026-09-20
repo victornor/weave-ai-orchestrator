@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { RunEvent, RunEventType } from '@weave-ai/shared';
 import { chatTranscript, runEventsToTranscript } from './transcript.js';
@@ -348,5 +351,49 @@ describe('compaction (VS-454)', () => {
     reset();
     const blocks = runEventsToTranscript([ev('session.compaction.started', {})]);
     expect(blocks).toEqual([]);
+  });
+});
+
+describe('the weave runtime (VS-608)', () => {
+  // Captured from the built-in agent's child NDJSON (mock provider) in VS-608 with:
+  //   npx vitest run packages/agent/src/capture.tmp.test.ts   (a read+edit turn, then a bash turn)
+  // The bytes are committed verbatim beside this test; the payloads below are not hand-written.
+  const ndjson = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'weave-edit-bash-turn.ndjson'), 'utf8');
+  let seqN = 0;
+  const weaveEvents: RunEvent[] = ndjson.split('\n').filter(Boolean).map((line) => JSON.parse(line) as { t: string; ev?: Record<string, unknown> })
+    .filter((m) => m.t === 'event')
+    .map((m) => { seqN += 1; const e = m.ev as { ts: string; type: RunEventType; payload: Record<string, unknown> }; return { id: `w${seqN}`, runId: 'run-capture', seq: seqN, ts: e.ts, type: e.type, stream: 'stdout', level: 'info', payload: e.payload }; });
+
+  it('renders the edit as a file block carrying the diff and the +1 −1 stat', () => {
+    const file = runEventsToTranscript(weaveEvents).find((b): b is FileBlock => b.kind === 'file' && b.path.endsWith('a.ts'))!;
+    expect(file).toBeDefined();
+    expect(file.changeType).toBe('modified');
+    expect(file.diffStat).toBe('+1 −1');
+    expect(file.diff).toContain('@@ -1,3 +1,3 @@');
+    expect(file.diff).toContain('-const beta = 2;');
+    expect(file.diff).toContain('+const beta = 3;');
+    expect(file.collapsed).toBe('Edit /ws/workers/w1/wt/a.ts +1 −1');
+  });
+
+  it('renders the edit tool call as one ok row folded with its result', () => {
+    const edit = runEventsToTranscript(weaveEvents).find((b): b is ToolBlock => b.kind === 'tool' && b.name === 'edit')!;
+    expect(edit.status).toBe('ok');
+    expect(edit.target).toBe('a.ts');
+    expect(edit.detail).toContain('1 replacement(s)');
+  });
+
+  it('renders the bash call as one row whose target is the command, backfilled from command.executed', () => {
+    const rows = runEventsToTranscript(weaveEvents).filter((b): b is ToolBlock => b.kind === 'tool' && b.name === 'bash');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.target).toBe('echo hello');
+    expect(rows[0]!.status).toBe('ok');
+    expect(rows[0]!.detail).toContain('hello');
+    expect(rows[0]!.collapsed).toContain('bash echo hello');
+  });
+
+  it('keeps the edited file path full when it is short enough to read', () => {
+    const kinds = runEventsToTranscript(weaveEvents).map((b) => b.kind);
+    expect(kinds).toContain('file');
+    expect(kinds).toContain('tool');
   });
 });

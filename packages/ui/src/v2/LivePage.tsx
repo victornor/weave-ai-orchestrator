@@ -17,7 +17,7 @@ import { resolveModel, contextStrip } from '@weave-ai/render';
 import { useModelsMany, useRuntimes, useRuntimeModels, useTicketsMany, useWorkersMany, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
 import { useGo, useSearchParams } from '../app/link';
 import { liveWorkingAgents } from '../lib/board';
-import { agentIsWorking, cellUiStatus, orderByRunning, useRunningWorkerIds } from '../lib/liveOrder';
+import { agentIsWorking, cellUiStatus, liveCounts, orderByRunning, useRunningWorkerIds } from '../lib/liveOrder';
 import { modelOptionLabel } from '../lib/runtime';
 import { projectColorVar } from '../lib/projectColor';
 import { STATUS_LABEL, STATUS_TEXT } from '../lib/status';
@@ -297,7 +297,7 @@ export function LiveBody(): React.ReactElement {
           <Chip key={w.id} label={w.name} active={shownScope === w.id} onClick={() => chooseScope(w.id)} />
         ))}
         <span className="ml-auto ac-mono text-micro text-text-3" aria-live="polite">
-          {filtered.filter((c) => workingIds.has(c.id)).length} running · showing {filtered.length}
+          {liveCounts([filtered], workingIds).total} running · showing {filtered.length}
         </span>
         {!phone ? (
           <span className="flex flex-none items-center gap-1 rounded-r4 border border-line-1 bg-bg-2 p-0.5" data-v2-live-cols>

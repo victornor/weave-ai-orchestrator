@@ -6,7 +6,7 @@ import { useMemo, type ReactNode } from 'react';
 import { useRouterState } from '@tanstack/react-router';
 import { useDecisionsMany, useIncidents, useWorkersMany, useWorkspaces } from '../api/hooks';
 import { liveWorkingAgents } from '../lib/board';
-import { agentIsWorking, useRunningWorkerIds } from '../lib/liveOrder';
+import { agentIsWorking, liveCounts, useRunningWorkerIds } from '../lib/liveOrder';
 import { countsAsNeeds } from './needsCount';
 import { workspaceFromV2Path, type V2Scope } from './nav';
 
@@ -79,12 +79,12 @@ export function useV2Counts(scope: V2Scope): V2Counts {
     return ids;
   }, [workerLists]);
   const workingIds = useRunningWorkerIds(activeIds);
+  // The same `liveCounts` the Live floor's roster figure uses (VS-630), so the badge and the floor
+  // it points to count one working set through one function.
+  const { total: live, perList: livePerWs } = liveCounts(workerLists, workingIds);
   const liveByWs: Record<string, number> = {};
-  let live = 0;
   listed.forEach((w, i) => {
-    const n = workerLists[i]?.filter((a) => workingIds.has(a.id)).length ?? 0;
-    liveByWs[w.id] = n;
-    live += n;
+    liveByWs[w.id] = livePerWs[i] ?? 0;
   });
 
   const openIncidents = (incidents.data?.items ?? []).filter((i) => i.resolvedAt === null).length;

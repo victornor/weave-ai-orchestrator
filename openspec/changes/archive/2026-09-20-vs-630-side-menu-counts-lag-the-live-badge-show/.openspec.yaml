@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "Side menu counts lag: the Live badge shows one, then jumps to two when
+  Live is opened"

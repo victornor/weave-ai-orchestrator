@@ -4,20 +4,18 @@
  * reassign, blockers) in the header's overflow menu. Overview is one scrolling page: a two-pane
  * overview/Activity split over the Work, Usage and Knowledge sections (captain's 2026-09-13 layout).
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import { deliveryBadgeOf, isActiveRun, openspecArchive, projectLabel, ticketUiStatus, carriesWeaverReview, type Project, type Run, type Ticket, type TicketAttachment } from '@weave-ai/shared';
+import { deliveryBadgeOf, openspecArchive, projectLabel, ticketUiStatus, carriesWeaverReview, type Project, type Ticket, type TicketAttachment } from '@weave-ai/shared';
 import { workerPauseDetail } from '@weave-ai/render';
 import { A, useGo, useSearchParams } from '../../app/link';
 import { useWs } from '../../api/context';
-import { useRunEventStream } from '../../api/runStream';
 import { Tabs } from '../../components/Tabs';
 import { StatusGlyph, Badge } from '../../components/StatusGlyph';
 import { Button } from '../../components/Button';
 import { Markdown } from '../../components/Markdown';
 import { DecisionCard } from '../../components/DecisionCard';
 import { Composer } from '../../components/Composer';
-import { RunTranscript } from '../../components/RunTranscript';
 import { Table } from '../../components/Table';
 import { StatTile } from '../../components/Chart';
 import { Skeleton, SkeletonRows } from '../../components/Skeleton';
@@ -35,7 +33,6 @@ import {
   useRoles,
   useSetTicketBlockers,
   useTicket,
-  useTicketComments,
   useTicketDocument,
   useTicketDocumentRevisions,
   useTicketKnowledgeUsage,
@@ -56,6 +53,7 @@ import { projectColorVar } from '../../lib/projectColor';
 import { ago, cents, duration, statusText, tokens } from '../../lib/format';
 import { cx } from '../../lib/cx';
 import { AttachmentItem } from '../../components/AttachmentItem';
+import { TicketActivityFeed } from './TicketActivityFeed';
 
 const TABS = [
   { key: 'artifacts', label: 'Artifacts' },
@@ -635,8 +633,7 @@ function ActivityPane({ ticket, worker, project }: { ticket: Ticket; worker: { i
   const ws = useWs();
   // VS-602: the live state of the agent that asked, for a merge card.
   const activity = useWorkerActivity();
-  const comments = useTicketComments(ticket.id);
-  const runs = useTicketRuns(ticket.id);
+  const go = useGo();
   const post = usePostComment();
   const retired = worker?.status === 'retired';
   const canConverse = Boolean(worker) && !retired && worker!.status !== 'paused' && worker!.status !== 'error';
@@ -649,33 +646,6 @@ function ActivityPane({ ticket, worker, project }: { ticket: Ticket; worker: { i
   const mergeDecision = (decisions.data ?? []).find(
     (d) => d.kind === 'merge_approval' && (d.ticketId === ticket.id || d.ticketId === ticket.identifier),
   );
-
-  const feed = useMemo(() => {
-    const items: Array<{ at: string; key: string; node: React.ReactNode }> = [];
-    for (const c of comments.data ?? []) {
-      items.push({
-        at: c.createdAt,
-        key: `c-${c.id}`,
-        node: (
-          <article className={cx('v2-card p-3.5', c.authorKind === 'human' && 'border-accent-edge')}>
-            <div className="mb-1.5 flex items-center gap-2">
-              <span className="text-micro font-medium text-text-soft">
-                {c.authorKind === 'human' ? 'You' : c.authorKind === 'agent' ? (worker?.name ?? 'Worker') : 'System'}
-              </span>
-              {c.kind !== 'comment' ? <Badge>{c.kind}</Badge> : null}
-              <div className="flex-1" />
-              <span className="ac-mono text-nano text-text-4">{ago(c.createdAt)}</span>
-            </div>
-            <Markdown source={c.body} breaks />
-          </article>
-        ),
-      });
-    }
-    for (const r of runs.data ?? []) {
-      items.push({ at: r.finishedAt ?? r.startedAt ?? r.createdAt, key: `r-${r.id}`, node: <RunTurn run={r} /> });
-    }
-    return items.sort((a, b) => a.at.localeCompare(b.at));
-  }, [comments.data, runs.data, worker?.name]);
 
   const ended = ticket.status === 'done' || ticket.status === 'cancelled';
   const steerLabel = canConverse && workerDetail.data
@@ -705,17 +675,7 @@ function ActivityPane({ ticket, worker, project }: { ticket: Ticket; worker: { i
           <AnswerError error={answer.error} />
         </>
       ) : null}
-      {comments.isLoading || runs.isLoading ? (
-        <SkeletonRows rows={4} />
-      ) : feed.length === 0 ? (
-        <EmptyState title="Nothing has happened yet." detail="Your replies, the worker's messages and its turns land here, in order." />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {feed.map((f) => (
-            <div key={f.key}>{f.node}</div>
-          ))}
-        </div>
-      )}
+      <TicketActivityFeed ticket={ticket} workerName={worker?.name ?? null} onTicket={(id) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: id } })} />
       {canConverse ? (
         <Composer
           placeholder={`Ask ${worker!.name}…`}
@@ -739,44 +699,6 @@ function ActivityPane({ ticket, worker, project }: { ticket: Ticket; worker: { i
           onSubmit={(body) => post.mutate({ id: ticket.id, body })}
         />
       )}
-    </div>
-  );
-}
-
-function RunTurn({ run }: { run: Run }): React.ReactElement {
-  const live = isActiveRun(run.status);
-  const [open, setOpen] = useState(live);
-  const wasLive = useRef(live);
-  useEffect(() => {
-    if (wasLive.current !== live) setOpen(live);
-    wasLive.current = live;
-  }, [live]);
-  const stream = useRunEventStream(open ? run.id : null, { live });
-  const { events } = stream;
-  const at = run.finishedAt ?? run.startedAt ?? run.createdAt;
-  const status = run.status === 'running' ? 'working' : run.status === 'succeeded' ? 'done' : run.status === 'interrupted' || run.status === 'cancelled' ? 'paused' : 'failed';
-  return (
-    <div className="flex items-start gap-2.5 px-1 py-1">
-      <StatusGlyph status={status} size="xs" pulse={live} />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2 text-micro text-text-3">
-          <span>turn {run.turnEpoch}</span>
-          <span>·</span>
-          <span>{run.status}</span>
-          <span>·</span>
-          <span className="ac-mono">{ago(at)}</span>
-          <div className="flex-1" />
-          <button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="rounded-r4 px-1.5 py-0.5 text-nano text-text-4 hover:bg-bg-3 hover:text-text-1">
-            {open ? 'hide transcript' : 'show transcript'}
-          </button>
-        </div>
-        {run.summary ? <p className="mt-0.5 text-meta leading-relaxed text-text-body">{run.summary}</p> : null}
-        {open ? (
-          <div className="v2-anim-fade v2-card mt-2 overflow-hidden">
-            <RunTranscript events={events} live={live} stream={stream} runtimeId={run.runtimeId} label={`Transcript of turn ${run.turnEpoch}`} />
-          </div>
-        ) : null}
-      </div>
     </div>
   );
 }

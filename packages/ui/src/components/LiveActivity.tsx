@@ -67,7 +67,7 @@ export function LiveActivity({ events, partials = [], lastPartialAt, partialSinc
 }
 
 /** The text and reasoning still being generated, after the last completed block. */
-export function LivePartials({ partials = [] }: { partials?: readonly PartialText[] }): React.ReactElement | null {
+export function LivePartials({ partials = [], onTicket }: { partials?: readonly PartialText[]; onTicket?: (id: string) => void }): React.ReactElement | null {
   const text = partials.filter((p) => p.kind === 'text' && p.text);
   const thinking = partials.filter((p) => p.kind === 'thinking' && p.text);
   // VS-601: a running tool's output so far (a Codex command's stdout), the last few lines of it.
@@ -86,7 +86,7 @@ export function LivePartials({ partials = [] }: { partials?: readonly PartialTex
         </pre>
       ))}
       {text.map((p) => (
-        <Markdown key={p.partId} source={p.text} breaks className="text-body leading-relaxed text-text-body" />
+        <Markdown key={p.partId} source={p.text} onTicket={onTicket} breaks className="text-body leading-relaxed text-text-body" />
       ))}
     </div>
   );

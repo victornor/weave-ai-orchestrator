@@ -26,7 +26,7 @@ import {
   type Ticket,
 } from '@weave-ai/shared';
 import { workerPauseReason } from '@weave-ai/render';
-import { A } from '../app/link';
+import { A, useGo } from '../app/link';
 import { DocumentPreview } from '../components/DocumentPreview';
 import { CiChip } from '../components/CiChip';
 import { Markdown } from '../components/Markdown';
@@ -340,6 +340,7 @@ export function V2DecisionCard({
   delivery,
   className,
 }: V2DecisionCardProps): React.ReactElement {
+  const go = useGo();
   const [watchOpen, setWatchOpen] = useState(false);
   const [overriding, setOverriding] = useState(false);
   const [reason, setReason] = useState('');
@@ -527,7 +528,7 @@ export function V2DecisionCard({
             </div>
             {watchOpen ? (
               <div className="v2-anim-fade mb-2">
-                <WorkerFeed agentId={askedBy} runId={decision.askedInRunId} ws={ws ?? undefined} compact resizable label={`Live feed for ${ticketIdentifier ?? 'the worker'}`} />
+                <WorkerFeed agentId={askedBy} runId={decision.askedInRunId} ws={ws ?? undefined} compact resizable label={`Live feed for ${ticketIdentifier ?? 'the worker'}`} onTicket={ws ? (id) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: id } }) : undefined} />
               </div>
             ) : null}
           </>

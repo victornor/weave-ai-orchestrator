@@ -41,6 +41,7 @@ import { sessionConversationRows } from '../lib/sessionConversation';
 import { V2Page } from './V2Page';
 import { WorkerFeed } from './WorkerFeed';
 import { SessionTurn } from './SessionTurn';
+import { useTicketLink } from './ticket/TicketModal';
 
 const TABS = [
   { key: 'transcript', label: 'Transcript' },
@@ -85,6 +86,7 @@ export function sessionAuthorLabel(
  * those words — so nothing is shown twice.
  */
 export function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }: { threadId: string; label: string; sessionAgentId: string; roleName: string }): React.ReactElement {
+  const onTicket = useTicketLink();
   const history = useThreadMessages(threadId);
   // The session's runs come from the same `useRuns` query `useWorkerRun` already makes, so this is a
   // cache hit, not a second request. Bound them to the loaded conversation window so a long history
@@ -108,7 +110,7 @@ export function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }:
       {rows.map((row) =>
         row.kind === 'turn' ? (
           <li key={row.key}>
-            <SessionTurn run={row.run} deliveredText={answersByRun.get(row.run.id) ?? null} />
+            <SessionTurn run={row.run} deliveredText={answersByRun.get(row.run.id) ?? null} onTicket={onTicket} />
           </li>
         ) : row.message.authorKind === 'system' ? (
           // VS-596: a system notice (a real failure reason) is a state, not a message from either
@@ -144,6 +146,7 @@ export function V2WorkerPage(): React.ReactElement {
 export function WorkerBody({ workerId }: { workerId: string }): React.ReactElement {
   const ws = useWs();
   const go = useGo();
+  const onTicket = useTicketLink();
   const [tab, setTab] = useState<string>('transcript');
   const detail = useWorker(workerId);
   const brief = useWorkerBrief(workerId);
@@ -371,7 +374,7 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
                 roleName={detail.data.role?.name ?? agent.name}
               />
             ) : (
-              <WorkerFeed agentId={workerId} ws={ws} label={`${agent.name} transcript`} />
+              <WorkerFeed agentId={workerId} ws={ws} label={`${agent.name} transcript`} onTicket={onTicket} />
             )}
             <div ref={bottom} />
           </div>

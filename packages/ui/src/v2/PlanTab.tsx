@@ -27,6 +27,7 @@ import { useNewOutboundMessageIds } from '../lib/streamReveal';
 import { ChatComposer } from './ChatComposer';
 import { ChatConversation, useLiveRunSettle } from './ChatConversation';
 import type { ChatConversationHandle, LiveChatRun } from './ChatConversation';
+import { useTicketLink } from './ticket/TicketModal';
 
 const TIERS = ['quick', 'standard', 'deep'] as const;
 
@@ -129,8 +130,7 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
   const canSubmit = drafts.length > 0 && plan.data?.plan.status === 'drafting' && !submit.isPending;
   const plannerRunning = live?.running ?? false;
   const projectName = (id: string | null): string | null => (id ? projectLabel(projects.find((p) => p.id === id) ?? { slug: id, name: id }) : null);
-  const openTicket = (identifier: string): void => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } });
-
+  const openTicket = useTicketLink();
   const send = (body: string, files: File[], opts: { idempotencyKey: string }): Promise<void> => {
     if (!plan.data) return Promise.reject(new Error('The planning conversation is still starting.'));
     return post

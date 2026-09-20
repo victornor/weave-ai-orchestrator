@@ -463,7 +463,7 @@ function WorkerRow({
             <span className="ac-mono flex-none text-nano text-text-2">{run?.model ?? '—'}</span>
             <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{ticketLabel ?? '—'}</span>
           </div>
-          <WorkerFeed agentId={worker.id} ws={ws} compact resizable label={`Live feed for ${worker.name}`} />
+          <WorkerFeed agentId={worker.id} ws={ws} compact resizable label={`Live feed for ${worker.name}`} onTicket={(id) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: id } })} />
           <div className="flex items-center gap-2 border-t border-line-1 px-2.5 py-1.5">
             <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-3">{spendLabel(run)}</span>
             <A to="/live" className="flex-none text-nano text-text-2 hover:text-text-1">

@@ -54,6 +54,7 @@ import { useExitPresence } from './motion';
 import { SearchPanel } from './SearchPanel';
 import { PlanTab } from './PlanTab';
 import { PlanTabStrip, usePlanTabs } from './PlanTabs';
+import { useTicketLink } from './ticket/TicketModal';
 import { DECISIONS_RAIL_WIDTH, DIVIDER_MAX, DIVIDER_MIN, clampDivider, readDivider, shouldSplit, useElementWidth, writeDivider } from './chatSplit';
 
 /** The answer shown in a note: the chosen option's label, else the first line of the free text. */
@@ -529,7 +530,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const running = (workers.data ?? []).filter((w) => w.status === 'running').length;
   const sessionStrip = runtimeLimitStrip(accounts.data, conductorRuntime);
 
-  const openTicket = useCallback((identifier: string) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } }), [go, ws]);
+  const openTicket = useTicketLink();
   const openWorker = useCallback((workerId: string) => go('/w/$ws/workers/$workerId', { params: { ws, workerId } }), [go, ws]);
 
   const replyTo = useMemo(() => (draft.replyToId ? (messages.data ?? []).find((m) => m.id === draft.replyToId) ?? null : null), [draft.replyToId, messages.data]);

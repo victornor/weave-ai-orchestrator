@@ -191,11 +191,13 @@ export interface WorkerFeedProps {
   showChrome?: boolean;
   /** Names the region for assistive tech. */
   label?: string;
+  /** Ticket identifiers in the transcript become tags that call this (VS-623). */
+  onTicket?: (id: string) => void;
   className?: string;
 }
 
 /** The feed: a run's status, its trace and its usage. */
-export function WorkerFeed({ agentId, runId, ws, global = false, compact = false, bodyHeight, resizable = false, showChrome = true, label = 'Worker live feed', className }: WorkerFeedProps): React.ReactElement {
+export function WorkerFeed({ agentId, runId, ws, global = false, compact = false, bodyHeight, resizable = false, showChrome = true, label = 'Worker live feed', onTicket, className }: WorkerFeedProps): React.ReactElement {
   const resolved = useWorkerRun(agentId, ws);
   // The worker's *current* run wins when it can be resolved; a specific `runId` (a decision's asking
   // run) is only the fallback, so a revision run that starts after the ask is what Watch follows.
@@ -255,6 +257,7 @@ export function WorkerFeed({ agentId, runId, ws, global = false, compact = false
             label={label}
             height={fixedHeight}
             maxHeight={fixedHeight === undefined ? TRACE_PANE_MAX_HEIGHT : undefined}
+            onTicket={onTicket}
             className={compact ? 'ac-compact-transcript' : undefined}
           />
         )}

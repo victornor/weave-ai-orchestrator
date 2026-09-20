@@ -65,7 +65,7 @@ function lineText(block: TranscriptBlock): string {
   }
 }
 
-export function ChatTrace({ events, className, reveal = false, runId = null }: { events: readonly RunEvent[]; className?: string; reveal?: boolean; runId?: string | null }): React.ReactElement {
+export function ChatTrace({ events, className, reveal = false, runId = null, onTicket }: { events: readonly RunEvent[]; className?: string; reveal?: boolean; runId?: string | null; onTicket?: (id: string) => void }): React.ReactElement {
   const rows = useMemo(() => groupConsecutiveTools(runEventsToTranscript(events)), [events]);
   // Only a line whose event arrived after this trace started watching the run streams in (VS-433);
   // a history read back or a join mid-turn is the baseline. The run id scopes that baseline (VS-440)
@@ -86,7 +86,7 @@ export function ChatTrace({ events, className, reveal = false, runId = null }: {
         ) : row.block.type === 'tool' ? (
           <ToolRow key={row.block.id} block={row.block} reveal={animate.has(row.block.id)} />
         ) : (
-          <TraceLine key={row.block.id} block={row.block} reveal={animate.has(row.block.id)} />
+          <TraceLine key={row.block.id} block={row.block} reveal={animate.has(row.block.id)} onTicket={onTicket} />
         ),
       )}
     </div>
@@ -201,14 +201,14 @@ function ToolGroup({ row }: { row: Extract<TranscriptRow, { type: 'tools' }> }):
   );
 }
 
-function TraceLine({ block, reveal }: { block: TranscriptBlock; reveal: boolean }): React.ReactElement {
+function TraceLine({ block, reveal, onTicket }: { block: TranscriptBlock; reveal: boolean; onTicket?: (id: string) => void }): React.ReactElement {
   const text = useStreamReveal(lineText(block), reveal);
   // Narration — and a runtime's own thinking — reads as work in progress, not as something addressed
   // to the human: italic, in the dimmest ink (HANDOFF §5).
   if (block.type === 'text') {
     return (
       <div data-trace-narration={block.thinking ? 'thinking' : 'text'} className="text-nano italic leading-relaxed text-text-4">
-        <Markdown source={text} className="text-nano italic text-text-4" />
+        <Markdown source={text} onTicket={onTicket} className="text-nano italic text-text-4" />
       </div>
     );
   }
@@ -276,6 +276,7 @@ export function ChatTurnTrace({
   actorName = 'weaver',
   contextWindowTokens,
   compactionAt,
+  onTicket,
 }: {
   trace: RunTrace;
   /** The workspace the remembered expansion set is scoped to. */
@@ -284,6 +285,8 @@ export function ChatTurnTrace({
   actorName?: string;
   contextWindowTokens?: number | null;
   compactionAt?: number | null;
+  /** Ticket identifiers in the opened trace's narration become tags that call this (VS-623). */
+  onTicket?: (id: string) => void;
 }): React.ReactElement {
   const [expanded, setExpanded] = useState<string[]>(() => readExpandedTraces(ws));
   useEffect(() => setExpanded(readExpandedTraces(ws)), [ws]);
@@ -304,7 +307,7 @@ export function ChatTurnTrace({
         <span className={cx('ac-mono text-nano', failed ? 'text-failed' : 'text-text-4')}>{actorName} did</span>
         <span className="ac-mono min-w-0 flex-1 truncate text-nano text-text-4">{parts.join(' · ')}</span>
       </button>
-      {open ? <ChatTrace events={events.data ?? []} className="v2-anim-fade mt-1 border-l border-line-1 pl-2.5" /> : null}
+      {open ? <ChatTrace events={events.data ?? []} onTicket={onTicket} className="v2-anim-fade mt-1 border-l border-line-1 pl-2.5" /> : null}
     </div>
   );
 }

@@ -27,6 +27,7 @@ export function RunTranscript({
   className,
   stream,
   runtimeId,
+  onTicket,
 }: {
   events: readonly RunEvent[];
   /** VS-595: the run's partial output; with `live`, the activity row and the streaming text render. */
@@ -54,6 +55,8 @@ export function RunTranscript({
    */
   maxHeight?: number;
   className?: string;
+  /** Ticket identifiers in prose, thinking and streamed text become tags that call this (VS-623). */
+  onTicket?: (id: string) => void;
 }): React.ReactElement {
   const partials = stream?.partials ?? [];
   const partialChars = partials.reduce((n, p) => n + p.text.length, 0);
@@ -69,10 +72,10 @@ export function RunTranscript({
         style={height !== undefined ? { height, maxHeight: 'none' } : maxHeight !== undefined ? { maxHeight } : undefined}
         className={cx('ac-scroll max-h-[calc(var(--ac-app-h)*0.5)] md:max-h-[calc(var(--ac-app-h)*0.6)]', className)}
       >
-        {live && events.length === 0 ? null : <Transcript events={events} className="gap-2" />}
+        {live && events.length === 0 ? null : <Transcript events={events} onTicket={onTicket} className="gap-2" />}
         {live ? (
           <div className="flex flex-col gap-2 p-3.5 pt-1">
-            <LivePartials partials={partials} />
+            <LivePartials partials={partials} onTicket={onTicket} />
             <LiveActivity events={events} partials={partials} lastPartialAt={stream?.lastPartialAt ?? null} partialSince={stream?.partialSince ?? null} runtimeId={runtimeId} />
           </div>
         ) : null}

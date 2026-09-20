@@ -116,6 +116,7 @@ interface LiveCardProps {
 }
 
 function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optionName, bodyHeight, resize, focused }: LiveCardProps): React.ReactElement {
+  const go = useGo();
   const { run } = useWorkerRun(cell.id, cell.ws);
   const runtimeId = run?.runtimeId ?? cell.runtimeId;
   const runtimeModels = useRuntimeModels(runtimeId, cell.ws);
@@ -155,7 +156,7 @@ function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optio
         {optionName ? <span className="v2-tag flex-none text-text-3">{optionName}</span> : null}
       </div>
       <ContextMeter view={context} compactionAt={compactionAt} className="shrink-0 border-b border-line-1 bg-bg-2 px-2.5 py-1" />
-      <WorkerFeed agentId={cell.id} ws={cell.ws} global bodyHeight={bodyHeight} showChrome={false} label={`${cell.name} live feed`} />
+      <WorkerFeed agentId={cell.id} ws={cell.ws} global bodyHeight={bodyHeight} showChrome={false} label={`${cell.name} live feed`} onTicket={(id) => go('/w/$ws/tickets/$ticketId', { params: { ws: cell.ws, ticketId: id } })} />
       {resize ? (
         <ResizeGrip
           height={resize.height}

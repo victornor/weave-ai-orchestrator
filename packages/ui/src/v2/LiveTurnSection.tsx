@@ -36,6 +36,8 @@ export interface LiveTurnSectionProps {
    * render whole.
    */
   mountTrace?: boolean;
+  /** Ticket identifiers in streamed text and trace narration become tags that call this (VS-623). */
+  onTicket?: (id: string) => void;
   className?: string;
 }
 
@@ -49,6 +51,7 @@ export function LiveTurnSection({
   showOutput = true,
   reveal = true,
   mountTrace = false,
+  onTicket,
   className,
 }: LiveTurnSectionProps): React.ReactElement {
   return (
@@ -59,8 +62,8 @@ export function LiveTurnSection({
             <span aria-hidden className="size-1.5 flex-none rounded-pill bg-working motion-safe:animate-[ac-pulse_1.6s_ease-in-out_infinite]" />
             Live run output — not sent yet
           </p>
-          <LivePartials partials={partials} />
-          {events.length > 0 || mountTrace ? <ChatTrace events={events} runId={runId} className="border-l border-line-1 pl-2.5" reveal={reveal} /> : null}
+          <LivePartials partials={partials} onTicket={onTicket} />
+          {events.length > 0 || mountTrace ? <ChatTrace events={events} runId={runId} onTicket={onTicket} className="border-l border-line-1 pl-2.5" reveal={reveal} /> : null}
         </div>
       ) : null}
       <LiveActivity events={events} partials={partials} lastPartialAt={lastPartialAt} partialSince={partialSince} runtimeId={runtimeId} />

@@ -52,12 +52,17 @@ The weaver chat and every planner chat SHALL render the live activity row — th
 
 ### Requirement: Role sessions show live progress
 
-A persistent role session's thread feed SHALL render the live turn the way the other conversation surfaces do: the streaming text and reasoning still being generated, each tool call and its result as they arrive, and the live activity row — all for the session agent's active run, so a ticketless session is never indistinguishable from an idle one. The live turn SHALL render below the conversation's delivered messages, where the turn's answer will land. When the turn ends, its transcript SHALL remain in the conversation as that turn's record, unchanged, with its final text appearing once. A turn that produced no final text SHALL NOT be announced with a system notice; a turn that failed, timed out or was cancelled SHALL still leave its real reason. Streaming SHALL affect only the run view: partial output SHALL NOT create or edit a thread message. A session whose runtime declares no partial output SHALL still say so in words, as the live row does.
+A persistent role session's thread feed SHALL render the live turn the way the other conversation surfaces do: the streaming text and reasoning still being generated, each tool call and its result as they arrive, and the live activity row — all for the session agent's active run, so a ticketless session is never indistinguishable from an idle one. The live turn SHALL render below the conversation's delivered messages, where the turn's answer will land. When the turn ends, its transcript SHALL remain in the conversation as that turn's record, unchanged, with its final text appearing once. A turn that produced no final text SHALL NOT be announced with a system notice; a turn that failed, timed out or was cancelled SHALL still leave its real reason. Streaming SHALL affect only the run view: partial output SHALL NOT create or edit a thread message. A session whose runtime declares no partial output SHALL still say so in words, as the live row does. A ticket identifier in the streaming text SHALL render as a clickable tag that opens the ticket, exactly as it does in the finished transcript, through the same shared linkifier.
 
 #### Scenario: A ticketless session works
 
 - **WHEN** a role session's agent has a live run
 - **THEN** its thread feed shows the streaming text, the tool calls as they arrive, and the live activity row for that run
+
+#### Scenario: An identifier in the streaming text is a tag
+
+- **WHEN** a session's live streaming text names a ticket identifier
+- **THEN** it renders as a clickable tag that opens the ticket, while the text is still streaming
 
 #### Scenario: The answer replaces the live turn
 

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: Ticket identifiers in a persistent session's chat are clickable and open
+  the ticket

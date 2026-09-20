@@ -19,22 +19,22 @@ import { Transcript } from '../components/Transcript';
 import { LiveActivity, LivePartials } from '../components/LiveActivity';
 import { Markdown } from '../components/Markdown';
 
-export function SessionTurn({ run, deliveredText }: { run: Run; deliveredText?: string | null }): React.ReactElement {
+export function SessionTurn({ run, deliveredText, onTicket }: { run: Run; deliveredText?: string | null; onTicket?: (id: string) => void }): React.ReactElement {
   const live = isActiveRun(run.status);
   const stream = useRunEventStream(run.id, { live, newest: !live });
   const { events, partials, lastPartialAt, partialSince } = stream;
   const hasText = events.some((e) => e.type === 'assistant.text');
   return (
     <div data-session-turn={run.id} className="flex flex-col gap-2">
-      {events.length > 0 ? <Transcript events={events} /> : null}
+      {events.length > 0 ? <Transcript events={events} onTicket={onTicket} /> : null}
       {live ? (
         <div className="flex flex-col gap-2">
-          <LivePartials partials={partials} />
+          <LivePartials partials={partials} onTicket={onTicket} />
           <LiveActivity events={events} partials={partials} lastPartialAt={lastPartialAt} partialSince={partialSince} runtimeId={run.runtimeId} />
         </div>
       ) : null}
       {!live && !hasText && deliveredText ? (
-        <Markdown source={deliveredText} breaks className="text-body leading-relaxed text-text-body" />
+        <Markdown source={deliveredText} onTicket={onTicket} breaks className="text-body leading-relaxed text-text-body" />
       ) : null}
     </div>
   );

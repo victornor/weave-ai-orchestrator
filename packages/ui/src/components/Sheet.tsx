@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useActiveV2RootTheme } from '../lib/v2ThemeScope';
 import { cx } from '../lib/cx';
 
 /** How far the grab handle has to travel down before letting go dismisses the sheet. */
@@ -85,6 +86,11 @@ export function Sheet({
   useDismiss(open, onClose);
   const ref = useRef<HTMLDivElement>(null);
   useFocusTrap(open, ref);
+  // The dialog is portalled into `document.body`, outside `.v2-root`; mirror the app's theme onto
+  // the portal so its tokens (including the backdrop's `--overlay`) follow light/dark, not the
+  // document default (VS-623). `V1` has no `.v2-root`, so this is a no-op there.
+  const [self, setSelf] = useState<HTMLElement | null>(null);
+  const theme = useActiveV2RootTheme(self);
   const grabbedAt = useRef<number | null>(null);
   const [dragged, setDragged] = useState(0);
   useEffect(() => {
@@ -103,7 +109,7 @@ export function Sheet({
   if (!open || typeof document === 'undefined') return null;
 
   return createPortal(
-    <div className="ac-viewport fixed z-50 flex items-end justify-center sm:items-center" role="presentation">
+    <div ref={setSelf} data-theme={theme ?? undefined} className="ac-viewport fixed z-50 flex items-end justify-center sm:items-center" role="presentation">
       <div className="absolute inset-0 bg-(--overlay)" onClick={onClose} aria-hidden />
       <div
         ref={ref}
@@ -168,9 +174,12 @@ export function Dialog(props: Parameters<typeof Sheet>[0]): React.ReactElement |
 /** Right-hand details pane on desktop, full-screen push on phone. */
 export function Drawer({ open, onClose, title, children }: { open: boolean; onClose: () => void; title?: string; children: ReactNode }): React.ReactElement | null {
   useDismiss(open, onClose);
+  // Same theme mirror as `Sheet`: a portal into `document.body` sits outside `.v2-root` (VS-623).
+  const [self, setSelf] = useState<HTMLElement | null>(null);
+  const theme = useActiveV2RootTheme(self);
   if (!open || typeof document === 'undefined') return null;
   return createPortal(
-    <div className="ac-viewport fixed z-40 flex justify-end">
+    <div ref={setSelf} data-theme={theme ?? undefined} className="ac-viewport fixed z-40 flex justify-end">
       <div className="absolute inset-0 bg-(--overlay)" onClick={onClose} aria-hidden />
       <div
         role="dialog"

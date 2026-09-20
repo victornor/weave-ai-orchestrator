@@ -397,6 +397,26 @@ describe('run engine', () => {
     expect(h.db.all('SELECT 1 FROM run_events WHERE run_id = ? AND type = ?', [run.id, 'assistant.text'])).toHaveLength(1);
   });
 
+  // VS-601: a running tool's output is a `tool_input` partial; the tool.result with the same partId supersedes it.
+  it('redacts a tool output partial and drops it when the tool.result completes', async () => {
+    let liveDuring: { partials: Array<{ text: string }> } | null = null;
+    class ToolRuntime extends FakeRuntime {
+      override async runTurn(input: TurnInput, sink: TurnSink): Promise<TurnResult> {
+        sink.onPartial?.({ kind: 'tool_input', partId: 'c1:out', toolCallId: 'c1', text: `token ${input.env.AC_RUN_TOKEN!} printed\n` });
+        await new Promise((r) => setTimeout(r, 120));
+        liveDuring = h.services.runs!.live((await h.db.all<{ id: string }>('SELECT id FROM runs'))[0]!.id) as typeof liveDuring;
+        sink.onEvent({ ts: nowIso(), type: 'tool.result', payload: { id: 'c1', partId: 'c1:out', content: 'ok' } });
+        return super.runTurn(input, sink);
+      }
+    }
+    h.ctx.registries.runtimes.set('fake', new ToolRuntime());
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    const run = await runOnce();
+    expect(liveDuring!.partials[0]!.text).toContain('[redacted]');
+    expect(liveDuring!.partials[0]!.text).not.toContain('eyJ');
+    expect(h.services.runs!.live(run.id)).toEqual({ partials: [] });
+  });
+
   // VS-92: a role's secrets in its workers' environment, from the store as well as the host.
   describe("a role's secrets", () => {
     /** Not a credential: a fixture, long enough for makeRedactor's 8-character floor. */

@@ -4,9 +4,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import { AC_ENV, ProviderProfileSchema, WorkspaceConfigSchema, type ProviderProfile } from '@weave-ai/shared';
+import { AC_ENV, ProviderProfileSchema, WorkspaceConfigSchema, validateRuntimeOptions, type ProviderProfile } from '@weave-ai/shared';
 import type { RuntimeEvent, TurnHandle, TurnInput, TurnSink } from '@weave-ai/runtime-sdk';
 import { createAdapter } from '../src/index.js';
+import { PRESET_NAMES, loadPreset } from '../src/index.js';
 import { Semaphore } from '../src/semaphore.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -17,6 +18,30 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const base = (over: Partial<ProviderProfile>): ProviderProfile => ({ baseUrl: 'https://llm.example.test/v1', auth: 'bearer', headers: {}, models: {}, ...over });
 const json = (status: number, body: unknown): Response => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+
+describe('preset catalogue', () => {
+  it('is served through the runtime package, with a description per preset', () => {
+    expect(PRESET_NAMES).toContain('openai');
+    expect(PRESET_NAMES).toContain('openai-compatible');
+    const openai = loadPreset('openai');
+    expect(openai?.description).toBeTruthy();
+    expect(openai?.compat?.maxTokensParam).toBe('max_completion_tokens');
+    expect(loadPreset('not-a-preset')).toBeUndefined();
+  });
+});
+
+describe('provider administration surfaces', () => {
+  it('declares every sampling parameter in its configSchema and validates their ranges', () => {
+    const schema = createAdapter({ entry: FAKE }).configSchema();
+    const props = (schema as { properties: Record<string, unknown> }).properties;
+    for (const key of ['maxOutputTokens', 'temperature', 'topP', 'frequencyPenalty', 'presencePenalty', 'seed', 'stop', 'toolChoice', 'parallelToolCalls', 'responseFormat', 'extraBody', 'extraHeaders']) {
+      expect(props, key).toHaveProperty(key);
+    }
+    expect(validateRuntimeOptions(schema, { temperature: 3 })).toMatchObject({ valid: false, byKey: { temperature: 'must be at most 2' } });
+    expect(validateRuntimeOptions(schema, { topP: -1 })).toMatchObject({ valid: false, byKey: { topP: 'must be at least 0' } });
+    expect(validateRuntimeOptions(schema, { nope: 1 })).toMatchObject({ valid: false, byKey: { nope: 'not an option this runtime understands' } });
+  });
+});
 
 describe('model discovery', () => {
   it('merges configured and discovered models, takes windows from contextField, and lists efforts from the preset', async () => {

@@ -59,6 +59,12 @@ vi.mock('../api/hooks', () => ({
   useSetModels: () => ({ mutate: (v: unknown) => state.modelWrites.push(v) }),
   useWorkspaceSummary: () => ({ data: { workspace: { id: 'acme', name: 'Acme', ticketPrefix: 'ACME' }, config: {}, plugins: state.plugins } }),
   usePatchConfig: () => ({ mutate: () => undefined, mutateAsync: async () => undefined }),
+  useProviders: () => ({ isLoading: false, isError: false, data: { providers: [], presets: [] } }),
+  useSaveProvider: () => ({ mutate: () => undefined, mutateAsync: async () => undefined, isError: false }),
+  useDeleteProvider: () => ({ mutate: () => undefined }),
+  useSetProviderSecret: () => ({ mutate: () => undefined, isPending: false }),
+  useClearProviderSecret: () => ({ mutate: () => undefined, isPending: false }),
+  useTestProvider: () => ({ mutate: () => undefined, isPending: false, isError: false }),
 }));
 
 vi.mock('../settings/sections', () => ({
@@ -134,7 +140,8 @@ describe('every listed section renders a real body', () => {
     updates: 'updates-body', security: 'security-body', 'host-tools': 'host-tools-body',
     dictation: 'dictation-body', device: 'device-note-body',
     general: 'Ticket prefix', weaver: 'Reviews every approval before you see it',
-    models: 'Overridden here: 2 agents, 0 worker-options catalogs.', projects: 'projects-body', knowledge: 'Curation',
+    models: 'Overridden here: 2 agents, 0 worker-options catalogs.', providers: 'None configured.',
+    projects: 'projects-body', knowledge: 'Curation',
     'worker-memory': 'Effective limit',
     approvals: 'Proposal approval', channels: 'channels-body', presentation: 'presentation-body',
     plugins: 'No plugins are configured for this workspace, or the daemon.',

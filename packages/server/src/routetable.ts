@@ -62,6 +62,11 @@ export const ROUTES: RouteRow[] = [
 
   { method: 'GET', path: `${W}/models`, tag: 'workspace', summary: 'Effective model settings plus locked flags for daemon overlays', auth: 'session' },
   { method: 'PUT', path: `${W}/models`, tag: 'workspace', summary: 'Replace unlocked model settings; omitted workerOptions keeps the catalog', auth: 'session', mutating: true },
+  { method: 'GET', path: `${W}/providers`, tag: 'workspace', summary: 'This workspace\'s weave-runtime providers with their secret state, plus the preset catalogue', auth: 'session' },
+  { method: 'PUT', path: `${W}/providers/{id}`, tag: 'workspace', summary: 'Create or replace a weave-runtime provider profile', auth: 'session', mutating: true },
+  { method: 'DELETE', path: `${W}/providers/{id}`, tag: 'workspace', summary: 'Remove a weave-runtime provider profile', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/providers/{id}/secret`, tag: 'workspace', summary: 'Set or replace the provider\'s API key in the workspace secret store; the value is never returned', auth: 'session', mutating: true },
+  { method: 'DELETE', path: `${W}/providers/{id}/secret`, tag: 'workspace', summary: 'Clear the provider\'s API key from the workspace secret store', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/providers/{id}/test`, tag: 'workspace', summary: 'Probe one weave-runtime model provider: models list, streamed answer, usage, tool call, output-cap spelling', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/projects`, tag: 'projects', summary: 'List projects', auth: 'session' },
   { method: 'POST', path: `${W}/projects`, tag: 'projects', summary: 'Add a project — 202 with the cloning row and the job doing the work', auth: 'session', mutating: true },

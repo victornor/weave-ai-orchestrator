@@ -4,7 +4,7 @@
  * with their tag, diff footer and reset.
  */
 import { useEffect, useState } from 'react';
-import { DEFAULT_MODEL_SETTING, WorkerModelOptionSchema, WorkerOptionsArraySchema, runtimeOptionProperties, type RuntimeOptionProperty } from '@weave-ai/shared';
+import { DEFAULT_MODEL_SETTING, WorkerModelOptionSchema, WorkerOptionsArraySchema, runtimeOptionProperties, validateRuntimeOptions, type RuntimeOptionProperty } from '@weave-ai/shared';
 import { useDaemonModels, useModels, useRuntimeModels, useRuntimes, useSetDaemonModels, useSetModels } from '../../../api/hooks';
 import type * as T from '../../../api/types';
 import { Button } from '../../../components/Button';
@@ -86,7 +86,11 @@ function OptionControl({ prop, value, onChange }: {
 function RuntimeOptionsEditor({ runtime, runtimes, options, onChange }: {
   runtime: string; runtimes: T.RuntimeInfo[]; options: T.RuntimeOptions | undefined; onChange: (next: T.RuntimeOptions) => void;
 }): React.ReactElement | null {
-  const fields = runtimeOptionProperties(runtimes.find((r) => r.id === runtime)?.configSchema);
+  const schema = runtimes.find((r) => r.id === runtime)?.configSchema;
+  const fields = runtimeOptionProperties(schema);
+  // The same declaration the daemon validates a save with (VS-610), so an out-of-range value the
+  // generated control allowed still reads as the schema's own message rather than saving silently.
+  const issues = validateRuntimeOptions(schema, options).byKey;
   if (fields.length === 0) return null;
   const set = (key: string, value: T.RuntimeOptionValue | undefined): void => {
     const next = { ...(options ?? {}) };
@@ -103,6 +107,7 @@ function RuntimeOptionsEditor({ runtime, runtimes, options, onChange }: {
             <span className="ac-label">{key}</span>
             <OptionControl prop={prop} value={options?.[key]} onChange={(v) => set(key, v)} />
             {prop.description ? <span className="text-nano text-text-3">{prop.description}</span> : null}
+            {issues[key] ? <span role="alert" className="text-nano text-failed">{key} {issues[key]}</span> : null}
           </label>
         ))}
       </div>

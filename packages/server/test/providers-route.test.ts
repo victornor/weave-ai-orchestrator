@@ -36,6 +36,70 @@ async function endpoint(): Promise<{ baseUrl: string; seen: Array<{ url: string;
 }
 
 const post = (h: Harness, path: string, payload: unknown = {}) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/w/ws1${path}`, { method: 'POST', headers: { ...authed(), 'content-type': 'application/json' }, body: JSON.stringify(payload) }));
+const req = (h: Harness, method: string, path: string, payload?: unknown) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/w/ws1${path}`, { method, headers: { ...authed(), 'content-type': 'application/json' }, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}) }));
+
+/** Make `saveConfig` real enough for a route test: it swaps the in-memory config, as the daemon's does. */
+function persistConfig(h: Harness): { saved: Array<{ providers: Record<string, unknown> }> } {
+  const saved: Array<{ providers: Record<string, unknown> }> = [];
+  h.runtime.ctx.saveConfig = async (next) => { saved.push(next as never); h.runtime.ctx.config = next; };
+  return { saved };
+}
+
+describe('provider administration', () => {
+  it('lists each provider with its secret state and model ids, and the preset catalogue, never a key', async () => {
+    harness = makeHarness();
+    harness.runtime.ctx.config.providers['openrouter'] = { baseUrl: 'https://openrouter.ai/api/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_OPENROUTER_KEY', models: { 'deepseek/deepseek-r1': {} } };
+    harness.runtime.ctx.config.providers['local'] = { baseUrl: 'http://127.0.0.1:11434/v1', auth: 'none', headers: {}, models: { llama: {} } };
+    harness.runtime.services.secrets.put({ kind: 'human', id: 'h' } as never, { name: 'WEAVE_LLM_OPENROUTER_KEY' }, 'sk-not-real-000000');
+    const res = await req(harness, 'GET', '/providers');
+    expect(res.status).toBe(200);
+    const json = await res.json() as { providers: Array<{ id: string; secretConfigured: boolean; models: string[] }>; presets: Array<{ id: string; description: string }> };
+    expect(json.providers.map((p) => `${p.id}:${p.secretConfigured}:${p.models.join(',')}`)).toEqual(['openrouter:true:deepseek/deepseek-r1', 'local:false:llama']);
+    expect(json.presets.map((p) => p.id)).toContain('openai');
+    expect(json.presets.find((p) => p.id === 'openai')?.description).toBeTruthy();
+    expect(JSON.stringify(json)).not.toContain('sk-not-real');
+  });
+
+  it('creates, updates and removes a profile, and refuses an invalid one without writing', async () => {
+    harness = makeHarness();
+    const { saved } = persistConfig(harness);
+    const profile = { baseUrl: 'https://api.example.test/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_EXAMPLE_KEY', models: { m1: { contextWindow: 8000 } } };
+    const created = await req(harness, 'PUT', '/providers/example', profile);
+    expect(created.status).toBe(200);
+    expect((await created.json() as { models: string[] }).models).toEqual(['m1']);
+    expect(Object.keys(saved.at(-1)!.providers)).toEqual(['example']);
+    // A malformed profile is a validation 400 and does not write.
+    const before = saved.length;
+    const bad = await req(harness, 'PUT', '/providers/example', { baseUrl: 'not a url' });
+    expect(bad.status).toBe(400);
+    expect((await bad.json() as { error: { code: string } }).error.code).toBe('validation');
+    expect(saved).toHaveLength(before);
+    // Remove.
+    expect((await req(harness, 'DELETE', '/providers/example')).status).toBe(200);
+    expect(saved.at(-1)!.providers).toEqual({});
+    expect((await req(harness, 'DELETE', '/providers/example')).status).toBe(404);
+  });
+
+  it('sets and clears a provider key, never returning its value', async () => {
+    harness = makeHarness();
+    harness.runtime.ctx.config.providers['mock'] = { baseUrl: 'http://127.0.0.1:1/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_MOCK_KEY', models: { m1: {} } };
+    harness.runtime.ctx.config.providers['nokeyname'] = { baseUrl: 'http://127.0.0.1:1/v1', auth: 'none', headers: {}, models: {} };
+    const set = await post(harness, '/providers/mock/secret', { value: 'sk-secret-value-000' });
+    expect(set.status).toBe(200);
+    const setJson = await set.json() as { ok: boolean; configured: boolean; secretName: string };
+    expect(setJson).toMatchObject({ ok: true, configured: true, secretName: 'WEAVE_LLM_MOCK_KEY' });
+    expect(JSON.stringify(setJson)).not.toContain('sk-secret-value');
+    expect(harness.runtime.services.secrets.has('WEAVE_LLM_MOCK_KEY')).toBe(true);
+    // A profile that names no apiKeySecret has nowhere to hold one.
+    const refused = await post(harness, '/providers/nokeyname/secret', { value: 'sk-x' });
+    expect(refused.status).toBe(400);
+    // Clear.
+    const cleared = await req(harness, 'DELETE', '/providers/mock/secret');
+    expect((await cleared.json() as { configured: boolean }).configured).toBe(false);
+    expect(harness.runtime.services.secrets.has('WEAVE_LLM_MOCK_KEY')).toBe(false);
+  });
+});
+
 
 describe('POST /providers/:id/test', () => {
   it('runs the probes with the provider\'s secret and reports each capability, never the key', async () => {

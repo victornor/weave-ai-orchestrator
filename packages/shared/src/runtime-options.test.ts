@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { workerOptionErrors } from './runtime-options.js';
+import { ProviderModelSchema } from './config.js';
+import { PROVIDER_MODEL_ENTRY_SCHEMA, runtimeOptionProperties, workerOptionErrors } from './runtime-options.js';
 
 describe('workerOptionErrors', () => {
   const runtime = { configSchema: () => ({ type: 'object', properties: { limit: { type: 'integer', maximum: 10 } }, additionalProperties: false }) };
@@ -18,5 +19,11 @@ describe('workerOptionErrors', () => {
 
   it('allows an explicitly unconfigured option', () => {
     expect(workerOptionErrors(() => undefined, [{ id: 'deep', runtime: null }])).toEqual([]);
+  });
+});
+
+describe('PROVIDER_MODEL_ENTRY_SCHEMA', () => {
+  it('declares exactly the fields ProviderModelSchema carries, so a schema change fails here', () => {
+    expect(runtimeOptionProperties(PROVIDER_MODEL_ENTRY_SCHEMA).map(([key]) => key)).toEqual(Object.keys(ProviderModelSchema.shape));
   });
 });

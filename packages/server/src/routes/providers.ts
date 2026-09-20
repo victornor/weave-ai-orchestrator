@@ -7,6 +7,7 @@
  *   key in the workspace secret store (the `routes/channels.ts` pattern). The value never appears
  *   in a response, a log line, an event or `workspace.yaml`.
  * - `POST /providers/:id/test` (VS-609) — the on-demand conformance probes.
+ * - `POST /providers/:id/discover` (VS-635) — fetch the endpoint's model list for the models editor.
  *
  * VS-633: the same handlers serve two scopes. Mounted under `/api/daemon/providers` they administer the
  * daemon's providers and its own secret store (visible to every workspace); mounted per workspace they
@@ -27,8 +28,10 @@ import { requireOperator } from '../auth.js';
 
 /** The probe as the `weave` runtime package exports it. Loaded by specifier at call time, like the runtime itself (`loadAdapter` in daemon.ts): the server has no build-time dependency on a runtime package. */
 export type ProbeFn = (o: { profile: ProviderProfile; model: string; apiKey?: string | undefined }) => Promise<{ ok: boolean; checks: Array<{ name: string; ok: boolean; detail: string }>; detected: Record<string, unknown> }>;
+/** VS-635: the runtime package's provider-model discovery, so the Settings fetch and a run agree. */
+export type DiscoverFn = (o: { profile: ProviderProfile; apiKey?: string | undefined }) => Promise<{ ok: boolean; models: Array<{ id: string; contextWindow?: number }>; error?: string }>;
 const RUNTIME_PACKAGE = '@weave-ai/runtime-weave';
-interface RuntimeModule { probeProvider?: ProbeFn; PRESET_NAMES?: readonly string[]; loadPreset?: (name: string) => { description?: string } | undefined }
+interface RuntimeModule { probeProvider?: ProbeFn; listProviderModels?: DiscoverFn; PRESET_NAMES?: readonly string[]; loadPreset?: (name: string) => { description?: string } | undefined }
 async function loadRuntime(): Promise<RuntimeModule> {
   return (await import(RUNTIME_PACKAGE)) as RuntimeModule;
 }
@@ -36,6 +39,13 @@ async function loadProbe(): Promise<ProbeFn> {
   try {
     const mod = await loadRuntime();
     if (mod.probeProvider) return mod.probeProvider;
+  } catch { /* fall through */ }
+  throw new OcError('unavailable', 'the weave runtime package is not available in this daemon');
+}
+async function loadDiscover(): Promise<DiscoverFn> {
+  try {
+    const mod = await loadRuntime();
+    if (mod.listProviderModels) return mod.listProviderModels;
   } catch { /* fall through */ }
   throw new OcError('unavailable', 'the weave runtime package is not available in this daemon');
 }
@@ -132,8 +142,10 @@ function daemonScope(c: Context<AppEnv>, deps: AppDeps): Scope {
 
 const TestBodySchema = z.object({ model: z.string().min(1).optional() });
 const SecretBodySchema = z.object({ value: z.string().min(1) });
+/** VS-635: a discovery request may name the profile being edited (before it is saved) and a key typed but not yet saved. */
+const DiscoverBodySchema = z.object({ profile: ProviderProfileSchema.optional(), apiKey: z.string().min(1).optional() });
 
-export function providerRoutes(deps: { probe?: ProbeFn; daemon?: AppDeps } = {}): Hono<AppEnv> {
+export function providerRoutes(deps: { probe?: ProbeFn; discover?: DiscoverFn; daemon?: AppDeps } = {}): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   const scopeOf = (c: Context<AppEnv>): Scope => (deps.daemon ? daemonScope(c, deps.daemon) : workspaceScope(c));
   const viewOf = (scope: Scope, id: string, profile: ProviderProfile, source?: ConfigSource): ProviderView => ({
@@ -218,6 +230,21 @@ export function providerRoutes(deps: { probe?: ProbeFn; daemon?: AppDeps } = {})
     return c.json({ ok: true, configured: false, secretName: profile.apiKeySecret ?? null });
   });
 
+  // VS-635: fetch the provider's model list from its endpoint, for the Settings models editor. Read-only:
+  // it never saves the (draft) profile or the key, and no key value is ever returned.
+  app.post('/:id/discover', async (c) => {
+    const scope = scopeOf(c);
+    const id = c.req.param('id');
+    const parsed = DiscoverBodySchema.safeParse(await body(c, z.record(z.string(), z.unknown())));
+    if (!parsed.success) throw new OcError('validation', `the discovery request for ${id} is invalid`, { issues: parsed.error.issues });
+    const stored = scope.view().find((e) => e.id === id)?.profile;
+    const profile = parsed.data.profile ?? stored;
+    if (!profile) throw new OcError('not_found', `provider ${id} is not configured ${scope.level === 'daemon' ? 'in the daemon settings' : 'in this workspace'}`);
+    const apiKey = parsed.data.apiKey ?? (profile.apiKeySecret ? scope.secretValue(profile.apiKeySecret) ?? undefined : undefined);
+    const result = await (deps.discover ?? await loadDiscover())({ profile, apiKey });
+    return c.json({ provider: id, ...result });
+  });
+
   app.post('/:id/test', async (c) => {
     const scope = scopeOf(c);
     const id = c.req.param('id');
@@ -225,7 +252,7 @@ export function providerRoutes(deps: { probe?: ProbeFn; daemon?: AppDeps } = {})
     if (!profile) throw new OcError('not_found', `provider ${id} is not configured ${scope.level === 'daemon' ? 'in the daemon settings' : 'in this workspace'}`);
     const { model: asked } = await body(c, TestBodySchema);
     const model = asked ?? Object.keys(profile.models)[0];
-    if (!model) throw new OcError('validation', `name a model to test: provider ${id} lists none`);
+    if (!model) throw new OcError('validation', `provider ${id} has no models; add one on the Providers page or pass a model to test`);
     const apiKey = profile.apiKeySecret ? scope.secretValue(profile.apiKeySecret) ?? undefined : undefined;
     if (profile.auth !== 'none' && profile.apiKeySecret && !apiKey) {
       return c.json({ ok: false, provider: id, model, checks: [{ name: 'api key', ok: false, detail: `the secret ${profile.apiKeySecret} has no value in ${scope.level === 'daemon' ? 'the daemon settings' : 'this workspace or the daemon settings'}` }], detected: {} });

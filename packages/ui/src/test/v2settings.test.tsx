@@ -21,6 +21,8 @@ const state = vi.hoisted(() => ({
     workers: null,
     workerOptions: null as unknown[] | null,
   } as Record<string, unknown>,
+  runtimes: [{ id: 'claude', displayName: 'Claude Code', detection: { status: 'available' }, capabilities: {} }] as unknown[],
+  runtimeModels: [] as Array<{ id: string; label: string; efforts?: string[] }>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -51,8 +53,8 @@ vi.mock('../api/hooks', () => ({
   useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
   useDecisionsMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
   useIncidents: () => ({ data: { items: [] } }),
-  useRuntimes: () => ({ data: [{ id: 'claude', displayName: 'Claude Code', detection: { status: 'available' }, capabilities: {} }] }),
-  useRuntimeModels: () => ({ data: [] }),
+  useRuntimes: () => ({ data: state.runtimes }),
+  useRuntimeModels: () => ({ data: state.runtimeModels }),
   useDaemonModels: () => ({ data: state.daemonModels }),
   useSetDaemonModels: () => ({ mutate: (v: unknown) => state.daemonWrites.push(v) }),
   useModels: () => ({ isLoading: false, data: state.workspaceModels }),
@@ -65,6 +67,7 @@ vi.mock('../api/hooks', () => ({
   useSetProviderSecret: () => ({ mutate: () => undefined, isPending: false }),
   useClearProviderSecret: () => ({ mutate: () => undefined, isPending: false }),
   useTestProvider: () => ({ mutate: () => undefined, isPending: false, isError: false }),
+  useDiscoverProviderModels: () => ({ mutate: () => undefined, isPending: false }),
   useMcpServers: () => ({ isLoading: false, isError: false, data: { servers: [] } }),
   useSaveMcpServer: () => ({ mutate: () => undefined, mutateAsync: async () => undefined, isError: false }),
   useDeleteMcpServer: () => ({ mutate: () => undefined }),
@@ -96,6 +99,8 @@ beforeEach(() => {
   state.modelWrites = [];
   state.daemonWrites = [];
   state.plugins = [];
+  state.runtimes = [{ id: 'claude', displayName: 'Claude Code', detection: { status: 'available' }, capabilities: {} }];
+  state.runtimeModels = [];
   state.workspaceModels = {
     weaver: { runtime: 'claude', model: 'opus', effort: 'max' },
     workers: { runtime: 'claude', model: 'sonnet', effort: 'high' },
@@ -331,5 +336,32 @@ describe('the workspace model overrides', () => {
     fireEvent.click(screen.getByText('Cancel'));
     expect(screen.queryByRole('button', { name: /Add option/ })).not.toBeInTheDocument();
     expect(state.modelWrites).toHaveLength(0);
+  });
+
+  it('says the built-in agent has no models and links to Providers (VS-635)', () => {
+    state.daemonModels = { weaver: { runtime: 'weave', model: null }, workers: null, workerOptions: null };
+    state.search = { section: 'models' };
+    render(<V2Settings />);
+    expect(screen.getByText(/No models are configured for the built-in agent/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Add one on the Providers page/ })).toBeInTheDocument();
+  });
+
+  it('creates a daemon worker option on a provider model of the built-in agent (VS-635)', () => {
+    state.runtimes = [
+      { id: 'claude', displayName: 'Claude Code', detection: { status: 'available' }, capabilities: {} },
+      { id: 'weave', displayName: 'Weave Agent', detection: { status: 'available' }, capabilities: {} },
+    ];
+    state.runtimeModels = [{ id: 'codeify/gpt-x', label: 'gpt-x (codeify)' }];
+    state.search = { section: 'models' };
+    render(<V2Settings />);
+    fireEvent.click(screen.getByRole('button', { name: /Add option/ }));
+    fireEvent.change(screen.getByLabelText('New option id'), { target: { value: 'builtin' } });
+    fireEvent.change(screen.getByLabelText('New option description'), { target: { value: 'The built-in agent' } });
+    fireEvent.change(screen.getByLabelText('new option runtime'), { target: { value: 'weave' } });
+    fireEvent.change(screen.getByLabelText('new option model'), { target: { value: 'codeify/gpt-x' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(state.daemonWrites.at(-1)).toEqual({
+      workerOptions: [{ id: 'builtin', description: 'The built-in agent', runtime: 'weave', model: 'codeify/gpt-x' }],
+    });
   });
 });

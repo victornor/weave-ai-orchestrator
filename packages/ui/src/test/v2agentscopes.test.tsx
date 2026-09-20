@@ -17,7 +17,8 @@ const state = vi.hoisted(() => ({
   saves: [] as Array<{ scope: string; id: string }>,
   deletes: [] as Array<{ scope: string; id: string }>,
   hides: [] as Array<{ id: string; disabled: boolean }>,
-  tests: [] as Array<{ scope: string; id: string }>,
+  tests: [] as Array<{ scope: string; id: string; model?: string }>,
+  discoveries: [] as Array<{ scope: string; id: string }>,
   secrets: [] as Array<{ scope: string; id: string; value: string }>,
 }));
 
@@ -69,7 +70,8 @@ vi.mock('../api/hooks', () => {
     useSetProviderDisabled: () => ({ mutate: (v: { id: string; disabled: boolean }) => { state.hides.push(v); } }),
     useSetProviderSecret: (scope = 'workspace') => ({ mutate: (v: { id: string; value: string }) => { state.secrets.push({ scope, ...v }); }, isPending: false }),
     useClearProviderSecret: () => ({ mutate: () => undefined, isPending: false }),
-    useTestProvider: (scope = 'workspace') => ({ mutate: (v: { id: string }, o?: { onSuccess?: (r: unknown) => void }) => { state.tests.push({ scope, id: v.id }); o?.onSuccess?.({ ok: true, provider: v.id, model: 'm1', checks: [{ name: 'models list', ok: true, detail: '1 model' }], detected: {} }); }, isPending: false, isError: false, error: null }),
+    useTestProvider: (scope = 'workspace') => ({ mutate: (v: { id: string; model?: string }, o?: { onSuccess?: (r: unknown) => void }) => { state.tests.push({ scope, id: v.id, model: v.model }); o?.onSuccess?.({ ok: true, provider: v.id, model: 'm1', checks: [{ name: 'models list', ok: true, detail: '1 model' }], detected: {} }); }, isPending: false, isError: false, error: null }),
+    useDiscoverProviderModels: (scope = 'workspace') => ({ mutate: (v: { id: string }, o?: { onSuccess?: (r: unknown) => void }) => { state.discoveries.push({ scope, id: v.id }); o?.onSuccess?.({ provider: v.id, ok: true, models: [{ id: 'm1' }] }); }, isPending: false, isError: false, error: null }),
     useMcpServers: (scope = 'workspace') => ({ isLoading: false, isError: false, data: scope === 'daemon' ? daemonMcp : wsMcp }),
     useSaveMcpServer: (scope = 'workspace') => ({ mutate: () => undefined, mutateAsync: async (v: { name: string }) => { state.saves.push({ scope, id: v.name }); }, isError: false }),
     useDeleteMcpServer: (scope = 'workspace') => ({ mutate: (id: string) => { state.deletes.push({ scope, id }); } }),
@@ -87,7 +89,7 @@ vi.mock('../settings/sections', () => ({
 
 const { V2Settings } = await import('../v2/settings/V2Settings');
 
-beforeEach(() => { state.scopes = []; state.saves = []; state.deletes = []; state.hides = []; state.tests = []; state.secrets = []; });
+beforeEach(() => { state.scopes = []; state.saves = []; state.deletes = []; state.hides = []; state.tests = []; state.discoveries = []; state.secrets = []; });
 afterEach(() => { cleanup(); delete document.documentElement.dataset['theme']; });
 
 const openDaemon = (section: string): void => { state.search = { section }; render(<V2Settings />); };
@@ -113,8 +115,9 @@ describe.each(['light', 'dark'] as const)('in the %s theme', (theme) => {
       fireEvent.change(screen.getByLabelText('dp API key'), { target: { value: 'sk-daemon-secret' } });
       fireEvent.click(screen.getByRole('button', { name: 'Save key' }));
       expect(state.secrets).toEqual([{ scope: 'daemon', id: 'dp', value: 'sk-daemon-secret' }]);
+      fireEvent.change(screen.getByLabelText('dp model to test'), { target: { value: 'm1' } });
       fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
-      expect(state.tests).toEqual([{ scope: 'daemon', id: 'dp' }]);
+      expect(state.tests).toEqual([{ scope: 'daemon', id: 'dp', model: 'm1' }]);
       expect(screen.getByText('models list')).toBeInTheDocument();
       expect(document.body.textContent).not.toContain('sk-daemon-secret');
     });
@@ -141,8 +144,9 @@ describe.each(['light', 'dark'] as const)('in the %s theme', (theme) => {
     it('tests an inherited provider, and can hide it from this workspace', () => {
       openWorkspace('providers');
       fireEvent.click(screen.getByRole('button', { name: /dp/ }));
+      fireEvent.change(screen.getByLabelText('dp model to test'), { target: { value: 'm1' } });
       fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
-      expect(state.tests).toEqual([{ scope: 'workspace', id: 'dp' }]);
+      expect(state.tests).toEqual([{ scope: 'workspace', id: 'dp', model: 'm1' }]);
       fireEvent.click(screen.getByRole('button', { name: 'Hide here' }));
       expect(state.hides).toEqual([{ id: 'dp', disabled: true }]);
     });

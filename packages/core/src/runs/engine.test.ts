@@ -2454,6 +2454,155 @@ describe('run engine', () => {
       expect(rows[0]!.body).toMatch(/usage limit/);
       expect(rows[0]!.body).not.toContain('quota_exceeded');
     });
+
+    describe('a resumed session turn still reports (VS-598)', () => {
+      /**
+       * The real watchdog sequence: the cut turn goes through `finalize` and the delivery step itself
+       * (so it posts its own "interrupted" notice), then the supervisor enqueues a retry wake with no
+       * thread context and the resumed turn runs.
+       */
+      const IDLE_RESULT = { structured: { state: 'idle', summary: 'x', tickets: [], knowledge: { recorded: false, reason: 'x' } } } as const;
+
+      /** Cut a human-woken session turn by a supervisor interrupt, through the real delivery step. */
+      async function cutTurnByInterrupt(): Promise<Run> {
+        const runId = await seededHumanRun({ mode: 'interrupt' });
+        runtime.queue.push(IDLE_RESULT as never);
+        return executeRun(h.ctx, h.deps, runId);
+      }
+
+      /** Cut a human-woken session turn by a hard timeout, through the real delivery step. */
+      async function cutTurnByTimeout(): Promise<Run> {
+        const runId = await seededHumanRun();
+        runtime.queue.push({ timedOut: true } as never);
+        return executeRun(h.ctx, h.deps, runId);
+      }
+
+      /** The supervisor's retry wake after a cut: a `retry` source, no thread context. */
+      function watchdogRetry(cutRunId: string): void {
+        h.services.wake!.enqueue(sessionId, { source: 'retry', reason: 'previous turn stopped responding', payload: { retryOfRunId: cutRunId } });
+      }
+
+      it('a watchdog-cut turn then its retry-woken resume leaves the human the answer', async () => {
+        seedSession();
+        const cut = await cutTurnByInterrupt();
+        expect(cut.status).toBe('interrupted');
+        // The cut posted its own notice; the retry resume must still answer past it.
+        expect(outbound()).toHaveLength(1);
+        expect(outbound()[0]).toMatchObject({ authorKind: 'system' });
+
+        watchdogRetry(cut.id);
+        runtime.queue.push({ finalText: 'the answer', structured: undefined } as never);
+        const resumed = await runOnce(sessionId);
+
+        expect(resumed.status).toBe('succeeded');
+        const rows = outbound();
+        expect(rows).toHaveLength(2);
+        expect(rows[0]).toMatchObject({ authorKind: 'system' });
+        expect(rows[1]).toMatchObject({ body: 'the answer', authorKind: 'agent', authorId: sessionId, runId: resumed.id });
+        // The answer quotes the message that was actually waiting, not the cut's notice.
+        const links = h.db.all<{ repliedToMessageId: string }>(
+          'SELECT replied_to_message_id AS repliedToMessageId FROM thread_message_replies WHERE message_id = ?',
+          [rows[1]!.id],
+        ).map((l) => l.repliedToMessageId);
+        expect(links).toHaveLength(1);
+      });
+
+      it('a watchdog-cut turn then a retry-woken resume that fails posts exactly one failure notice', async () => {
+        seedSession();
+        const cut = await cutTurnByInterrupt();
+        expect(outbound()).toHaveLength(1);
+
+        watchdogRetry(cut.id);
+        runtime.queue.push({ error: { code: 'turn_crashed', family: 'unknown', message: 'the runtime crashed unexpectedly' } } as never);
+        const resumed = await runOnce(sessionId);
+
+        expect(resumed.status).toBe('failed');
+        const rows = outbound();
+        expect(rows).toHaveLength(2);
+        expect(rows[0]).toMatchObject({ authorKind: 'system' });
+        expect(rows[0]!.body).toMatch(/interrupted/);
+        expect(rows[1]).toMatchObject({ authorKind: 'system' });
+        expect(rows[1]!.body).toMatch(/crashed unexpectedly/);
+        expect(rows[1]!.runId).toBe(resumed.id);
+      });
+
+      it('a hard-timeout cut then its retry-woken resume behaves the same', async () => {
+        seedSession();
+        const cut = await cutTurnByTimeout();
+        expect(cut.status).toBe('timed_out');
+        expect(outbound()).toHaveLength(1);
+        expect(outbound()[0]!.body).toMatch(/took too long/);
+
+        watchdogRetry(cut.id);
+        runtime.queue.push({ finalText: 'the answer', structured: undefined } as never);
+        const resumed = await runOnce(sessionId);
+
+        expect(resumed.status).toBe('succeeded');
+        const rows = outbound();
+        expect(rows).toHaveLength(2);
+        expect(rows[0]!.body).toMatch(/took too long/);
+        expect(rows[1]).toMatchObject({ body: 'the answer', authorKind: 'agent' });
+      });
+
+      it('a self-scheduled turn does not answer a stale human message', async () => {
+        seedSession();
+        await h.services.threads!.inbound(HUMAN, threadId, 'are you there?');
+        // The human wake is spent and this turn is unrelated: the fallback is for retries only.
+        h.db.run("UPDATE wakeups SET status = 'failed', run_id = 'spent', finished_at = ? WHERE agent_id = ? AND source = 'human_message'", [nowIso(), sessionId]);
+        h.services.wake!.enqueue(sessionId, { source: 'self_scheduled', reason: 'check on something later' });
+        runtime.queue.push({ finalText: 'the answer', structured: undefined } as never);
+        const run = await runOnce(sessionId);
+
+        expect(run.status).toBe('succeeded');
+        expect(outbound()).toHaveLength(0);
+      });
+
+      it('links the answer to every human message sent before the turn ended', async () => {
+        seedSession();
+        const first = await h.services.threads!.inbound(HUMAN, threadId, 'first');
+        const second = await h.services.threads!.inbound(HUMAN, threadId, 'second');
+        runtime.queue.push({ finalText: 'the answer', structured: undefined } as never);
+        const run = await runOnce(sessionId);
+
+        expect(run.status).toBe('succeeded');
+        const rows = outbound();
+        expect(rows).toHaveLength(1);
+        const links = h.db.all<{ repliedToMessageId: string }>(
+          'SELECT replied_to_message_id AS repliedToMessageId FROM thread_message_replies WHERE message_id = ?',
+          [rows[0]!.id],
+        ).map((l) => l.repliedToMessageId);
+        expect(links.sort()).toEqual([first.id, second.id].sort());
+      });
+
+      it('names the reset time and the manual step for a usage limit', async () => {
+        seedSession();
+        await h.services.threads!.inbound(HUMAN, threadId, 'any update?');
+        runtime.queue.push({ error: { code: 'quota_exceeded', family: 'provider_quota', message: 'You have hit your limit. It resets at 2026-09-20T14:30:00Z.' } } as never);
+        const run = await runOnce(sessionId);
+
+        expect(run.status).toBe('failed');
+        const rows = outbound();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.body).toMatch(/usage limit was reached/);
+        expect(rows[0]!.body).toMatch(/resets at 2026-09-20 14:30 UTC/);
+        expect(rows[0]!.body).toMatch(/Nothing retries automatically/);
+      });
+
+      it('tells the human a login is needed and what happens next', async () => {
+        seedSession();
+        // Run directly rather than through the dispatcher: an auth failure preserves the wake and gates
+        // the runtime, so a dispatcher drain would be a second dispatch the test does not want.
+        const reported = await seededHumanRun();
+        runtime.queue.push({ error: { code: 'auth_expired', family: 'auth', message: 'login expired' } } as never);
+        const run = await executeRun(h.ctx, h.deps, reported);
+
+        expect(run.status).toBe('failed');
+        const rows = outbound();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.body).toMatch(/log in again/);
+        expect(rows[0]!.body).toMatch(/resumes once the login is renewed/);
+      });
+    });
   });
 
 });

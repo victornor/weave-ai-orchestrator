@@ -39,14 +39,35 @@ describe('skillsFor (VS-189)', () => {
     h = makeHarness();
     seedSkills(h.ctx);
     const expected = manifest.skills.filter((s) => s.audience === 'worker' || s.audience === 'all').map((s) => s.name).sort();
-    expect(skillsFor(h.ctx, 'worker').map((s) => s.name).sort()).toEqual(expected);
+    expect(skillsFor(h.ctx, { kind: 'worker', ticketId: null }).map((s) => s.name).sort()).toEqual(expected);
   });
 
   it('returns exactly the weaver- and all-audience skills, never a worker-only one', () => {
     h = makeHarness();
     seedSkills(h.ctx);
     const expected = manifest.skills.filter((s) => s.audience === 'weaver' || s.audience === 'all').map((s) => s.name).sort();
-    expect(skillsFor(h.ctx, 'weaver').map((s) => s.name).sort()).toEqual(expected);
+    expect(skillsFor(h.ctx, { kind: 'weaver', ticketId: null }).map((s) => s.name).sort()).toEqual(expected);
+  });
+
+  // VS-620: a session's skills follow its ticket posture, not its kind.
+  it('returns only the all-audience skills for a ticketless session', () => {
+    h = makeHarness();
+    seedSkills(h.ctx);
+    const expected = manifest.skills.filter((s) => s.audience === 'all').map((s) => s.name).sort();
+    expect(skillsFor(h.ctx, { kind: 'session', ticketId: null }).map((s) => s.name).sort()).toEqual(expected);
+  });
+
+  it('returns the worker- and all-audience skills for a session that holds a ticket', () => {
+    h = makeHarness();
+    seedSkills(h.ctx);
+    const expected = manifest.skills.filter((s) => s.audience === 'worker' || s.audience === 'all').map((s) => s.name).sort();
+    expect(skillsFor(h.ctx, { kind: 'session', ticketId: 'tkt-1' }).map((s) => s.name).sort()).toEqual(expected);
+  });
+
+  it('returns only the planning skill for a planner', () => {
+    h = makeHarness();
+    seedSkills(h.ctx);
+    expect(skillsFor(h.ctx, { kind: 'planner', ticketId: null }).map((s) => s.name)).toEqual(['weave-ai-planning']);
   });
 });
 
@@ -103,6 +124,41 @@ describe('ensureHomeCurrent re-renders on a runtime change (VS-189)', () => {
     expect(result.rerendered).toBe(true);
     expect(install).toHaveBeenCalledTimes(1);
     expect(existsSync(join(agent.homePath, '.claude/skills', 'weave-ai-worker', 'SKILL.md'))).toBe(false); // FakeRuntime install is a spy, not a real writer
+  });
+});
+
+describe('ensureHomeCurrent re-renders on a skill-posture change (VS-620)', () => {
+  it('re-renders a session home when it takes a ticket and again when it returns to being ticketless', async () => {
+    h = makeHarness();
+    seedSkills(h.ctx);
+    const install = vi.fn(async () => undefined);
+    h.ctx.registries.runtimes.set('claude', fakeRuntimeWithInstallSpy(install));
+
+    const sessionId = h.addWorker(null, { kind: 'session', runtimeId: 'claude', worktreePath: null, branch: null });
+    let agent = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [sessionId])!;
+
+    const first = await ensureHomeCurrent(h.ctx, h.deps, agent);
+    expect(first.rerendered).toBe(true);
+    expect(install).toHaveBeenCalledTimes(1);
+
+    // Nothing changed: the second call must not re-render.
+    const second = await ensureHomeCurrent(h.ctx, h.deps, agent);
+    expect(second.rerendered).toBe(false);
+    expect(install).toHaveBeenCalledTimes(1);
+
+    // The session takes a ticket: the posture moves to `worker` and the home re-renders.
+    h.db.update('agents', sessionId, { ticketId: 'tkt-1' });
+    agent = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [sessionId])!;
+    const third = await ensureHomeCurrent(h.ctx, h.deps, agent);
+    expect(third.rerendered).toBe(true);
+    expect(install).toHaveBeenCalledTimes(2);
+
+    // The ticket ends: back to the ticketless posture, so it re-renders again.
+    h.db.update('agents', sessionId, { ticketId: null });
+    agent = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [sessionId])!;
+    const fourth = await ensureHomeCurrent(h.ctx, h.deps, agent);
+    expect(fourth.rerendered).toBe(true);
+    expect(install).toHaveBeenCalledTimes(3);
   });
 });
 

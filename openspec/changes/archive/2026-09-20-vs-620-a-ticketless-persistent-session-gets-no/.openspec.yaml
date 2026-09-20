@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "A ticketless persistent session gets no worker delivery rules: scope the
+  worker skill and the leftover reply bookkeeping"

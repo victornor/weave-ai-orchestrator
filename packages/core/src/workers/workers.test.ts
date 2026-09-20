@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
-import { FakeRuntime } from '@weave-ai/runtime-sdk';
+import { FakeRuntime, type RuntimeAdapter } from '@weave-ai/runtime-sdk';
 import type { WorktreeProvider } from '@weave-ai/plugin-sdk';
 import type { Agent, Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
@@ -19,6 +19,20 @@ import type { Actor, WorkersService } from '../api.js';
 const SYSTEM: Actor = { kind: 'system', id: null };
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
 const CONDUCTOR: Actor = { kind: 'agent', id: 'conductor', runId: 'run-1' };
+
+/** VS-620: the skill sets a home should carry, derived from the shipped manifest's audience. */
+const SKILL_MANIFEST = JSON.parse(readFileSync(new URL('../../../../skills/manifest.json', import.meta.url), 'utf8')) as {
+  skills: Array<{ name: string; audience: 'worker' | 'weaver' | 'all' }>;
+};
+const SESSION_SKILL_NAMES = SKILL_MANIFEST.skills.filter((s) => s.audience === 'all').map((s) => s.name).sort();
+const WORKER_SKILL_NAMES = SKILL_MANIFEST.skills.filter((s) => s.audience === 'worker' || s.audience === 'all').map((s) => s.name).sort();
+
+/** A `FakeRuntime` whose `installInstructions` records the skill names it was handed (VS-620). */
+function fakeRuntimeWithInstallSpy(install: RuntimeAdapter['installInstructions']): RuntimeAdapter {
+  const runtime: RuntimeAdapter = new FakeRuntime();
+  runtime.installInstructions = install;
+  return runtime;
+}
 
 describe('workers', () => {
   let h: TestHarness;
@@ -46,6 +60,16 @@ describe('workers', () => {
       assigneeRoleId: h.roleId, createdByKind: 'agent', createdAt: now, updatedAt: now, ...over,
     });
     return h.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [id])!;
+  }
+
+  /** Seed the harness's skills dir with one directory per shipped skill, so `skillsFor` finds them. */
+  function seedSkills(): void {
+    mkdirSync(h.ctx.skillsDir, { recursive: true });
+    for (const s of SKILL_MANIFEST.skills) {
+      const dir = join(h.ctx.skillsDir, s.name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'SKILL.md'), `# ${s.name}\n`, 'utf8');
+    }
   }
 
   beforeEach(async () => {
@@ -1339,6 +1363,24 @@ describe('workers', () => {
       const { ticket } = await workers.takeTicketForSession(HUMAN, session.id, { projectId: h.projectId, kind: 'task', title: 'Race check' });
 
       expect(sweepWouldSpawnFor(ticket.id)).toBe(false);
+    });
+
+    // VS-620: the home's skills follow the session's posture, and checkout/release re-render it.
+    it('installs the all-audience skills on a ticketless session, the worker set on checkout, and removes it again on release', async () => {
+      seedSkills();
+      const seen: string[][] = [];
+      h.ctx.registries.runtimes.set('claude', fakeRuntimeWithInstallSpy(async (_home, bundle) => {
+        seen.push(bundle.skills.map((s) => s.name).sort());
+      }));
+
+      const { agent: session } = await workers.ensureSession(HUMAN, h.projectId, h.roleId);
+      expect(seen.at(-1)).toEqual(SESSION_SKILL_NAMES);
+
+      const { agent } = await workers.takeTicketForSession(HUMAN, session.id, { projectId: h.projectId, kind: 'task', title: 'Wire up the endpoint' });
+      expect(seen.at(-1)).toEqual(WORKER_SKILL_NAMES);
+
+      await workers.releaseSessionTicket(HUMAN, agent.id);
+      expect(seen.at(-1)).toEqual(SESSION_SKILL_NAMES);
     });
   });
 

@@ -699,7 +699,7 @@ const SESSION_PENDING_MESSAGES = 50;
  */
 function sessionReplyContext(
   wakes: Wakeup[],
-  fallback?: { agentId: string; deps: () => CoreServices },
+  fallback?: { agentId: string; deps: () => CoreServices; ctx?: WorkspaceContext },
 ): { threadId: string | null; messageIds: string[] } {
   const flat = flattenWakes(wakes);
   const isString = (v: unknown): v is string => typeof v === 'string';
@@ -712,11 +712,45 @@ function sessionReplyContext(
     : ((flat.map((w) => w.payload['messageIds']).find(Array.isArray) as unknown[] | undefined)?.filter(isString) ?? []);
   if (threadId || !fallback) return { threadId, messageIds };
   if (!flat.some((w) => w.source === 'retry')) return { threadId: null, messageIds: [] };
+  // VS-620: a retry wake names the run it resumes, and that run's own `human_message` wakes are
+  // exactly the messages it answers. Resolving them directly stops a message a completed tool-only
+  // turn already handled (which posted nothing, so the thread still looks unanswered) from being
+  // re-quoted by a later resume.
+  const retried = retriedHumanMessages(flat, fallback);
+  if (retried) return retried;
   const own = fallback.deps().threads.list({ agentId: fallback.agentId })[0];
   if (!own) return { threadId: null, messageIds: [] };
   const pending = pendingHumanMessages(fallback.deps().threads.messages(own.id, { limit: SESSION_PENDING_MESSAGES }));
   if (pending.length === 0) return { threadId: null, messageIds: [] };
   return { threadId: own.id, messageIds: pending.map((m) => m.id) };
+}
+
+/**
+ * VS-620: the human messages a retry wake resumes — the `human_message` wakes of the run named by the
+ * retry payload's `retryOfRunId`. Null when the retry names no run, that run is gone, or it was not
+ * woken by a human; the caller then falls back to the thread's still-waiting message (the resume may
+ * be for a self-scheduled run that a human message arrived during).
+ */
+function retriedHumanMessages(
+  flat: Array<{ source: string; payload: Record<string, unknown> }>,
+  fallback: { ctx?: WorkspaceContext },
+): { threadId: string; messageIds: string[] } | null {
+  const ctx = fallback.ctx;
+  if (!ctx) return null;
+  const isString = (v: unknown): v is string => typeof v === 'string';
+  const retryOfRunId = flat.map((w) => w.payload['retryOfRunId']).find(isString);
+  if (!retryOfRunId) return null;
+  const run = ctx.db.get<Run>('SELECT * FROM runs WHERE id = ?', [retryOfRunId]);
+  if (!run || !Array.isArray(run.wakeupIds)) return null;
+  const wakes = run.wakeupIds
+    .map((id) => ctx.db.get<{ source: string; payload: Record<string, unknown> | null }>('SELECT * FROM wakeups WHERE id = ?', [id]))
+    .filter((w): w is { source: string; payload: Record<string, unknown> | null } => Boolean(w));
+  const human = wakes.filter((w) => w.source === 'human_message');
+  if (human.length === 0) return null;
+  const threadId = human.map((w) => (w.payload ?? {})['threadId']).find(isString);
+  const messageIds = human.map((w) => (w.payload ?? {})['messageId']).filter(isString);
+  if (!threadId || messageIds.length === 0) return null;
+  return { threadId, messageIds };
 }
 
 /**
@@ -755,7 +789,7 @@ async function deliverSessionAnswer(
 ): Promise<void> {
   const log = ctx.log('run').child({ runId: input.run.id });
   if (input.agent.kind !== 'session' || input.ticket) return;
-  const { threadId, messageIds: replyToMessageIds } = sessionReplyContext(input.wakes, { agentId: input.agent.id, deps });
+  const { threadId, messageIds: replyToMessageIds } = sessionReplyContext(input.wakes, { agentId: input.agent.id, deps, ctx });
   if (!threadId) return;
   try {
     // The wake names the thread; never post into one another agent owns (a stale or forged payload).
@@ -1071,7 +1105,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
       try {
         // VS-596: a retry wake is a fresh wake with no human message of its own, so carry the thread
         // and waking message(s) forward — otherwise a session's retried turn could not deliver its answer.
-        const reply = sessionReplyContext(f.wakes, f.agent.kind === 'session' ? { agentId: f.agent.id, deps } : undefined);
+        const reply = sessionReplyContext(f.wakes, f.agent.kind === 'session' ? { agentId: f.agent.id, deps, ctx } : undefined);
         deps().wake.enqueue(f.agent.id, {
           source: 'retry', reason: `retry after ${errorCode ?? errorFamily}`,
           payload: { retryOfRunId: runId, attempt: attempt + 1, ...(reply.threadId ? { threadId: reply.threadId, messageIds: reply.messageIds } : {}) }, notBefore,

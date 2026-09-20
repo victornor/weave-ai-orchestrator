@@ -2599,6 +2599,34 @@ describe('run engine', () => {
         expect(links.sort()).toEqual([first.id, second.id].sort());
       });
 
+      // VS-620: a tool-only turn is complete and consumes its message, so a later resume answers the
+      // second message only — the first is not re-quoted from the thread's still-unanswered list.
+      it('a completed tool-only turn then a second message: the resumed answer links the second only', async () => {
+        seedSession();
+        await h.services.threads!.inbound(HUMAN, threadId, 'first');
+        runtime.queue.push({ finalText: null, structured: undefined } as never);
+        const toolOnly = await runOnce(sessionId);
+        expect(toolOnly.status).toBe('succeeded');
+        expect(outbound()).toHaveLength(0);
+
+        // A second human message, then a turn woken by it that the watchdog cuts.
+        const cut = await cutTurnByInterrupt();
+        expect(outbound()).toHaveLength(1);
+
+        watchdogRetry(cut.id);
+        runtime.queue.push({ finalText: 'the answer', structured: undefined } as never);
+        const resumed = await runOnce(sessionId);
+        expect(resumed.status).toBe('succeeded');
+
+        const second = h.services.threads!.messages(threadId).filter((m) => m.direction === 'inbound').at(-1)!;
+        const answer = outbound().at(-1)!;
+        const links = h.db.all<{ repliedToMessageId: string }>(
+          'SELECT replied_to_message_id AS repliedToMessageId FROM thread_message_replies WHERE message_id = ?',
+          [answer.id],
+        ).map((l) => l.repliedToMessageId);
+        expect(links).toEqual([second.id]);
+      });
+
       it('names the reset time and the manual step for a usage limit', async () => {
         seedSession();
         await h.services.threads!.inbound(HUMAN, threadId, 'any update?');

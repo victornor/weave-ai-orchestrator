@@ -355,6 +355,15 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
       }
 
       case 'plan.proposed': {
+        // A runtime's todo list (codex `todo_list`, weave `todo_write`) carries `items` and is a plan
+        // update, not something waiting for the human's approval. A real plan proposal carries a
+        // plan body (or a title) instead.
+        const items = Array.isArray(p['items']) ? p['items'] : null;
+        if (items && p['plan'] === undefined && p['body'] === undefined && p['tasks'] === undefined && p['title'] === undefined) {
+          const done = items.filter((it) => typeof it === 'object' && it !== null && ((it as Payload)['status'] === 'completed' || (it as Payload)['completed'] === true)).length;
+          push(status(ev, `updated the todo list · ${done}/${items.length} done`));
+          break;
+        }
         const title = scrub(str(p, 'title', 'changeName', 'name'));
         const planBody = scrub(bodyText(p['plan'] ?? p['body'] ?? p['tasks']));
         push(status(ev, `proposed a plan${title ? `: ${oneLine(title, 80)}` : ''} · waiting for approval`, 'info', planBody ? truncate(planBody, maxDetail).text : null));

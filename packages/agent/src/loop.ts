@@ -19,6 +19,7 @@ import type { ChildEvent, ChildPartial, ChildResult, InitMessage } from './proto
 import { retentionDays, sweepSessions } from './retention.js';
 import { Session } from './session.js';
 import { SseParser } from './sse.js';
+import type { SteeringSource } from './steering.js';
 import { bashTool } from './tools/bash.js';
 import { editTool } from './tools/edit.js';
 import { rgAvailable, grepTool } from './tools/grep.js';
@@ -26,8 +27,10 @@ import { globTool } from './tools/glob.js';
 import { errorOutput, toolSpecs, type ToolCtx, type ToolDefinition } from './tools/index.js';
 import { ReadLedger } from './tools/ledger.js';
 import { readTool } from './tools/read.js';
+import { makeTodoTool } from './tools/todo.js';
 import { makeWebFetchTool } from './tools/webFetch.js';
 import { writeTool } from './tools/write.js';
+import { validateAgainstSchema } from './validate.js';
 import type { AgentError, ContentBlock, Message, Usage } from './types.js';
 
 export interface LoopIO {
@@ -35,7 +38,7 @@ export interface LoopIO {
   partial(p: ChildPartial): void;
   log(level: 'debug' | 'info' | 'warn' | 'error', msg: string, fields?: Record<string, unknown>): void;
 }
-export interface LoopDeps { fetch?: typeof fetch; sleep?: (ms: number, signal: AbortSignal) => Promise<void>; idleTimeoutMs?: number; connectTimeoutMs?: number; requestTimeoutMs?: number; partialFlushMs?: number; now?: () => number; random?: () => number }
+export interface LoopDeps { fetch?: typeof fetch; sleep?: (ms: number, signal: AbortSignal) => Promise<void>; idleTimeoutMs?: number; connectTimeoutMs?: number; requestTimeoutMs?: number; partialFlushMs?: number; now?: () => number; random?: () => number; steering?: SteeringSource }
 
 export const INTERRUPTED = '[Tool execution was interrupted]';
 export const WEAVE_MCP_SERVER = 'weave-ai';
@@ -45,6 +48,11 @@ const DEFAULT_IDLE_MS = 120_000;
 /** Below the supervisor's 15 minute silence window, so one long request cannot look like a hang. */
 const DEFAULT_REQUEST_MS = 600_000;
 const MAX_INVALID_CALLS = 3;
+/** `submit_result` arguments that do not match the run's schema are corrected this many times before the turn fails. */
+const MAX_SUBMIT_INVALID = 2;
+/** A model that stops without calling `submit_result` while a schema is set is nudged at most this many times. */
+const MAX_SUBMIT_NUDGES = 2;
+const SUBMIT_NUDGE = 'Call the `submit_result` tool now with your final structured result for this run.';
 const CONTINUE_PROMPT = 'Your previous reply was cut off by the output limit. Continue exactly where you stopped.';
 const DEADLINE_MARGIN_MS = 30_000;
 export const PREAMBLE = [
@@ -91,6 +99,7 @@ class PartialBatcher {
 export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortSignal, deps: LoopDeps = {}): Promise<ChildResult> {
   const f = deps.fetch ?? fetch;
   const sleep = deps.sleep ?? defaultSleep;
+  const steering = deps.steering;
   const { run, provider } = init;
   const nowMs = deps.now ?? Date.now;
   const started = nowMs();
@@ -119,6 +128,12 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
   let model: string | undefined;
   let finalText: string | null = null;
   let steps = 0;
+  /** S7: the arguments of a valid `submit_result`, and the counters that bound its correction and nudges. */
+  const outputSchema = init.outputSchema;
+  let structured: unknown;
+  let submitted = false;
+  let submitInvalid = 0;
+  let submitNudges = 0;
   const mcpClients: McpClient[] = [];
   /** Cleared for the rest of the run once an endpoint rejects `stream_options`. */
   let sendStreamOptions = true;
@@ -165,7 +180,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       emit('error', { code: err.code, family: err.family, message: err.message });
       return finish(result({ exitCode: 1, error: err }), true);
     }
-    const coreByName: Record<string, ToolDefinition> = { read: readTool, write: writeTool, edit: editTool, bash: bashTool, grep: grepTool, glob: globTool };
+    const coreByName: Record<string, ToolDefinition> = { read: readTool, write: writeTool, edit: editTool, bash: bashTool, grep: grepTool, glob: globTool, todo_write: makeTodoTool() };
     if (webFetchEnabled) coreByName['web_fetch'] = makeWebFetchTool();
     const modeNames = new Set<string>(modeToolNames(run.permission.mode));
     const coreNames = new Set([...Object.keys(coreByName), 'web_fetch']);
@@ -224,6 +239,17 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       if (!isAllowedByLists(name, permissionCfg)) continue;
       tools.set(name, tool);
     }
+    // S7: the run's own report schema. `submit_result` is an internal tool the loop handles itself,
+    // so it is added after the mode and allow-list filters and is offered in every mode.
+    if (outputSchema) {
+      tools.set('submit_result', {
+        name: 'submit_result',
+        description: 'Deliver the final structured result for this run. Call this once, last, when the work is done; its arguments must match the run\'s result schema exactly.',
+        parameters: outputSchema,
+        readOnly: true,
+        run: async () => ({ text: 'Report received.' }),
+      });
+    }
     const modeAllows = (name: string): boolean => restrictedDropsMcp(name) ? false : (!coreNames.has(name) || modeNames.has(name));
     const toolList = toolSpecs([...tools.values()]);
     const ledger = new ReadLedger();
@@ -237,6 +263,9 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     const deadline = started + Math.max(0, run.limits.timeoutMs - DEADLINE_MARGIN_MS);
     for (;;) {
       if (signal.aborted) throw new Cancelled();
+      // Live input (S7): a message that arrived while the previous step ran is delivered at this
+      // request boundary, after that step's tool results and before the next request is built.
+      for (const text of steering?.drain() ?? []) session.append({ role: 'user', text });
       if (run.limits.timeoutMs > 0 && nowMs() >= deadline) return finish(result({ exitCode: 1, timedOut: true }), true);
       if (steps >= stepCap) {
         const err = stopError.maxSteps(stepCap);
@@ -300,6 +329,15 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
           session.append({ role: 'user', text: CONTINUE_PROMPT });
           continue;
         }
+        // S7: with a schema set, a stop that never submitted is asked once more, at most twice.
+        if (outputSchema && !submitted && submitNudges < MAX_SUBMIT_NUDGES) {
+          submitNudges++;
+          io.log('info', 'the model stopped without calling submit_result; asking again', { attempt: submitNudges });
+          session.append({ role: 'user', text: SUBMIT_NUDGE });
+          continue;
+        }
+        // Live input that arrived while this step was in flight keeps the turn going (S7).
+        if (steering && steering.pending > 0) continue;
         finalText = step.text || null; return finish(result({}), false);
       }
 
@@ -309,6 +347,28 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
         for (const { c, args } of parsed) {
           if (signal.aborted) throw new Cancelled();
           emit('tool.call', { id: c.id, name: c.name, input: args.ok ? args.value : c.argsText, partId: c.id });
+          // S7: the run's report. A valid call ends the turn with `structured`; an invalid one is a
+          // corrective result twice and then a failed turn. It never reaches the permission layer.
+          if (c.name === 'submit_result' && outputSchema) {
+            const violations = args.ok ? validateAgainstSchema(args.value, outputSchema) : [`the arguments could not be parsed: ${args.error}`];
+            if (args.ok && violations.length === 0) {
+              structured = args.value;
+              submitted = true;
+              if (step.text) finalText = step.text;
+              const text = 'Report received.';
+              session.append({ role: 'toolResult', toolCallId: c.id, name: c.name, text, isError: false });
+              done.add(c.id);
+              emit('tool.result', { id: c.id, name: c.name, status: 'completed', isError: false, content: text });
+              return finish(result({ structured }), false);
+            }
+            submitInvalid++;
+            if (submitInvalid > MAX_SUBMIT_INVALID) throw new StepFailure({ code: 'tool_call_invalid', family: 'tooling', message: `submit_result was rejected ${submitInvalid} times; its arguments must match the run's result schema.` });
+            const text = `The result does not match the run's schema:\n${violations.join('\n')}\nCall submit_result again with corrected arguments.`;
+            session.append({ role: 'toolResult', toolCallId: c.id, name: c.name, text, isError: true });
+            done.add(c.id);
+            emit('tool.result', { id: c.id, name: c.name, status: 'error', isError: true, content: text });
+            continue;
+          }
           const tool = tools.get(c.name);
           const toolCtx: ToolCtx = { cwd: wtCwd, home: run.cwd, configHome: run.configHome, mode: run.permission.mode, imageInput: compat.image.input, env, signal, callId: c.id, spillDir: run.spillDir, ledger, rg, emit: (type, payload) => emit(type, { id: c.id, ...payload }) };
           const key = args.ok ? DoomGuard.key(c.name, args.value) : '';

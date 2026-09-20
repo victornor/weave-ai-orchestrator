@@ -2,6 +2,7 @@
 import { createInterface } from 'node:readline';
 import { runAgentTurn, type LoopIO } from './loop.js';
 import { parseParentLine, type ChildMessage, type ChildResult, type InitMessage } from './protocol.js';
+import { SteeringQueue } from './steering.js';
 
 /** The child entry: reads `init` from stdin, runs one turn, writes exactly one `result` to stdout, exits with its code. */
 function write(m: ChildMessage): void { process.stdout.write(`${JSON.stringify(m)}\n`); }
@@ -16,6 +17,8 @@ async function main(): Promise<void> {
   process.on('SIGINT', onSignal);
 
   let init: InitMessage | null = null;
+  /** A human's live message for the running turn (S7); the loop delivers it at a request boundary. */
+  const steering = new SteeringQueue();
   const initSeen = new Promise<InitMessage | null>((resolve) => {
     const rl = createInterface({ input: process.stdin });
     rl.on('line', (line) => {
@@ -23,7 +26,7 @@ async function main(): Promise<void> {
       if (!m) return;
       if (m.type === 'init') { init = m; resolve(m); }
       else if (m.type === 'cancel') ac.abort();
-      // `send` is not supported in this slice: live input arrives with S7.
+      else if (m.type === 'send') steering.push(m.text);
     });
     // The adapter closing our stdin means it is gone or is cancelling.
     rl.on('close', () => { if (init) ac.abort(); resolve(null); });
@@ -38,7 +41,7 @@ async function main(): Promise<void> {
     log: (level, msg, fields) => write({ t: 'log', level, msg, ...(fields ? { fields } : {}) }),
   };
   let result: ChildResult;
-  try { result = await runAgentTurn(first, io, ac.signal); }
+  try { result = await runAgentTurn(first, io, ac.signal, { steering }); }
   catch (e) { result = { exitCode: 1, signal: null, timedOut: false, session: null, finalText: null, error: { code: 'agent_crashed', family: 'unknown', message: (e as Error).message } }; }
   write({ t: 'result', result });
   process.stdout.write('', () => process.exit(result.exitCode ?? 0));

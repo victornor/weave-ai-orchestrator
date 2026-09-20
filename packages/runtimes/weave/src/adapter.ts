@@ -10,8 +10,8 @@ import { parseChildLine } from './events.js';
 import { Semaphore } from './semaphore.js';
 
 export const capabilities: RuntimeCapabilities = {
-  resumableSessions: true, forkSessions: true, streamingInput: false, systemPromptInjection: 'system_prompt',
-  structuredOutput: false, mcp: true, usageReporting: 'per_turn', costReporting: false, permissionModes: ['auto', 'restricted', 'bypass'],
+  resumableSessions: true, forkSessions: true, streamingInput: true, systemPromptInjection: 'system_prompt',
+  structuredOutput: true, mcp: true, usageReporting: 'per_turn', costReporting: false, permissionModes: ['auto', 'restricted', 'bypass'],
   partialOutput: 'full',
   // Below the agent's own trigger (window less max(16384, output cap)) for every window worth running; only the meter reads it.
   contextCompactionAt: 0.85,
@@ -234,14 +234,32 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
       // At most `maxConcurrentRuns` children per provider; a run cancelled while it waits never takes a slot.
       const wait = new AbortController();
       let live: ReturnType<typeof spawnLines> | null = null;
-      onHandle?.({ get pid() { return live?.child.pid ?? null; }, cancel: async (mode) => { wait.abort(); await live?.cancel(mode); } });
+      /** Set when the child's `result` line arrives: `send` is `closed` from then on (S7). */
+      let resultSeen = false;
+      // Resolves with the child once it is spawned (or null if the run never gets one). A `send` that
+      // arrives before the spawn — the instant a turn starts, or while the concurrency gate holds it —
+      // waits here instead of being wrongly reported closed.
+      let settleSpawn: (run: ReturnType<typeof spawnLines> | null) => void = () => undefined;
+      const spawned = new Promise<ReturnType<typeof spawnLines> | null>((resolve) => { settleSpawn = resolve; });
+      onHandle?.({
+        get pid() { return live?.child.pid ?? null; },
+        cancel: async (mode) => { wait.abort(); await live?.cancel(mode); },
+        // Live input (S7): one NDJSON line per message; the child queues it and delivers it at its
+        // next request boundary. Once the result exists (or the child is gone) nothing can take it.
+        send: async (text) => {
+          if (resultSeen) return 'closed';
+          const run = live ?? await spawned;
+          if (resultSeen || !run) return 'closed';
+          return run.write(`${JSON.stringify({ type: 'send', text })}\n`) ? 'delivered' : 'closed';
+        },
+      });
       let release = (): void => undefined;
       if (profile.maxConcurrentRuns) {
         const gate = gates.get(parts.providerId) ?? new Semaphore(profile.maxConcurrentRuns);
         gates.set(parts.providerId, gate);
         gate.setLimit(profile.maxConcurrentRuns);
         try { release = await gate.acquire(wait.signal); }
-        catch { return { exitCode: 143, signal: 'SIGTERM', timedOut: false, session: input.session.ref, finalText: null, provider: parts.providerId }; }
+        catch { settleSpawn(null); return { exitCode: 143, signal: 'SIGTERM', timedOut: false, session: input.session.ref, finalText: null, provider: parts.providerId }; }
       }
       try {
         let seq = 0;
@@ -263,14 +281,15 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
             if (m.kind === 'event') emit(m.ev);
             else if (m.kind === 'partial') sink.onPartial?.(m.partial);
             else if (m.kind === 'log') sink.onRaw('stderr', m.text);
-            else if (m.kind === 'result') result = m.result;
+            else if (m.kind === 'result') { result = m.result; resultSeen = true; }
             else sink.onRaw('stdout', m.text);
           },
         });
         live = run;
+        settleSpawn(run);
         const outcome = await run.done;
         return finish(result, outcome, lastStderr, input, parts.providerId);
-      } finally { release(); }
+      } finally { settleSpawn(null); release(); }
     },
   };
 }

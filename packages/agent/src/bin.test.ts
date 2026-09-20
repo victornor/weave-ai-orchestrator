@@ -92,6 +92,20 @@ describe('child process', () => {
     c.child.stdin!.write(`${JSON.stringify({ type: 'cancel', mode: 'interrupt' })}\n`);
     expect((await c.exited).code).toBe(143);
   });
+
+  it('a send message on stdin keeps the turn going and reaches the next request', async () => {
+    mock.script({ chunks: textChunks('first'), delayMs: 400 }, { chunks: textChunks('second') });
+    const c = spawnChild();
+    c.child.stdin!.write(`${JSON.stringify(init())}\n`);
+    await until(() => mock.requests.length === 1);
+    c.child.stdin!.write(`${JSON.stringify({ type: 'send', text: 'steer me' })}\n`);
+    const { code } = await c.exited;
+    expect(code).toBe(0);
+    expect(resultOf(c.msgs)).toMatchObject({ exitCode: 0, finalText: 'second' });
+    expect(mock.requests).toHaveLength(2);
+    const msgs = mock.requests[1]!.body['messages'] as Array<{ role: string; content: string }>;
+    expect(msgs.some((m) => m.role === 'user' && m.content === 'steer me')).toBe(true);
+  });
 });
 
 describe('child process, compact mode', () => {

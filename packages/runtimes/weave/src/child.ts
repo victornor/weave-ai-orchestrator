@@ -69,6 +69,7 @@ export function buildInit(input: TurnInput, p: { providerId: string; modelId: st
       ...(p.profile.timeouts && Object.keys(p.profile.timeouts).length > 0 ? { timeouts: { ...p.profile.timeouts } } : {}),
     },
     prompt: input.prompt, systemPrompt: input.systemPrompt, session: p.session, mcpServers, toolEnv: p.toolEnv,
+    ...(input.outputSchema ? { outputSchema: input.outputSchema as Record<string, unknown> } : {}),
   };
 }
 

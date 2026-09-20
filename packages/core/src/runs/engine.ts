@@ -624,6 +624,13 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     const containment: ContainmentRequest | undefined = workerMemory ? { runId, memoryMb: workerMemory.mb } : undefined;
     contained = containment !== undefined && systemdScopeAvailable();
 
+    // VS-614: only a turn that owes a report gets the structured-output schema. A ticketless
+    // persistent session is a raw session (VS-618, VS-620): no report rules and no shaping of its
+    // replies, so it gets neither the schema nor — on a runtime that turns it into a tool — a
+    // `submit_result` or a nudge. Every other turn (a worker, the weaver, a planner, or a session
+    // that took a ticket) keeps the schema it has always had.
+    const owesReport = ticket !== null || agent.kind !== 'session';
+
     const input: TurnInput = {
       runId,
       turnEpoch: run.turnEpoch,
@@ -637,7 +644,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       session: { policy: turnSession.policy, ref: turnSession.ref, isFirstTurn: turnSession.isFirstTurn },
       systemPrompt: { text: systemPromptText, mode: turnSession.isFirstTurn ? 'inject' : 'skip' },
       prompt,
-      outputSchema: RUN_REPORT_JSON_SCHEMA as unknown as Record<string, unknown>,
+      ...(owesReport ? { outputSchema: RUN_REPORT_JSON_SCHEMA as unknown as Record<string, unknown> } : {}),
       mcpServers,
       env,
       // The runtime's own options (compaction, tool-output limit, extra args, …) ride with the

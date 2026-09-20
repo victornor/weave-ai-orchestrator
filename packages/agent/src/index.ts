@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url';
 
 export * from './protocol.js';
 export * from './types.js';
+export { SteeringQueue, type SteeringSource } from './steering.js';
+export { validateAgainstSchema } from './validate.js';
 export { Session, forkSessionFile, type SessionRef } from './session.js';
 export { SseParser } from './sse.js';
 export { requestOptions, requestHeaders } from './profile.js';

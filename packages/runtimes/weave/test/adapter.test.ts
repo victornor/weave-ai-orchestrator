@@ -18,6 +18,7 @@ beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'wa-adapter-')); });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 const adapterWith = (providers: Record<string, ProviderProfile> = { test: profile }) => createAdapter({ entry: FAKE, host: { providers: () => providers } });
+const until = async (cond: () => boolean): Promise<void> => { const end = Date.now() + 10_000; while (!cond()) { if (Date.now() > end) throw new Error('condition never arrived'); await new Promise((r) => setTimeout(r, 10)); } };
 const record = (): { pid: number; pgid: number; argv: string[]; env: Record<string, string>; init: Record<string, any> } => JSON.parse(readFileSync(join(dir, 'record.json'), 'utf8'));
 
 function input(prompt: string, over: Partial<TurnInput> = {}): TurnInput {
@@ -43,7 +44,7 @@ async function runFake(prompt: string, over: Partial<TurnInput> = {}, adapter = 
 
 describe('declaration', () => {
   it('declares what S1 delivers and matches the shared partial-output table', () => {
-    expect(capabilities).toMatchObject({ resumableSessions: true, streamingInput: false, mcp: true, usageReporting: 'per_turn', costReporting: false, partialOutput: 'full', structuredOutput: false });
+    expect(capabilities).toMatchObject({ resumableSessions: true, streamingInput: true, mcp: true, usageReporting: 'per_turn', costReporting: false, partialOutput: 'full', structuredOutput: true });
     expect(RUNTIME_PARTIAL_OUTPUT['weave']).toBe(capabilities.partialOutput);
     expect(adapterWith().capabilities).toBe(capabilities);
   });
@@ -116,7 +117,20 @@ describe('a turn through a fake child', () => {
     expect(k.spawns).toEqual([{ pid: rec.pid, pgid: rec.pid }]);
     expect(rec.pgid).toBe(rec.pid);
     expect(handle!.pid).toBe(rec.pid);
-    expect(handle!.send).toBeUndefined();
+    expect(typeof handle!.send).toBe('function');
+  });
+
+  it('delivers live input while the turn runs and reports closed once the result exists', async () => {
+    const k = sink();
+    let handle: TurnHandle | undefined;
+    const p = adapterWith().runTurn(input('hold'), k.s, (h) => { handle = h; });
+    await until(() => existsSync(join(dir, 'record.json')));
+    expect(await handle!.send('steer now')).toBe('delivered');
+    expect(await handle!.send('finish')).toBe('delivered');
+    const r = await p;
+    expect(r.finalText).toBe('steered');
+    expect(readFileSync(join(dir, 'sends.jsonl'), 'utf8').trim().split('\n')).toEqual(['steer now', 'finish']);
+    expect(await handle!.send('too late')).toBe('closed');
   });
 
   it('puts the key only on stdin: not in argv, not in the child env, not in the tool env, and no run token in the tool env', async () => {
@@ -141,6 +155,13 @@ describe('a turn through a fake child', () => {
   it('carries an MCP server\'s timeouts and readOnly flag onto the init line (VS-621)', async () => {
     await runFake('replay', { mcpServers: { demo: { type: 'stdio', command: 'node', args: ['s.js'], listTimeoutMs: 1234, callTimeoutMs: 5678, readOnly: true } } });
     expect(record().init['mcpServers']).toEqual({ demo: { type: 'stdio', command: 'node', args: ['s.js'], listTimeoutMs: 1234, callTimeoutMs: 5678, readOnly: true } });
+  });
+
+  it('passes the run output schema to the child and forwards a structured result', async () => {
+    const schema = { type: 'object', additionalProperties: false, required: ['report'], properties: { report: { type: 'string' } } };
+    const r = await runFake('structured', { outputSchema: schema });
+    expect(record().init['outputSchema']).toEqual(schema);
+    expect(r.result.structured).toEqual({ ok: true });
   });
 
   it('sends the model without the provider prefix, the options, the system prompt and session/spill locations under the config home', async () => {

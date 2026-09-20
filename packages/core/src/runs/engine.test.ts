@@ -2703,14 +2703,17 @@ describe('run engine', () => {
       it('names the reset time and the manual step for a usage limit', async () => {
         seedSession();
         await h.services.threads!.inbound(HUMAN, threadId, 'any update?');
-        runtime.queue.push({ error: { code: 'quota_exceeded', family: 'provider_quota', message: 'You have hit your limit. It resets at 2026-09-20T14:30:00Z.' } } as never);
+        const resetAt = new Date(Math.floor(Date.now() / 60_000) * 60_000 + 2 * 60 * 60_000);
+        const resetAtIso = resetAt.toISOString();
+        const resetAtUtc = resetAtIso.slice(0, 16).replace('T', ' ');
+        runtime.queue.push({ error: { code: 'quota_exceeded', family: 'provider_quota', message: `You have hit your limit. It resets at ${resetAtIso}.` } } as never);
         const run = await runOnce(sessionId);
 
         expect(run.status).toBe('failed');
         const rows = outbound();
         expect(rows).toHaveLength(1);
         expect(rows[0]!.body).toMatch(/usage limit was reached/);
-        expect(rows[0]!.body).toMatch(/resets at 2026-09-20 14:30 UTC/);
+        expect(rows[0]!.body).toContain(`resets at ${resetAtUtc} UTC`);
         expect(rows[0]!.body).toMatch(/Nothing retries automatically/);
       });
 

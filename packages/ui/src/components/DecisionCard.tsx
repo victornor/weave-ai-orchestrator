@@ -7,6 +7,7 @@ import { CiChip } from './CiChip';
 import { Composer } from './Composer';
 import { DocumentPreview } from './DocumentPreview';
 import { HandoverCommand } from './HandoverCommand';
+import { LiveActivityLine } from './LiveActivityLine';
 import { Markdown } from './Markdown';
 import { StatusGlyph } from './StatusGlyph';
 import { TicketEvidence } from './TicketEvidence';
@@ -25,6 +26,8 @@ export interface DecisionCardProps {
   /** The workspace slug — needed to link a merge-approval card to its ticket's conversation (VS-106) and to its pull request's diff (VS-107). */
   ws?: string | null;
   askedBy?: string | null;
+  /** VS-602: the asking agent's live-turn state, so the card shows what it is doing, not a bare status. */
+  live?: { label: string; since: string } | null;
   /** Who raised a question: the weaver asking the human reads differently from a worker asking. */
   asker?: 'weaver' | 'worker';
   busy?: boolean;
@@ -297,7 +300,7 @@ const CONTEXT_PREVIEW_CHARS = 500;
  * primary action sits bottom-left inside a 44 px thumb band. A decision that has
  * been answered renders the same card as an inert record of what was decided.
  */
-export function DecisionCard({ decision, ticketIdentifier, projectLabel, projectSlug, ws, askedBy, asker, busy, queued, plan, autoApproving, onHide, ticketFiledByConductor, ticketSummary, compact, delivery, onAnswer, className }: DecisionCardProps): React.ReactElement {
+export function DecisionCard({ decision, ticketIdentifier, projectLabel, projectSlug, ws, askedBy, live, asker, busy, queued, plan, autoApproving, onHide, ticketFiledByConductor, ticketSummary, compact, delivery, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
   const [overriding, setOverriding] = useState(false);
   const [confirm, setConfirm] = useState('');
@@ -404,6 +407,8 @@ export function DecisionCard({ decision, ticketIdentifier, projectLabel, project
       </div>
 
       <div className={compact ? 'p-3' : 'p-3.5'}>
+        {/* VS-602: a live asking agent shows what it is doing, before the question's body. */}
+        {!inert && live ? <LiveActivityLine line={live} /> : null}
         <h3 className={cx(compact ? 'mb-1' : 'mb-1.5', 'text-head font-semibold leading-snug tracking-head text-text-strong')}>{decision.title}</h3>
         {why ? <p className={cx(section, 'text-meta leading-snug text-text-2')}>{why}</p> : null}
         {decision.context && decision.context.length > CONTEXT_PREVIEW_CHARS ? (

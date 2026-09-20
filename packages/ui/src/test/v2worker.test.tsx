@@ -24,6 +24,8 @@ const state = vi.hoisted(() => ({
   resetOption: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   models: null as { workers: { runtime: string; model: string | null }; weaver: { runtime: string; model: string | null }; workerOptions: Array<{ id: string; description: string; runtime: string | null; model: string | null }>; source: { weaver: string; workers: string; workerOptions: string } } | null,
   sessionTurns: null as number | null,
+  /** VS-602: the session agent's active run, so the ticketless feed shows it live. */
+  sessionRun: null as { id: string; runtimeId: string; status: string } | null,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -33,7 +35,8 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('../app/link', () => ({ useGo: () => state.go, useSearchParams: () => ({}) }));
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
 vi.mock('../lib/drafts', () => ({ draftKey: () => 'k', useDraft: () => ({ draft: { text: 'steer this' }, patch: state.patch }) }));
-vi.mock('../v2/WorkerFeed', () => ({ WorkerFeed: () => <div data-testid="worker-feed" /> }));
+vi.mock('../v2/WorkerFeed', () => ({ WorkerFeed: () => <div data-testid="worker-feed" />, useWorkerRun: () => (state.sessionRun ? { run: state.sessionRun, live: true } : { run: null, live: false }) }));
+vi.mock('../api/runStream', () => ({ useRunEventStream: () => ({ events: [], partials: [], lastPartialAt: null, partialSince: null, status: { state: 'connected' }, retryNow: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
   useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: state.noTicket ? null : ticket({ id: 'tk1', identifier: 'ACME-1' }), thread: state.thread, role: state.role, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, sessionTurns: state.sessionTurns, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
   useWorkerBrief: () => ({ data: { brief: '# The brief' } }),
@@ -94,6 +97,7 @@ beforeEach(() => {
   state.resetOption = vi.fn();
   state.models = null;
   state.sessionTurns = null;
+  state.sessionRun = null;
 });
 
 describe('V2 worker page', () => {
@@ -205,7 +209,7 @@ describe('V2 worker page', () => {
       expect(screen.getByText('System')).toBeInTheDocument();
     });
 
-    it('renders a failed-turn notice as the same system notice (VS-598)', () => {
+it('renders a failed-turn notice as the same system notice (VS-598)', () => {
       state.role = { id: 'r1', name: 'Full-stack Engineer' };
       state.threadMessages = [
         message({ id: 'm1', direction: 'inbound', authorKind: 'human', authorId: null, body: 'any update?' }),
@@ -215,6 +219,15 @@ describe('V2 worker page', () => {
       const notice = screen.getByText('The turn failed: the runtime crashed unexpectedly.');
       expect(notice.closest('li')).toHaveClass('items-center');
       expect(screen.getByText('System')).toBeInTheDocument();
+    });
+
+    it('shows the live activity row for a session turn, never an idle-looking thread (VS-602)', () => {
+      state.sessionRun = { id: 'run9', runtimeId: 'opencode', status: 'running' };
+      state.threadMessages = [message({ id: 'm1', direction: 'outbound', authorKind: 'agent', authorId: 'a1', body: 'Working on it.' })];
+      render(<WorkerBody workerId="a1" />);
+      const row = document.querySelector('[data-live-activity]');
+      expect(row).not.toBeNull();
+      expect(row?.textContent).toContain('Starting the turn');
     });
   });
 

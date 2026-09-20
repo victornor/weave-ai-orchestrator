@@ -94,7 +94,7 @@ export function V2TicketScreen(): React.ReactElement {
     if (!liveWorker) return null;
     const summary = mergeWorkerActivity(liveWorker, activity);
     const runLine = lastLinesByAgent(runs.data ?? []).get(liveWorker.id) ?? null;
-    return activityLine(summary, runLine) ?? { label: 'Working', since: null };
+    return activityLine(summary, runLine) ?? { label: 'Starting the turn', since: null };
   }, [liveWorker, activity, runs.data]);
 
   const [tab, setTab] = useState<string>(() => resolveTab(search['tab']));
@@ -433,6 +433,8 @@ function Facts({ title, rows }: { title: string; rows: Array<[string, string]> }
 
 function OverviewPane({ ticket }: { ticket: Ticket }): React.ReactElement {
   const detail = useTicket(ticket.id);
+  // VS-602: the live state of the agent that asked, for the retry card.
+  const activity = useWorkerActivity();
   const d = detail.data;
   const decisions = useDecisions({ status: 'open', owner: 'human' });
   const answer = useAnswerDecision();
@@ -447,13 +449,14 @@ function OverviewPane({ ticket }: { ticket: Ticket }): React.ReactElement {
   });
   return (
     <div className="flex min-w-0 flex-col gap-5" data-v2-overview-pane>
-      {retryDecision ? (
+{retryDecision ? (
         <>
           <DecisionCard
             decision={retryDecision}
             ticketIdentifier={ticket.identifier}
             projectSlug={d?.project?.slug}
             projectLabel={d?.project ? projectLabel(d.project) : null}
+            live={retryDecision.askedByAgentId ? activity.get(retryDecision.askedByAgentId)?.live ?? null : null}
             busy={answer.isPending}
             onAnswer={(a) => answer.mutate({ id: retryDecision.id, ...a })}
           />
@@ -552,6 +555,8 @@ function AttachmentsSection({ attachments }: { attachments: TicketAttachment[] }
 
 function PlanTab({ ticket, project }: { ticket: Ticket; project: Project | null }): React.ReactElement {
   const ws = useWs();
+  // VS-602: the live state of the agent that asked, for the plan card.
+  const activity = useWorkerActivity();
   const [revision, setRevision] = useState<number | undefined>();
   const doc = useTicketDocument(ticket.id, 'plan', revision);
   const revisions = useTicketDocumentRevisions(ticket.id, 'plan');
@@ -578,6 +583,7 @@ function PlanTab({ ticket, project }: { ticket: Ticket; project: Project | null 
             projectSlug={project?.slug}
             projectLabel={project ? projectLabel(project) : null}
             ws={ws}
+            live={planDecision.askedByAgentId ? activity.get(planDecision.askedByAgentId)?.live ?? null : null}
             busy={answer.isPending}
             plan={missing ? undefined : <Markdown source={body} />}
             onAnswer={(a) => answer.mutate({ id: planDecision.id, ...a })}
@@ -627,6 +633,8 @@ function AnswerError({ error }: { error: unknown }): React.ReactElement | null {
 
 function ActivityPane({ ticket, worker, project }: { ticket: Ticket; worker: { id: string; name: string; status: string } | null; project: Project | null }): React.ReactElement {
   const ws = useWs();
+  // VS-602: the live state of the agent that asked, for a merge card.
+  const activity = useWorkerActivity();
   const comments = useTicketComments(ticket.id);
   const runs = useTicketRuns(ticket.id);
   const post = usePostComment();
@@ -690,6 +698,7 @@ function ActivityPane({ ticket, worker, project }: { ticket: Ticket; worker: { i
             projectSlug={project?.slug}
             projectLabel={project ? projectLabel(project) : null}
             ws={ws}
+            live={mergeDecision.askedByAgentId ? activity.get(mergeDecision.askedByAgentId)?.live ?? null : null}
             busy={answer.isPending}
             onAnswer={(a) => answer.mutate({ id: mergeDecision.id, ...a })}
           />

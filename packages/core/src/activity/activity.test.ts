@@ -32,6 +32,28 @@ describe('WorkerActivityService (VS-328)', () => {
     expect(a.summaryFor(agentId)?.activity).toBeNull();
   });
 
+  it('carries the live-turn state so a board card is never a bare "Working" (VS-602)', () => {
+    h = makeHarness({ bare: true });
+    const a = createWorkerActivityService(h.ctx);
+    const agentId = h.addWorker(null);
+
+    // Nothing observed yet: no live state.
+    expect(a.summaryFor(agentId)?.live ?? null).toBeNull();
+
+    // A running tool: the live state names it, with the elapsed seconds it has run.
+    a.observe(agentId, null, ev({ type: 'tool.call', payload: { id: 't1', name: 'bash', input: { command: 'sleep 3; ls' } }, ts: new Date(Date.now() - 3000).toISOString() }));
+    const running = a.summaryFor(agentId)?.live;
+    expect(running).toMatchObject({ state: 'tool', label: 'Running bash sleep 3; ls', toolCount: 1, wholeStepsOnly: true });
+
+    // The tool result flips it to "waiting for the model" rather than leaving a stale "Running".
+    a.observe(agentId, null, ev({ type: 'tool.result', payload: { id: 't1', name: 'bash' }, ts: new Date().toISOString() }));
+    expect(a.summaryFor(agentId)?.live).toMatchObject({ state: 'waiting', label: 'Waiting for the model', toolCount: 1 });
+
+    // The turn ends: the live state is gone.
+    a.finish(agentId);
+    expect(a.summaryFor(agentId)?.live ?? null).toBeNull();
+  });
+
   it('keeps the last tally across a turn and replaces it with a newer one', () => {
     h = makeHarness({ bare: true });
     const a = createWorkerActivityService(h.ctx);

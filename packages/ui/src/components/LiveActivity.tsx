@@ -29,14 +29,14 @@ export function useNow(active: boolean, everyMs = 1000): number {
 
 export interface LiveRunProps {
   events: readonly RunEvent[];
-  partials: readonly PartialText[];
-  lastPartialAt: number | null;
-  partialSince: number | null;
+  partials?: readonly PartialText[];
+  lastPartialAt?: number | null;
+  partialSince?: number | null;
   /** The run's runtime, which decides whether the page can say more than "whole steps only". */
   runtimeId?: string | null;
 }
 
-export function LiveActivity({ events, partials, lastPartialAt, partialSince, runtimeId }: LiveRunProps): React.ReactElement {
+export function LiveActivity({ events, partials = [], lastPartialAt, partialSince, runtimeId }: LiveRunProps): React.ReactElement {
   const now = useNow(true);
   const partialOutput = runtimeId ? RUNTIME_PARTIAL_OUTPUT[runtimeId] ?? 'none' : 'none';
   const t = liveTurn(events, partials, now, { partialOutput, lastPartialAt, partialSince });
@@ -67,7 +67,7 @@ export function LiveActivity({ events, partials, lastPartialAt, partialSince, ru
 }
 
 /** The text and reasoning still being generated, after the last completed block. */
-export function LivePartials({ partials }: { partials: readonly PartialText[] }): React.ReactElement | null {
+export function LivePartials({ partials = [] }: { partials?: readonly PartialText[] }): React.ReactElement | null {
   const text = partials.filter((p) => p.kind === 'text' && p.text);
   const thinking = partials.filter((p) => p.kind === 'thinking' && p.text);
   // VS-601: a running tool's output so far (a Codex command's stdout), the last few lines of it.

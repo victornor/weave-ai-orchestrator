@@ -195,9 +195,9 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
             empty={<p className="text-micro text-text-3">Tell the planner what you want to build.</p>}
             actorName="Planner"
             workingAriaLabel="Planner is working"
+            runtimeId={plannerRuntimeId}
             live={live}
             working={plannerRunning}
-            runtimeId={plannerRuntimeId}
             focused={focused}
             revealIds={revealIds}
             onTicket={openTicket}

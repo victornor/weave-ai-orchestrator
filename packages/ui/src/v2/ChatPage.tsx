@@ -810,9 +810,9 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
               empty={<EmptyState title="Tell me what you need." detail="Ask the weaver to file a ticket, explain a failure, or tell you what is running." />}
               actorName="weaver"
               workingAriaLabel="Weaver is working"
+              runtimeId={conductorRuntime}
               live={live}
               working={working}
-              runtimeId={conductorRuntime}
               focused={focused}
               revealIds={revealIds}
               onTicket={openTicket}

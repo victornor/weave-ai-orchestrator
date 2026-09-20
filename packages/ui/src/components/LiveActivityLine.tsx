@@ -1,6 +1,6 @@
 /**
  * The line a ticket with a live worker shows (VS-368): its current activity with a ticking elapsed
- * clock, or — between turns — the worker's last run summary or a bare "Working". Either form carries
+ * clock, or — between turns — the worker's last run summary or "Starting the turn". Either form carries
  * the amber working mark, so a running ticket never reads as idle.
  *
  * The mark is a *liveness* mark, not the ticket's status glyph: it belongs on a line, not in a card's

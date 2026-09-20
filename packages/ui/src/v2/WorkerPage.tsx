@@ -37,7 +37,9 @@ import { draftKey, useDraft } from '../lib/drafts';
 import { cents, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
 import { V2Page } from './V2Page';
-import { WorkerFeed } from './WorkerFeed';
+import { WorkerFeed, useWorkerRun } from './WorkerFeed';
+import { LiveActivity } from '../components/LiveActivity';
+import { useRunEventStream } from '../api/runStream';
 
 const TABS = [
   { key: 'transcript', label: 'Transcript' },
@@ -77,10 +79,15 @@ export function sessionAuthorLabel(
  */
 function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }: { threadId: string; label: string; sessionAgentId: string; roleName: string }): React.ReactElement {
   const history = useThreadMessages(threadId);
+  // VS-602: a ticketless session has no ticket-comment feed, but its live turn must still show what
+  // it is doing rather than look idle. Follow the session agent's current run.
+  const { run, live } = useWorkerRun(sessionAgentId);
+  const stream = useRunEventStream(run?.id ?? null, { live });
   if (history.isLoading) return <SkeletonRows rows={4} />;
   if (history.isError) return <ErrorState code="THREAD_UNREADABLE" message={history.error?.message ?? 'Could not load this conversation.'} />;
-  if (!history.data?.length) return <p className="text-meta text-text-3">Nothing said yet — say something below.</p>;
-  return (
+  const body = !history.data?.length ? (
+    <p className="text-meta text-text-3">Nothing said yet — say something below.</p>
+  ) : (
     <ol aria-label={label} className="flex flex-col gap-3">
       {history.data.map((m) =>
         m.authorKind === 'system' ? (
@@ -102,6 +109,20 @@ function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }: { thre
         ),
       )}
     </ol>
+  );
+  return (
+    <div className="flex flex-col gap-2">
+      {live && run ? (
+        <LiveActivity
+          events={stream.events}
+          partials={stream.partials}
+          lastPartialAt={stream.lastPartialAt}
+          partialSince={stream.partialSince}
+          runtimeId={run.runtimeId}
+        />
+      ) : null}
+      {body}
+    </div>
   );
 }
 

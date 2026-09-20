@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent } from '@weave-ai/shared';
-import { clock, liveTurn } from './liveTurn.js';
+import { clock, liveTurn, liveTurnLine } from './liveTurn.js';
 
 let seq = 0;
 const T0 = Date.parse('2026-09-19T12:00:00.000Z');
@@ -52,5 +52,27 @@ describe('liveTurn (VS-595)', () => {
   it('formats the clock compactly', () => {
     expect(clock(4200)).toBe('4 s');
     expect(clock(65_000)).toBe('1 m 05 s');
+  });
+});
+
+describe('liveTurnLine (VS-602)', () => {
+  it('names the state and its elapsed seconds, with the tool count for a non-tool state', () => {
+    const t = liveTurn([call('a', 1), result('a', 2)], [], now(6), { partialOutput: 'full' });
+    expect(liveTurnLine(t)).toBe('Waiting for the model · 4 s · 1 tool call');
+  });
+
+  it('shows a running tool with its command and elapsed time', () => {
+    const t = liveTurn([call('a', 1, 'sleep 3; ls')], [], now(4), { partialOutput: 'full' });
+    expect(liveTurnLine(t)).toBe('Running bash sleep 3; ls · 3 s');
+  });
+
+  it('shows streaming text and thinking', () => {
+    const e = [call('a', 1), result('a', 2)];
+    expect(liveTurnLine(liveTurn(e, [{ partId: 'p', kind: 'text', text: 'Hi' }], now(3), { partialOutput: 'full', partialSince: now(2.5) }))).toBe('Writing · 0 s · 1 tool call');
+    expect(liveTurnLine(liveTurn(e, [{ partId: 'p', kind: 'thinking', text: 'hm' }], now(3), { partialOutput: 'full' }))).toBe('Thinking · 1 s · 1 tool call');
+  });
+
+  it('says the turn is starting, and flags a runtime that reports whole steps only', () => {
+    expect(liveTurnLine(liveTurn([], [], now(2), {}))).toBe('Starting the turn · 0 s · whole steps only');
   });
 });

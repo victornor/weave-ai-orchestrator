@@ -186,6 +186,13 @@ export interface WorkerActivitySummary {
   ticketId: string | null;
   /** The current activity line, or null when the worker has no run in progress. */
   activity: { verb: string; label: string; target: string | null; since: string } | null;
+  /**
+   * The live turn's state, computed in the daemon with the same `liveTurn` the web row uses (VS-602),
+   * so a board card or ticket header shows the same words without opening a stream per card. Null
+   * when the worker has no run in progress. `since` is when the current state began, so the client's
+   * own clock ticks the elapsed time.
+   */
+  live?: { state: string; label: string; since: string; toolCount: number; turnMs: number; sinceLastMs: number; wholeStepsOnly: boolean } | null;
   /** The last parsed test tally, or null when none has been read. Kept across turns until replaced. */
   tests: TestTally | null;
 }

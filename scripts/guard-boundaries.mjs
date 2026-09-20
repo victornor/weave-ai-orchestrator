@@ -5,6 +5,8 @@ const rules = [
   { pkg: 'packages/core', forbid: ['@weave-ai/server', '@weave-ai/cli', '@weave-ai/runtime-claude', '@weave-ai/runtime-codex', '@weave-ai/runtime-opencode', '@weave-ai/runtime-gemini', '@weave-ai/runtime-cursor', '@weave-ai/channel-web', '@weave-ai/channel-cli', '@weave-ai/channel-telegram', '@weave-ai/surface-headless', '@weave-ai/surface-tmux', '@weave-ai/surface-herdr', '@weave-ai/surface-hyprland', '@weave-ai/tui', '@weave-ai/ui', '@weave-ai/presenter'] },
   { pkg: 'packages/shared', forbid: ['@weave-ai/'] },
   { pkg: 'packages/runtime-sdk', forbid: ['@weave-ai/core', '@weave-ai/db', '@weave-ai/server'] },
+  { pkg: 'packages/agent', forbid: ['@weave-ai/core', '@weave-ai/db', '@weave-ai/server', '@weave-ai/runtime', '@weave-ai/cli', '@weave-ai/ui'] },
+  { pkg: 'packages/runtimes/weave', forbid: ['@weave-ai/core', '@weave-ai/db', '@weave-ai/server'] },
   { pkg: 'packages/channel-sdk', forbid: ['@weave-ai/core', '@weave-ai/db', '@weave-ai/server'] },
   { pkg: 'packages/surface-sdk', forbid: ['@weave-ai/core', '@weave-ai/db', '@weave-ai/server'] },
 ];

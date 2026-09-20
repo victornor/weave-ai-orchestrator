@@ -502,6 +502,25 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
 export const PluginEntrySchema = z.union([z.string(), z.object({ name: z.string(), config: z.record(z.string(), z.unknown()).optional() })]);
 export type PluginEntry = z.infer<typeof PluginEntrySchema>;
 
+/**
+ * VS-607: a model provider for the built-in `weave` runtime — any OpenAI-compatible Chat
+ * Completions endpoint. The API key is a workspace secret named by `apiKeySecret`, never a value in
+ * this file. `auth` is `bearer`, `none`, or `header:<Name>` for a provider that wants the key in a
+ * named header. `models` carries what the endpoint does not say itself.
+ */
+export const ProviderModelSchema = z.object({
+  contextWindow: z.number().int().positive().optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
+});
+export const ProviderProfileSchema = z.object({
+  baseUrl: z.string().url(),
+  apiKeySecret: z.string().regex(/^[A-Z][A-Z0-9_]*$/).optional(),
+  auth: z.string().regex(/^(bearer|none|header:[A-Za-z0-9-]+)$/).default('bearer'),
+  headers: z.record(z.string(), z.string()).default({}),
+  models: z.record(z.string(), ProviderModelSchema).default({}),
+});
+export type ProviderProfile = z.infer<typeof ProviderProfileSchema>;
+
 export const WorkspaceConfigSchema = withKeyAlias(z.object({
   version: z.literal(1),
   id: slug,
@@ -510,6 +529,8 @@ export const WorkspaceConfigSchema = withKeyAlias(z.object({
   defaults: WorkspaceDefaultsSchema.default({}),
   /** Model selection, whole and entire: nothing else in this file names a runtime or a model. */
   models: WorkspaceModelsSchema.default({}),
+  /** Model providers for the `weave` runtime, by provider id. */
+  providers: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/), ProviderProfileSchema).default({}),
   projects: z.array(ProjectConfigSchema).default([]),
   weaver: z.object({
     channels: z.array(z.string()).default(['web', 'cli']),

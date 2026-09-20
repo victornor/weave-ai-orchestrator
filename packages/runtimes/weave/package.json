@@ -1,0 +1,24 @@
+{
+  "name": "@weave-ai/runtime-weave",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@weave-ai/shared": "workspace:*",
+    "@weave-ai/runtime-sdk": "workspace:*",
+    "@weave-ai/agent": "workspace:*",
+    "execa": "^9.6.0"
+  },
+  "devDependencies": {}
+}

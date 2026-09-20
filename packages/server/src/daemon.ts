@@ -22,11 +22,11 @@ import {
 } from '@weave-ai/core';
 import type { AuthService, CoreServices, IncidentsService } from '@weave-ai/core';
 import type { ChannelAdapter, SurfaceAdapter } from '@weave-ai/plugin-sdk';
-import type { RuntimeAdapter } from '@weave-ai/runtime-sdk';
+import type { RuntimeAdapter, RuntimeHost } from '@weave-ai/runtime-sdk';
 import type { WeaveAIPlugin, PluginHost, AgentToolDefinition, WorktreeProvider, ForgeAdapter } from '@weave-ai/plugin-sdk';
 import {
   OcError, SHUTDOWN_CANCEL_GRACE_MS, SHUTDOWN_DRAIN_GRACE_MS, COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS,
-  type DaemonConfig, type EventType, type WorkspaceEvent,
+  type DaemonConfig, type EventType, type ProviderProfile, type WorkspaceEvent,
 } from '@weave-ai/shared';
 import { createApp, type WorkspaceAdmin } from './app.js';
 import { createUpdateChecker, runningReleaseRoot } from './release-info.js';
@@ -42,7 +42,7 @@ import type { AppDeps, WorkspaceRuntime } from './types.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const log = getLogger('daemon');
 
-const RUNTIME_PACKAGES = ['@weave-ai/runtime-claude', '@weave-ai/runtime-codex', '@weave-ai/runtime-opencode', '@weave-ai/runtime-gemini', '@weave-ai/runtime-cursor'];
+const RUNTIME_PACKAGES = ['@weave-ai/runtime-claude', '@weave-ai/runtime-codex', '@weave-ai/runtime-opencode', '@weave-ai/runtime-gemini', '@weave-ai/runtime-cursor', '@weave-ai/runtime-weave'];
 const CHANNEL_PACKAGES = ['@weave-ai/channel-web', '@weave-ai/channel-cli', '@weave-ai/channel-telegram'];
 const SURFACE_PACKAGES = ['@weave-ai/surface-headless', '@weave-ai/surface-tmux', '@weave-ai/surface-herdr', '@weave-ai/surface-hyprland'];
 
@@ -114,9 +114,14 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const auth = createAuthService(daemonDb, daemonCfg);
   const registries = createRegistries();
 
-  await registerBuiltins(registries);
-
   const workspaces = new Map<string, WorkspaceRuntime>();
+  await registerBuiltins(registries, {
+    providers: () => {
+      const out: Record<string, ProviderProfile> = {};
+      for (const ws of workspaces.values()) for (const [id, profile] of Object.entries(ws.ctx.config.providers ?? {})) out[id] ??= profile;
+      return out;
+    },
+  });
   const { publicUrl, host, port } = resolveUrls(daemonCfg);
 
   // The loopback listener must exist before workspaces load: its URL goes into every run's env.
@@ -379,10 +384,10 @@ function makeAdmin(
 // ---------- plugins and built-in adapters ----------
 
 /** Best-effort registration: a missing or half-built package logs and is skipped, never fatal. */
-async function registerBuiltins(registries: Registries): Promise<void> {
+async function registerBuiltins(registries: Registries, host: RuntimeHost): Promise<void> {
   for (const name of RUNTIME_PACKAGES) {
     const adapter = await loadAdapter<RuntimeAdapter>(name);
-    if (adapter?.id) { registries.runtimes.set(adapter.id, adapter); log.info({ runtime: adapter.id }, 'runtime registered'); }
+    if (adapter?.id) { adapter.attach?.(host); registries.runtimes.set(adapter.id, adapter); log.info({ runtime: adapter.id }, 'runtime registered'); }
   }
   for (const name of CHANNEL_PACKAGES) {
     const adapter = await loadAdapter<ChannelAdapter>(name);

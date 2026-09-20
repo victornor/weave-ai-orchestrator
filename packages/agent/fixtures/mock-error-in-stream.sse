@@ -1,0 +1,4 @@
+data: {"id":"e","object":"chat.completion.chunk","model":"mock-model","choices":[{"index":0,"delta":{"content":"par"},"finish_reason":null}]}
+
+data: {"error":{"message":"upstream exploded","type":"server_error","code":"500"}}
+

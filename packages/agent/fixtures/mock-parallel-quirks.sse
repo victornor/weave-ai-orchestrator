@@ -1,0 +1,10 @@
+data: {"id":"x","object":"chat.completion.chunk","created":1789867314,"model":"mock-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_a","type":"function","function":{"name":"read","arguments":"{\"path\":\"a\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"x","object":"chat.completion.chunk","created":1789867314,"model":"mock-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_b","type":"function","function":{"name":"read","arguments":"{\"path\":\"b\"}"}}]},"finish_reason":null}]}
+
+data: {"id":"x","object":"chat.completion.chunk","created":1789867314,"model":"mock-model","choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_c","type":"function","function":{"name":"bash","arguments":{"command":"true"}}}]},"finish_reason":null}]}
+
+data: {"id":"x","object":"chat.completion.chunk","created":1789867314,"model":"mock-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":3}}
+
+data: [DONE]
+

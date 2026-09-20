@@ -1,4 +1,4 @@
-import type { AccountLimitWindow, AgentKind, BillingType, RunErrorFamily, RunEventType, PermissionMode, SessionPolicy } from '@weave-ai/shared';
+import type { AccountLimitWindow, AgentKind, BillingType, ProviderProfile, RunErrorFamily, RunEventType, PermissionMode, SessionPolicy } from '@weave-ai/shared';
 import type { ContainmentRequest } from './containment.js';
 export type { RunErrorFamily, RunEventType };
 export type { ContainmentRequest } from './containment.js';
@@ -184,8 +184,19 @@ export interface ResumeCommandInput {
  */
 export interface ResumeCommand { cmd: string; args: string[]; env: Record<string, string> }
 
+/**
+ * VS-607: what the daemon offers a runtime that is not a wrapped CLI and so needs workspace
+ * configuration to know what it can talk to. Read lazily: the workspaces load after the adapters register.
+ */
+export interface RuntimeHost {
+  /** Every model provider the workspaces configure, by provider id (the first workspace defining an id wins). */
+  providers(): Record<string, ProviderProfile>;
+}
+
 export interface RuntimeAdapter {
   readonly id: string; readonly displayName: string; readonly capabilities: RuntimeCapabilities;
+  /** Optional: called once when the daemon registers the adapter, before any workspace loads. */
+  attach?(host: RuntimeHost): void;
   detect(): Promise<RuntimeDetection>;
   listModels(): Promise<RuntimeModel[]>;
   configSchema(): JsonSchema;

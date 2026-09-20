@@ -1,0 +1,37 @@
+## Context
+
+The authoritative design is the project knowledge documents `builtin-agent-design` (isolation, contract, loop, providers), `builtin-agent-runtime-details` (tools, permissions, context, MCP, errors, tests), `builtin-agent-slices` (S1) and the real provider bytes in `builtin-agent-probe-results`. This document records only what S1 builds and where it departs from them under captain's 2026-09-20 decisions: per-run child process; Chat Completions only; provider profiles in workspace config; permission modes only, no approvals, no sandbox; workers and the weaver may both use the runtime; no cost display (token usage only); session retention 30 days configurable (deleting is not in S1); tool names and keys follow OpenCode/pi; key secrets named `WEAVE_LLM_<PROVIDER>_KEY`, collected through a decision card secret input.
+
+## Goals / Non-Goals
+
+**Goals:** a worker turn streams and completes on a mock provider in CI and on one real endpoint (weaver-run), with cancel and resume; the boundaries later slices extend (`ToolDefinition` registry, codec, session store, protocol) are right the first time.
+
+**Non-Goals:** everything listed in the proposal's non-goals. Permission modes: S1 registers only `read` and `bash`; the `restricted` mode therefore exposes `read` and MCP tools only and `bash` is absent, `auto` and `bypass` expose both. Full deny patterns, confinement and the mode table are S2.
+
+## Decisions
+
+1. **Package layout.** `packages/agent` imports only `shared` (guard rule added). Modules: `sse.ts` (parser), `codec/chatCompletions.ts` (request builder, chunk reducer, assembler), `protocol.ts` (zod-free typed message unions and NDJSON reader/writer), `loop.ts`, `session.ts`, `profile.ts` (resolved provider from the `init` line; only the four option keys), `tools/{index,read,bash}.ts` (`ToolDefinition {name, description, schema, run(args, ctx)}` registry shared by core and MCP tools), `mcp/http.ts`, `bin.ts` (child entry: reads `init`, redirects `console` to stderr, runs, writes `result`), `testkit/mockProvider.ts`, and `conformance.ts` (the live harness). `packages/runtimes/weave` imports `runtime-sdk`, `shared`, `agent` (types and the entry path only).
+2. **Provider config reaches the adapter through `RuntimeAdapter.attach?(host)`**, additive in `runtime-sdk`, called from `registerBuiltins` (`host = { providers(): Record<string, ProviderProfile> }`, read lazily across the loaded workspaces, the first definition of an id winning). Chosen over injecting profiles into `TurnInput.options` because `detect()` and later `listModels()` take no arguments. **The key is not read through the host**: a provider's `apiKeySecret` is a secret name, and the operator attaches that secret to the role, so the engine already delivers it in the run's `TurnInput.env`. The adapter lifts it out of that env, sends it to the child only on stdin, and strips it (and `AC_RUN_TOKEN`) from the shell tool's environment. A run whose env lacks the variable fails before spawning with `auth`/`key_missing`. S3 extends the host (discovery, per-workspace resolution).
+3. **Minimal `providers` schema** in `packages/shared/src/config.ts`: `baseUrl`, `apiKeySecret`, `auth` (`bearer | header:<Name> | none`), `headers`, `models` (record of `{contextWindow?, maxOutputTokens?}`). Default `{}`, so existing workspace files and `config-compatibility` stay valid. No presets, compat flags, pricing or `discover` yet.
+4. **Codec is a pure reducer over parsed chunks**, so the byte-split property test runs against `sse.ts` + reducer with no network. Tool-call assembly and the quirk handling in the spec are implemented as listed; usage is read from whichever chunk carries it; `stream_options.include_usage` is sent (harmless where ignored, and the parser does not depend on it). The token cap is always `max_tokens` (probe results: honoured everywhere; `max_completion_tokens` ignored by Z.ai). Nothing else is defaulted into the body.
+5. **Loop and cancel.** One `AbortController` per turn threaded into `fetch`, each `reader.read()`, tool execution, and MCP calls. Cancel arrives by SIGTERM to the child or the protocol `cancel` message; both set the abort and drive the same finalisation path (synthetic `[Tool execution was interrupted]` results, persist, exit 143). Session appends are synchronous whole-line writes, never aborted mid-line. Step cap default 200 (`limits.maxTurns`); deadline and budget are honoured only as far as `limits.timeoutMs` (child stops 30 s early).
+6. **Errors in S1** are the minimum: HTTP status to `RunErrorFamily` per the design table for 401/403 (`auth`), 402 and quota wording (`provider_quota`), 429 and 5xx (`transient_upstream`, retried 2 times with the design's backoff, abortable), 400 overflow (`resource`), the rest `unknown`; an `error` object in-stream ends the step. The full table, `retry-after` handling, idle timeouts beyond one fixed 120 s idle guard, repair and doom-loop are S5.
+7. **Sessions** are the design's linear entries (header `{type:"session",v:1,id,createdAt,cwd}`, then `{id,parentId,type:"message",…}`) so S6's tree and compaction need no format change; the `parentId` chain is written but read linearly.
+8. **Usage.** Following the other adapters, `inputTokens` is the fresh (uncached) prompt tokens summed over requests, `outputTokens` sums completion tokens, `cachedInputTokens` sums `prompt_tokens_details.cached_tokens`, `contextTokens` is the last request's prompt tokens, `firstRequest` is fresh/cached for request 1; missing usage falls back to a js-tiktoken `o200k_base` estimate. `cost` is omitted (no display in v1).
+9. **Weaver live check.** `pnpm --filter @weave-ai/agent conformance --live --base-url <url> --model <id> --key-env <ENV>` sends one streamed tool-using request to a real endpoint from a scratch directory, prints a per-capability report (streamed, tool call assembled, usage seen and where, reasoning field seen, reported model) and writes raw SSE captures to `--out` (must be outside the repo). Its exact invocation is stated on the PR. No live provider is called by this change or its tests.
+
+## Risks / Trade-offs
+
+- **Provider behaviour beyond the four probed gateways is unverified.** Mitigation: fixtures are written from the recorded real bytes in the probe-results doc and VS-605's attachments, and the live check yields the first fixtures of our own.
+- **Child start cost and RSS are unmeasured.** The live check prints child start time and peak RSS so the design's assumptions can be checked.
+- **`bash` is not confined** (as with the CLIs); S2 adds the guards. S1's `bash` runs under the run's containment scope and never receives the key or the run token.
+- **`attach` widens the SDK** by one optional method. It is additive; the other five adapters do not implement it.
+- **Size:** large. Task order lets a turn end after part (a), the library, and continue with part (b), adapter and registration; each task is committed when it compiles.
+
+## Migration Plan
+
+Additive only: new packages, an optional config key defaulting to `{}`, one new registry entry that reports `unsupported` until a provider is configured. Rollback is removing the package from `RUNTIME_PACKAGES`.
+
+## Open Questions
+
+None blocking. Recorded assumption: `RuntimeHost.resolveSecret` reads the existing workspace secret store; if its API needs a change the task notes it on the ticket rather than widening scope silently.

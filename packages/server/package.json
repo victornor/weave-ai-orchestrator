@@ -34,6 +34,7 @@
     "@weave-ai/runtime-cursor": "workspace:*",
     "@weave-ai/runtime-gemini": "workspace:*",
     "@weave-ai/runtime-opencode": "workspace:*",
+    "@weave-ai/runtime-weave": "workspace:*",
     "@weave-ai/runtime-sdk": "workspace:*",
     "@weave-ai/shared": "workspace:*",
     "@weave-ai/surface-headless": "workspace:*",

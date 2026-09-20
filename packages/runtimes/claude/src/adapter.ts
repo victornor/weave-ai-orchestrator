@@ -51,6 +51,9 @@ export const capabilities: RuntimeCapabilities = {
   // the CLI told us. Check it against the CLI's release notes when auto-compaction changes; it is
   // read only to say how far a context is from being compacted, never to trigger anything.
   contextCompactionAt: CONTEXT_COMPACTION_AT,
+  // VS-599: `--include-partial-messages` stream_events are translated into text, thinking and
+  // tool-input partials (see `events.ts`); the completed events are unchanged.
+  partialOutput: 'full',
 };
 
 /** Aliases plus pinned ids. Claude Code has no machine-readable model list, so this is `static`. */
@@ -189,6 +192,7 @@ export const adapter: RuntimeAdapter = {
     let seq = 0;
     const emit = (line: string) => {
       for (const ev of parser.handle(line)) sink.onEvent({ ...ev, seq: seq++ });
+      for (const p of parser.takePartials()) sink.onPartial?.(p);
     };
 
     // The same resolution the account probe uses, so neither can find a different `claude`.

@@ -26,6 +26,10 @@ const state = vi.hoisted(() => ({
   context: [] as ThreadMessage[],
   events: [] as unknown[],
   runEvents: [] as RunEvent[],
+  runPartials: [] as Array<{ partId: string; kind: 'text' | 'thinking' | 'tool_input'; text: string }>,
+  lastPartialAt: null as number | null,
+  partialSince: null as number | null,
+  weaverRuntimeId: 'claude' as string,
   runStreams: [] as Array<{ id: string | null; live: boolean }>,
   runState: 'connected' as 'connected' | 'offline' | 'unreachable',
   lastRun: null as { id: string; status: string } | null,
@@ -63,7 +67,14 @@ vi.mock('@tanstack/react-query', async (importOriginal) => {
 vi.mock('../api/runStream', () => ({
   useRunEventStream: (id: string | null, opts?: { live?: boolean }) => {
     state.runStreams.push({ id, live: opts?.live ?? false });
-    return { events: state.runEvents, status: { state: state.runState }, retryNow: vi.fn() };
+    return {
+      events: state.runEvents,
+      partials: state.runPartials,
+      lastPartialAt: state.lastPartialAt,
+      partialSince: state.partialSince,
+      status: { state: state.runState },
+      retryNow: vi.fn(),
+    };
   },
 }));
 vi.mock('../v2/chatSplit', async (importOriginal) => {
@@ -95,7 +106,7 @@ vi.mock('../api/hooks', () => ({
   useRoadmapBlocks: () => ({ data: state.roadmapBlocks }),
   useRoadmapBlockTitles: () => state.blockTitles,
   useTickets: () => ({ data: state.tickets }),
-  useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: 'claude' }, lastRun: state.lastRun, compacting: state.compacting } }),
+  useWeaver: () => ({ data: { agent: { id: 'weaver1', runtimeId: state.weaverRuntimeId }, lastRun: state.lastRun, compacting: state.compacting } }),
   useCompactWeaver: () => ({ mutate: state.compact, isPending: false }),
   useRuntimes: () => ({ data: [{ id: 'claude', capabilities: { contextCompactionAt: 0.8 } }] }),
   useRuntimeModels: () => ({ data: [{ id: 'sonnet', contextWindowTokens: 1_000_000 }] }),
@@ -247,6 +258,10 @@ beforeEach(() => {
   state.context = [];
   state.events = [];
   state.runEvents = [];
+  state.runPartials = [];
+  state.lastPartialAt = null;
+  state.partialSince = null;
+  state.weaverRuntimeId = 'claude';
   state.runStreams = [];
   state.runState = 'connected';
   state.lastRun = null;
@@ -283,7 +298,7 @@ describe('the V2 Chat screen', () => {
   it('shows no Refresh under "working" while the live stream is healthy, and one when it drops (VS-370)', async () => {
     state.lastRun = { id: 'r9', status: 'running' };
     const utils = render(<V2ChatPage />);
-    await screen.findByText('working');
+    await waitFor(() => expect(document.querySelector('[data-live-activity]')).not.toBeNull());
     expect(screen.queryByRole('button', { name: 'Refresh' })).toBeNull();
 
     state.runState = 'offline';
@@ -299,7 +314,7 @@ describe('the V2 Chat screen', () => {
     });
     state.lastRun = { id: 'r9', status: 'running' };
     const utils = render(<V2ChatPage />);
-    await screen.findByText('working');
+    await waitFor(() => expect(document.querySelector('[data-live-activity]')).not.toBeNull());
     // Nothing on the wire yet: the trace is not mounted, so no history placeholder.
     expect(screen.queryByText('Nothing on the wire yet.')).toBeNull();
 
@@ -336,8 +351,37 @@ describe('the V2 Chat screen', () => {
     ];
     render(<V2ChatPage />);
     expect(screen.queryByText('Compacting conversation…')).toBeNull();
-    expect(screen.getByText('working')).toBeInTheDocument();
+    expect(document.querySelector('[data-live-activity]')).not.toBeNull();
     expect(document.querySelector('[data-trace-compaction]')).toHaveTextContent('Conversation compacted · 184.3k → 11.8k tok');
+  });
+
+  it('streams the weaver reply as partial text in the live row, never as a thread message (VS-599)', async () => {
+    state.lastRun = { id: 'r9', status: 'running' };
+    state.runPartials = [{ partId: 'm1:0', kind: 'text', text: 'Draft reply in progress' }];
+    state.lastPartialAt = Date.now();
+    state.partialSince = Date.now();
+    render(<V2ChatPage />);
+    const partials = (await waitFor(() => {
+      const el = document.querySelector('[data-live-partials]');
+      expect(el).not.toBeNull();
+      return el;
+    })) as HTMLElement;
+    expect(partials).toHaveTextContent('Draft reply in progress');
+    // The same live activity row a worker page shows, in its streaming state — not a bare "working".
+    const row = document.querySelector('[data-live-state]');
+    expect(row).not.toBeNull();
+    expect(row!.getAttribute('data-live-state')).toBe('streaming');
+    // Streaming affects the run view only: the draft created no thread message.
+    expect(document.querySelectorAll('[data-message-id]')).toHaveLength(0);
+    expect(state.messages).toHaveLength(0);
+  });
+
+  it('says a non-streaming runtime reports whole steps only in the chat row (VS-599)', () => {
+    state.lastRun = { id: 'r9', status: 'running' };
+    state.weaverRuntimeId = 'codex';
+    render(<V2ChatPage />);
+    expect(document.querySelector('[data-live-activity]')).not.toBeNull();
+    expect(document.querySelector('[data-live-whole-steps]')).not.toBeNull();
   });
 
   it('collapses an empty decisions pane on desktop and expands it when a decision arrives (VS-549)', async () => {

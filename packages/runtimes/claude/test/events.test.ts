@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
+import type { RuntimeEvent, RuntimePartial } from '@weave-ai/runtime-sdk';
 import { createClaudeParser } from '../src/events.js';
 
 // Fixtures: recorded live from claude 2.1.258 on 2026-09-03 (`claude -p --output-format
@@ -24,8 +24,12 @@ function fixture(name: string): string[] {
 function run(name: string, resumed = false) {
   const parser = createClaudeParser({ resumed });
   const events: RuntimeEvent[] = [];
-  for (const line of fixture(name)) events.push(...parser.handle(line));
-  return { events, state: parser.state, types: events.map((e) => e.type) };
+  const partials: RuntimePartial[] = [];
+  for (const line of fixture(name)) {
+    events.push(...parser.handle(line));
+    partials.push(...parser.takePartials());
+  }
+  return { events, state: parser.state, types: events.map((e) => e.type), partials };
 }
 
 describe('claude stream-json parser', () => {
@@ -175,5 +179,45 @@ describe('claude stream-json parser', () => {
     }));
     const cmd = evs.find((e) => e.type === 'command.executed')!;
     expect(cmd.payload['tests']).toEqual({ passed: 28, total: 28 });
+  });
+
+  it('translates stream_event text and thinking deltas into partials under the completed id (VS-599)', () => {
+    const { events, partials, types, state } = run('stream-events-text');
+    expect(partials.map((p) => [p.kind, p.text])).toEqual([['thinking', 'Let me think'], ['text', 'hi']]);
+    // stream_event lines never become persisted events, and each completed block appears once.
+    expect(types).toEqual(['session.started', 'assistant.thinking', 'assistant.text', 'usage.delta', 'turn.completed']);
+    expect(state.assistantText).toBe('hi');
+    const thinking = events.find((e) => e.type === 'assistant.thinking')!;
+    const text = events.find((e) => e.type === 'assistant.text')!;
+    expect(thinking.payload['partId']).toBe(partials[0]!.partId);
+    expect(text.payload['partId']).toBe(partials[1]!.partId);
+    // A signature is consumed, never surfaced anywhere the page, the transcript or a report can see.
+    expect(JSON.stringify({ events, partials })).not.toContain('SIGSECRET');
+  });
+
+  it('reports tool-input deltas under the tool call and emits one tool.call with the full input (VS-599)', () => {
+    const { events, partials, types } = run('stream-events-tool');
+    const toolInputs = partials.filter((p) => p.kind === 'tool_input');
+    expect(toolInputs.map((p) => p.text).join('')).toBe('{"command":"echo hi"}');
+    expect(toolInputs.every((p) => p.toolCallId === 'toolu_stream_01')).toBe(true);
+    const calls = events.filter((e) => e.type === 'tool.call');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.payload).toMatchObject({ id: 'toolu_stream_01', name: 'Bash', input: { command: 'echo hi' } });
+    expect(calls[0]!.payload['partId']).toBe(toolInputs[0]!.partId);
+    expect(types).toContain('tool.result');
+    expect(types).not.toContain('runtime.raw');
+  });
+
+  it('invents no completed event when the stream is cut off after deltas (VS-599)', () => {
+    const p = createClaudeParser();
+    const sid = 'cut-session';
+    const se = (event: Record<string, unknown>) => JSON.stringify({ type: 'stream_event', session_id: sid, event });
+    p.handle(JSON.stringify({ type: 'system', subtype: 'init', session_id: sid, model: 'm' }));
+    p.handle(se({ type: 'message_start', message: { id: 'msg_cut', content: [] } }));
+    p.handle(se({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }));
+    p.handle(se({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'half' } }));
+    expect(p.takePartials().map((x) => x.text)).toEqual(['half']);
+    expect(p.state.assistantText).toBe('');
+    expect(p.state.finalText).toBeNull();
   });
 });

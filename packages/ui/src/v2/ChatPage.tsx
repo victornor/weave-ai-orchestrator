@@ -812,6 +812,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
               workingAriaLabel="Weaver is working"
               live={live}
               working={working}
+              runtimeId={conductorRuntime}
               focused={focused}
               revealIds={revealIds}
               onTicket={openTicket}

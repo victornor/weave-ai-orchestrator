@@ -20,7 +20,8 @@ describe('claude buildArgs — live input (default)', () => {
   it('builds the stream-json-in / stream-json-out invocation with a fresh session id', () => {
     const b = buildArgs(input(), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
     expect(b.cmd).toBe('claude');
-    expect(pairs(b.args)).toContain('-p --output-format stream-json --verbose --input-format stream-json --replay-user-messages');
+    expect(pairs(b.args)).toContain('-p --output-format stream-json --verbose --include-partial-messages --input-format stream-json --replay-user-messages');
+    expect(b.args).toContain('--include-partial-messages');
     expect(pairs(b.args)).toContain(`--session-id ${NEW_ID}`);
     expect(b.args).not.toContain('--resume');
     expect(b.sessionId).toBe(NEW_ID);
@@ -128,10 +129,11 @@ describe('claude buildArgs — live input (default)', () => {
 describe('claude buildArgs — liveInput: false (legacy, argv/text-stdin prompt)', () => {
   it('reverts to --input-format text with no --replay-user-messages', () => {
     const b = buildArgs(input({ options: { liveInput: false } }), { newSessionId: NEW_ID, tmpDir: '/tmp/ac' });
-    expect(pairs(b.args)).toContain('-p --output-format stream-json --verbose --input-format text');
+    expect(pairs(b.args)).toContain('-p --output-format stream-json --verbose --include-partial-messages --input-format text');
+    expect(b.args).toContain('--include-partial-messages');
     expect(pairs(b.args)).not.toContain('--replay-user-messages');
     expect(b.liveInput).toBe(false);
-    expect(b.args[6]).toBe('do the thing'); // operand sits before any variadic flag
+    expect(b.args[7]).toBe('do the thing'); // operand sits before any variadic flag
     expect(b.stdin).toBeNull();
   });
 

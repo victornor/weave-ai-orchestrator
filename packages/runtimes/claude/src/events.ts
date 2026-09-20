@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
+import type { RuntimeEvent, RuntimePartial } from '@weave-ai/runtime-sdk';
 import { truncate } from '@weave-ai/runtime-sdk';
 import { parseTestSummary } from '@weave-ai/shared';
 
@@ -53,6 +53,12 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
   /** tool_use id -> tool name, so tool_result lines can be classified. */
   const toolNames = new Map<string, string>();
   let sessionAnnounced = false;
+  // VS-599: the `stream_event` state. `streamMessageId` is the id `message_start` announced; the
+  // blocks it opened are kept in start order so a completed `assistant` block can be matched to the
+  // stream index its deltas were reported under, giving both the same `partId`.
+  let streamMessageId: string | null = null;
+  const streamBlocks = new Map<string, Array<{ idx: number; type: string; toolId: string | null; consumed: boolean }>>();
+  const pendingPartials: RuntimePartial[] = [];
 
   function handle(line: string): RuntimeEvent[] {
     let msg: Json | null;
@@ -68,8 +74,82 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
       case 'assistant': return assistant(msg, ts);
       case 'user': return user(msg, ts);
       case 'result': return result(msg, ts);
+      case 'stream_event': return streamEvent(msg);
       default: return [raw(type ?? 'unknown', msg, ts)];
     }
+  }
+
+  /**
+   * VS-599: one `--include-partial-messages` line. It carries no persisted event — the completed
+   * `assistant`/`user` lines still produce every persisted event — only the deltas and the block
+   * bookkeeping, which `takePartials()` hands to `TurnSink.onPartial`. Shapes come from the
+   * 2026-09-20 captured run (see design.md §1).
+   */
+  function streamEvent(msg: Json): RuntimeEvent[] {
+    const ev = obj(msg['event']);
+    if (!ev) return [];
+    switch (str(ev['type'])) {
+      case 'message_start': {
+        const id = str(obj(ev['message'])?.['id']);
+        if (id) { streamMessageId = id; if (!streamBlocks.has(id)) streamBlocks.set(id, []); }
+        return [];
+      }
+      case 'content_block_start': {
+        const idx = num(ev['index']);
+        const block = obj(ev['content_block']);
+        const kind = str(block?.['type']);
+        if (streamMessageId && idx != null && kind) {
+          const list = streamBlocks.get(streamMessageId) ?? [];
+          if (!streamBlocks.has(streamMessageId)) streamBlocks.set(streamMessageId, list);
+          list.push({ idx, type: kind, toolId: kind === 'tool_use' ? str(block?.['id']) : null, consumed: false });
+        }
+        return [];
+      }
+      case 'content_block_delta': {
+        const idx = num(ev['index']);
+        const delta = obj(ev['delta']);
+        const kind = str(delta?.['type']);
+        if (streamMessageId && idx != null) {
+          const partId = `${streamMessageId}:${idx}`;
+          if (kind === 'text_delta') {
+            const text = str(delta?.['text']);
+            if (text) pendingPartials.push({ kind: 'text', partId, messageId: streamMessageId, text });
+          } else if (kind === 'thinking_delta') {
+            const text = str(delta?.['thinking']);
+            if (text) pendingPartials.push({ kind: 'thinking', partId, messageId: streamMessageId, text });
+          } else if (kind === 'input_json_delta') {
+            const text = str(delta?.['partial_json']);
+            const toolId = streamBlocks.get(streamMessageId)?.find((b) => b.idx === idx)?.toolId ?? null;
+            if (text) pendingPartials.push({ kind: 'tool_input', partId, ...(toolId ? { toolCallId: toolId } : {}), text });
+          }
+          // `signature_delta` (and any other delta type) is consumed here and never surfaced.
+        }
+        return [];
+      }
+      default:
+        // content_block_stop, message_delta, message_stop: no event and no partial.
+        return [];
+    }
+  }
+
+  /**
+   * The `partId` the completed block and its streamed partials share: `${message.id}:${block index}`.
+   * A block is matched to the stream block whose type (and, for a tool, id) agrees, in start order;
+   * with no recorded stream block the completed event carries no `partId`, leaving persisted events
+   * byte-identical to a turn that never streamed.
+   */
+  function completedPartId(messageId: string, kind: string | null, toolId: string | null): string | null {
+    if (!messageId) return null;
+    const entry = streamBlocks.get(messageId)?.find((b) =>
+      !b.consumed && b.type === kind && (kind !== 'tool_use' || b.toolId === toolId));
+    if (!entry) return null;
+    entry.consumed = true;
+    return `${messageId}:${entry.idx}`;
+  }
+
+  /** The partials accumulated since the last call, then cleared. */
+  function takePartials(): RuntimePartial[] {
+    return pendingPartials.splice(0, pendingPartials.length);
   }
 
   function system(msg: Json, ts: string): RuntimeEvent[] {
@@ -136,6 +216,9 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
       }
     }
     const content = Array.isArray(m['content']) ? m['content'] : [];
+    // VS-599: the message id the streamed partials were reported under, so a completed block can
+    // carry the same `partId` and supersede its partial.
+    const messageId = str(m['id']) ?? '';
     for (const blockRaw of content) {
       const b = obj(blockRaw);
       if (!b) continue;
@@ -144,19 +227,22 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
           const text = str(b['text']) ?? '';
           if (!text) break;
           state.assistantText += (state.assistantText ? '\n' : '') + text;
-          out.push({ ts, type: 'assistant.text', payload: { text } });
+          const partId = completedPartId(messageId, 'text', null);
+          out.push({ ts, type: 'assistant.text', payload: { text, ...(partId ? { partId } : {}) } });
           break;
         }
         case 'thinking': {
           const think = str(b['thinking']) ?? '';
-          out.push({ ts, type: 'assistant.thinking', payload: { text: truncate(think, 2000), redacted: think.length > 2000 } });
+          const partId = completedPartId(messageId, 'thinking', null);
+          out.push({ ts, type: 'assistant.thinking', payload: { text: truncate(think, 2000), redacted: think.length > 2000, ...(partId ? { partId } : {}) } });
           break;
         }
         case 'tool_use': {
           const id = str(b['id']) ?? '';
           const name = str(b['name']) ?? 'unknown';
           if (id) toolNames.set(id, name);
-          out.push({ ts, type: 'tool.call', payload: { id, name, input: b['input'] } });
+          const partId = completedPartId(messageId, 'tool_use', id || null);
+          out.push({ ts, type: 'tool.call', payload: { id, name, input: b['input'], ...(partId ? { partId } : {}) } });
           if (EDIT_TOOLS.has(name)) {
             const path = str(obj(b['input'])?.['file_path'] ?? obj(b['input'])?.['notebook_path']);
             if (path) out.push({ ts, type: 'file.changed', payload: { path, tool: name, toolUseId: id } });
@@ -243,6 +329,7 @@ export function createClaudeParser(opts: { resumed: boolean } = { resumed: false
   return {
     state,
     handle,
+    takePartials,
     get sessionAnnounced() { return sessionAnnounced; },
   };
 }

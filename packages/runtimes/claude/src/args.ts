@@ -56,9 +56,12 @@ export function buildArgs(input: TurnInput, opts: ClaudeBuildOpts): ClaudeBuiltC
   // The prompt (non-live only) goes immediately after the fixed head: several later flags are
   // variadic (--allowedTools, --disallowedTools, --mcp-config, --tools) and would swallow a
   // trailing operand.
+  // VS-599: `--include-partial-messages` makes the CLI interleave `stream_event` lines with the
+  // completed `assistant` messages; the parser turns those into `onPartial` and never persists them.
+  // Both forms use `--print` + `--output-format stream-json`, which is all the flag requires.
   const head: string[] = liveInput
-    ? ['-p', '--output-format', 'stream-json', '--verbose', '--input-format', 'stream-json', '--replay-user-messages']
-    : ['-p', '--output-format', 'stream-json', '--verbose', '--input-format', 'text'];
+    ? ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--input-format', 'stream-json', '--replay-user-messages']
+    : ['-p', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--input-format', 'text'];
   const args: string[] = [];
 
   // A stored ref always means "resume that conversation" (a relaunch resumes too, §7.4).

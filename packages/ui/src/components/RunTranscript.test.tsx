@@ -44,7 +44,7 @@ describe('RunTranscript live activity', () => {
   });
 
   it('a runtime that cannot stream says so in words', () => {
-    const { container } = render(<RunTranscript events={[]} live stream={noStream} runtimeId="codex" label="t" />);
+    const { container } = render(<RunTranscript events={[]} live stream={noStream} runtimeId="gemini" label="t" />);
     expect(container.querySelector('[data-live-whole-steps]')!.textContent).toContain('whole steps only');
   });
 

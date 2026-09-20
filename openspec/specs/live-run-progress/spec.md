@@ -53,14 +53,18 @@ If a runtime's partial stream ends without a completed part, the page SHALL disc
 - **THEN** the run is cancelled as before and the page shows no partial text after the cancellation event
 
 ### Requirement: Runtime coverage is declared
-Each runtime adapter SHALL declare `capabilities.partialOutput` as `none`, `text` or `full`, and the value the page reads SHALL agree with that declaration. opencode (`full`) and Claude (`full`) are delivered; every other runtime SHALL show the "whole steps only" state until its own follow-up change declares partial output.
+Each runtime adapter SHALL declare `capabilities.partialOutput` as `none`, `text` or `full`, and the value the page reads SHALL agree with that declaration. opencode (`full`), Claude (`full`) and Codex (`full`) are delivered; every other runtime SHALL show the "whole steps only" state until its own follow-up change declares partial output.
 
 #### Scenario: Claude now streams
 - **WHEN** a Claude run is live and generating text
 - **THEN** the page shows the streaming text and the streaming state, not the whole-steps-only statement
 
+#### Scenario: Codex now streams
+- **WHEN** a Codex run is live and its app-server is running
+- **THEN** the page shows streaming text, reasoning and running tools, not the whole-steps-only statement
+
 #### Scenario: Unsupported runtime
-- **WHEN** a codex run is live before its follow-up lands
+- **WHEN** a run of a runtime that declares `none` is live
 - **THEN** the page shows the whole-steps-only statement, elapsed time, tool count and time since the last event
 
 ### Requirement: The weaver chat is a live run surface

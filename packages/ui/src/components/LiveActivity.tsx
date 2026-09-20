@@ -70,13 +70,20 @@ export function LiveActivity({ events, partials, lastPartialAt, partialSince, ru
 export function LivePartials({ partials }: { partials: readonly PartialText[] }): React.ReactElement | null {
   const text = partials.filter((p) => p.kind === 'text' && p.text);
   const thinking = partials.filter((p) => p.kind === 'thinking' && p.text);
-  if (text.length === 0 && thinking.length === 0) return null;
+  // VS-601: a running tool's output so far (a Codex command's stdout), the last few lines of it.
+  const output = partials.filter((p) => p.kind === 'tool_input' && p.text);
+  if (text.length === 0 && thinking.length === 0 && output.length === 0) return null;
   return (
     <div data-live-partials className="flex flex-col gap-3 px-3.5 pb-1">
       {thinking.map((p) => (
         <p key={p.partId} data-live-thinking className="ac-mono text-micro italic text-text-3">
           {p.text.length > 240 ? `…${p.text.slice(-240)}` : p.text}
         </p>
+      ))}
+      {output.map((p) => (
+        <pre key={p.partId} data-live-tool-output className="ac-mono max-h-24 overflow-hidden whitespace-pre-wrap break-all rounded-r4 bg-bg-2 px-2 py-1 text-nano text-text-2">
+          {p.text.trimEnd().split('\n').slice(-4).join('\n')}
+        </pre>
       ))}
       {text.map((p) => (
         <Markdown key={p.partId} source={p.text} breaks className="text-body leading-relaxed text-text-body" />

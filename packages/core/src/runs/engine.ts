@@ -301,7 +301,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     const ev: RunEvent = { id: String(seq), runId, seq, ts, type, stream, level, payload: clean };
     emitRunEvent(ctx, runId, ev);
     // VS-595: the completed part supersedes its partial output.
-    if ((type === 'assistant.text' || type === 'assistant.thinking' || type === 'tool.call') && typeof clean['partId'] === 'string') partials.complete(clean['partId']);
+    if ((type === 'assistant.text' || type === 'assistant.thinking' || type === 'tool.call' || type === 'tool.result') && typeof clean['partId'] === 'string') partials.complete(clean['partId']);
     // VS-328: fold the event into the live per-worker activity summary the board consumes.
     try { deps().activity.observe(agent.id, agent.ticketId ?? null, ev); } catch (e) { log.warn({ err: String(e) }, 'activity observe failed'); }
   };

@@ -21,6 +21,8 @@ function input(scenario = 'success', ref: TurnInput['session']['ref'] = null, mo
   writeFileSync(join(dir, 'codex'), `#!${process.execPath}
 const fs = require('node:fs');
 const args = process.argv.slice(2);
+// VS-601: turns try codex app-server first; a server that exits at once sends the turn to exec.
+if (args[0] === 'app-server') { process.stderr.write('app-server unavailable\\n'); process.exit(2); }
 let prompt = '';
 const emit = (event) => process.stdout.write(JSON.stringify(event) + '\\n');
 process.stdin.on('data', (chunk) => { prompt += chunk; });

@@ -2,14 +2,15 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import type {
   AccountDescription, AccountProbeInput, AgentHome, InstructionBundle, JsonSchema, RuntimeAdapter,
-  RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, TurnHandle, TurnInput, TurnResult, TurnSink,
+  RuntimeCapabilities, RuntimeDetection, RuntimeModel, SessionRef, SpawnOutcome, TurnHandle, TurnInput, TurnResult, TurnSink,
 } from '@weave-ai/runtime-sdk';
 import { classifyError, detectBinary, installBundleFiles, launchCommand, runTmpDir, spawnLines, truncate, writeFiles } from '@weave-ai/runtime-sdk';
 import { extractReport } from '@weave-ai/shared';
 import { describeCodexAccount } from './account.js';
 import { buildArgs, mcpConfigToml, resumeCommand } from './args.js';
+import { runAppServerTurn } from './app-server.js';
 import { compactCodexThread } from './compact.js';
-import { createCodexParser } from './events.js';
+import { createCodexParser, type CodexParseState } from './events.js';
 import { listModels as listCodexModels, modelContextWindow } from './models.js';
 import { readThreadContextTokens, readThreadUsage } from './usage.js';
 import { asCodexSession, type CodexSessionRef } from './session.js';
@@ -42,6 +43,7 @@ export const capabilities: RuntimeCapabilities = {
   usageReporting: 'per_turn',
   costReporting: false,
   permissionModes: ['auto', 'restricted', 'bypass'],
+  partialOutput: 'full',
 };
 
 /** Codex has no `--list-models`; `listModels` tries `codex debug models --bundled` first. */
@@ -60,6 +62,7 @@ const CONFIG_SCHEMA: JsonSchema = {
     compactionPercent: { type: 'number', exclusiveMinimum: 0, maximum: 100, default: 60, description: 'Compact at this percentage of the active model context window' },
     contextWindowTokens: { type: 'integer', minimum: 1, description: 'Override the active Codex model context window in tokens' },
     autoCompactTokenLimit: { type: 'integer', minimum: 1, description: 'Optional absolute compaction threshold; overrides compactionPercent' },
+    appServer: { type: 'boolean', default: true, description: 'Drive turns through `codex app-server` for live partial output; false keeps `codex exec --json`' },
     extraArgs: { type: 'array', items: { type: 'string' } },
   },
 };
@@ -127,27 +130,40 @@ export const adapter: RuntimeAdapter = {
 
     const previous = asCodexSession(input.session.ref);
     const baseline = previous?.usage ?? readThreadUsage(input.configHome, built.threadId);
-    const parser = createCodexParser({ resumed: built.mode === 'resume', baseline: built.mode === 'new' ? undefined : baseline });
+    const resumed = built.mode === 'resume';
+    const parserBaseline = built.mode === 'new' ? undefined : baseline;
     let seq = 0;
-    const launch = launchCommand(built.cmd, built.env);
-    const run = spawnLines({
-      cmd: launch.cmd,
-      args: built.args,
-      cwd: input.cwd,
-      env: launch.env,
-      stdin: built.stdin,
-      timeoutMs: input.limits.timeoutMs,
-      containment: input.containment,
-      onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
-      onLine: (stream, line) => {
-        sink.onRaw(stream, line);
-        if (stream === 'stdout') for (const ev of parser.handle(line)) sink.onEvent({ ...ev, seq: seq++ });
-      },
-    });
-    onHandle?.({ pid: run.child.pid ?? null, cancel: (mode) => run.cancel(mode) });
-
-    const outcome = await run.done;
-    const st = parser.state;
+    const nextSeq = (): number => seq++;
+    // VS-595/VS-601: a per-turn `codex app-server` gives partial output and a tool's start. A server
+    // that cannot start, or a rejected thread or turn request, returns null and `exec --json` takes the
+    // turn; `options.appServer: false` opts out.
+    const server = input.options['appServer'] === false ? null : await runAppServerTurn(input, sink, onHandle, built, nextSeq, { resumed, baseline: parserBaseline, model });
+    let outcome: Pick<SpawnOutcome, 'exitCode' | 'signal' | 'timedOut' | 'stderr'>;
+    let st: CodexParseState;
+    if (server) {
+      outcome = server.outcome;
+      st = server.translator.state;
+    } else {
+      const parser = createCodexParser({ resumed, baseline: parserBaseline });
+      const launch = launchCommand(built.cmd, built.env);
+      const run = spawnLines({
+        cmd: launch.cmd,
+        args: built.args,
+        cwd: input.cwd,
+        env: launch.env,
+        stdin: built.stdin,
+        timeoutMs: input.limits.timeoutMs,
+        containment: input.containment,
+        onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
+        onLine: (stream, line) => {
+          sink.onRaw(stream, line);
+          if (stream === 'stdout') for (const ev of parser.handle(line)) sink.onEvent({ ...ev, seq: nextSeq() });
+        },
+      });
+      onHandle?.({ pid: run.child.pid ?? null, cancel: (mode) => run.cancel(mode) });
+      outcome = await run.done;
+      st = parser.state;
+    }
     let finalText = st.finalText;
     try { finalText = readFileSync(built.lastMessagePath, 'utf8').trim() || finalText; } catch { /* codex may not have written it */ }
     try { rmSync(tmpDir, { recursive: true, force: true }); } catch { /* best effort */ }

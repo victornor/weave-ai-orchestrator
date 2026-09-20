@@ -34,4 +34,13 @@ describe('live partials (VS-595)', () => {
     const m = applyDelta(new Map(), [part(0, 'a'), part(0, 'b', 'p2')]).map;
     expect(dropSuperseded(m, [done('p1')]).map((p) => p.partId)).toEqual(['p2']);
   });
+
+  // VS-601: a running command's output partial is superseded by the tool.result that carries its partId.
+  it('drops a tool output part once its tool.result is present', () => {
+    const out = { partId: 'c1:out', kind: 'tool_input' as const, offset: 0, text: 'line1\n' };
+    const m = applyDelta(new Map(), [out]).map;
+    const result: RunEvent = { ...done('c1:out'), type: 'tool.result', payload: { id: 'c1', partId: 'c1:out' } };
+    expect(dropSuperseded(m, [])).toHaveLength(1);
+    expect(dropSuperseded(m, [result])).toEqual([]);
+  });
 });

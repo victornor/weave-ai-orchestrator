@@ -8,9 +8,9 @@ describe('activeRunLine', () => {
   it('shows what the agent is doing and for how long, from the live frame', () => {
     expect(activeRunLine(
       { status: 'running', startedAt: '2026-09-20T00:00:00.000Z' },
-      { label: 'Waiting for the model', since: new Date(NOW - 4000).toISOString() },
+      { label: 'Working', since: new Date(NOW - 4000).toISOString() },
       NOW,
-    )).toBe('Waiting for the model · now');
+    )).toBe('Working · now');
   });
 
   it('falls back to the run status and its elapsed time when there is no live frame', () => {

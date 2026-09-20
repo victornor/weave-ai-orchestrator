@@ -1,7 +1,7 @@
 /**
  * The live row for a terminal surface (VS-603): the same `liveTurnLine` the web row renders, so the
- * terminal never spells a live state a second way. One second of its own clock keeps "Waiting for the
- * model · 12 s" ageing while nothing arrives; nothing here polls.
+ * terminal never spells a live state a second way. One second of its own clock keeps "Working · 12 s"
+ * ageing while nothing arrives; nothing here polls.
  */
 import React from 'react';
 import { Text } from 'ink';

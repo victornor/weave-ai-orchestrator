@@ -2,7 +2,7 @@
  * The live activity row and the partial output of a run that is still going (VS-595).
  *
  * A running turn must never read as a bare "working": the row says whether the worker is writing,
- * thinking, running a named tool, or waiting for the model, with the seconds it has been in that
+ * thinking, running a named tool, or working, with the seconds it has been in that
  * state, the turn's length, the tool-call count and the time since anything last arrived — enough to
  * tell a long investigation from a hung run. It ticks on the page's own one-second clock; nothing is
  * polled. A runtime that cannot stream says so in words instead of leaving the row to look broken.

@@ -32,7 +32,7 @@ export interface LiveTurnPartial { partId: string; kind: 'text' | 'thinking' | '
 
 export interface LiveTurn {
   state: LiveTurnState;
-  /** The words for the state: `Running bash sleep 3; ls`, `Waiting for the model`, … */
+  /** The words for the state: `Running bash sleep 3; ls`, `Working`, … */
   label: string;
   /** How long the current state has lasted. */
   stateMs: number;
@@ -88,7 +88,7 @@ export function liveTurn(
   if (live.some((p) => p.kind === 'text')) return { ...base, state: 'streaming', label: 'Writing', stateMs: opts.partialSince ? Math.max(0, now - opts.partialSince) : base.sinceLastMs };
   if (live.some((p) => p.kind === 'thinking')) return { ...base, state: 'thinking', label: 'Thinking', stateMs: opts.partialSince ? Math.max(0, now - opts.partialSince) : base.sinceLastMs };
   if (events.length === 0 || lastAny === 0) return { ...base, state: 'starting', label: 'Starting the turn', stateMs: base.turnMs };
-  return { ...base, state: 'waiting', label: 'Waiting for the model', stateMs: base.sinceLastMs };
+  return { ...base, state: 'waiting', label: 'Working', stateMs: base.sinceLastMs };
 }
 
 /** `4 s`, `1 m 05 s`: the compact clock the activity row uses. */
@@ -131,7 +131,7 @@ const PROGRESS_WORD: Record<LiveTurnState, string> = {
   streaming: 'Writing',
   thinking: 'Thinking',
   tool: 'Working',
-  waiting: 'Waiting for the model',
+  waiting: 'Working',
 };
 
 /**

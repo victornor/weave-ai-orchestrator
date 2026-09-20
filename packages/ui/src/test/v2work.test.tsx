@@ -510,15 +510,17 @@ describe('V2 Work liveness', () => {
     expect(within(inProgress).getByText('Platform Engineer #1')).toBeInTheDocument();
   });
 
-  it('shows the live-turn state on a card, never a bare "Working" (VS-602)', () => {
+  it('shows the live-turn word on a card, never a bare status word (VS-602, VS-627)', () => {
     state.workers = [liveWorker({
       activity: { verb: 'reading', label: 'Reading code', target: null, since: '2026-09-13T12:00:00.000Z' },
-      live: { state: 'waiting', label: 'Waiting for the model', since: '2026-09-13T11:59:06.000Z', toolCount: 4, turnMs: 66_000, sinceLastMs: 6000, wholeStepsOnly: false },
+      live: { state: 'waiting', label: 'Working', since: '2026-09-13T11:59:06.000Z', toolCount: 4, turnMs: 66_000, sinceLastMs: 6000, wholeStepsOnly: false },
     })];
     render(<V2WorkScreen />);
     const card = document.querySelector('[data-v2-card="ACME-1"]') as HTMLElement;
-    expect(within(card).getByText('Waiting for the model')).toBeInTheDocument();
-    expect(within(card).queryByText('Working')).toBeNull();
+    expect(within(card).getByText('Working')).toBeInTheDocument();
+    expect(within(card).queryByText('Reading code')).toBeNull();
+    expect(card.querySelector('[data-v2-activity] span')!.textContent).toContain('Working');
+    expect(card.querySelector('[data-v2-activity]')!.textContent).toContain('·');
   });
 
   it('shows the working mark, activity line and test tally on a live card', () => {

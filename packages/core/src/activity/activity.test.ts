@@ -45,9 +45,9 @@ describe('WorkerActivityService (VS-328)', () => {
     const running = a.summaryFor(agentId)?.live;
     expect(running).toMatchObject({ state: 'tool', label: 'Running bash sleep 3; ls', toolCount: 1, wholeStepsOnly: true });
 
-    // The tool result flips it to "waiting for the model" rather than leaving a stale "Running".
+    // The tool result flips it to "Working" rather than leaving a stale "Running".
     a.observe(agentId, null, ev({ type: 'tool.result', payload: { id: 't1', name: 'bash' }, ts: new Date().toISOString() }));
-    expect(a.summaryFor(agentId)?.live).toMatchObject({ state: 'waiting', label: 'Waiting for the model', toolCount: 1 });
+    expect(a.summaryFor(agentId)?.live).toMatchObject({ state: 'waiting', label: 'Working', toolCount: 1 });
 
     // The turn ends: the live state is gone.
     a.finish(agentId);

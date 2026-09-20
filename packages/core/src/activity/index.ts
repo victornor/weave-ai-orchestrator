@@ -180,7 +180,7 @@ export function createWorkerActivityService(ctx: WorkspaceContext): WorkerActivi
         e.tests = tally;
       }
       // Push on every event: the throttle above caps the rate, and a tool result changes the live
-      // state (a running tool becomes "waiting for the model") even though it has no activity line.
+      // state (a running tool becomes "Working") even though it has no activity line.
       schedule(agentId);
     },
     finish(agentId) {

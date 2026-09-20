@@ -364,4 +364,26 @@ describe('the live trace reveal (VS-433)', () => {
     render(<ChatTrace events={[event({ id: 'e1', seq: 1, type: 'session.compaction.started', payload: {} })]} />);
     expect(document.querySelector('[data-trace-compaction]')).toBeNull();
   });
+
+  it('shows a subagent\'s work nested under its task call, open while it runs and once the human opens it (VS-615)', () => {
+    const task = event({ id: 't', seq: 1, type: 'tool.call', payload: { name: 'task', id: 't1', input: { description: 'find alpha', prompt: 'where is alpha' } } });
+    const inner = [
+      event({ id: 'i1', seq: 2, type: 'tool.call', payload: { name: 'read', id: 't1/1', parentId: 't1', input: { path: 'src/a.ts' } } }),
+      event({ id: 'i2', seq: 3, type: 'tool.result', payload: { id: 't1/1', parentId: 't1', content: 'alpha' } }),
+    ];
+    // Running: nothing top level but the task row, and its children are already visible.
+    const { container, rerender } = render(<ChatTrace events={[task, ...inner]} />);
+    expect(container.querySelectorAll('[data-trace-tool]')).toHaveLength(2);
+    const nested = container.querySelector('[data-trace-subagent]')!;
+    expect(nested.textContent).toContain('read');
+    expect(nested.textContent).toContain('a.ts');
+    expect(container.querySelector('[data-v2-trace] > [data-trace-subagent]')).toBeNull();
+    // Finished: collapsed until the human opens it.
+    const done = event({ id: 'tr', seq: 4, type: 'tool.result', payload: { id: 't1', name: 'task', content: 'alpha is in src/a.ts' } });
+    rerender(<ChatTrace events={[task, ...inner, done]} />);
+    expect(container.querySelector('[data-trace-subagent]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /^task, find alpha/ }));
+    expect(container.querySelector('[data-trace-subagent]')!.textContent).toContain('a.ts');
+    expect(container.querySelector('[data-trace-result]')!.textContent).toContain('alpha is in src/a.ts');
+  });
 });

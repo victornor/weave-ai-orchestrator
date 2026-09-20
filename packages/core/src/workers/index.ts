@@ -1015,7 +1015,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         let via: string | undefined;
         let message = 'compaction failed';
         try {
-          const result = await adapter.compactSession!({ ref, cwd: agent.homePath, configHome, model: setting.model ?? null });
+          const result = await adapter.compactSession!({ ref, cwd: agent.homePath, configHome, model: setting.model ?? null, workspaceId: ctx.workspaceId });
           ok = result.ok;
           via = result.via;
           message = result.error?.message ?? (ok ? '' : 'compaction failed');

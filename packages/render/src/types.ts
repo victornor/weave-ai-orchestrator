@@ -36,6 +36,8 @@ export interface ToolBlock extends TranscriptBlockBase {
   detailTruncated: boolean;
   /** `+18 −2` when the tool reported a diff stat. */
   diffStat: string | null;
+  /** A subagent's blocks (VS-615): the events that named this call as their `parentId`, in order. Absent for an ordinary tool. */
+  children?: TranscriptBlock[];
 }
 
 export interface FileBlock extends TranscriptBlockBase {

@@ -190,6 +190,31 @@ describe('confinement', () => {
       expect(await writeTool.run({ path: '.git/hooks/pre-commit', content: 'x' }, ctx({ mode }))).toMatchObject({ isError: true, text: expect.stringContaining('protected') });
     }
   });
+  it('refuses the .git pointer file of a linked worktree, and the gitdir it names, in every mode (VS-615)', async () => {
+    const gitdir = join(home, 'clone', '.git', 'worktrees', 'wt');
+    mkdirSync(gitdir, { recursive: true });
+    writeFileSync(join(wt, '.git'), `gitdir: ${gitdir}\n`);
+    for (const mode of ['auto', 'bypass', 'restricted'] as const) {
+      expect(await writeTool.run({ path: '.git', content: 'gitdir: /elsewhere\n' }, ctx({ mode }))).toMatchObject({ isError: true, text: expect.stringContaining('protected') });
+      expect(await editTool.run({ path: '.git', old_string: 'gitdir', new_string: 'xdir' }, ctx({ mode }))).toMatchObject({ isError: true });
+      expect(await writeTool.run({ path: join(gitdir, 'HEAD'), content: 'ref: refs/heads/x\n' }, ctx({ mode }))).toMatchObject({ isError: true, text: expect.stringContaining('protected') });
+    }
+    expect(readFileSync(join(wt, '.git'), 'utf8')).toBe(`gitdir: ${gitdir}\n`);
+    // Ordinary files next to it are still writable.
+    expect((await writeTool.run({ path: 'ok.txt', content: 'fine' }, ctx())).isError).toBeFalsy();
+  });
+  it('refuses the daemon config directory in every mode, unless it holds the worktree (VS-615)', async () => {
+    const cfg = join(home, 'daemon-config');
+    mkdirSync(cfg, { recursive: true });
+    writeFileSync(join(cfg, 'daemon.yaml'), 'secret: 1');
+    for (const mode of ['auto', 'bypass', 'restricted'] as const) {
+      expect(await readTool.run({ path: join(cfg, 'daemon.yaml') }, ctx({ mode, protectedPaths: [cfg] }))).toMatchObject({ isError: true, text: expect.stringContaining('protected') });
+      expect(await writeTool.run({ path: join(cfg, 'new.txt'), content: 'x' }, ctx({ mode, protectedPaths: [cfg] }))).toMatchObject({ isError: true, text: expect.stringContaining('protected') });
+    }
+    expect((await readTool.run({ path: join(cfg, 'daemon.yaml') }, ctx())).isError).toBeFalsy();
+    // A protected directory that contains the roots cannot be honoured without refusing the work itself.
+    expect((await writeTool.run({ path: 'ok.txt', content: 'fine' }, ctx({ protectedPaths: [dir] }))).isError).toBeFalsy();
+  });
   it('refuses the workspace state directory in every mode', async () => {
     const configHome = join(dir, 'state', 'runtimes', 'weave');
     mkdirSync(configHome, { recursive: true });

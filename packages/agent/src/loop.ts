@@ -24,9 +24,10 @@ import { bashTool } from './tools/bash.js';
 import { editTool } from './tools/edit.js';
 import { rgAvailable, grepTool } from './tools/grep.js';
 import { globTool } from './tools/glob.js';
-import { errorOutput, toolSpecs, type ToolCtx, type ToolDefinition } from './tools/index.js';
+import { errorOutput, toolSpecs, type ToolCtx, type ToolDefinition, type ToolOutput } from './tools/index.js';
 import { ReadLedger } from './tools/ledger.js';
 import { readTool } from './tools/read.js';
+import { EXPLORE_MAX_STEPS, EXPLORE_SYSTEM, makeTaskTool } from './tools/task.js';
 import { makeTodoTool } from './tools/todo.js';
 import { makeWebFetchTool } from './tools/webFetch.js';
 import { writeTool } from './tools/write.js';
@@ -58,6 +59,7 @@ const DEADLINE_MARGIN_MS = 30_000;
 export const PREAMBLE = [
   'You are Weave Agent, a coding agent working in a git worktree through tools.',
   'Use `read` to look at files and directories, `grep` and `glob` to search, `edit` and `write` to change files, and `bash` to run commands; paths may be relative to the worktree.',
+  'Use `task` to hand a wide read-only search to an explore subagent; only its written findings come back.',
   'Read a file before you edit or overwrite it; `edit` needs an `old_string` that matches exactly once.',
   'Tool results are capped: when a result says it was truncated, page with `read` offset or open the named output file. An older result may be replaced by a note that it was pruned: run the call again if you still need it.',
   'A directory may have its own AGENTS.md: it is appended to the first result from that directory. Follow it.',
@@ -180,7 +182,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       emit('error', { code: err.code, family: err.family, message: err.message });
       return finish(result({ exitCode: 1, error: err }), true);
     }
-    const coreByName: Record<string, ToolDefinition> = { read: readTool, write: writeTool, edit: editTool, bash: bashTool, grep: grepTool, glob: globTool, todo_write: makeTodoTool() };
+    const coreByName: Record<string, ToolDefinition> = { read: readTool, write: writeTool, edit: editTool, bash: bashTool, grep: grepTool, glob: globTool, todo_write: makeTodoTool(), task: makeTaskTool((req, ctx) => runExplore(req, ctx)) };
     if (webFetchEnabled) coreByName['web_fetch'] = makeWebFetchTool();
     const modeNames = new Set<string>(modeToolNames(run.permission.mode));
     const coreNames = new Set([...Object.keys(coreByName), 'web_fetch']);
@@ -370,7 +372,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
             continue;
           }
           const tool = tools.get(c.name);
-          const toolCtx: ToolCtx = { cwd: wtCwd, home: run.cwd, configHome: run.configHome, mode: run.permission.mode, imageInput: compat.image.input, env, signal, callId: c.id, spillDir: run.spillDir, ledger, rg, emit: (type, payload) => emit(type, { id: c.id, ...payload }) };
+          const toolCtx: ToolCtx = { cwd: wtCwd, home: run.cwd, configHome: run.configHome, protectedPaths: run.protectedPaths, mode: run.permission.mode, imageInput: compat.image.input, env, signal, callId: c.id, spillDir: run.spillDir, ledger, rg, emit: (type, payload) => emit(type, { id: c.id, ...payload }), onOutput: (chunk) => batch.add({ kind: 'tool_output', partId: `${c.id}:out`, toolCallId: c.id, text: chunk }) };
           const key = args.ok ? DoomGuard.key(c.name, args.value) : '';
           const verdict = args.ok && tool ? doom.check(key) : 'ok';
           if (verdict === 'stop') stopFailure = stopError.doom(c.name);
@@ -412,7 +414,9 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
           session.append({ role: 'toolResult', toolCallId: c.id, name: c.name, text: out.text, isError: out.isError === true, ...(embed && images.length > 0 ? { images } : {}) });
           if (!embed && images.length > 0) session.append({ role: 'user', text: `[image from ${c.name}]`, images });
           done.add(c.id);
-          if (!denied) emit('tool.result', { id: c.id, name: c.name, status: out.isError ? 'error' : 'completed', isError: out.isError === true, content: out.text.slice(0, 20_000) });
+          // Output still buffered for this call is sent before its result, which supersedes it.
+          batch.flush();
+          if (!denied) emit('tool.result', { id: c.id, partId: `${c.id}:out`, name: c.name, status: out.isError ? 'error' : 'completed', isError: out.isError === true, content: out.text.slice(0, 20_000) });
         }
       } finally {
         // Whatever ended the loop early, the persisted history keeps every call paired with a result.
@@ -423,6 +427,53 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     }
 
     // ---- one model request, retried on the ladder before any result is committed ----
+    /**
+     * The explore subagent (S9): a nested loop over its own in-memory history, offering only `read`,
+     * `grep` and `glob` (so no `task`: depth 1). It shares the parent's provider ladder and abort
+     * signal, adds its tokens to the turn's usage, and returns only its final text. Its events carry
+     * `parentId`, the `task` call's id, so the transcript nests them under that call. A provider
+     * failure ends the turn like the parent's own would; a cancel stops it at the next await.
+     */
+    async function runExplore(req: { description: string; prompt: string }, tctx: ToolCtx): Promise<ToolOutput> {
+      const parentId = tctx.callId;
+      const exploreTools = new Map<string, ToolDefinition>([['read', readTool], ['grep', grepTool], ['glob', globTool]]);
+      const specs = toolSpecs([...exploreTools.values()]);
+      const messages: Message[] = [{ role: 'user', text: req.prompt }];
+      let n = 0;
+      let last = '';
+      // Read confinement lifts in `bypass`; the subagent never gets more than `auto`.
+      const mode = run.permission.mode === 'bypass' ? 'auto' : run.permission.mode;
+      for (let step = 0; step < EXPLORE_MAX_STEPS; step++) {
+        if (signal.aborted) throw new Cancelled();
+        const body = buildRequest({ model: run.model, system: EXPLORE_SYSTEM, messages, tools: specs, options: opts, compat, effort: run.effort });
+        const r = await streamStep(body, true);
+        if (r.model) model = r.model;
+        const usage = r.usage ?? await estimateUsage(body, r);
+        tokens.prompt += usage.promptTokens; tokens.completion += usage.completionTokens; tokens.cached += usage.cachedTokens;
+        const stopped = classifyFinish(r.finishReason, r.refusal);
+        if (stopped) throw new StepFailure(stopped);
+        if (r.text) { last = r.text; emit('assistant.text', { text: r.text, partId: `${parentId}/${++n}:t`, parentId }); }
+        const parsed = r.calls.map((c) => ({ c, args: repairArgs(c.argsText, { closeTorn: r.finishReason !== 'length' }) }));
+        messages.push({ role: 'assistant', content: [...(r.text ? [{ type: 'text' as const, text: r.text }] : []), ...parsed.map(({ c, args }) => ({ type: 'toolCall' as const, id: c.id, name: c.name, args: args.ok ? args.value : {}, raw: c.argsText }))] });
+        if (parsed.length === 0) return { text: r.text || '(the subagent returned no text)' };
+        for (const { c, args } of parsed) {
+          if (signal.aborted) throw new Cancelled();
+          const evId = `${parentId}/${++n}`;
+          emit('tool.call', { id: evId, name: c.name, input: args.ok ? args.value : c.argsText, parentId });
+          const tool = exploreTools.get(c.name);
+          const { onOutput: _streamed, ...inherited } = tctx;
+          const sub: ToolCtx = { ...inherited, mode, callId: evId, ledger: new ReadLedger(), emit: (type, payload) => emit(type, { id: evId, parentId, ...payload }) };
+          let out: ToolOutput;
+          if (!tool) out = errorOutput(`unknown tool "${c.name}". Available: ${[...exploreTools.keys()].join(', ')}`);
+          else if (!args.ok) out = errorOutput(invalidToolMessage(c.name, args.error));
+          else out = await tool.run(args.value, sub).catch((e: unknown) => errorOutput((e as Error).message));
+          const text = out.text.length === 0 ? '(no output)' : out.text;
+          messages.push({ role: 'toolResult', toolCallId: c.id, name: c.name, text, isError: out.isError === true });
+          emit('tool.result', { id: evId, name: c.name, status: out.isError ? 'error' : 'completed', isError: out.isError === true, content: text.slice(0, 20_000), parentId });
+        }
+      }
+      return { text: `${last || '(no findings)'}\n[the explore subagent stopped after ${EXPLORE_MAX_STEPS} steps]` };
+    }
     async function runCompaction(trigger: 'proactive' | 'overflow' | 'manual', specs: ReturnType<typeof toolSpecs>): Promise<CompactOutcome> {
       emit('session.compaction.started', { trigger });
       const out = await compact({ session, window, complete, log: (level, msg, fields) => io.log(level, msg, fields) });

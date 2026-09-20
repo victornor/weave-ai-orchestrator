@@ -6,15 +6,14 @@
 import React from 'react';
 import { Text } from 'ink';
 import type { RunEvent } from '@weave-ai/shared';
-import { RUNTIME_PARTIAL_OUTPUT } from '@weave-ai/shared';
 import { liveActivityLine, type LiveTurnPartial } from '@weave-ai/render';
 import { useNow } from '../hooks.js';
 
 export interface ActivityLineProps {
   events: readonly RunEvent[];
   partials?: readonly LiveTurnPartial[];
-  /** The run's runtime, which decides whether the row says more than "whole steps only". */
-  runtimeId?: string | null;
+  /** What the run's runtime can stream (`capabilities.partialOutput`); without it the row says "whole steps only". */
+  partialOutput?: 'none' | 'text' | 'full';
   partialSince?: number | null;
   lastPartialAt?: number | null;
   /** Render nothing unless a turn is genuinely live. */
@@ -26,15 +25,14 @@ export function activityLineFor(
   events: readonly RunEvent[],
   partials: readonly LiveTurnPartial[],
   now: number,
-  runtimeId?: string | null,
+  partialOutput: 'none' | 'text' | 'full' = 'none',
   opts: { partialSince?: number | null; lastPartialAt?: number | null } = {},
 ): string {
-  const partialOutput = runtimeId ? RUNTIME_PARTIAL_OUTPUT[runtimeId] ?? 'none' : 'none';
   return liveActivityLine(events, partials, now, { partialOutput, partialSince: opts.partialSince, lastPartialAt: opts.lastPartialAt });
 }
 
-export function ActivityLine({ events, partials = [], runtimeId, partialSince, lastPartialAt, live = true }: ActivityLineProps): React.ReactElement | null {
+export function ActivityLine({ events, partials = [], partialOutput, partialSince, lastPartialAt, live = true }: ActivityLineProps): React.ReactElement | null {
   const now = useNow(live);
   if (!live) return null;
-  return <Text dimColor>{activityLineFor(events, partials, now, runtimeId, { partialSince, lastPartialAt })}</Text>;
+  return <Text dimColor>{activityLineFor(events, partials, now, partialOutput, { partialSince, lastPartialAt })}</Text>;
 }

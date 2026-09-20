@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RuntimeEvent, RuntimePartial, TurnInput } from '@weave-ai/runtime-sdk';
-import { RUNTIME_PARTIAL_OUTPUT } from '@weave-ai/shared';
 import { adapter } from '../src/adapter.js';
 import { writeFakeClaudeCli, writeFakeClaudeCompactCli } from './fakeCli.js';
 
@@ -50,7 +49,6 @@ describe('claude adapter', () => {
 
   it('declares full partial output and the shared table agrees (VS-599)', () => {
     expect(adapter.capabilities.partialOutput).toBe('full');
-    expect(RUNTIME_PARTIAL_OUTPUT[adapter.id]).toBe(adapter.capabilities.partialOutput);
   });
 
   it('declares its own in-process scheduling tools to deny on worker turns (VS-317)', () => {

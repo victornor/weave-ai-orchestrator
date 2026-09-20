@@ -11,7 +11,7 @@ export type EditPayload =
 
 export type TranscriptBlock =
   | { id: string; type: 'text'; text: string; thinking?: boolean; thinkingDurationMs?: number | null }
-  | { id: string; type: 'tool'; tool: string; target: string; targetPath: string | null; durationMs: number | null; adds: number | null; dels: number | null; diff: string | null; error?: boolean; pending?: boolean; denied?: boolean; editPayload?: EditPayload | null }
+  | { id: string; type: 'tool'; tool: string; target: string; targetPath: string | null; durationMs: number | null; adds: number | null; dels: number | null; diff: string | null; error?: boolean; pending?: boolean; denied?: boolean; editPayload?: EditPayload | null; /** A subagent's blocks (VS-615): the events that named this call as their `parentId`. */ children?: TranscriptBlock[] }
   | { id: string; type: 'phase'; phase: string; durationMs: number | null; tokens: number | null }
   | { id: string; type: 'status'; text: string; status: 'needs-you' | 'blocked' | 'failed' | 'done' | 'working' }
   | { id: string; type: 'command'; command: string; exitCode: number | null; output: string | null }
@@ -155,7 +155,18 @@ export function compactionLine(pre: number | null, post: number | null): string 
  * one card; a tool.result merges into the tool.call that opened it. Pure, so
  * the same semantics can be golden-tested and shared with the TUI.
  */
-export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBlock[] {
+export function runEventsToTranscript(all: readonly RunEvent[]): TranscriptBlock[] {
+  // A subagent's events (VS-615) name the `task` call that started them as `parentId`. They render
+  // inside that call, not beside it; one whose parent is not in view stays where it is.
+  const callIds = new Set<string>();
+  for (const e of all) if (e?.type === 'tool.call') { const key = callKey(e.payload ?? {}, ''); if (key) callIds.add(key); }
+  const nested = new Map<string, RunEvent[]>();
+  const events: RunEvent[] = [];
+  for (const e of all) {
+    const parent = e ? str((e.payload ?? {})['parentId']) : '';
+    if (parent && callIds.has(parent)) nested.set(parent, [...(nested.get(parent) ?? []), e]);
+    else events.push(e);
+  }
   const out: TranscriptBlock[] = [];
   const openTools = new Map<string, number>();
   /** Kept after a tool.result folds, so a trailing `command.executed` (Claude/Gemini/Cursor send
@@ -331,6 +342,11 @@ export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBl
         break;
     }
   }
+  for (const [parent, children] of nested) {
+    const at = openTools.get(parent) ?? closedTools.get(parent);
+    const owner = at != null ? out[at] : undefined;
+    if (owner?.type === 'tool') owner.children = runEventsToTranscript(children);
+  }
   for (let i = out.length - 1; i >= 0; i--) {
     const block = out[i];
     if (!block || block.type !== 'text' || block.thinking) continue;
@@ -345,7 +361,7 @@ function summariseInput(input: unknown): string {
   if (typeof input === 'string') return input.slice(0, 120);
   if (input && typeof input === 'object') {
     const o = input as Record<string, unknown>;
-    for (const k of ['file_path', 'filePath', 'path', 'notebook_path', 'notebookPath', 'pattern', 'command', 'query', 'url']) {
+    for (const k of ['file_path', 'filePath', 'path', 'notebook_path', 'notebookPath', 'pattern', 'command', 'query', 'url', 'description']) {
       const v = o[k];
       if (typeof v === 'string') return v.slice(0, 120);
     }

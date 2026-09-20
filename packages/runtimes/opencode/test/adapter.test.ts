@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { RUNTIME_PARTIAL_OUTPUT } from '@weave-ai/shared';
 import { adapter, readProviderError } from '../src/adapter.js';
 
 const dirs: string[] = [];
@@ -28,7 +27,7 @@ describe('opencode adapter', () => {
   });
 
   it('declares the partial output the page is told about (VS-595)', () => {
-    expect(adapter.capabilities.partialOutput).toBe(RUNTIME_PARTIAL_OUTPUT['opencode']);
+    expect(adapter.capabilities.partialOutput).toBe('full');
   });
 
   it('detects models from `opencode models`, falling back to a static list', async () => {

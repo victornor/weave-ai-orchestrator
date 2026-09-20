@@ -79,4 +79,20 @@ describe('PartialBuffer (VS-595)', () => {
     expect(frames).toEqual([]);
     expect(buf.snapshot().partials).toEqual([]);
   });
+  it('carries tool_output frames, masks a secret split across two chunks, and drops the part on completion (VS-615)', () => {
+    const { buf, frames } = setup([SECRET]);
+    buf.push({ kind: 'tool_output', partId: 'b1:out', toolCallId: 'b1', text: `building… key=${SECRET.slice(0, 9)}` });
+    vi.advanceTimersByTime(60);
+    expect(text(frames, 'b1:out')).not.toContain(SECRET.slice(0, 4));
+    buf.push({ kind: 'tool_output', partId: 'b1:out', toolCallId: 'b1', text: `${SECRET.slice(9)}\nstill running, more output follows` });
+    vi.advanceTimersByTime(60);
+    const shown = text(frames, 'b1:out');
+    expect(frames.flatMap((f) => f.parts).every((p) => p.kind === 'tool_output')).toBe(true);
+    expect(shown).toContain('[redacted]');
+    expect(shown).not.toContain(SECRET.slice(0, 4));
+    expect(shown).not.toContain(SECRET.slice(-4));
+    expect(buf.snapshot().partials).toEqual([{ partId: 'b1:out', kind: 'tool_output', text: shown }]);
+    buf.complete('b1:out');
+    expect(buf.snapshot().partials).toEqual([]);
+  });
 });

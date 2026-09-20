@@ -37,7 +37,7 @@ export function childBaseEnv(base: Record<string, string>): Record<string, strin
   return env;
 }
 
-export function buildInit(input: TurnInput, p: { providerId: string; modelId: string; profile: ProviderProfile; apiKey: string | undefined; session: { id: string; path: string }; layout: ChildLayout; toolEnv: Record<string, string>; resolved: Resolved; headers: Record<string, string> }): InitMessage {
+export function buildInit(input: TurnInput, p: { providerId: string; modelId: string; profile: ProviderProfile; apiKey: string | undefined; session: { id: string; path: string }; layout: ChildLayout; toolEnv: Record<string, string>; resolved: Resolved; headers: Record<string, string>; /** Directories the file tools refuse in every mode: the daemon's config directory. */ protectedPaths?: string[] }): InitMessage {
   const mcpServers: InitMessage['mcpServers'] = {};
   for (const [name, cfg] of Object.entries(input.mcpServers)) {
     // Both transports ride the init line; the child routes by `type` (S8). An entry with neither a
@@ -61,6 +61,7 @@ export function buildInit(input: TurnInput, p: { providerId: string; modelId: st
       permission: { mode: input.permission.mode, ...(input.permission.allowedTools ? { allowedTools: input.permission.allowedTools } : {}), ...(input.permission.deniedTools ? { deniedTools: input.permission.deniedTools } : {}), ...(input.permission.bashDeny ? { bashDeny: input.permission.bashDeny } : {}), ...(input.permission.firstTurn ? { firstTurn: true } : {}) },
       model: p.modelId, effort: input.effort ?? null, options: input.options, spillDir: p.layout.spillDir,
       ...(input.configHome ? { configHome: input.configHome } : {}),
+      ...(p.protectedPaths && p.protectedPaths.length > 0 ? { protectedPaths: p.protectedPaths } : {}),
     },
     provider: {
       id: p.providerId, baseUrl: p.profile.baseUrl, auth: p.profile.auth, headers: p.headers, ...(p.profile.query ? { query: p.profile.query } : {}), ...(p.apiKey ? { apiKey: p.apiKey } : {}),

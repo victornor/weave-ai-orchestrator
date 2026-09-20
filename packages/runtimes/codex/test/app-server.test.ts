@@ -3,7 +3,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RuntimeEvent, RuntimePartial, TurnHandle, TurnInput } from '@weave-ai/runtime-sdk';
-import { RUNTIME_PARTIAL_OUTPUT } from '@weave-ai/shared';
 import { buildArgs } from '../src/args.js';
 import { configOverrides, postureFor, runAppServerTurn } from '../src/app-server.js';
 import { adapter } from '../src/adapter.js';
@@ -180,7 +179,6 @@ describe('configOverrides', () => {
 describe('adapter turn', () => {
   it('declares full partial output, as the shared table the page reads says', () => {
     expect(adapter.capabilities.partialOutput).toBe('full');
-    expect(adapter.capabilities.partialOutput).toBe(RUNTIME_PARTIAL_OUTPUT['codex']);
   });
 
   it('drives the turn through the app-server and reports the thread as the session', async () => {

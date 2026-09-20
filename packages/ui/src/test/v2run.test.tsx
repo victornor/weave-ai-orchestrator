@@ -18,6 +18,7 @@ vi.mock('../api/hooks', () => ({
   useWeaverMany: () => [{ data: { agent: { id: 'weaver-1', name: 'Acme Weaver' } } }],
   useRuntimeModels: () => ({ data: [{ id: 'sonnet-4.6', label: 'Sonnet', contextWindowTokens: 200_000 }] }),
   useRuns: () => ({ data: [] }),
+  usePartialOutput: () => 'full',
 }));
 
 const { RunBody } = await import('../v2/RunPage');

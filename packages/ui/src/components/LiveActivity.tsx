@@ -9,11 +9,11 @@
  */
 import { useEffect, useState } from 'react';
 import type { RunEvent } from '@weave-ai/shared';
-import { RUNTIME_PARTIAL_OUTPUT } from '@weave-ai/shared';
 import { clock, liveTurn } from '@weave-ai/render';
 import type { PartialText } from '../lib/livePartials';
 import { Markdown } from './Markdown';
 import { cx } from '../lib/cx';
+import { usePartialOutput } from '../api/hooks';
 
 /** One shared clock per component that asks for it; stops when `active` is false. */
 export function useNow(active: boolean, everyMs = 1000): number {
@@ -38,7 +38,7 @@ export interface LiveRunProps {
 
 export function LiveActivity({ events, partials = [], lastPartialAt, partialSince, runtimeId }: LiveRunProps): React.ReactElement {
   const now = useNow(true);
-  const partialOutput = runtimeId ? RUNTIME_PARTIAL_OUTPUT[runtimeId] ?? 'none' : 'none';
+  const partialOutput = usePartialOutput(runtimeId);
   const t = liveTurn(events, partials, now, { partialOutput, lastPartialAt, partialSince });
   return (
     <div
@@ -71,7 +71,7 @@ export function LivePartials({ partials = [], onTicket }: { partials?: readonly 
   const text = partials.filter((p) => p.kind === 'text' && p.text);
   const thinking = partials.filter((p) => p.kind === 'thinking' && p.text);
   // VS-601: a running tool's output so far (a Codex command's stdout), the last few lines of it.
-  const output = partials.filter((p) => p.kind === 'tool_input' && p.text);
+  const output = partials.filter((p) => (p.kind === 'tool_input' || p.kind === 'tool_output') && p.text);
   if (text.length === 0 && thinking.length === 0 && output.length === 0) return null;
   return (
     <div data-live-partials className="flex flex-col gap-3 px-3.5 pb-1">

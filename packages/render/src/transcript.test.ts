@@ -410,4 +410,34 @@ describe('the weave runtime (VS-608)', () => {
     expect(kinds).toContain('file');
     expect(kinds).toContain('tool');
   });
+
+  it('nests a subagent\'s events under the task call that started it (VS-615)', () => {
+    reset();
+    const blocks = runEventsToTranscript([
+      ev('tool.call', { id: 't1', name: 'task', input: { description: 'find alpha', prompt: 'where is alpha' } }),
+      ev('tool.call', { id: 't1/1', name: 'read', input: { path: 'a.txt' }, parentId: 't1' }),
+      ev('tool.result', { id: 't1/1', name: 'read', content: '1\talpha', parentId: 't1' }),
+      ev('assistant.text', { text: 'alpha is on line 1', parentId: 't1' }),
+      ev('tool.result', { id: 't1', name: 'task', content: 'alpha is on line 1' }),
+      ev('assistant.text', { text: 'Done.' }),
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(['tool', 'text']);
+    const task = blocks[0] as ToolBlock;
+    expect(task).toMatchObject({ name: 'task', status: 'ok', target: 'find alpha' });
+    expect(task.children!.map((b) => b.kind)).toEqual(['tool', 'text']);
+    expect(task.children![0]).toMatchObject({ kind: 'tool', name: 'read', target: 'a.txt', status: 'ok', detail: '1\talpha' });
+    expect((task.children![1] as TextBlock).text).toBe('alpha is on line 1');
+    expect((blocks[1] as TextBlock).text).toBe('Done.');
+  });
+
+  it('keeps an event whose parent is not in view where it is, and adds no children to an ordinary tool', () => {
+    reset();
+    const blocks = runEventsToTranscript([
+      ev('tool.call', { id: 'c1', name: 'bash', input: { command: 'ls' } }),
+      ev('tool.result', { id: 'c1', name: 'bash', content: 'ok' }),
+      ev('tool.call', { id: 'x/1', name: 'read', input: { path: 'a.txt' }, parentId: 'missing' }),
+    ]);
+    expect(blocks.map((b) => b.kind)).toEqual(['tool', 'tool']);
+    expect((blocks[0] as ToolBlock).children).toBeUndefined();
+  });
 });

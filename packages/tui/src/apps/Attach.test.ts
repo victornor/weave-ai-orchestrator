@@ -50,7 +50,7 @@ describe('foldDelta (VS-603)', () => {
     const events = [call('a', 1), result('a', 2)];
     const next = foldDelta(new Map(), frame('run-1', 0, 'Let me '), 'run-1');
     expect(next.matched).toBe(true);
-    expect(activityLineFor(events, [...next.map.values()], T0 + 6000, 'claude', { partialSince: T0 + 6000, lastPartialAt: T0 + 6000 })).toBe('Writing · 0 s · 1 tool call');
+    expect(activityLineFor(events, [...next.map.values()], T0 + 6000, 'full', { partialSince: T0 + 6000, lastPartialAt: T0 + 6000 })).toBe('Writing · 0 s · 1 tool call');
   });
 
   it('ignores a frame for another run', () => {

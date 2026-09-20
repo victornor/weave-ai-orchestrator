@@ -100,8 +100,12 @@ function ToolRow({ block, marker = '▸', reveal = false }: { block: ToolBlock; 
   // An edit or write starts expanded (VS-413), mirroring V1's `TranscriptLine`: the diff is the
   // content the human asked for, not a second click to reveal it. Every other tool row — reads,
   // searches, shell output — keeps starting collapsed (VS-370).
-  const [open, setOpen] = useState(() => Boolean(block.editPayload));
-  const expandable = Boolean(block.diff) || Boolean(block.editPayload);
+  // A subagent's call (VS-615) is open while it runs, so its work is visible as it happens, and
+  // stays as the human left it once they toggle it.
+  const children = block.children ?? [];
+  const [manual, setManual] = useState<boolean | null>(null);
+  const open = manual ?? (Boolean(block.editPayload) || (block.pending === true && children.length > 0));
+  const expandable = Boolean(block.diff) || Boolean(block.editPayload) || children.length > 0;
   // A file tool shows only the file name (VS-437); the whole path stays on the element as a title.
   // A command, a pattern or a url has no `targetPath` and renders exactly as it always did.
   const targetLabel = block.targetPath ? targetBaseName(block.targetPath) : block.target;
@@ -131,7 +135,7 @@ function ToolRow({ block, marker = '▸', reveal = false }: { block: ToolBlock; 
           type="button"
           aria-expanded={open}
           aria-label={`${block.tool}${block.target ? `, ${block.target}` : ''}`}
-          onClick={() => setOpen((v) => !v)}
+          onClick={() => setManual(!open)}
           className="text-left"
         >
           {head}
@@ -139,6 +143,7 @@ function ToolRow({ block, marker = '▸', reveal = false }: { block: ToolBlock; 
       ) : (
         head
       )}
+      {open && children.length > 0 ? <SubagentRows blocks={children} /> : null}
       {open && block.editPayload ? (
         // The edit/write body comes straight from V1's `EditPayloadBody` (VS-324): the same
         // `diffHunksForEdits` derivation, `DiffHunks` and 40-line window, not a second renderer.
@@ -148,6 +153,18 @@ function ToolRow({ block, marker = '▸', reveal = false }: { block: ToolBlock; 
       ) : open && block.diff ? (
         <ResultLines text={block.diff} />
       ) : null}
+    </div>
+  );
+}
+
+/** What a subagent did under its `task` call: the same rows as the trace, indented under the call. */
+function SubagentRows({ blocks }: { blocks: readonly TranscriptBlock[] }): React.ReactElement {
+  const rows = useMemo(() => groupConsecutiveTools(blocks), [blocks]);
+  return (
+    <div className="v2-anim-fade flex flex-col gap-1 border-l border-line-2 pl-2.5" data-trace-subagent>
+      {rows.map((row) =>
+        row.type === 'tools' ? <ToolGroup key={row.id} row={row} /> : row.block.type === 'tool' ? <ToolRow key={row.block.id} block={row.block} marker="·" /> : <TraceLine key={row.block.id} block={row.block} reveal={false} />,
+      )}
     </div>
   );
 }

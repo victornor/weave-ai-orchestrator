@@ -435,6 +435,40 @@ describe('run engine', () => {
     expect(h.services.runs!.live(run.id)).toEqual({ partials: [] });
   });
 
+  // VS-615: a bash command's output streams as `tool_output`; a secret split across two chunks never shows.
+  it('masks a run token split across two tool_output chunks and drops the part on tool.result', async () => {
+    const frames: Array<{ parts: Array<{ kind: string; text: string }> }> = [];
+    const orig = h.ctx.events.broadcast.bind(h.ctx.events);
+    vi.spyOn(h.ctx.events, 'broadcast').mockImplementation((((type: string, et: string, id: string, payload: unknown) => {
+      if (type === 'run.delta') frames.push(payload as { parts: Array<{ kind: string; text: string }> });
+      return (orig as (...a: unknown[]) => unknown)(type, et, id, payload);
+    }) as never));
+    let liveDuring: { partials: Array<{ kind: string; text: string }> } | null = null;
+    class BashRuntime extends FakeRuntime {
+      override async runTurn(input: TurnInput, sink: TurnSink): Promise<TurnResult> {
+        const t = input.env.AC_RUN_TOKEN!;
+        sink.onPartial?.({ kind: 'tool_output', partId: 'b1:out', toolCallId: 'b1', text: `key ${t.slice(0, 20)}` });
+        await new Promise((r) => setTimeout(r, 80));
+        sink.onPartial?.({ kind: 'tool_output', partId: 'b1:out', toolCallId: 'b1', text: `${t.slice(20)} and then some ordinary trailing output\n` });
+        await new Promise((r) => setTimeout(r, 120));
+        liveDuring = h.services.runs!.live((await h.db.all<{ id: string }>('SELECT id FROM runs'))[0]!.id) as typeof liveDuring;
+        sink.onEvent({ ts: nowIso(), type: 'tool.result', payload: { id: 'b1', partId: 'b1:out', content: 'ok' } });
+        return super.runTurn(input, sink);
+      }
+    }
+    h.ctx.registries.runtimes.set('fake', new BashRuntime());
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    const run = await runOnce();
+    const parts = frames.flatMap((f) => f.parts);
+    expect(parts.length).toBeGreaterThan(0);
+    expect(parts.every((p) => p.kind === 'tool_output')).toBe(true);
+    const shown = parts.map((p) => p.text).join('');
+    expect(shown).toContain('[redacted]');
+    expect(shown).not.toContain('eyJ');
+    expect(liveDuring!.partials[0]!.kind).toBe('tool_output');
+    expect(h.services.runs!.live(run.id)).toEqual({ partials: [] });
+  });
+
   // VS-92: a role's secrets in its workers' environment, from the store as well as the host.
   describe("a role's secrets", () => {
     /** Not a credential: a fixture, long enough for makeRedactor's 8-character floor. */

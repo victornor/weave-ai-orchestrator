@@ -9,6 +9,11 @@ describe('LivePartials', () => {
     expect(container.querySelector('[data-live-tool-output]')?.textContent).toBe('c\nd\ne\nf');
   });
 
+  it('shows a tool_output partial the same way (VS-615)', () => {
+    const { container } = render(<LivePartials partials={[{ partId: 'b1:out', kind: 'tool_output', text: 'one\ntwo\nthree\n' }]} />);
+    expect(container.querySelector('[data-live-tool-output]')?.textContent).toBe('one\ntwo\nthree');
+  });
+
   it('renders nothing when no partial has text', () => {
     const { container } = render(<LivePartials partials={[{ partId: 'c1:out', kind: 'tool_input', text: '' }]} />);
     expect(container.querySelector('[data-live-partials]')).toBeNull();

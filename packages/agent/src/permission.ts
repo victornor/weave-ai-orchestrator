@@ -19,17 +19,17 @@ export interface PermissionConfig {
 }
 
 /** The read-only core tools a `restricted` turn may see, before the MCP tools are added. */
-export const RESTRICTED_CORE_TOOLS = ['read', 'grep', 'glob', 'todo_write'] as const;
+export const RESTRICTED_CORE_TOOLS = ['read', 'grep', 'glob', 'todo_write', 'task'] as const;
 /**
  * The full core tool set. `web_fetch` is named here so the mode logic treats it like the write-capable
  * tools — `restricted` removes it — even though it is only offered when the turn's option enables it.
  */
-export const ALL_CORE_TOOLS = ['read', 'write', 'edit', 'bash', 'grep', 'glob', 'todo_write', 'web_fetch'] as const;
+export const ALL_CORE_TOOLS = ['read', 'write', 'edit', 'bash', 'grep', 'glob', 'todo_write', 'task', 'web_fetch'] as const;
 
 /** A name key that folds case, underscores and the Claude spellings together. */
 export const toolKey = (name: string): string => name.toLowerCase().replace(/_/g, '');
 
-const CLAUDE_ALIASES = ['Bash', 'Read', 'Write', 'Edit', 'Grep', 'Glob', 'TodoWrite'];
+const CLAUDE_ALIASES = ['Bash', 'Read', 'Write', 'Edit', 'Grep', 'Glob', 'TodoWrite', 'Task'];
 
 /** `TodoWrite` → `todo_write`; every other alias is already the lower-case name. */
 const ALIAS_CANONICAL: Record<string, string> = Object.fromEntries(CLAUDE_ALIASES.map((a) => [toolKey(a), a === 'TodoWrite' ? 'todo_write' : a.toLowerCase()]));

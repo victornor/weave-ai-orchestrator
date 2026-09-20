@@ -47,6 +47,8 @@ vi.mock('../api/context', () => ({
   useWs: () => 'ws1',
 }));
 vi.mock('../api/hooks', () => ({
+  // What the daemon's runtime list declares for each runtime (VS-615).
+  usePartialOutput: (id?: string | null) => (({ opencode: 'full', claude: 'full', codex: 'full', cursor: 'text', gemini: 'text', weave: 'full' }) as Record<string, string>)[id ?? ''] ?? 'none',
   useWs: () => 'ws1',
   useProjects: () => ({ data: state.projects, isLoading: false, isError: false, refetch: vi.fn() }),
   useRoles: () => ({ data: state.roles, isLoading: false, isError: false, refetch: vi.fn() }),

@@ -115,7 +115,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const registries = createRegistries();
 
   const workspaces = new Map<string, WorkspaceRuntime>();
-  await registerBuiltins(registries, createRuntimeHost(workspaces));
+  await registerBuiltins(registries, createRuntimeHost(workspaces, configDir));
   const { publicUrl, host, port } = resolveUrls(daemonCfg);
 
   // The loopback listener must exist before workspaces load: its URL goes into every run's env.
@@ -383,7 +383,7 @@ function makeAdmin(
  * workspace that does not define the id resolves nothing. Without one it keeps the aggregate (first
  * workspace defining an id wins) for the callers that have no run, such as the runtime catalog.
  */
-export function createRuntimeHost(workspaces: Map<string, WorkspaceRuntime>): RuntimeHost {
+export function createRuntimeHost(workspaces: Map<string, WorkspaceRuntime>, configDir?: string): RuntimeHost {
   const providers = (workspaceId?: string): Record<string, ProviderProfile> => {
     if (workspaceId !== undefined) {
       const out: Record<string, ProviderProfile> = {};
@@ -402,7 +402,7 @@ export function createRuntimeHost(workspaces: Map<string, WorkspaceRuntime>): Ru
     }
     return undefined;
   };
-  return { providers, providerKey };
+  return { providers, providerKey, ...(configDir ? { configDir } : {}) };
 }
 
 /** Best-effort registration: a missing or half-built package logs and is skipped, never fatal. */

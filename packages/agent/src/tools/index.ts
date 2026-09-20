@@ -11,6 +11,8 @@ export interface ToolCtx {
   home: string;
   /** The runtime config home, used to derive the protected workspace state directory. */
   configHome?: string | undefined;
+  /** Directories the file tools refuse in every mode. */
+  protectedPaths?: string[] | undefined;
   /** The turn's permission mode; confinement and deny patterns read it. */
   mode: PermissionMode;
   /** How the profile takes images; `read` refuses an image when it is `none`. */
@@ -27,6 +29,8 @@ export interface ToolCtx {
   rg: boolean;
   /** Emit a `runtime` event for this call; the loop adds the call id. */
   emit(type: string, payload: Record<string, unknown>): void;
+  /** A tool still running reports the output it has produced so far; the loop streams it as `tool_output` partials. */
+  onOutput?(chunk: string): void;
 }
 export interface ToolOutput { text: string; isError?: boolean; /** Image parts a tool produced (a `read` of an image, an MCP image result). */ images?: McpImagePart[]; meta?: { command?: string; exitCode?: number | null } }
 export interface ToolDefinition extends ToolSpec {

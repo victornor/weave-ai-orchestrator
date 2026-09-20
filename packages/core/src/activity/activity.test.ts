@@ -54,6 +54,22 @@ describe('WorkerActivityService (VS-328)', () => {
     expect(a.summaryFor(agentId)?.live ?? null).toBeNull();
   });
 
+  it("reads whether a run can stream from its runtime's declared capability, not a table of ids (VS-615)", () => {
+    h = makeHarness({ bare: true });
+    const a = createWorkerActivityService(h.ctx);
+    const now = new Date().toISOString();
+    const streaming = { id: 'brand-new', capabilities: { partialOutput: 'full' } };
+    const silent = { id: 'silent', capabilities: {} };
+    h.ctx.registries.runtimes.set('brand-new', streaming as never);
+    h.ctx.registries.runtimes.set('silent', silent as never);
+    for (const [runId, runtimeId] of [['r-new', 'brand-new'], ['r-silent', 'silent']] as const) {
+      const agentId = h.addWorker(null);
+      h.db.insert('runs', { id: runId, workspaceId: h.workspaceId, agentId, ticketId: null, runtimeId, turnEpoch: 0, cwd: '/tmp', createdAt: now });
+      a.observe(agentId, null, ev({ runId, type: 'tool.call', payload: { id: 't1', name: 'bash', input: { command: 'ls' } }, ts: now }));
+      expect(a.summaryFor(agentId)?.live?.wholeStepsOnly).toBe(runtimeId === 'silent');
+    }
+  });
+
   it('keeps the last tally across a turn and replaces it with a newer one', () => {
     h = makeHarness({ bare: true });
     const a = createWorkerActivityService(h.ctx);

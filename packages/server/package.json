@@ -20,6 +20,7 @@
     "dev": "node --enable-source-maps dist/bin.js"
   },
   "dependencies": {
+    "@weave-ai/agent": "workspace:*",
     "@weave-ai/channel-cli": "workspace:*",
     "@weave-ai/channel-sdk": "workspace:*",
     "@weave-ai/channel-telegram": "workspace:*",

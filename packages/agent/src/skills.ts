@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { ToolDefinition } from './tools/index.js';
 import { errorOutput } from './tools/index.js';
 
-export interface Skill { name: string; description: string; dir: string; file: string }
+export interface Skill { name: string; description: string; dir: string; file: string; /** Which configured root the skill came from (a REPL's `skillRoots`); unset for the default home. */ source?: string }
 export const SKILL_BODY_MAX_BYTES = 50 * 1024;
 
 /** `name` and `description` from a SKILL.md's frontmatter, and the body after it. A file with no name is not a skill. */
@@ -20,7 +20,25 @@ export function parseSkill(text: string): { name: string; description: string; b
 
 /** The skills under `<home>/<skillsDir>/<name>/SKILL.md`, sorted by name so the prompt built from them is byte-stable. */
 export function loadSkills(home: string, skillsDir = '.agents/skills'): Skill[] {
-  const root = join(home, skillsDir);
+  return readSkillRoot(join(home, skillsDir));
+}
+
+/**
+ * Skills from several roots, in the order given: on a name collision the earlier root wins. Each
+ * skill carries the root's `source` label, so a listing can say where it came from.
+ */
+export function loadSkillRoots(roots: ReadonlyArray<{ dir: string; source: string }>): Skill[] {
+  const seen = new Set<string>();
+  const out: Skill[] = [];
+  for (const r of roots) for (const s of readSkillRoot(r.dir)) {
+    if (seen.has(s.name)) continue;
+    seen.add(s.name);
+    out.push({ ...s, source: r.source });
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function readSkillRoot(root: string): Skill[] {
   if (!existsSync(root)) return [];
   const out: Skill[] = [];
   for (const entry of readdirSync(root).sort()) {

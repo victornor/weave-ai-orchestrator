@@ -33,6 +33,14 @@ describe('command tree', () => {
     expect(program.version()).toBe(VERSION);
   });
 
+  it('has `repl` (also installed as weave-agent) with the one-shot, resume and provider options (VS-626)', () => {
+    const repl = find(program, ['repl']);
+    expect(repl).toBeDefined();
+    const help = helpOf(repl!);
+    for (const flag of ['--print', '--continue', '--resume', '--provider', '--base-url', '--model', '--permission', '--workspace-dir']) expect(help).toContain(flag);
+    expect(help).toContain('weave-agent');
+  });
+
   it('exposes every top-level command from PLAN §20', () => {
     const expected = [
       'init', 'daemon', 'login', 'logout', 'context', 'devices', 'presenter', 'project', 'runtime', 'role',

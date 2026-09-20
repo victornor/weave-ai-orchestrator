@@ -1,0 +1,17 @@
+## 1. Standalone runner (turn one)
+
+- [x] 1.1 Export `runAgentTurn` and the REPL modules from `@weave-ai/agent`; add optional `init.skillRoots` (default behaviour unchanged) and the `origin:"repl"` header field. Verify: existing `packages/agent` tests unchanged and green; a loop test with two `skillRoots` shows both in the system prompt, project first.
+- [x] 1.2 `repl/config.ts`: provider/model/permission/MCP resolution from flags, nearest `workspace.yaml`, and `agent.yaml`; key from env, then the read-only workspace secret opener, then an in-memory prompt. Verify: unit tests per source and precedence; the key is absent from every returned object that is printed or logged; a `packages/server` test opens a `createSecretStore` file with the new opener.
+- [x] 1.3 `repl/sessions.ts`: REPL data-home layout, header scan, list by cwd or all, most-recent lookup, per-turn bookkeeping line, retention sweep. Verify: fixture with sessions in two directories plus a worker-style file elsewhere; only the REPL directory is listed; `Session.open` still loads a file with bookkeeping lines.
+- [x] 1.4 `repl/run.ts`: build an `InitMessage` from resolved config and state, run one turn in-process with an `AbortController` and `SteeringQueue`, return the result. Verify: against `testkit/mockProvider` the request body has the prompt, and resuming sends the earlier messages.
+- [x] 1.5 CLI: `weave repl` (`-p`, `-c`, `--resume`, `--provider`, `--base-url`, `--model`, `--preset`, `--permission`, `--workspace-dir`, `--verbose`), `repl-bin.ts`, and the `weave-agent` shim in `writeCliShims`. Verify: `-p` prints the final text and exits with the loop's code (success and auth failure); `-c` and `--resume` work; shim tests assert both shims and that `weave-agent --help` runs from a built release path.
+- [x] 1.6 Commit; run the changed test files.
+
+## 2. REPL, commands, docs (turn two)
+
+- [x] 2.1 `repl/events.ts`: pure renderer from loop events and partials to styled lines (streamed text, dim thinking, `edit` as a diff, `bash` command plus streamed output, denied and error results), with key redaction. Verify: golden output for each event kind, with and without colour.
+- [x] 2.2 `repl/commands.ts`: `/help /new /compact /exit /permissions /skills /sessions /mcp /model` as pure functions over `ReplState`, with completion. Verify: fixtures for a skill from each source, a connected stdio MCP server and a failed one (tool counts asserted), `/model` switch, `effort`, an out-of-range value refused with the schema message, an unset parameter absent.
+- [x] 2.3 `repl/terminal.ts`: readline driver with history, tab completion, Ctrl-C (cancel, then exit at idle), Ctrl-D, steering while a turn runs. Verify: pty tests against `testkit/mockProvider`: prompt shows streamed text and a rendered tool call and leaves a session file; `/sessions` resume; `/model` changes the next body; Ctrl-C mid-turn leaves a loadable session; steering text reaches the next request.
+- [x] 2.4 Standalone pty test with a scratch `HOME`, no workspace and an env key: the key appears in no argv, output or session file.
+- [x] 2.5 Docs: "Running the agent yourself" page in `docs/` (where each thing is read from, session location, default `auto`, name rationale); no `docs/API.md` change.
+- [x] 2.6 Run `pnpm test` once with `--maxWorkers=4`, typecheck, lint and the boundary guard; paste both suite blocks in the delivery report; state what is unverified (real-endpoint turn).

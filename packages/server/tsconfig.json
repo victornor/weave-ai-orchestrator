@@ -13,6 +13,9 @@
       "path": "../../packages/shared"
     },
     {
+      "path": "../../packages/agent"
+    },
+    {
       "path": "../../packages/db"
     },
     {

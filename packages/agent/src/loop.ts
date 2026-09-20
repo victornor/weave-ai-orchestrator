@@ -2,7 +2,7 @@ import { completeCompat } from './codec/params.js';
 import { compact, compactionThreshold, NOTHING_TO_SUMMARISE, SUMMARY_MAX_OUTPUT_TOKENS, type CompactOutcome } from './compaction.js';
 import { InstructionLoader } from './instructions.js';
 import { pruneMessages } from './prune.js';
-import { loadSkills, skillIndex, skillTool } from './skills.js';
+import { loadSkillRoots, loadSkills, skillIndex, skillTool } from './skills.js';
 import { RequestSizer } from './tokens.js';
 import { buildRequest, StreamReducer, type StepResult } from './codec/chatCompletions.js';
 import { DoomGuard } from './doom.js';
@@ -108,7 +108,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
   const now = (): string => new Date().toISOString();
   const emit = (type: string, payload: Record<string, unknown>): void => io.emit({ ts: now(), type, payload });
   const batch = new PartialBatcher((p) => io.partial(p), deps.partialFlushMs ?? 25);
-  const session = Session.open({ path: init.session.path, id: init.session.id, cwd: run.cwd });
+  const session = Session.open({ path: init.session.path, id: init.session.id, cwd: run.cwd, ...(init.session.origin ? { origin: init.session.origin } : {}) });
   const opts = provider.params ?? requestOptions(run.options);
   const compat = completeCompat(provider.compat);
   const wtCwd = run.worktree?.path ?? run.cwd;
@@ -169,7 +169,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     // from the request itself; `all` keeps every tool so a call the mode removed is answered with a
     // permission denial rather than "unknown tool".
     const webFetchEnabled = run.options['webFetch'] === true;
-    const skills = loadSkills(run.cwd);
+    const skills = init.skillRoots ? loadSkillRoots(init.skillRoots) : loadSkills(run.cwd);
     const instructions = new InstructionLoader(wtCwd);
     instructions.pin(join(run.cwd, 'AGENTS.md'));
     const system = [PREAMBLE, init.systemPrompt.mode === 'inject' ? init.systemPrompt.text : '', skillIndex(skills)].filter(Boolean).join('\n\n');

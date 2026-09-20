@@ -14,6 +14,8 @@ import { dirname, join } from 'node:path';
 
 /** The marker every Weave CLI shim carries, old or new — `isWeaveShim` reads it. */
 const CLI_BIN_SUFFIX = join('packages', 'cli', 'dist', 'bin.js');
+/** The terminal agent's entry, next to the CLI bin: `weave-agent` runs it (VS-626). */
+const REPL_BIN_SUFFIX = join('packages', 'cli', 'dist', 'repl-bin.js');
 /** The line a deprecated `conductor` shim prints before it execs the CLI. */
 export const CONDUCTOR_DEPRECATION = 'conductor is now weave; this alias will be removed later';
 
@@ -27,9 +29,14 @@ export function cliShimTarget(dataHomeDir: string): string {
   return join(dataHomeDir, 'current', CLI_BIN_SUFFIX);
 }
 
-/** True when `content` is a Weave CLI shim (old `conductor` or new `weave`), not some unrelated program. */
+/** The terminal REPL entry a `weave-agent` shim should run: the `current` release's, addressed through the symlink. */
+export function replShimTarget(dataHomeDir: string): string {
+  return join(dataHomeDir, 'current', REPL_BIN_SUFFIX);
+}
+
+/** True when `content` is a Weave CLI shim (old `conductor`, `weave` or `weave-agent`), not some unrelated program. */
 export function isWeaveShim(content: string): boolean {
-  return content.includes(CLI_BIN_SUFFIX);
+  return content.includes(CLI_BIN_SUFFIX) || content.includes(REPL_BIN_SUFFIX);
 }
 
 /** The CLI bin a shim's `exec` line names, or null when it does not parse as one. */
@@ -72,6 +79,9 @@ export interface ShimWriteResult {
   changed: boolean;
   /** The `conductor` alias rewritten by this call, or null when there was none. */
   alias: string | null;
+  /** Where the `weave-agent` shim lives (VS-626), and whether this call changed it; it is written only when the release ships the REPL entry. */
+  agentPath: string;
+  agentChanged: boolean;
   /** `no-release` when there is no current release to point at (a source checkout): nothing is written. */
   reason: 'no-release' | null;
 }
@@ -87,7 +97,7 @@ export function writeCliShims(o: WriteShimsOptions): ShimWriteResult {
   const weavePath = join(binDir, 'weave');
   const target = cliShimTarget(o.dataHomeDir);
   if (!existsSync(target)) {
-    return { path: weavePath, present: false, changed: false, alias: null, reason: 'no-release' };
+    return { path: weavePath, present: false, changed: false, alias: null, agentPath: join(binDir, 'weave-agent'), agentChanged: false, reason: 'no-release' };
   }
 
   const changed = writeShim(weavePath, renderCliShim({ target, node: o.node, deprecated: false }));
@@ -99,7 +109,11 @@ export function writeCliShims(o: WriteShimsOptions): ShimWriteResult {
     writeShim(conductorPath, renderCliShim({ target, node: o.node, deprecated: true }));
     alias = conductorPath;
   }
-  return { path: weavePath, present: true, changed, alias, reason: null };
+  // The terminal agent's own command (VS-626): same node, the release's REPL entry. A release built before it existed has no such file, so nothing is written.
+  const agentPath = join(binDir, 'weave-agent');
+  const replTarget = replShimTarget(o.dataHomeDir);
+  const agentChanged = existsSync(replTarget) ? writeShim(agentPath, renderCliShim({ target: replTarget, node: o.node, deprecated: false })) : false;
+  return { path: weavePath, present: true, changed, alias, agentPath, agentChanged, reason: null };
 }
 
 /** Write `content` at `path`, executable, only when its bytes differ. Returns whether it changed. */

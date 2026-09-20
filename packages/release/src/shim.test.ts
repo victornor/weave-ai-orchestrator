@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  CONDUCTOR_DEPRECATION, cliShimTarget, isWeaveShim, readCliShimTarget, renderCliShim, userBinDir, writeCliShims,
+  CONDUCTOR_DEPRECATION, cliShimTarget, isWeaveShim, readCliShimTarget, renderCliShim, replShimTarget, userBinDir, writeCliShims,
 } from './shim.js';
 
 const tmps: string[] = [];
@@ -110,5 +110,29 @@ describe('writeCliShims (VS-377)', () => {
     const result = writeCliShims({ home, dataHomeDir, node: '/usr/local/bin/node' });
     expect(result).toMatchObject({ present: false, changed: false, alias: null, reason: 'no-release' });
     expect(existsSync(join(userBinDir(home), 'weave'))).toBe(false);
+  });
+});
+
+describe('weave-agent shim (VS-626)', () => {
+  it('is written next to weave, runs the release\'s REPL entry, and is a no-op the second time', () => {
+    const h = host();
+    writeFileSync(join(h.dataHomeDir, 'current', 'packages', 'cli', 'dist', 'repl-bin.js'), '// repl\n');
+    const first = writeCliShims(h);
+    const agent = join(userBinDir(h.home), 'weave-agent');
+    expect(first).toMatchObject({ agentPath: agent, agentChanged: true });
+    const content = readFileSync(agent, 'utf8');
+    expect(readCliShimTarget(content)).toBe(replShimTarget(h.dataHomeDir));
+    expect(content).toContain(`exec "${h.node}" "${join(h.dataHomeDir, 'current', 'packages', 'cli', 'dist', 'repl-bin.js')}" "$@"`);
+    expect(isWeaveShim(content)).toBe(true);
+    expect(statSync(agent).mode & 0o111).not.toBe(0);
+    expect(writeCliShims(h)).toMatchObject({ agentChanged: false });
+  });
+
+  it('is not written for a release built before the REPL existed, and never when there is no release', () => {
+    const h = host();
+    expect(writeCliShims(h)).toMatchObject({ present: true, agentChanged: false });
+    expect(existsSync(join(userBinDir(h.home), 'weave-agent'))).toBe(false);
+    const home = tmp('vs626-home-');
+    expect(writeCliShims({ home, dataHomeDir: tmp('vs626-data-'), node: '/usr/local/bin/node' })).toMatchObject({ present: false, agentChanged: false });
   });
 });

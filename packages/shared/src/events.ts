@@ -43,4 +43,4 @@ export interface RunLiveSnapshot { partials: Array<{ partId: string; kind: RunDe
  * `capabilities.partialOutput`), for a page that must say whether it can stream. A runtime absent
  * here reports whole steps only. Each adapter's own test pins its declaration to this table.
  */
-export const RUNTIME_PARTIAL_OUTPUT: Readonly<Record<string, 'text' | 'full'>> = { opencode: 'full' };
+export const RUNTIME_PARTIAL_OUTPUT: Readonly<Record<string, 'text' | 'full'>> = { opencode: 'full', claude: 'full' };

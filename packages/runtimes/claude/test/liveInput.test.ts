@@ -1,6 +1,6 @@
 import { rmSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { RuntimeEvent, TurnHandle, TurnInput } from '@weave-ai/runtime-sdk';
+import type { RuntimeEvent, RuntimePartial, TurnHandle, TurnInput } from '@weave-ai/runtime-sdk';
 import { RUN_REPORT_JSON_SCHEMA } from '@weave-ai/shared';
 import { adapter } from '../src/adapter.js';
 import { writeFakeClaudeCli } from './fakeCli.js';
@@ -68,5 +68,20 @@ describe('claude adapter — live stdin against a fake CLI', () => {
       (h) => { handle = h; },
     );
     expect(handle?.send).toBeUndefined();
+  });
+
+  it('reports stream_event deltas through onPartial and only completed events through onEvent (VS-599)', async () => {
+    const events: RuntimeEvent[] = [];
+    const partials: RuntimePartial[] = [];
+    const result = await adapter.runTurn(
+      input({}, { stream: true, assistantText: 'hi there' }),
+      { onSpawn: () => undefined, onEvent: (e) => events.push(e), onRaw: () => undefined, onPartial: (p) => partials.push(p) },
+    );
+    expect(result.exitCode).toBe(0);
+    expect(partials.map((p) => [p.kind, p.text])).toEqual([['text', 'hi there']]);
+    // The persisted events are exactly the completed ones; no stream_event became runtime.raw.
+    expect(events.map((e) => e.type)).toEqual(['session.started', 'assistant.text', 'usage.delta', 'turn.completed']);
+    const text = events.find((e) => e.type === 'assistant.text')!;
+    expect(text.payload['partId']).toBe(partials[0]!.partId);
   });
 });

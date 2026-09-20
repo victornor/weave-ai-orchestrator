@@ -19,6 +19,8 @@ import type { ChatEntry, ChatRow } from '../lib/dispatch';
 import { replyTargets } from '../lib/replyTargets';
 import { cx } from '../lib/cx';
 import { useRunEventStream } from '../api/runStream';
+import { LiveActivity, LivePartials } from '../components/LiveActivity';
+import type { PartialText } from '../lib/livePartials';
 import { ChatMessage } from './ChatMessage';
 import { ChatTrace, ChatTurnTrace, CompactionRow } from './ChatTrace';
 
@@ -75,6 +77,8 @@ export interface ChatConversationProps {
   live: LiveChatRun | null;
   /** True while a turn is starting or running: the live section is shown on it. */
   working: boolean;
+  /** The live run's runtime id, so its live activity row resolves partial-output coverage (VS-599). */
+  runtimeId?: string | null;
   /** Only the focused pane holds a live stream to its run (VS-199). */
   focused?: boolean;
   /** Outbound messages that genuinely arrived after this thread opened, so only those reveal. */
@@ -99,17 +103,27 @@ export interface ChatConversationProps {
   footer?: React.ReactNode;
 }
 
-/** The live turning section: the indicator, the dropped-stream retry and the streaming trace. */
+/** The live turning section: the activity row and streaming partials, the dropped-stream retry and
+ *  the streaming trace. */
 function LiveSection({
   workingAriaLabel,
   live,
   liveEvents,
+  partials,
+  lastPartialAt,
+  partialSince,
+  runtimeId,
   runStreamStatus,
   onRetry,
 }: {
   workingAriaLabel: string;
   live: LiveChatRun | null;
   liveEvents: readonly RunEvent[];
+  partials: readonly PartialText[];
+  lastPartialAt: number | null;
+  partialSince: number | null;
+  /** The run's runtime, so the row can say "whole steps only" for one that cannot stream (VS-599). */
+  runtimeId?: string | null;
   runStreamStatus: { state: string };
   onRetry: () => void;
 }): React.ReactElement {
@@ -130,10 +144,18 @@ function LiveSection({
         // VS-454: the live compaction row, shared with the screenshot harness and tests.
         <CompactionRow />
       ) : (
-        <div className="flex items-center gap-2">
-          <span className="size-1.5 flex-none rounded-pill bg-working" aria-hidden />
-          <span className="ac-mono text-nano text-text-3">{live ? 'working' : 'starting…'}</span>
-        </div>
+        // VS-599: the chat shows the same live activity row and streaming text as any run surface,
+        // instead of a bare "working" with nothing said between steps.
+        <>
+          <LivePartials partials={partials} />
+          <LiveActivity
+            events={liveEvents}
+            partials={partials}
+            lastPartialAt={lastPartialAt}
+            partialSince={partialSince}
+            runtimeId={runtimeId}
+          />
+        </>
       )}
       {live && (runStreamStatus.state === 'unreachable' || runStreamStatus.state === 'offline') ? (
         <p className="text-nano text-text-3">
@@ -159,6 +181,7 @@ export function ChatConversation({
   workingAriaLabel = 'Weaver is working',
   live,
   working,
+  runtimeId,
   focused = true,
   revealIds,
   onTicket,
@@ -173,7 +196,7 @@ export function ChatConversation({
   footer,
 }: ChatConversationProps): React.ReactElement {
   const runId = live?.id ?? null;
-  const { events: runEvents, status: runStreamStatus, retryNow } = useRunEventStream(runId, { live: focused && (live?.running ?? false) });
+  const { events: runEvents, status: runStreamStatus, retryNow, partials, lastPartialAt, partialSince } = useRunEventStream(runId, { live: focused && (live?.running ?? false) });
   const liveEvents = useMemo(() => runEvents.filter((e) => !isHumanReplyToolEvent(e)), [runEvents]);
 
   const stick = useStickToBottom([rows, liveEvents.length], {
@@ -288,6 +311,10 @@ export function ChatConversation({
               workingAriaLabel={workingAriaLabel}
               live={live}
               liveEvents={liveEvents}
+              partials={partials ?? []}
+              lastPartialAt={lastPartialAt ?? null}
+              partialSince={partialSince ?? null}
+              runtimeId={runtimeId}
               runStreamStatus={runStreamStatus}
               onRetry={retryNow}
             />

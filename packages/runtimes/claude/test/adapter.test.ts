@@ -3,8 +3,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { RuntimeEvent, RuntimePartial, TurnInput } from '@weave-ai/runtime-sdk';
+import { RUNTIME_PARTIAL_OUTPUT } from '@weave-ai/shared';
 import { adapter } from '../src/adapter.js';
-import { writeFakeClaudeCompactCli } from './fakeCli.js';
+import { writeFakeClaudeCli, writeFakeClaudeCompactCli } from './fakeCli.js';
 
 const dirs: string[] = [];
 const tmp = (p: string) => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push(d); return d; };
@@ -44,6 +46,11 @@ describe('claude adapter', () => {
     expect(adapter.skillsDir()).toBe('.claude/skills');
     expect(adapter.instructionFiles()).toEqual(['CLAUDE.md', 'AGENTS.md']);
     expect(adapter.capabilities).toMatchObject({ resumableSessions: true, forkSessions: true, structuredOutput: true, mcp: true, costReporting: true, usageReporting: 'per_turn' });
+  });
+
+  it('declares full partial output and the shared table agrees (VS-599)', () => {
+    expect(adapter.capabilities.partialOutput).toBe('full');
+    expect(RUNTIME_PARTIAL_OUTPUT[adapter.id]).toBe(adapter.capabilities.partialOutput);
   });
 
   it('declares its own in-process scheduling tools to deny on worker turns (VS-317)', () => {
@@ -118,5 +125,30 @@ describe('claude adapter', () => {
     const d = await adapter.detect();
     expect(['available', 'missing_binary', 'broken']).toContain(d.status);
     if (d.status === 'available') expect(d.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
+describe('claude adapter — headless turn streaming (VS-599)', () => {
+  it('reports partials in the --input-format text form and persists only completed events', async () => {
+    const fakeDir = writeFakeClaudeCli({ stream: true, assistantText: 'pong' });
+    dirs.push(fakeDir);
+    const events: RuntimeEvent[] = [];
+    const partials: RuntimePartial[] = [];
+    const input: TurnInput = {
+      runId: 'run-headless', turnEpoch: 1, cwd: tmp('ac-head-'), worktree: null,
+      session: { policy: 'fresh', ref: null, isFirstTurn: true },
+      systemPrompt: { text: '', mode: 'skip' },
+      prompt: 'do the thing', mcpServers: {},
+      env: { PATH: `${fakeDir}:${process.env['PATH'] ?? ''}` },
+      options: { liveInput: false }, limits: { timeoutMs: 10_000 }, permission: { mode: 'auto' },
+    };
+    const result = await adapter.runTurn(input, {
+      onSpawn: () => undefined, onEvent: (e) => events.push(e), onRaw: () => undefined, onPartial: (p) => partials.push(p),
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.finalText).toBe('pong');
+    expect(partials.map((p) => [p.kind, p.text])).toEqual([['text', 'pong']]);
+    expect(events.map((e) => e.type)).toEqual(['session.started', 'assistant.text', 'usage.delta', 'turn.completed']);
+    expect(events.find((e) => e.type === 'assistant.text')!.payload['partId']).toBe(partials[0]!.partId);
   });
 });

@@ -197,6 +197,7 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
             workingAriaLabel="Planner is working"
             live={live}
             working={plannerRunning}
+            runtimeId={plannerRuntimeId}
             focused={focused}
             revealIds={revealIds}
             onTicket={openTicket}

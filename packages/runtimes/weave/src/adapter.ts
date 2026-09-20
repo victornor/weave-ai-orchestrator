@@ -34,6 +34,7 @@ const CONFIG_SCHEMA: JsonSchema = {
     contextWindowTokens: { type: 'integer', minimum: 1, description: 'The model\'s context window when the endpoint does not say' },
     maxTurnTokens: { type: 'integer', minimum: 1, description: 'Stop the turn (as tooling/budget_exhausted) once it has used this many tokens; unset means no cap' },
     debugWire: { type: 'boolean', description: 'Record each request and response, redacted, under the run\'s wire directory. Sensitive: message content is kept' },
+    webFetch: { type: 'boolean', description: 'Enable the web_fetch tool; off by default and denied in restricted mode' },
   },
 };
 

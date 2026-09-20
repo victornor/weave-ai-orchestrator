@@ -20,8 +20,11 @@ export interface PermissionConfig {
 
 /** The read-only core tools a `restricted` turn may see, before the MCP tools are added. */
 export const RESTRICTED_CORE_TOOLS = ['read', 'grep', 'glob'] as const;
-/** The full core tool set, in request order. */
-export const ALL_CORE_TOOLS = ['read', 'write', 'edit', 'bash', 'grep', 'glob'] as const;
+/**
+ * The full core tool set. `web_fetch` is named here so the mode logic treats it like the write-capable
+ * tools — `restricted` removes it — even though it is only offered when the turn's option enables it.
+ */
+export const ALL_CORE_TOOLS = ['read', 'write', 'edit', 'bash', 'grep', 'glob', 'web_fetch'] as const;
 
 /** A name key that folds case, underscores and the Claude spellings together. */
 export const toolKey = (name: string): string => name.toLowerCase().replace(/_/g, '');

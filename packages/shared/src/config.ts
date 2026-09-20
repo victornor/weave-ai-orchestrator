@@ -552,6 +552,8 @@ export const ProviderCompatSchema = z.object({
   }).optional(),
   strictAlternation: z.boolean().optional(),
   emptyContent: z.enum(['null', 'empty']).optional(),
+  /** How a model takes images: not at all, lifted into a user message (the default), or inside the tool message. */
+  image: z.object({ input: z.enum(['none', 'user', 'user_and_tool']).optional() }).optional(),
   responseFormat: z.array(z.enum(['json_object', 'json_schema'])).optional(),
   seedParam: z.string().optional(),
   stopMax: z.number().int().positive().optional(),

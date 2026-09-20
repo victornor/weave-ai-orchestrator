@@ -5,7 +5,8 @@ import { classifyFinish, classifyHttp, classifyNetwork, classifyStreamError, sto
 import { invalidToolMessage, repairArgs } from './repair.js';
 import { parseRetryAfter, planRetry } from './retry.js';
 import { WireLog } from './wire.js';
-import { McpHttpClient } from './mcp/http.js';
+import { createMcpClient, type McpClient, type McpTool } from './mcp/client.js';
+import { assignMcpToolNames } from './mcp/naming.js';
 import { bashDenial, isAllowedByLists, modeToolNames, toolDenial, type PermissionConfig } from './permission.js';
 import { dirname, join } from 'node:path';
 import { chatCompletionsUrl, requestHeaders, requestOptions, shellEnv } from './profile.js';
@@ -19,6 +20,7 @@ import { globTool } from './tools/glob.js';
 import { errorOutput, toolSpecs, type ToolCtx, type ToolDefinition } from './tools/index.js';
 import { ReadLedger } from './tools/ledger.js';
 import { readTool } from './tools/read.js';
+import { makeWebFetchTool } from './tools/webFetch.js';
 import { writeTool } from './tools/write.js';
 import type { AgentError, ContentBlock, Message, Usage } from './types.js';
 
@@ -105,7 +107,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
   let model: string | undefined;
   let finalText: string | null = null;
   let steps = 0;
-  const mcpClients: McpHttpClient[] = [];
+  const mcpClients: McpClient[] = [];
   /** Cleared for the rest of the run once an endpoint rejects `stream_options`. */
   let sendStreamOptions = true;
   /** The step being streamed, so a cancel can persist the text seen so far. */
@@ -126,6 +128,8 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     batch.flush();
     emit('turn.completed', { sessionId: session.id, failed, ...(interrupted ? { interrupted: true } : {}) });
     session.close();
+    // SIGTERM is issued synchronously inside close(); a stdio server must not outlive the turn.
+    for (const c of mcpClients) void c.close();
     return r;
   };
 
@@ -133,25 +137,50 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     // Tools: the six core tools plus every MCP tool. The mode removes the write-capable core tools
     // from the request itself; `all` keeps every tool so a call the mode removed is answered with a
     // permission denial rather than "unknown tool".
+    const webFetchEnabled = run.options['webFetch'] === true;
     const coreByName: Record<string, ToolDefinition> = { read: readTool, write: writeTool, edit: editTool, bash: bashTool, grep: grepTool, glob: globTool };
+    if (webFetchEnabled) coreByName['web_fetch'] = makeWebFetchTool();
     const modeNames = new Set<string>(modeToolNames(run.permission.mode));
-    const coreNames = new Set(Object.keys(coreByName));
+    const coreNames = new Set([...Object.keys(coreByName), 'web_fetch']);
     const all = new Map<string, ToolDefinition>(Object.entries(coreByName));
+    const clientsByServer = new Map<string, McpClient>();
+    const toolsByServer = new Map<string, McpTool[]>();
+    // A stdio MCP server gets an explicit, minimal environment: the plain base the shell tools start
+    // from (PATH/HOME/LANG/TMPDIR/USER/TERM), never the ambient process env and never the turn's role
+    // secrets, which ride in `init.toolEnv`. The server's own `env` is added on top of this base.
+    const mcpBaseEnv: Record<string, string> = { TERM: 'dumb' };
+    for (const k of ['PATH', 'HOME', 'LANG', 'TMPDIR', 'USER']) { const v = init.toolEnv[k]; if (v !== undefined) mcpBaseEnv[k] = v; }
     try {
-      for (const [server, cfg] of Object.entries(init.mcpServers)) {
-        const client = new McpHttpClient({ url: cfg.url, ...(cfg.headers ? { headers: cfg.headers } : {}), ...(deps.fetch ? { fetch: deps.fetch } : {}) });
+      // The Weave server first: its names are unprefixed and must be in the namespace before any
+      // other server's names can be assigned.
+      const entries = Object.entries(init.mcpServers);
+      const ordered = [...entries.filter(([s]) => s === WEAVE_MCP_SERVER), ...entries.filter(([s]) => s !== WEAVE_MCP_SERVER)];
+      for (const [server, cfg] of ordered) {
         try {
-          await client.initialize(signal);
-          for (const t of await client.listTools(signal)) {
-            const name = server === WEAVE_MCP_SERVER ? t.name : `mcp__${server}__${t.name}`.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64);
-            all.set(name, { name, description: t.description, parameters: t.inputSchema, readOnly: t.readOnly, run: async (args, ctx) => { const r = await client.callTool(t.name, args, ctx.signal); return { text: r.text, isError: r.isError }; } });
-          }
+          const client = createMcpClient(server, cfg, {
+            ...(deps.fetch ? { fetch: deps.fetch } : {}),
+            env: mcpBaseEnv,
+            onStderr: (line) => io.log('debug', `[mcp:${server}] ${line}`),
+          });
           mcpClients.push(client);
+          await client.initialize(signal);
+          const listed = await client.listTools(signal);
+          clientsByServer.set(server, client);
+          toolsByServer.set(server, listed);
         } catch (e) {
           if (signal.aborted) throw new Cancelled();
           if (server === WEAVE_MCP_SERVER) throw new StepFailure({ code: 'mcp_unavailable', family: 'tooling', message: `The Weave tool server is unreachable: ${(e as Error).message}` });
           io.log('warn', `MCP server ${server} skipped`, { error: (e as Error).message });
         }
+      }
+      const nameMap = assignMcpToolNames([...toolsByServer].map(([server, tools]) => ({ server, tools: tools.map((t) => t.name) })), new Set<string>(), WEAVE_MCP_SERVER);
+      for (const [name, ref] of nameMap) {
+        const client = clientsByServer.get(ref.server)!;
+        const meta = toolsByServer.get(ref.server)!.find((t) => t.name === ref.tool)!;
+        all.set(name, {
+          name, description: meta.description, parameters: meta.inputSchema, readOnly: meta.readOnly,
+          run: async (args, ctx) => { const r = await client.callTool(ref.tool, args, ctx.signal); return { text: r.text, isError: r.isError, ...(r.images ? { images: r.images } : {}) }; },
+        });
       }
     } catch (e) { if (e instanceof StepFailure) { emit('error', { code: e.err.code, family: e.err.family, message: e.err.message }); return finish(result({ exitCode: 1, error: e.err }), true); } throw e; }
     const tools = new Map<string, ToolDefinition>();
@@ -225,7 +254,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
           if (signal.aborted) throw new Cancelled();
           emit('tool.call', { id: c.id, name: c.name, input: args.ok ? args.value : c.argsText, partId: c.id });
           const tool = tools.get(c.name);
-          const toolCtx: ToolCtx = { cwd: wtCwd, home: run.cwd, configHome: run.configHome, mode: run.permission.mode, env, signal, callId: c.id, spillDir: run.spillDir, ledger, rg, emit: (type, payload) => emit(type, { id: c.id, ...payload }) };
+          const toolCtx: ToolCtx = { cwd: wtCwd, home: run.cwd, configHome: run.configHome, mode: run.permission.mode, imageInput: compat.image.input, env, signal, callId: c.id, spillDir: run.spillDir, ledger, rg, emit: (type, payload) => emit(type, { id: c.id, ...payload }) };
           const key = args.ok ? DoomGuard.key(c.name, args.value) : '';
           const verdict = args.ok && tool ? doom.check(key) : 'ok';
           if (verdict === 'stop') stopFailure = stopError.doom(c.name);
@@ -236,7 +265,12 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
           } else if (tool === undefined) {
             const d = all.has(c.name) ? toolDenial(c.name, permissionCfg, modeAllows) : null;
             if (d) { denied = true; emit('tool.denied', { id: c.id, name: c.name, reason: d.reason }); out = { text: d.text, isError: true }; }
-            else out = errorOutput(`unknown tool "${c.name}". Available: ${[...tools.keys()].join(', ')}`);
+            else if (c.name === 'web_fetch' && !modeAllows('web_fetch')) {
+              const wedge = toolDenial('web_fetch', permissionCfg, modeAllows)!;
+              denied = true; emit('tool.denied', { id: c.id, name: 'web_fetch', reason: wedge.reason }); out = { text: wedge.text, isError: true };
+            } else if (c.name === 'web_fetch') {
+              out = errorOutput('web_fetch is disabled; enable it with the webFetch option');
+            } else out = errorOutput(`unknown tool "${c.name}". Available: ${[...tools.keys()].join(', ')}`);
           } else if (!args.ok) {
             out = errorOutput(invalidToolMessage(c.name, args.error));
           } else if (verdict === 'warn') {
@@ -252,7 +286,10 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
           invalidStreak = (tool === undefined && !denied) || !args.ok ? invalidStreak + 1 : 0;
           if (out.text.length === 0) out = { ...out, text: '(no output)' };
           if (tool && args.ok && verdict === 'ok' && !stopFailure) doom.record(key, out.text);
-          session.append({ role: 'toolResult', toolCallId: c.id, name: c.name, text: out.text, isError: out.isError === true });
+          const images = compat.image.input === 'none' ? [] : (out.images ?? []);
+          const embed = compat.image.input === 'user_and_tool';
+          session.append({ role: 'toolResult', toolCallId: c.id, name: c.name, text: out.text, isError: out.isError === true, ...(embed && images.length > 0 ? { images } : {}) });
+          if (!embed && images.length > 0) session.append({ role: 'user', text: `[image from ${c.name}]`, images });
           done.add(c.id);
           if (!denied) emit('tool.result', { id: c.id, name: c.name, status: out.isError ? 'error' : 'completed', isError: out.isError === true, content: out.text.slice(0, 20_000) });
         }

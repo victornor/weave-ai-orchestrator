@@ -47,6 +47,10 @@ describe('declaration', () => {
     expect(RUNTIME_PARTIAL_OUTPUT['weave']).toBe(capabilities.partialOutput);
     expect(adapterWith().capabilities).toBe(capabilities);
   });
+  it('offers the webFetch option in its config schema', () => {
+    const schema = adapterWith().configSchema();
+    expect((schema['properties'] as Record<string, unknown>)['webFetch']).toMatchObject({ type: 'boolean' });
+  });
   it('validates every parameter key and rejects out-of-range values by name', () => {
     const schema = adapterWith().configSchema();
     const all = { temperature: 0.2, topP: 0.5, frequencyPenalty: 1, presencePenalty: -1, maxOutputTokens: 100, seed: 3, stop: ['x'], toolChoice: 'auto', parallelToolCalls: true, responseFormat: 'json_object', extraBody: '{"a":1}', extraHeaders: ['X-A: 1'], contextWindowTokens: 8000, maxTurnTokens: 50_000, debugWire: true };
@@ -126,7 +130,12 @@ describe('a turn through a fake child', () => {
     expect(JSON.stringify(rec.init['toolEnv'])).not.toContain(KEY);
     expect(rec.init['toolEnv']).not.toHaveProperty(AC_ENV.RUN_TOKEN);
     expect(rec.init['toolEnv']).not.toHaveProperty('WEAVE_LLM_TEST_KEY');
-    expect(rec.init['mcpServers']).toEqual({ 'weave-ai': { url: 'http://127.0.0.1:1/mcp/runs/run-1', headers: { Authorization: 'Bearer run-token-xyz' } } });
+    expect(rec.init['mcpServers']).toEqual({ 'weave-ai': { type: 'http', url: 'http://127.0.0.1:1/mcp/runs/run-1', headers: { Authorization: 'Bearer run-token-xyz' } } });
+  });
+
+  it('carries a stdio MCP server onto the init line', async () => {
+    await runFake('replay', { mcpServers: { demo: { type: 'stdio', command: 'node', args: ['s.js'], env: { A: '1' } } } });
+    expect(record().init['mcpServers']).toEqual({ demo: { type: 'stdio', command: 'node', args: ['s.js'], env: { A: '1' } } });
   });
 
   it('sends the model without the provider prefix, the options, the system prompt and session/spill locations under the config home', async () => {

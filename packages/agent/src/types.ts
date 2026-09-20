@@ -1,13 +1,16 @@
 /** The agent's own message form. Sessions store this, never the wire JSON, so a later slice can re-encode it for another provider. */
+export interface ImagePart { mediaType: string; dataBase64: string }
+
 export type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'thinking'; text: string }
+  | { type: 'image'; mediaType: string; dataBase64: string }
   | { type: 'toolCall'; id: string; name: string; args: unknown; raw?: string };
 
 export type Message =
-  | { role: 'user'; text: string }
+  | { role: 'user'; text: string; images?: ImagePart[] }
   | { role: 'assistant'; content: ContentBlock[]; model?: string }
-  | { role: 'toolResult'; toolCallId: string; name: string; text: string; isError: boolean };
+  | { role: 'toolResult'; toolCallId: string; name: string; text: string; isError: boolean; images?: ImagePart[] };
 
 export interface Usage { promptTokens: number; completionTokens: number; cachedTokens: number; reasoningTokens: number; estimated: boolean }
 

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -13,11 +13,11 @@ let dir: string; let mock: MockProvider; let mcp: MockMcp | undefined;
 beforeEach(async () => { dir = mkdtempSync(join(tmpdir(), 'wa-loop-')); mkdirSync(join(dir, 'wt')); mock = await startMockProvider(); });
 afterEach(async () => { await mock.close(); await mcp?.close(); mcp = undefined; rmSync(dir, { recursive: true, force: true }); });
 
-function makeInit(over: { prompt?: string; options?: Record<string, unknown>; mcpServers?: InitMessage['mcpServers']; toolEnv?: Record<string, string>; maxTurns?: number; session?: string; mode?: 'auto' | 'restricted' | 'bypass'; permission?: Partial<InitMessage['run']['permission']> } = {}): InitMessage {
+function makeInit(over: { prompt?: string; options?: Record<string, unknown>; mcpServers?: InitMessage['mcpServers']; toolEnv?: Record<string, string>; maxTurns?: number; session?: string; mode?: 'auto' | 'restricted' | 'bypass'; permission?: Partial<InitMessage['run']['permission']>; compat?: InitMessage['provider']['compat'] } = {}): InitMessage {
   return {
     type: 'init', v: 1,
     run: { runId: 'run-abc123', turnEpoch: 1, cwd: dir, worktree: { path: join(dir, 'wt'), branch: 'ac/x' }, limits: { timeoutMs: 600_000, ...(over.maxTurns ? { maxTurns: over.maxTurns } : {}) }, permission: { mode: over.mode ?? 'auto', ...over.permission }, model: 'mock-model', options: over.options ?? {}, spillDir: join(dir, 'spill') },
-    provider: { id: 'mock', baseUrl: mock.baseUrl, auth: 'bearer', headers: {}, apiKey: KEY },
+    provider: { id: 'mock', baseUrl: mock.baseUrl, auth: 'bearer', headers: {}, apiKey: KEY, ...(over.compat ? { compat: over.compat } : {}) },
     prompt: over.prompt ?? 'hello', systemPrompt: { text: 'HOME INSTRUCTIONS', mode: 'inject' },
     session: { path: join(dir, over.session ?? 's.jsonl'), id: 'sess1' }, mcpServers: over.mcpServers ?? {}, toolEnv: { PATH: process.env['PATH'] ?? '', ...over.toolEnv },
   };
@@ -332,5 +332,173 @@ describe('cancel', () => {
     expect(r.exitCode).toBe(143);
     assertValidHistory(join(dir, 's.jsonl'));
     expect(readFileSync(join(dir, 's.jsonl'), 'utf8').split('\n')[0]).toContain('"session"');
+  });
+});
+
+/** A newline-delimited JSON-RPC stdio MCP server, written to disk at test time. */
+const STDIO_ECHO_SERVER = `
+import { createInterface } from 'node:readline';
+import { writeFileSync } from 'node:fs';
+if (process.env.PIDFILE) writeFileSync(process.env.PIDFILE, String(process.pid));
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+const rl = createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === 'initialize') return send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'echo', version: '1' } } });
+  if (msg.method === 'tools/list') return send({ jsonrpc: '2.0', id: msg.id, result: { tools: [{ name: 'echo', description: 'echo', inputSchema: { type: 'object' } }] } });
+  if (msg.method === 'tools/call') return send({ jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: 'stdio:' + msg.params.arguments.text }], isError: false } });
+});
+`;
+
+describe('MCP transports and naming through the loop', () => {
+  it('runs a tool from a fake stdio server and reaps the child at turn end', async () => {
+    const script = join(dir, 'stdio-server.mjs'); const pidfile = join(dir, 'stdio-pid');
+    writeFileSync(script, STDIO_ECHO_SERVER);
+    mock.script({ chunks: toolCallChunks([{ id: 's1', name: 'mcp__demo__echo', args: '{"text":"hi"}' }]) }, { chunks: textChunks('done') });
+    const h = harness();
+    const r = await runAgentTurn(makeInit({ mcpServers: { demo: { type: 'stdio', command: process.execPath, args: [script], env: { PIDFILE: pidfile } } } }), h.io, new AbortController().signal, fast);
+    expect(r.error).toBeUndefined();
+    expect(String(h.events.find((e) => e.type === 'tool.result')!.payload['content'])).toBe('stdio:hi');
+    const pid = Number(readFileSync(pidfile, 'utf8'));
+    await until(() => { try { process.kill(pid, 0); return false; } catch { return true; } });
+    expect(() => process.kill(pid, 0)).toThrow();
+  });
+
+  it('caps an MCP result over 50 KB with a clear marker', async () => {
+    mcp = await startMockMcp([{ name: 'big' }], () => 'x'.repeat(60 * 1024));
+    mock.script({ chunks: toolCallChunks([{ id: 'b1', name: 'mcp__demo__big', args: '{}' }]) }, { chunks: textChunks('done') });
+    const h = harness();
+    await runAgentTurn(makeInit({ mcpServers: { demo: { url: mcp.url } } }), h.io, new AbortController().signal, fast);
+    const s = Session.open({ path: join(dir, 's.jsonl'), id: 'x', cwd: dir });
+    const content = s.messages.filter((m) => m.role === 'toolResult').map((m) => (m as { text: string }).text).join('');
+    s.close();
+    expect(content.length).toBeLessThan(52 * 1024);
+    expect(content).toContain('[truncated at 51200 characters]');
+  });
+
+  it('suffixes colliding wire names from two servers', async () => {
+    const a = await startMockMcp([{ name: 'dup' }], () => 'A');
+    const b = await startMockMcp([{ name: 'dup' }], () => 'B');
+    try {
+      mock.script({ chunks: toolCallChunks([{ id: 'd1', name: 'mcp__a_b__dup', args: '{}' }]) }, { chunks: textChunks('done') });
+      const h = harness();
+      await runAgentTurn(makeInit({ mcpServers: { 'a.b': { url: a.url }, 'a/b': { url: b.url } } }), h.io, new AbortController().signal, fast);
+      const names = (mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name);
+      expect(names).toContain('mcp__a_b__dup');
+      expect(names.some((n) => /^mcp__a_b__dup_\d+$/.test(n))).toBe(true);
+    } finally { await a.close(); await b.close(); }
+  });
+});
+
+const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 1, 1, 1, 1]);
+
+describe('web_fetch registration', () => {
+  it('is absent from a restricted request even when enabled', async () => {
+    mock.script({ chunks: textChunks('hi') });
+    await runAgentTurn(makeInit({ mode: 'restricted', options: { webFetch: true } }), harness().io, new AbortController().signal, fast);
+    const names = (mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name);
+    expect(names).not.toContain('web_fetch');
+  });
+
+  it('is offered in auto only when the option is set', async () => {
+    mock.script({ chunks: textChunks('hi') });
+    await runAgentTurn(makeInit({ mode: 'auto', options: { webFetch: true } }), harness().io, new AbortController().signal, fast);
+    let names = (mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name);
+    expect(names).toContain('web_fetch');
+    mock.script({ chunks: textChunks('hi') });
+    await runAgentTurn(makeInit({ mode: 'auto' }), harness().io, new AbortController().signal, fast);
+    names = (mock.requests[1]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name);
+    expect(names).not.toContain('web_fetch');
+  });
+
+  it('answers a disabled web_fetch call with an error naming the option', async () => {
+    mock.script({ chunks: toolCallChunks([{ id: 'w1', name: 'web_fetch', args: '{"url":"http://example.test/"}' }]) }, { chunks: textChunks('ok') });
+    const h = harness();
+    await runAgentTurn(makeInit(), h.io, new AbortController().signal, fast);
+    expect(String(h.events.find((e) => e.type === 'tool.result')!.payload['content'])).toContain('web_fetch is disabled');
+  });
+});
+
+describe('image reading', () => {
+  const b64 = PNG_HEADER.toString('base64');
+  const messagesOf = (turn: number): Array<Record<string, unknown>> => mock.requests[turn]!.body['messages'] as Array<Record<string, unknown>>;
+  const hasImage = (m: Record<string, unknown>): boolean => JSON.stringify(m['content']).includes('image_url');
+
+  it('lifts a read png into a user message by default', async () => {
+    writeFileSync(join(dir, 'wt', 'pic.png'), PNG_HEADER);
+    mock.script({ chunks: toolCallChunks([{ id: 'i1', name: 'read', args: '{"path":"pic.png"}' }]) }, { chunks: textChunks('seen') });
+    await runAgentTurn(makeInit(), harness().io, new AbortController().signal, fast);
+    const msgs = messagesOf(1);
+    const user = msgs.find((m) => m['role'] === 'user' && hasImage(m));
+    expect(user).toBeTruthy();
+    expect(JSON.stringify(user!['content'])).toContain(b64);
+    expect(typeof msgs.find((m) => m['role'] === 'tool')!['content']).toBe('string');
+  });
+
+  it('keeps the image inside the tool message for user_and_tool', async () => {
+    writeFileSync(join(dir, 'wt', 'pic2.png'), PNG_HEADER);
+    mock.script({ chunks: toolCallChunks([{ id: 'i2', name: 'read', args: '{"path":"pic2.png"}' }]) }, { chunks: textChunks('seen') });
+    await runAgentTurn(makeInit({ compat: { image: { input: 'user_and_tool' } } }), harness().io, new AbortController().signal, fast);
+    const msgs = messagesOf(1);
+    const tool = msgs.find((m) => m['role'] === 'tool')!;
+    expect(Array.isArray(tool['content'])).toBe(true);
+    expect(JSON.stringify(tool['content'])).toContain('image_url');
+    expect(msgs.filter((m) => m['role'] === 'user' && hasImage(m))).toHaveLength(0);
+  });
+
+  it('returns an error text for image.input none with no image part', async () => {
+    writeFileSync(join(dir, 'wt', 'pic3.png'), PNG_HEADER);
+    mock.script({ chunks: toolCallChunks([{ id: 'i3', name: 'read', args: '{"path":"pic3.png"}' }]) }, { chunks: textChunks('seen') });
+    const h = harness();
+    await runAgentTurn(makeInit({ compat: { image: { input: 'none' } } }), h.io, new AbortController().signal, fast);
+    expect(String(h.events.find((e) => e.type === 'tool.result')!.payload['content'])).toContain('this model cannot read images');
+    expect(JSON.stringify(mock.requests[1]!.body)).not.toContain('image_url');
+  });
+
+  it('lifts an image from an MCP tool into a user message', async () => {
+    mcp = await startMockMcp([{ name: 'snap' }], () => [{ type: 'image', data: 'QUJD', mimeType: 'image/png' }]);
+    mock.script({ chunks: toolCallChunks([{ id: 's1', name: 'mcp__demo__snap', args: '{}' }]) }, { chunks: textChunks('done') });
+    await runAgentTurn(makeInit({ mcpServers: { demo: { url: mcp.url } } }), harness().io, new AbortController().signal, fast);
+    expect(JSON.stringify(mock.requests[1]!.body)).toContain('data:image/png;base64,QUJD');
+  });
+
+  it('round-trips a persisted image through the session', async () => {
+    writeFileSync(join(dir, 'wt', 'pic4.png'), PNG_HEADER);
+    mock.script({ chunks: toolCallChunks([{ id: 'i4', name: 'read', args: '{"path":"pic4.png"}' }]) }, { chunks: textChunks('a') }, { chunks: textChunks('b') });
+    await runAgentTurn(makeInit(), harness().io, new AbortController().signal, fast);
+    await runAgentTurn(makeInit({ prompt: 'again' }), harness().io, new AbortController().signal, fast);
+    expect(JSON.stringify(mock.requests[2]!.body)).toContain(b64);
+  });
+});
+
+/** A stdio MCP server that records the environment it was spawned with. */
+const STDIO_ENV_SERVER = `
+import { createInterface } from 'node:readline';
+import { writeFileSync } from 'node:fs';
+if (process.env.ENVFILE) writeFileSync(process.env.ENVFILE, JSON.stringify(process.env));
+const send = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+const rl = createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  const msg = JSON.parse(line);
+  if (msg.method === 'initialize') return send({ jsonrpc: '2.0', id: msg.id, result: { protocolVersion: '2025-03-26', capabilities: {}, serverInfo: { name: 'env', version: '1' } } });
+  if (msg.method === 'tools/list') return send({ jsonrpc: '2.0', id: msg.id, result: { tools: [] } });
+});
+`;
+
+describe('stdio MCP server environment', () => {
+  it('does not leak the run token or role secrets into the spawned server', async () => {
+    const script = join(dir, 'stdio-env.mjs'); const envfile = join(dir, 'server-env.json');
+    writeFileSync(script, STDIO_ENV_SERVER);
+    mock.script({ chunks: textChunks('hi') });
+    await runAgentTurn(makeInit({
+      mcpServers: { demo: { type: 'stdio', command: process.execPath, args: [script], env: { ENVFILE: envfile } } },
+      toolEnv: { AC_RUN_TOKEN: 'run-token-xyz', MY_ROLE_SECRET: 's3cr3t' },
+    }), harness().io, new AbortController().signal, fast);
+    await until(() => existsSync(envfile));
+    const env = JSON.parse(readFileSync(envfile, 'utf8')) as Record<string, string>;
+    expect(env['AC_RUN_TOKEN']).toBeUndefined();
+    expect(env['MY_ROLE_SECRET']).toBeUndefined();
+    expect(env['PATH']).toBeDefined();
+    expect(env['ENVFILE']).toBe(envfile);
   });
 });

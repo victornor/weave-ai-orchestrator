@@ -7,8 +7,8 @@ export interface MockMcp {
   close(): Promise<void>;
 }
 
-/** A minimal streamable-HTTP MCP server (JSON replies) for loop tests. `handler` may hold a call open to test cancel. */
-export async function startMockMcp(tools: Array<{ name: string; description?: string }>, handler: (name: string, args: Record<string, unknown>) => Promise<string> | string): Promise<MockMcp> {
+/** A minimal streamable-HTTP MCP server (JSON replies) for loop tests. `handler` may hold a call open to test cancel, or return raw content parts. */
+export async function startMockMcp(tools: Array<{ name: string; description?: string }>, handler: (name: string, args: Record<string, unknown>) => Promise<string | Array<Record<string, unknown>>> | string | Array<Record<string, unknown>>): Promise<MockMcp> {
   const calls: MockMcp['calls'] = [];
   const sockets = new Set<import('node:net').Socket>();
   const server: Server = createServer((req, res) => {
@@ -21,8 +21,9 @@ export async function startMockMcp(tools: Array<{ name: string; description?: st
       if (msg.method === 'tools/list') return ok({ tools: tools.map((t) => ({ name: t.name, description: t.description ?? t.name, inputSchema: { type: 'object', properties: {} } })) });
       if (msg.method === 'tools/call') {
         calls.push({ name: msg.params!.name, args: msg.params!.arguments, headers: req.headers });
-        const text = await handler(msg.params!.name, msg.params!.arguments);
-        return ok({ content: [{ type: 'text', text }], isError: false });
+        const out = await handler(msg.params!.name, msg.params!.arguments);
+        const content = typeof out === 'string' ? [{ type: 'text', text: out }] : out;
+        return ok({ content, isError: false });
       }
       res.writeHead(202); res.end();
     });

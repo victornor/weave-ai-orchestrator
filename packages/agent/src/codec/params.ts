@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import type { ProviderCompat, ProviderParams } from '@weave-ai/shared';
-import type { ContentBlock, Message } from '../types.js';
+import type { ContentBlock, ImagePart, Message } from '../types.js';
 
 export type Params = ProviderParams & { contextWindowTokens?: number };
+
+export type ImageInput = 'none' | 'user' | 'user_and_tool';
 
 /** Every flag with its value when nothing sets it. `max_tokens` is what the probed endpoints all honoured. */
 export interface Compat {
@@ -14,6 +16,7 @@ export interface Compat {
   tools: { supported: boolean; parallel: boolean; choice: Array<'auto' | 'required' | 'none' | 'named'>; strict: boolean; idFormat: 'any' | 'alnum9' | 'safe64' };
   strictAlternation: boolean;
   emptyContent: 'null' | 'empty';
+  image: { input: ImageInput };
   responseFormat: Array<'json_object' | 'json_schema'>;
   seedParam: string;
   stopMax: number | undefined;
@@ -25,7 +28,7 @@ export const DEFAULT_COMPAT: Compat = {
   maxTokensParam: 'max_tokens', streamUsage: 'stream_options', systemRole: 'system', omitParams: [],
   reasoning: { field: 'auto', passBack: 'none', effortParam: 'none', effortMap: {}, effortLevels: [] },
   tools: { supported: true, parallel: true, choice: ['auto', 'required', 'none'], strict: false, idFormat: 'any' },
-  strictAlternation: false, emptyContent: 'null', responseFormat: ['json_object'], seedParam: 'seed', stopMax: undefined, modelsPath: '/models', contextField: undefined,
+  strictAlternation: false, emptyContent: 'null', image: { input: 'user' }, responseFormat: ['json_object'], seedParam: 'seed', stopMax: undefined, modelsPath: '/models', contextField: undefined,
 };
 
 /** Fill the defaults under a (possibly partial) compat block. */
@@ -38,6 +41,7 @@ export function completeCompat(c: ProviderCompat | undefined): Compat {
     reasoning: { field: r?.field ?? d.reasoning.field, passBack: r?.passBack ?? d.reasoning.passBack, effortParam: r?.effortParam ?? d.reasoning.effortParam, effortMap: r?.effortMap ?? d.reasoning.effortMap, effortLevels: r?.effortLevels ?? d.reasoning.effortLevels },
     tools: { supported: t?.supported ?? d.tools.supported, parallel: t?.parallel ?? d.tools.parallel, choice: t?.choice ?? d.tools.choice, strict: t?.strict ?? d.tools.strict, idFormat: t?.idFormat ?? d.tools.idFormat },
     strictAlternation: c?.strictAlternation ?? d.strictAlternation, emptyContent: c?.emptyContent ?? d.emptyContent,
+    image: { input: c?.image?.input ?? d.image.input },
     responseFormat: c?.responseFormat ?? d.responseFormat, seedParam: c?.seedParam ?? d.seedParam, stopMax: c?.stopMax, modelsPath: c?.modelsPath ?? d.modelsPath, contextField: c?.contextField,
   };
 }
@@ -141,9 +145,12 @@ export function toWireMessages(messages: Message[], compat: Compat = DEFAULT_COM
   messages.forEach((m, index) => {
     if (m.role === 'user') {
       if (compat.strictAlternation && out[out.length - 1]?.['role'] === 'tool') out.push({ role: 'assistant', content: '' });
-      out.push({ role: 'user', content: m.text });
-    } else if (m.role === 'toolResult') out.push({ role: 'tool', tool_call_id: id(m.toolCallId), content: m.text });
-    else {
+      const images = compat.image.input === 'none' ? [] : (m.images ?? []);
+      out.push({ role: 'user', content: images.length > 0 ? partsContent(m.text, images) : m.text });
+    } else if (m.role === 'toolResult') {
+      const images = compat.image.input === 'user_and_tool' ? (m.images ?? []) : [];
+      out.push({ role: 'tool', tool_call_id: id(m.toolCallId), content: images.length > 0 ? partsContent(m.text, images) : m.text });
+    } else {
       const text = m.content.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('');
       const calls = m.content.filter((b): b is Extract<ContentBlock, { type: 'toolCall' }> => b.type === 'toolCall');
       const msg: Record<string, unknown> = { role: 'assistant', content: text || (calls.length > 0 && compat.emptyContent === 'null' ? null : '') };
@@ -157,6 +164,14 @@ export function toWireMessages(messages: Message[], compat: Compat = DEFAULT_COM
     }
   });
   return out;
+}
+
+/** A text part plus one OpenAI `image_url` data part per image, in order. */
+function partsContent(text: string, images: ImagePart[]): unknown[] {
+  const parts: unknown[] = [];
+  if (text) parts.push({ type: 'text', text });
+  for (const p of images) parts.push({ type: 'image_url', image_url: { url: `data:${p.mediaType};base64,${p.dataBase64}` } });
+  return parts;
 }
 
 /** Splits `<think>…</think>` out of streamed content, across chunk boundaries. */

@@ -39,7 +39,15 @@ export function childBaseEnv(base: Record<string, string>): Record<string, strin
 
 export function buildInit(input: TurnInput, p: { providerId: string; modelId: string; profile: ProviderProfile; apiKey: string | undefined; session: { id: string; path: string }; layout: ChildLayout; toolEnv: Record<string, string>; resolved: Resolved; headers: Record<string, string> }): InitMessage {
   const mcpServers: InitMessage['mcpServers'] = {};
-  for (const [name, cfg] of Object.entries(input.mcpServers)) if (cfg.type === 'http' && cfg.url) mcpServers[name] = { url: cfg.url, ...(cfg.headers ? { headers: cfg.headers } : {}) };
+  for (const [name, cfg] of Object.entries(input.mcpServers)) {
+    // Both transports ride the init line; the child routes by `type` (S8). An entry with neither a
+    // url nor a command names no reachable server and is dropped.
+    if (cfg.type === 'stdio' && cfg.command) {
+      mcpServers[name] = { type: 'stdio', command: cfg.command, ...(cfg.args ? { args: cfg.args } : {}), ...(cfg.env ? { env: cfg.env } : {}) };
+    } else if (cfg.url) {
+      mcpServers[name] = { type: 'http', url: cfg.url, ...(cfg.headers ? { headers: cfg.headers } : {}) };
+    }
+  }
   return {
     type: 'init', v: 1,
     run: {

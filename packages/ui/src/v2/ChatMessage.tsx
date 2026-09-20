@@ -9,7 +9,6 @@
  * `onJumpTo` the conversation owns, so the scroll and highlight live in the list and this component
  * stays shared — a plan tab inherits the behaviour through its conversation (VS-442).
  */
-import { useMemo } from 'react';
 import type { ThreadMessage } from '@weave-ai/shared';
 import { AttachmentItem } from '../components/AttachmentItem';
 import { attachmentPartsOf, attachmentToView } from '@weave-ai/render';
@@ -18,26 +17,13 @@ import { clock, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
 import { useStreamReveal } from '../lib/streamReveal';
 
-const IDENTIFIER = /\b([A-Z][A-Z0-9]+-\d+)\b/g;
-
 /**
- * The message body. Ticket identifiers become `#ticket:` anchors the markdown renderer keeps, and
- * `.v2-root` CSS paints them as bordered mono tags; everything else stays markdown. Clicks on those
- * anchors open the ticket instead of navigating the raw href.
+ * The message body. Ticket identifiers in prose become `#ticket:` anchors the shared markdown
+ * renderer keeps (and does not wrap inside code spans), `.v2-root` CSS paints them as bordered mono
+ * tags, and a click opens the ticket instead of navigating the raw href (VS-349, VS-623).
  */
 export function MessageBody({ body, onTicket }: { body: string; onTicket: (id: string) => void }): React.ReactElement {
-  const source = useMemo(() => body.replace(IDENTIFIER, (id) => `[${id}](#ticket:${id})`), [body]);
-  const onClick = (e: React.MouseEvent<HTMLDivElement>): void => {
-    const a = (e.target as HTMLElement).closest('a[href^="#ticket:"]');
-    if (!a) return;
-    e.preventDefault();
-    onTicket(decodeURIComponent(a.getAttribute('href')!.slice('#ticket:'.length)));
-  };
-  return (
-    <div onClick={onClick}>
-      <Markdown source={source} className="text-body leading-relaxed text-text-body" breaks />
-    </div>
-  );
+  return <Markdown source={body} onTicket={onTicket} className="text-body leading-relaxed text-text-body" breaks />;
 }
 
 /** A small shape naming the attachment's kind, coloured by kind (HANDOFF §5). */

@@ -124,6 +124,7 @@ function LiveSection({
   showStreamedOutput,
   runStreamStatus,
   onRetry,
+  onTicket,
 }: {
   workingAriaLabel: string;
   live: LiveChatRun | null;
@@ -137,6 +138,8 @@ function LiveSection({
   showStreamedOutput: boolean;
   runStreamStatus: { state: string };
   onRetry: () => void;
+  /** Ticket identifiers in the streamed text and trace become tags that call this (VS-623). */
+  onTicket?: (id: string) => void;
 }): React.ReactElement {
   // VS-454: a compaction is under way when a start has arrived with no completion after it. The
   // weaver goes quiet for tens of seconds here, so say so rather than leaving the live area reading
@@ -157,7 +160,7 @@ function LiveSection({
         <>
           <CompactionRow />
           {liveEvents.length || live?.fromStart ? (
-            <ChatTrace events={liveEvents} runId={live?.id ?? null} className="border-l border-line-1 pl-2.5" reveal />
+            <ChatTrace events={liveEvents} runId={live?.id ?? null} onTicket={onTicket} className="border-l border-line-1 pl-2.5" reveal />
           ) : null}
         </>
       ) : (
@@ -172,6 +175,7 @@ function LiveSection({
           runId={live?.id ?? null}
           showOutput={showStreamedOutput}
           mountTrace={Boolean(live?.fromStart)}
+          onTicket={onTicket}
         />
       )}
       {live && (runStreamStatus.state === 'unreachable' || runStreamStatus.state === 'offline') ? (
@@ -312,7 +316,7 @@ export function ChatConversation({
                         {...(onReply && m.direction === 'outbound' ? { onReply: () => onReply(m.id) } : {})}
                       />
                       {m.direction === 'outbound' && row.trace ? (
-                        <ChatTurnTrace trace={row.trace} ws={ws} actorName={actorName} {...resolveContext(row.trace)} />
+                        <ChatTurnTrace trace={row.trace} ws={ws} actorName={actorName} onTicket={onTicket} {...resolveContext(row.trace)} />
                       ) : null}
                       {renderAfterTrace?.(row.entry)}
                     </>
@@ -334,6 +338,7 @@ export function ChatConversation({
               showStreamedOutput={showStreamedOutput}
               runStreamStatus={runStreamStatus}
               onRetry={retryNow}
+              onTicket={onTicket}
             />
           ) : null}
 

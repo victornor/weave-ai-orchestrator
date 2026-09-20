@@ -297,6 +297,22 @@ describe('V2 worker page', () => {
       expect(items[turnIndex + 1]).toHaveTextContent('what did you find?');
     });
 
+    it('links a ticket identifier in the turn transcript and leaves code literal (VS-623)', () => {
+      state.runs = [sessionRun({ status: 'succeeded', finishedAt: '2026-09-20T00:05:00.000Z' })];
+      state.threadMessages = [message({ id: 'm1', createdAt: '2026-09-20T00:00:30.000Z', body: 'what now?' })];
+      state.runEvents = {
+        run9: [ev('assistant.text', { text: 'I filed VS-623 for that; the literal is `VS-623`.' })],
+      };
+      render(<WorkerBody workerId="a1" />);
+      const tags = screen.getAllByText('VS-623');
+      const link = tags.find((t) => t.tagName === 'A');
+      expect(link).toBeTruthy();
+      expect(link!.getAttribute('href')).toBe('#ticket:VS-623');
+      expect(tags.some((t) => t.tagName === 'CODE')).toBe(true);
+      fireEvent.click(link!);
+      expect(state.go).toHaveBeenCalledWith('/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'VS-623' } });
+    });
+
     it('shows the final text once, from the transcript, not again as a message (VS-618)', () => {
       state.runs = [sessionRun({ status: 'succeeded', finishedAt: '2026-09-20T00:05:00.000Z' })];
       state.threadMessages = [

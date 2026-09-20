@@ -23,10 +23,13 @@ export function Transcript({
   events,
   className,
   window: windowSize = WINDOW,
+  onTicket,
 }: {
   events: readonly RunEvent[];
   className?: string;
   window?: number;
+  /** Ticket identifiers in prose and thinking become tags that call this (VS-623). */
+  onTicket?: (id: string) => void;
 }): React.ReactElement {
   const rows = useMemo(
     () => groupConsecutiveTools(runEventsToTranscript(events)),
@@ -55,16 +58,16 @@ export function Transcript({
       ) : null}
       {rows.slice(hidden).map((row) =>
         row.type === 'tools' ? (
-          <ToolGroup key={row.id} tool={row.tool} calls={row.calls} />
+          <ToolGroup key={row.id} tool={row.tool} calls={row.calls} onTicket={onTicket} />
         ) : (
-          <TranscriptLine key={row.block.id} block={row.block} />
+          <TranscriptLine key={row.block.id} block={row.block} onTicket={onTicket} />
         ),
       )}
     </div>
   );
 }
 
-function ToolGroup({ tool, calls }: { tool: string; calls: ToolBlock[] }): React.ReactElement {
+function ToolGroup({ tool, calls, onTicket }: { tool: string; calls: ToolBlock[]; onTicket?: (id: string) => void }): React.ReactElement {
   const [open, setOpen] = useState(false);
   const n = calls.length;
   return (
@@ -86,7 +89,7 @@ function ToolGroup({ tool, calls }: { tool: string; calls: ToolBlock[] }): React
       {open ? (
         <div className="flex flex-col gap-2 border-t border-line-1 p-2">
           {calls.map((b) => (
-            <TranscriptLine key={b.id} block={b} />
+            <TranscriptLine key={b.id} block={b} onTicket={onTicket} />
           ))}
         </div>
       ) : null}
@@ -98,7 +101,7 @@ function ToolGroup({ tool, calls }: { tool: string; calls: ToolBlock[] }): React
  * the same markdown rendering VS-319 already produces. No runtime reports this duration directly —
  * `runEventsToTranscript` derives it from the gap to the next event — so it is absent, not zero,
  * when it cannot be derived. */
-function ThinkingLine({ text, durationMs }: { text: string; durationMs: number | null }): React.ReactElement {
+function ThinkingLine({ text, durationMs, onTicket }: { text: string; durationMs: number | null; onTicket?: (id: string) => void }): React.ReactElement {
   const [open, setOpen] = useState(false);
   return (
     <div className="overflow-hidden rounded-r4 border border-line-1">
@@ -116,21 +119,21 @@ function ThinkingLine({ text, durationMs }: { text: string; durationMs: number |
       </button>
       {open ? (
         <div className="border-t border-line-1 p-2.5">
-          <Markdown source={text} breaks className="text-body italic leading-relaxed text-text-3" />
+          <Markdown source={text} onTicket={onTicket} breaks className="text-body italic leading-relaxed text-text-3" />
         </div>
       ) : null}
     </div>
   );
 }
 
-export function TranscriptLine({ block }: { block: TranscriptBlock }): React.ReactElement {
+export function TranscriptLine({ block, onTicket }: { block: TranscriptBlock; onTicket?: (id: string) => void }): React.ReactElement {
   // An edit-type row starts expanded (VS-324 review): captain's ask was to see the diff itself,
   // not a second click to reveal it. The header still collapses it like any other row.
   const [open, setOpen] = useState(() => block.type === 'tool' && Boolean(block.editPayload));
 
   if (block.type === 'text') {
-    if (block.thinking) return <ThinkingLine text={block.text} durationMs={block.thinkingDurationMs ?? null} />;
-    return <Markdown source={block.text} breaks className="text-body leading-relaxed text-text-body" />;
+    if (block.thinking) return <ThinkingLine text={block.text} durationMs={block.thinkingDurationMs ?? null} onTicket={onTicket} />;
+    return <Markdown source={block.text} onTicket={onTicket} breaks className="text-body leading-relaxed text-text-body" />;
   }
 
   if (block.type === 'report') {

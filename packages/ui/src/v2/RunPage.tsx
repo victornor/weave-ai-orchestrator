@@ -122,7 +122,14 @@ export function RunBody({ runId }: { runId: string }): React.ReactElement {
       <section className="flex flex-col gap-2">
         <div className="ac-label">What it did</div>
         <div className="v2-card overflow-hidden">
-          <RunTranscript events={events} live={live} stream={stream} runtimeId={detail.data?.run.runtimeId} label="Run transcript" />
+          <RunTranscript
+            events={events}
+            live={live}
+            stream={stream}
+            runtimeId={detail.data?.run.runtimeId}
+            label="Run transcript"
+            onTicket={ws ? (id) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: id } }) : undefined}
+          />
         </div>
       </section>
 

@@ -11,6 +11,7 @@ import { useV2Theme, type V2ThemeState } from './theme';
 import { useTextSize } from './textSize';
 import { V2Shell } from './V2Shell';
 import { DictationSessionProvider } from './DictationSession';
+import { TicketModalProvider } from './ticket/TicketModal';
 
 const V2ThemeContext = createContext<V2ThemeState | null>(null);
 
@@ -55,7 +56,9 @@ export function V2Workspace(): React.ReactElement {
   const ws = params.ws ?? '';
   return (
     <WorkspaceProvider ws={ws}>
-      <Outlet />
+      <TicketModalProvider>
+        <Outlet />
+      </TicketModalProvider>
     </WorkspaceProvider>
   );
 }

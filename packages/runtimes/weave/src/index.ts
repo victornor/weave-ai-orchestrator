@@ -3,5 +3,6 @@ export { adapter, capabilities, createAdapter, default, type WeaveAdapterOptions
 export { buildInit, layoutFor, splitModel, toolEnvFor } from './child.js';
 export { parseChildLine, type ChildLine } from './events.js';
 export { probeProvider, type ProbeReport } from '@weave-ai/agent';
+export { listProviderModels, type ProviderModel, type ProviderModelsResult, type ListProviderModelsOptions } from '@weave-ai/agent';
 export { testMcpServer, type McpTestResult, type McpClientConfig } from '@weave-ai/agent';
 export { PRESET_NAMES, loadPreset, type Preset } from '@weave-ai/agent';

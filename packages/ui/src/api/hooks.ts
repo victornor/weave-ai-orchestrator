@@ -1348,6 +1348,17 @@ export function useTestProvider(scope: AgentConfigScope = 'workspace'): UseMutat
   });
 }
 
+/** VS-635: fetch a provider's model ids from its endpoint. Read-only; the request is the side effect, so nothing is cached. */
+export function useDiscoverProviderModels(scope: AgentConfigScope = 'workspace'): UseMutationResult<T.ProviderDiscovery, Error, { id: string; profile?: T.ProviderProfile; apiKey?: string }> {
+  const ws = useHookWs();
+  return useMutation({
+    mutationFn: ({ id, profile, apiKey }) => scopedCall<T.ProviderDiscovery>(scope, ws, 'providers', `/${encodeURIComponent(id)}/discover`, {
+      method: 'POST',
+      body: { ...(profile ? { profile } : {}), ...(apiKey ? { apiKey } : {}) },
+    }),
+  });
+}
+
 /* ------------------------------------------------------ MCP servers (VS-621, VS-633) */
 
 /** The MCP servers a scope resolves, each with the names it references and whether those are set. */

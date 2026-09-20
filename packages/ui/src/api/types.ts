@@ -163,6 +163,9 @@ export interface ProviderView { id: string; profile: ProviderProfile; secretConf
 export interface PresetSummary { id: string; description: string }
 /** `disabled` (workspace scope only): inherited daemon providers this workspace hides. */
 export interface ProvidersPayload { providers: ProviderView[]; disabled?: ProviderView[]; presets: PresetSummary[] }
+/** `POST /providers/:id/discover` (VS-635): the endpoint's model list for the models editor, never a key. */
+export interface ProviderDiscoveredModel { id: string; contextWindow?: number }
+export interface ProviderDiscovery { provider: string; ok: boolean; models: ProviderDiscoveredModel[]; error?: string }
 /** `POST /providers/:id/test` (VS-609): the per-capability probe verdict and the flags it measured. */
 export interface ProviderTestReport { ok?: boolean; provider: string; model: string; checks: Array<{ name: string; ok: boolean; detail: string }>; detected: Record<string, unknown> }
 

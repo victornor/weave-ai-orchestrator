@@ -136,7 +136,84 @@ describe('POST /providers/:id/test', () => {
     harness.runtime.ctx.config.providers['bare'] = { baseUrl: 'http://127.0.0.1:1/v1', auth: 'none', headers: {}, models: {} };
     const res = await post(harness, '/providers/bare/test');
     expect(res.status).toBe(400);
-    expect((await res.json() as { error: { code: string } }).error.code).toBe('validation');
+    const err = await res.json() as { error: { code: string; message: string } };
+    expect(err.error.code).toBe('validation');
+    expect(err.error.message).toBe('provider bare has no models; add one on the Providers page or pass a model to test');
+  });
+  it('uses a model named in the body even when the profile lists none (VS-635)', async () => {
+    harness = makeHarness();
+    const ep = await endpoint();
+    harness.runtime.ctx.config.providers['mock'] = { baseUrl: ep.baseUrl, auth: 'none', headers: {}, preset: 'openai', models: {} };
+    const res = await post(harness, '/providers/mock/test', { model: 'typed-model' });
+    expect(res.status).toBe(200);
+    expect((await res.json() as { model: string }).model).toBe('typed-model');
+    expect(ep.seen.every((s) => (s.body['model'] ?? 'typed-model') === 'typed-model')).toBe(true);
+  });
+});
+
+// VS-635: the on-demand model discovery behind the Settings models editor.
+describe('POST /providers/:id/discover', () => {
+  const dreq = (h: Harness, method: string, path: string, payload?: unknown) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/daemon/providers${path}`, { method, headers: { ...authed(), 'content-type': 'application/json' }, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}) }));
+
+  it('returns the endpoint\'s ids with the stored key, and never the key', async () => {
+    harness = makeHarness();
+    const ep = await endpoint();
+    harness.runtime.ctx.config.providers['mock'] = { baseUrl: ep.baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_MOCK_KEY', models: {} };
+    harness.runtime.services.secrets.put({ kind: 'human', id: 'h' } as never, { name: 'WEAVE_LLM_MOCK_KEY' }, 'sk-discovery-key');
+    const res = await post(harness, '/providers/mock/discover');
+    expect(res.status).toBe(200);
+    const json = await res.json() as { provider: string; ok: boolean; models: Array<{ id: string }> };
+    expect(json).toMatchObject({ provider: 'mock', ok: true });
+    expect(json.models.map((m) => m.id)).toEqual(['m1']);
+    // The workspace store's value was used (the fake records it as `held`), and no value is returned.
+    expect(ep.seen.at(-1)!.auth).toBe('Bearer held');
+    expect(JSON.stringify(json)).not.toContain('held');
+  });
+
+  it('fetches against a draft profile before it is saved, and with a key typed but not saved', async () => {
+    harness = makeHarness();
+    const ep = await endpoint();
+    // The stored profile points at a dead port; the body carries the real endpoint and the typed key.
+    harness.runtime.ctx.config.providers['draft'] = { baseUrl: 'http://127.0.0.1:1/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_DRAFT_KEY', models: {} };
+    const res = await post(harness, '/providers/draft/discover', {
+      profile: { baseUrl: ep.baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_DRAFT_KEY', models: {} },
+      apiKey: 'sk-typed-not-saved',
+    });
+    expect(await res.json()).toMatchObject({ provider: 'draft', ok: true, models: [{ id: 'm1' }] });
+    expect(ep.seen.at(-1)!.auth).toBe('Bearer sk-typed-not-saved');
+    expect(harness.runtime.services.secrets.has('WEAVE_LLM_DRAFT_KEY')).toBe(false);
+  });
+
+  it('names a failure in one line and returns no ids', async () => {
+    harness = makeHarness();
+    const dead = createServer((_req, res) => { res.writeHead(500, { 'content-type': 'text/plain' }); res.end('nope'); });
+    await new Promise<void>((r) => dead.listen(0, '127.0.0.1', r));
+    try {
+      harness.runtime.ctx.config.providers['bad'] = { baseUrl: `http://127.0.0.1:${(dead.address() as AddressInfo).port}/v1`, auth: 'none', headers: {}, models: {} };
+      const json = await (await post(harness, '/providers/bad/discover')).json() as { ok: boolean; models: unknown[]; error: string };
+      expect(json.ok).toBe(false);
+      expect(json.models).toEqual([]);
+      expect(json.error).toBe('HTTP 500');
+    } finally { await new Promise<void>((r) => dead.close(() => r())); }
+  });
+
+  it('discovers a daemon provider from the daemon scope with its daemon key', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vs635-discover-'));
+    const h = makeHarness({ daemonConfigDir: dir });
+    harness = h;
+    try {
+      const ep = await endpoint();
+      await dreq(h, 'PUT', '/dp', { baseUrl: ep.baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_D_KEY', models: {} });
+      await dreq(h, 'POST', '/dp/secret', { value: 'sk-daemon-disco' });
+      const json = await (await dreq(h, 'POST', '/dp/discover', {})).json() as { ok: boolean; models: Array<{ id: string }> };
+      expect(json).toMatchObject({ ok: true, models: [{ id: 'm1' }] });
+      expect(ep.seen.at(-1)!.auth).toBe('Bearer sk-daemon-disco');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('404s an unknown provider', async () => {
+    harness = makeHarness();
+    expect((await post(harness, '/providers/ghost/discover')).status).toBe(404);
   });
 });
 

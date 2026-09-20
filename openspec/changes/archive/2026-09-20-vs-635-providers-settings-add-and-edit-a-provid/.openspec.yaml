@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "Providers settings: add and edit a provider's models, and let Test
+  connection take a model"

@@ -25,6 +25,23 @@ export interface RuntimeOptionSchema { type?: string; properties?: Record<string
 /** Options the editor leaves to a dedicated control (runtime/model/thinking), never a generated field. */
 export const FIRST_CLASS_OPTION_KEYS = ['model', 'effort'] as const;
 
+/**
+ * VS-635: the fields of one provider `models` entry, declared once as a JSON Schema so the Providers
+ * editor renders them with `runtimeOptionProperties` and the generated control instead of restating
+ * them. Mirrors `ProviderModelSchema` in `config.ts` (a test asserts the keys stay equal); the entry's
+ * `id` is the record key, not a schema field. `compat` and `params` are objects, edited as JSON.
+ */
+export const PROVIDER_MODEL_ENTRY_SCHEMA: RuntimeOptionSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    contextWindow: { type: 'integer', minimum: 1, description: "The model's context window when the endpoint does not say" },
+    maxOutputTokens: { type: 'integer', minimum: 1, description: 'Output cap for this model' },
+    compat: { type: 'object', description: 'Per-model compat flags, overriding the provider and preset' },
+    params: { type: 'object', description: 'Per-model request parameters' },
+  },
+};
+
 /** The schema's option fields, in declaration order, minus the ones with a first-class control. */
 export function runtimeOptionProperties(schema: unknown): Array<[string, RuntimeOptionProperty]> {
   const props = schema && typeof schema === 'object' ? (schema as RuntimeOptionSchema).properties : undefined;

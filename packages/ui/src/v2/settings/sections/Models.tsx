@@ -4,18 +4,18 @@
  * with their tag, diff footer and reset.
  */
 import { useEffect, useState } from 'react';
-import { DEFAULT_MODEL_SETTING, WorkerModelOptionSchema, WorkerOptionsArraySchema, runtimeOptionProperties, validateRuntimeOptions, type RuntimeOptionProperty } from '@weave-ai/shared';
+import { DEFAULT_MODEL_SETTING, WorkerModelOptionSchema, WorkerOptionsArraySchema, runtimeOptionProperties, validateRuntimeOptions } from '@weave-ai/shared';
 import { useDaemonModels, useModels, useRuntimeModels, useRuntimes, useSetDaemonModels, useSetModels } from '../../../api/hooks';
 import { useHookWs } from '../../../api/context';
 import type * as T from '../../../api/types';
+import { A } from '../../../app/link';
 import { Button } from '../../../components/Button';
 import { SkeletonRows } from '../../../components/Skeleton';
 import { cx } from '../../../lib/cx';
 import { isRuntimeAvailable, modelOptionLabel, runtimeStatusLabel } from '../../../lib/runtime';
+import { inputCx, OptionControl } from '../optionControl';
 import { effortModeFor, effortsForModel, isCustomModel, settingAfterModelChange } from '../model';
 import { baselineAgent, baselineOption, countOverrides, diffOption, diffSetting, agentOverrideState, optionOverrideState } from '../override';
-
-const inputCx = 'h-8 w-full rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1 outline-none';
 
 /** A text control that writes on blur or Enter, so a custom model id is not saved per keystroke. */
 function CommitInput({ value, ariaLabel, placeholder, className, onCommit }: {
@@ -37,53 +37,6 @@ function CommitInput({ value, ariaLabel, placeholder, className, onCommit }: {
 }
 
 /** One generated control for a runtime option the adapter declares; shape comes from its configSchema. */
-function OptionControl({ prop, value, onChange }: {
-  prop: RuntimeOptionProperty; value: unknown; onChange: (v: T.RuntimeOptionValue | undefined) => void;
-}): React.ReactElement {
-  const empty = value === undefined || value === null || value === '';
-  if (prop.type === 'boolean') {
-    return (
-      <label className="flex items-center gap-2 text-micro text-text-2">
-        <input type="checkbox" aria-label={prop.description ?? 'option'} checked={value === true} onChange={(e) => onChange(e.target.checked)} />
-        {prop.default !== undefined ? <span className="text-text-3">default {String(prop.default)}</span> : null}
-      </label>
-    );
-  }
-  if (prop.enum && prop.enum.length > 0) {
-    return (
-      <select className={cx(inputCx, 'ac-mono')} value={empty ? '' : String(value)} onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)}>
-        <option value="">default{prop.default !== undefined ? ` (${String(prop.default)})` : ''}</option>
-        {prop.enum.map((v) => <option key={String(v)} value={String(v)}>{String(v)}</option>)}
-      </select>
-    );
-  }
-  if (prop.type === 'integer' || prop.type === 'number') {
-    return (
-      <input type="number" className={cx(inputCx, 'ac-mono')} value={empty ? '' : String(value)}
-        placeholder={prop.default !== undefined ? String(prop.default) : ''} min={prop.minimum} max={prop.maximum}
-        onChange={(e) => onChange(e.target.value === '' ? undefined : Number(e.target.value))} />
-    );
-  }
-  if (prop.type === 'array') {
-    const lines = Array.isArray(value) ? value.join('\n') : '';
-    return (
-      <textarea className={cx(inputCx, 'ac-mono h-16 py-1.5')} value={lines} placeholder="one per line"
-        onChange={(e) => onChange(e.target.value.split('\n').map((l) => l.trim()).filter(Boolean))} />
-    );
-  }
-  return (
-    <input className={cx(inputCx, 'ac-mono')} value={empty ? '' : String(value)}
-      placeholder={prop.default !== undefined ? String(prop.default) : ''}
-      onChange={(e) => onChange(e.target.value === '' ? undefined : e.target.value)} />
-  );
-}
-
-/**
- * A runtime's own options (compaction, tool-output limit, extra args, …), generated from the
- * adapter's `configSchema()` the daemon returns on `/runtimes`. `model`/`effort` are left to the
- * first-class controls beside this; the rest are editable here, per setting, so a workspace can run
- * the weaver and its workers on different compaction without touching the daemon default.
- */
 function RuntimeOptionsEditor({ runtime, runtimes, options, onChange }: {
   runtime: string; runtimes: T.RuntimeInfo[]; options: T.RuntimeOptions | undefined; onChange: (next: T.RuntimeOptions) => void;
 }): React.ReactElement | null {
@@ -106,7 +59,7 @@ function RuntimeOptionsEditor({ runtime, runtimes, options, onChange }: {
         {fields.map(([key, prop]) => (
           <label key={key} className="flex flex-col gap-1">
             <span className="ac-label">{key}</span>
-            <OptionControl prop={prop} value={options?.[key]} onChange={(v) => set(key, v)} />
+            <OptionControl prop={prop} value={options?.[key]} onChange={(v) => set(key, v as T.RuntimeOptionValue | undefined)} />
             {prop.description ? <span className="text-nano text-text-3">{prop.description}</span> : null}
             {issues[key] ? <span role="alert" className="text-nano text-failed">{key} {issues[key]}</span> : null}
           </label>
@@ -165,6 +118,12 @@ function ModelControls({ label, setting, runtimes, recessed, runtimeOptional, pr
           {custom ? (
             <CommitInput ariaLabel={`${label} model id`} placeholder="model id" value={setting.model ?? ''}
               onCommit={(v) => onChange(settingAfterModelChange(setting, v.trim() || null, known))} />
+          ) : null}
+          {configured && setting.runtime === 'weave' && known.length === 0 ? (
+            <span className="text-nano text-text-3">
+              No models are configured for the built-in agent.{' '}
+              <A to="/settings" search={{ section: 'providers' }} className="v2-link">Add one on the Providers page</A>.
+            </span>
           ) : null}
         </div>
       {configured ? (

@@ -21,6 +21,7 @@ export { classifyHttp, classifyStreamError, classifyNetwork, classifyFinish, par
 export { planRetry, parseRetryAfter, backoffMs } from './retry.js';
 export { repairArgs } from './repair.js';
 export { probeProvider, type ProbeReport, type ProbeCheck, type ProbeOptions } from './probe.js';
+export { listProviderModels, type ProviderModel, type ProviderModelsResult, type ListProviderModelsOptions } from './discover.js';
 export { createMcpClient, testMcpServer, type McpClient, type McpClientConfig, type McpTool, type McpTestResult } from './mcp/client.js';
 export { runAgentTurn, type LoopIO, type LoopDeps } from './loop.js';
 export { loadSkills, loadSkillRoots, type Skill } from './skills.js';

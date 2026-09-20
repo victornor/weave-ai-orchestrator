@@ -5,8 +5,10 @@
  * The child is the runtime package's own fake agent, so nothing calls a real endpoint.
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { daemonSecretStore } from '@weave-ai/core';
@@ -72,5 +74,52 @@ describe('a worker option on a daemon-level provider', () => {
     expect(rec.init['provider']).toMatchObject({ id: 'dp', baseUrl: profile.baseUrl, apiKey: KEY });
     expect(JSON.stringify(rec.argv)).not.toContain(KEY);
     expect(JSON.stringify(rec.env)).not.toContain(KEY);
+  });
+
+  it('discovers a daemon provider\'s models, saves the picked one, and offers it to a daemon worker option (VS-635)', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'vs635-opt-'));
+    const cfgDir = join(dir, 'config');
+    mkdirSync(cfgDir);
+    harness = makeHarness({ daemonConfigDir: cfgDir });
+    const h = harness;
+
+    // The discovery route uses the real runtime function with the global fetch, so give it a local endpoint.
+    const modelsServer = createServer((req, res) => {
+      if (req.method === 'GET') { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ data: [{ id: 'detected-model', context_length: 8192 }] })); return; }
+      res.writeHead(404); res.end();
+    });
+    await new Promise<void>((r) => modelsServer.listen(0, '127.0.0.1', r));
+    const baseUrl = `http://127.0.0.1:${(modelsServer.address() as AddressInfo).port}/v1`;
+
+    const host = createRuntimeHost(h.deps.workspaces, cfgDir, h.deps.daemon);
+    const adapter = createAdapter({
+      entry: FAKE,
+      host,
+      fetch: (async () => new Response(JSON.stringify({ data: [{ id: 'detected-model', context_length: 8192 }] }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch,
+    });
+    h.deps.registries.runtimes.set('weave', adapter);
+
+    try {
+      // A codeify-shaped provider: base URL, no models, key in the daemon store.
+      const bare = { baseUrl, preset: 'openrouter', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_DP_KEY', models: {} };
+      expect((await call(h, 'PUT', '/daemon/providers/dp', bare)).status).toBe(200);
+      expect((await call(h, 'POST', '/daemon/providers/dp/secret', { value: 'sk-daemon' })).status).toBe(200);
+
+      // Fetch from the endpoint, then the editor saves the picked model.
+      const discovered = await (await call(h, 'POST', '/daemon/providers/dp/discover', {})).json() as { ok: boolean; models: Array<{ id: string; contextWindow?: number }> };
+      expect(discovered.ok).toBe(true);
+      expect(discovered.models).toEqual([{ id: 'detected-model', contextWindow: 8192 }]);
+      const saved = await call(h, 'PUT', '/daemon/providers/dp', { ...bare, models: { 'detected-model': { contextWindow: 8192 } } });
+      expect(saved.status).toBe(200);
+      expect((await saved.json() as { models: string[] }).models).toEqual(['detected-model']);
+
+      // The Models editor on the daemon sees it, and a worker option can name it, in a workspace with no provider config.
+      expect(Object.keys(h.runtime.ctx.config.providers)).toEqual([]);
+      const list = await (await call(h, 'GET', '/runtimes/weave/models')).json() as Array<{ id: string }>;
+      expect(list.map((m) => m.id)).toContain('dp/detected-model');
+      expect((await call(h, 'PUT', '/daemon/models', { workerOptions: [{ id: 'builtin', description: 'The built-in agent', runtime: 'weave', model: 'dp/detected-model' }] })).status).toBe(200);
+    } finally {
+      await new Promise<void>((r) => modelsServer.close(() => r()));
+    }
   });
 });

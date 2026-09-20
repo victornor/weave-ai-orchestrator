@@ -13,13 +13,13 @@
  * ever holds a stored key, only the one being typed.
  */
 import { useEffect, useState } from 'react';
-import { useClearProviderSecret, useDeleteProvider, useProviders, useSaveProvider, useSetProviderDisabled, useSetProviderSecret, useTestProvider, type AgentConfigScope } from '../../../api/hooks';
+import { PROVIDER_MODEL_ENTRY_SCHEMA, runtimeOptionProperties } from '@weave-ai/shared';
+import { useClearProviderSecret, useDeleteProvider, useDiscoverProviderModels, useProviders, useSaveProvider, useSetProviderDisabled, useSetProviderSecret, useTestProvider, type AgentConfigScope } from '../../../api/hooks';
 import type * as T from '../../../api/types';
 import { Button } from '../../../components/Button';
 import { SkeletonRows } from '../../../components/Skeleton';
 import { cx } from '../../../lib/cx';
-
-const inputCx = 'h-8 w-full rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1 outline-none';
+import { inputCx, OptionControl } from '../optionControl';
 
 /**
  * A convenience hint only: presets carry compat flags and a description, not an endpoint. A preset
@@ -132,6 +132,27 @@ function profileOf(draft: Draft, models: Record<string, T.ProviderModelEntry>): 
   };
 }
 
+/** One model being edited in the models editor: its id is the `profile.models` key, edited as text. */
+interface ModelRow { id: string; entry: T.ProviderModelEntry }
+function modelRowsOf(models: Record<string, T.ProviderModelEntry>): ModelRow[] {
+  return Object.entries(models).map(([id, entry]) => ({ id, entry }));
+}
+function modelRowsError(rows: ModelRow[]): string | null {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    const id = row.id.trim();
+    if (!id) return 'Every model needs an id.';
+    if (seen.has(id)) return `Duplicate model id "${id}".`;
+    seen.add(id);
+  }
+  return null;
+}
+function modelRowsToRecord(rows: ModelRow[]): Record<string, T.ProviderModelEntry> {
+  const out: Record<string, T.ProviderModelEntry> = {};
+  for (const row of rows) out[row.id.trim()] = row.entry;
+  return out;
+}
+
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }): React.ReactElement {
   return (
     <label className="flex flex-col gap-1">
@@ -142,12 +163,11 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-/** The masked key input plus its status; a stored value is never read into the field. */
-function SecretRow({ id, secretName, configured, onSet, onClear, pending, scope }: {
-  id: string; secretName: string | undefined; configured: boolean;
-  onSet: (value: string) => void; onClear: () => void; pending: boolean; scope: AgentConfigScope;
+/** The masked key input plus its status; a stored value is never read into the field. The draft is lifted so discovery can use a typed-but-unsaved key. */
+function SecretRow({ id, secretName, configured, value, onValueChange, onSet, onClear, pending, scope }: {
+  id: string; secretName: string | undefined; configured: boolean; value: string;
+  onValueChange: (value: string) => void; onSet: (value: string) => void; onClear: () => void; pending: boolean; scope: AgentConfigScope;
 }): React.ReactElement {
-  const [draft, setDraft] = useState('');
   return (
     <div className="v2-recessed flex flex-col gap-1 rounded-r4 border border-line-1 px-3 py-2">
       <div className="flex items-baseline gap-2">
@@ -162,10 +182,10 @@ function SecretRow({ id, secretName, configured, onSet, onClear, pending, scope 
           className={cx(inputCx, 'ac-mono')}
           autoComplete="off"
           placeholder={configured ? 'Replace the key…' : 'Paste the API key…'}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          value={value}
+          onChange={(e) => onValueChange(e.target.value)}
         />
-        <Button size="sm" variant="primary" disabled={!draft || pending || !secretName} onClick={() => { onSet(draft); setDraft(''); }}>Save key</Button>
+        <Button size="sm" variant="primary" disabled={!value || pending || !secretName} onClick={() => onSet(value)}>Save key</Button>
         <Button size="sm" variant="danger" disabled={!configured || pending} onClick={onClear}>Clear</Button>
       </div>
       <span className="text-nano text-text-3">
@@ -205,25 +225,126 @@ function TestResult({ report, onApply, hideApply }: {
 
 const SOURCE_TAG: Record<T.ConfigSource, string | null> = { daemon: null, workspace: 'this workspace', override: 'overrides daemon' };
 
+/** The Test connection model selector (VS-635): the provider's configured models plus a free-text id, sending the chosen id as `asked`. */
+function TestControls({ providerId, modelIds, pending, onTest }: {
+  providerId: string; modelIds: string[]; pending: boolean; onTest: (model: string) => void;
+}): React.ReactElement {
+  const [model, setModel] = useState('');
+  const [free, setFree] = useState(false);
+  const listed = !free && modelIds.includes(model);
+  const canTest = model.trim().length > 0;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <select
+        aria-label={`${providerId} model to test`}
+        className={cx(inputCx, 'ac-mono w-40')}
+        value={free ? '__other' : listed ? model : ''}
+        onChange={(e) => {
+          if (e.target.value === '__other') { setFree(true); return; }
+          setFree(false);
+          setModel(e.target.value);
+        }}>
+        <option value="">select a model…</option>
+        {modelIds.map((m) => <option key={m} value={m}>{m}</option>)}
+        <option value="__other">type a model…</option>
+      </select>
+      {free ? (
+        <input aria-label={`${providerId} model id to test`} className={cx(inputCx, 'ac-mono w-40')} value={model} placeholder="model id" onChange={(e) => setModel(e.target.value)} />
+      ) : null}
+      <Button size="sm" disabled={pending || !canTest} onClick={() => onTest(model.trim())}>{pending ? 'Testing…' : 'Test connection'}</Button>
+      {!canTest ? <span className="text-nano text-text-3">add or type a model to test</span> : null}
+    </div>
+  );
+}
+
+/** The models editor (VS-635): list, add, edit and remove a provider's `models`, and fetch ids from the endpoint. Fields come from PROVIDER_MODEL_ENTRY_SCHEMA, never hand-coded. */
+function ModelEntriesEditor({ rows, onChange, onFetch, discovering, discovered, discoverError, onPick }: {
+  rows: ModelRow[]; onChange: (next: ModelRow[]) => void; onFetch: () => void; discovering: boolean;
+  discovered: Array<{ id: string; contextWindow?: number }> | null; discoverError: string | null; onPick: (m: { id: string; contextWindow?: number }) => void;
+}): React.ReactElement {
+  const fields = runtimeOptionProperties(PROVIDER_MODEL_ENTRY_SCHEMA);
+  const setRow = (index: number, next: ModelRow): void => onChange(rows.map((r, j) => (j === index ? next : r)));
+  const setEntry = (index: number, key: string, value: unknown): void => {
+    const entry = { ...(rows[index]!.entry as Record<string, unknown>) };
+    if (value === undefined) delete entry[key];
+    else entry[key] = value;
+    setRow(index, { ...rows[index]!, entry: entry as T.ProviderModelEntry });
+  };
+  return (
+    <div className="v2-recessed flex flex-col gap-2 rounded-r4 border border-line-1 px-3 py-2">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <span className="ac-label">Models</span>
+        <div className="flex-1" />
+        <Button size="sm" disabled={discovering} onClick={onFetch}>{discovering ? 'Fetching…' : 'Fetch from endpoint'}</Button>
+        <Button size="sm" onClick={() => onChange([...rows, { id: '', entry: {} }])}>+ Add model</Button>
+      </div>
+      {rows.length === 0 ? <p className="text-micro text-text-3">No models yet. Add one by hand, or fetch the list from the endpoint.</p> : null}
+      {rows.map((row, index) => (
+        <div key={index} className="flex flex-col gap-2 rounded-r4 border border-line-1 p-2">
+          <div className="flex items-end gap-2">
+            <label className="flex min-w-0 flex-1 flex-col gap-1">
+              <span className="ac-label">model id</span>
+              <input aria-label={`model ${index} id`} className={cx(inputCx, 'ac-mono')} value={row.id} placeholder="model id" onChange={(e) => setRow(index, { ...row, id: e.target.value })} />
+            </label>
+            <Button size="sm" variant="danger" aria-label={`remove model ${index}`} onClick={() => onChange(rows.filter((_, j) => j !== index))}>Remove</Button>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {fields.map(([key, prop]) => (
+              <label key={key} className="flex flex-col gap-1">
+                <span className="ac-label">{key}</span>
+                <OptionControl prop={prop} value={(row.entry as Record<string, unknown>)[key]} ariaLabel={`model ${index} ${key}`} onChange={(v) => setEntry(index, key, v)} />
+                {prop.description ? <span className="text-nano text-text-3">{prop.description}</span> : null}
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+      {discoverError ? <span role="alert" className="text-micro text-failed">{discoverError}</span> : null}
+      {discovered ? (
+        discovered.length === 0
+          ? <span className="text-micro text-text-3">The endpoint returned no models.</span>
+          : (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-nano text-text-3">From the endpoint:</span>
+              {discovered.map((m) => (
+                <button key={m.id} type="button" className="v2-link text-micro" disabled={rows.some((r) => r.id.trim() === m.id)} onClick={() => onPick(m)}>{m.id}</button>
+              ))}
+            </div>
+          )
+      ) : null}
+    </div>
+  );
+}
+
 function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
   view: T.ProviderView; scope: AgentConfigScope; onSave: (profile: T.ProviderProfile) => Promise<void>; onRemove: () => void;
   onOverride?: () => void; onHide?: () => void;
 }): React.ReactElement {
-  const { id, profile, secretConfigured, models } = view;
+  const { id, profile, secretConfigured, models: modelIds } = view;
   const inherited = scope === 'workspace' && view.source === 'daemon';
   const tag = scope === 'workspace' ? (inherited ? 'from daemon' : SOURCE_TAG[view.source ?? 'workspace']) : null;
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => draftOf(profile));
+  const [modelRows, setModelRows] = useState<ModelRow[]>(() => modelRowsOf(profile.models));
+  const [keyDraft, setKeyDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<T.ProviderTestReport | null>(null);
+  const [discovered, setDiscovered] = useState<Array<{ id: string; contextWindow?: number }> | null>(null);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const set = useSetProviderSecret(scope);
   const clear = useClearProviderSecret(scope);
   const test = useTestProvider(scope);
-  useEffect(() => { setDraft(draftOf(profile)); }, [profile]);
+  const discover = useDiscoverProviderModels(scope);
+  useEffect(() => {
+    setDraft(draftOf(profile)); setModelRows(modelRowsOf(profile.models)); setKeyDraft('');
+    setDiscovered(null); setDiscoverError(null); setReport(null);
+  }, [profile]);
 
+  const rowsError = modelRowsError(modelRows);
   const save = (): void => {
-    const built = profileOf(draft, profile.models);
+    if (rowsError) { setError(rowsError); return; }
+    const built = profileOf(draft, modelRowsToRecord(modelRows));
     if (built.error || !built.profile) { setError(built.error ?? 'Could not build the profile.'); return; }
     setError(null);
     void onSave(built.profile);
@@ -232,6 +353,23 @@ function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
     if (!report) return;
     setError(null);
     void onSave({ ...profile, compat: mergeCompat(profile.compat, report.detected) });
+  };
+  /** Fetch the endpoint's model list using the profile as edited (before saving) and a key typed but not saved. */
+  const fetchModels = (): void => {
+    if (rowsError) { setError(rowsError); return; }
+    setDiscoverError(null);
+    const built = profileOf(draft, modelRowsToRecord(modelRows));
+    if (built.error || !built.profile) { setDiscoverError(built.error ?? 'Could not build the profile.'); return; }
+    discover.mutate({ id, profile: built.profile, ...(keyDraft ? { apiKey: keyDraft } : {}) }, {
+      onSuccess: (r) => {
+        if (r.ok) { setDiscovered(r.models); setDiscoverError(null); }
+        else { setDiscovered(null); setDiscoverError(r.error ?? 'The endpoint did not answer.'); }
+      },
+    });
+  };
+  const pickModel = (m: { id: string; contextWindow?: number }): void => {
+    if (modelRows.some((r) => r.id.trim() === m.id)) return;
+    setModelRows([...modelRows, { id: m.id, entry: m.contextWindow ? { contextWindow: m.contextWindow } : {} }]);
   };
 
   return (
@@ -242,7 +380,7 @@ function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
           {tag ? <span className="v2-tag text-text-2">{tag}</span> : null}
           <span className="v2-tag text-text-2">{profile.preset ?? 'custom'}</span>
           <span className="truncate text-micro text-text-3">{profile.baseUrl}</span>
-          <span className="text-nano text-text-3">{models.length} model{models.length === 1 ? '' : 's'}</span>
+          <span className="text-nano text-text-3">{modelIds.length} model{modelIds.length === 1 ? '' : 's'}</span>
           <span className="text-nano text-text-3">{secretConfigured ? 'key set' : 'no key'}</span>
           <span className="ml-auto text-text-3" aria-hidden>{open ? '▾' : '▸'}</span>
         </button>
@@ -254,15 +392,17 @@ function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
           </p>
           <div className="grid gap-1 text-micro text-text-2 sm:grid-cols-2">
             <span>base URL <span className="ac-mono text-text-1">{profile.baseUrl}</span></span>
-            <span>models <span className="ac-mono text-text-1">{models.join(', ') || 'discovered'}</span></span>
+            <span>models <span className="ac-mono text-text-1">{modelIds.join(', ') || 'discovered'}</span></span>
             <span>key <span className="text-text-1">{secretConfigured ? 'set (daemon or workspace store)' : 'not set'}</span></span>
           </div>
           {test.isError ? <span role="alert" className="text-micro text-failed">{test.error.message}</span> : null}
           {report ? <TestResult report={report} hideApply /> : null}
-          <div className="flex justify-end gap-2">
-            <Button size="sm" disabled={test.isPending} onClick={() => test.mutate({ id }, { onSuccess: (r) => setReport(r) })}>{test.isPending ? 'Testing…' : 'Test connection'}</Button>
-            <Button size="sm" variant="primary" onClick={onOverride}>Override</Button>
-            <Button size="sm" onClick={onHide}>Hide here</Button>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <TestControls providerId={id} modelIds={modelIds} pending={test.isPending} onTest={(model) => test.mutate({ id, model }, { onSuccess: (r) => setReport(r) })} />
+            <div className="flex gap-2">
+              <Button size="sm" variant="primary" onClick={onOverride}>Override</Button>
+              <Button size="sm" onClick={onHide}>Hide here</Button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -316,20 +456,25 @@ function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
             <input type="checkbox" aria-label={`${id} discover models`} checked={draft.discover} onChange={(e) => setDraft({ ...draft, discover: e.target.checked })} />
             Discover models from the endpoint
           </label>
+          <ModelEntriesEditor rows={modelRows} onChange={setModelRows} onFetch={fetchModels} discovering={discover.isPending}
+            discovered={discovered} discoverError={discoverError} onPick={pickModel} />
           <SecretRow id={id} scope={scope} secretName={profile.apiKeySecret} configured={secretConfigured} pending={set.isPending || clear.isPending}
-            onSet={(value) => set.mutate({ id, value })} onClear={() => clear.mutate(id)} />
+            value={keyDraft} onValueChange={setKeyDraft}
+            onSet={(value) => { set.mutate({ id, value }); setKeyDraft(''); }} onClear={() => clear.mutate(id)} />
           {error ? <span role="alert" className="text-micro text-failed">{error}</span> : null}
           {test.isError ? <span role="alert" className="text-micro text-failed">{test.error.message}</span> : null}
           {report ? <TestResult report={report} onApply={applyDetected} /> : null}
-          <div className="flex justify-end gap-2">
-            <Button size="sm" disabled={test.isPending} onClick={() => test.mutate({ id }, { onSuccess: (r) => setReport(r) })}>{test.isPending ? 'Testing…' : 'Test connection'}</Button>
-            <Button size="sm" variant="primary" onClick={save}>Save</Button>
-            {confirmRemove ? (
-              <>
-                <Button size="sm" variant="danger" onClick={onRemove}>Confirm remove</Button>
-                <Button size="sm" onClick={() => setConfirmRemove(false)}>Cancel</Button>
-              </>
-            ) : <Button size="sm" variant="danger" onClick={() => setConfirmRemove(true)}>{view.source === 'override' ? 'Remove override' : 'Remove'}</Button>}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <TestControls providerId={id} modelIds={modelRows.map((r) => r.id.trim()).filter(Boolean)} pending={test.isPending} onTest={(model) => test.mutate({ id, model }, { onSuccess: (r) => setReport(r) })} />
+            <div className="flex gap-2">
+              <Button size="sm" variant="primary" onClick={save}>Save</Button>
+              {confirmRemove ? (
+                <>
+                  <Button size="sm" variant="danger" onClick={onRemove}>Confirm remove</Button>
+                  <Button size="sm" onClick={() => setConfirmRemove(false)}>Cancel</Button>
+                </>
+              ) : <Button size="sm" variant="danger" onClick={() => setConfirmRemove(true)}>{view.source === 'override' ? 'Remove override' : 'Remove'}</Button>}
+            </div>
           </div>
         </div>
       ) : null}

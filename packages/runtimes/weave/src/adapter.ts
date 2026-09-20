@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { agentEntryPath, forkSessionFile, headersWithExtras, loadPreset, requestHeaders, resolveProvider, type ChildResult } from '@weave-ai/agent';
+import { agentEntryPath, forkSessionFile, headersWithExtras, listProviderModels, loadPreset, resolveProvider, type ChildResult } from '@weave-ai/agent';
 import { childEnv, installBundleFiles, spawnLines, type AgentHome, type CompactSessionInput, type CompactSessionResult, type InstructionBundle, type JsonSchema, type RuntimeAdapter, type RuntimeCapabilities, type RuntimeDetection, type RuntimeEvent, type RuntimeHost, type RuntimeModel, type SessionRef, type TurnHandle, type TurnInput, type TurnResult, type TurnSink } from '@weave-ai/runtime-sdk';
 import type { ProviderProfile } from '@weave-ai/shared';
 import { buildCompactInit, buildInit, childBaseEnv, layoutFor, splitModel, toolEnvFor } from './child.js';
@@ -61,12 +61,11 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
   let host: RuntimeHost | undefined = opts.host;
   const entry = (): string => opts.entry ?? agentEntryPath();
   const providers = (workspaceId?: string): Record<string, ProviderProfile> => host?.providers(workspaceId) ?? {};
-  const doFetch = opts.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const now = opts.now ?? Date.now;
   const presetOf = (p: ProviderProfile) => loadPreset(p.preset ?? 'openai-compatible');
   const gates = new Map<string, Semaphore>();
 
-  /** `GET {baseUrl}{modelsPath}`, cached ten minutes per provider. A failure is remembered for a minute and yields nothing, so the static models still list. */
+  /** `GET {baseUrl}{modelsPath}`, cached ten minutes per provider. A failure is remembered for a minute and yields nothing, so the static models still list. Delegates the request to `listProviderModels` (VS-635) so a run and the Settings fetch use one discovery path. */
   const cache = new Map<string, { at: number; ok: boolean; models: Discovered[] }>();
   async function discover(pid: string, profile: ProviderProfile, workspaceId?: string): Promise<Discovered[]> {
     if (profile.discover === false) return [];
@@ -75,27 +74,10 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
     const key = `${workspaceId ?? ''}|${pid}|${profile.baseUrl}`;
     const hit = cache.get(key);
     if (hit && now() - hit.at < (hit.ok ? DISCOVERY_TTL_MS : DISCOVERY_FAILURE_TTL_MS)) return hit.models;
-    let models: Discovered[] = []; let ok = false;
-    try {
-      const { compat, params } = resolveProvider({ preset: presetOf(profile), profile });
-      const apiKey = host?.providerKey?.(pid, workspaceId);
-      const headers = requestHeaders({ id: pid, baseUrl: profile.baseUrl, auth: profile.auth, headers: headersWithExtras(profile.headers, params.extraHeaders).headers, ...(apiKey ? { apiKey } : {}) });
-      const qs = new URLSearchParams(profile.query ?? {}).toString();
-      const res = await doFetch(`${profile.baseUrl.replace(/\/+$/, '')}${compat.modelsPath}${qs ? `?${qs}` : ''}`, { headers: { ...headers, accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json() as { data?: unknown };
-      const list = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json as unknown[] : [];
-      const field = compat.contextField;
-      for (const m of list) {
-        if (typeof m !== 'object' || m === null) continue;
-        const id = (m as Record<string, unknown>)['id'];
-        if (typeof id !== 'string' || !id) continue;
-        const w = field ? field.split('.').reduce<unknown>((o, k) => (typeof o === 'object' && o !== null ? (o as Record<string, unknown>)[k] : undefined), m) : undefined;
-        models.push({ id, ...(typeof w === 'number' && w > 0 ? { contextWindow: Math.floor(w) } : {}) });
-      }
-      ok = true;
-    } catch { models = []; }
-    cache.set(key, { at: now(), ok, models });
+    const apiKey = host?.providerKey?.(pid, workspaceId);
+    const result = await listProviderModels({ profile, apiKey: apiKey ?? undefined, ...(opts.fetch ? { fetch: opts.fetch } : {}) });
+    const models: Discovered[] = result.ok ? result.models : [];
+    cache.set(key, { at: now(), ok: result.ok, models });
     return models;
   }
 

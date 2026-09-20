@@ -35,6 +35,7 @@ export const qk = {
   workerHandoverCommand: (ws: string, id: string) => ['w', ws, 'workers', id, 'handover-command'] as const,
   weaver: (ws: string) => ['w', ws, 'weaver'] as const,
   models: (ws: string) => ['w', ws, 'models'] as const,
+  providers: (ws: string) => ['w', ws, 'providers'] as const,
 
   tickets: (ws: string) => ['w', ws, 'tickets'] as const,
   ticket: (ws: string, id: string) => ['w', ws, 'tickets', id] as const,

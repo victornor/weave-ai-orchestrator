@@ -1235,6 +1235,60 @@ export function useSetModels(): UseMutationResult<T.WorkspaceModels, Error, T.Wo
   });
 }
 
+/* ------------------------------------------------------- providers (VS-610) */
+
+/** This workspace's `weave`-runtime providers, with their secret state, plus the preset catalogue. */
+export function useProviders(): UseQueryResult<T.ProvidersPayload> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.providers(ws), queryFn: () => api.ws<T.ProvidersPayload>(ws, '/providers') });
+}
+
+/** Create or replace a provider profile; the body is the profile, `id` names the config key. */
+export function useSaveProvider(): UseMutationResult<T.ProviderView, Error, { id: string; profile: T.ProviderProfile }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, profile }) => api.ws<T.ProviderView>(ws, `/providers/${encodeURIComponent(id)}`, { method: 'PUT', body: profile }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.providers(ws) }),
+  });
+}
+
+export function useDeleteProvider(): UseMutationResult<{ ok: boolean }, Error, string> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => api.ws<{ ok: boolean }>(ws, `/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.providers(ws) }),
+  });
+}
+
+/** Set or replace the provider's key; only a status comes back, never the value. */
+export function useSetProviderSecret(): UseMutationResult<{ ok: boolean; configured: boolean; secretName: string }, Error, { id: string; value: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, value }) => api.ws<{ ok: boolean; configured: boolean; secretName: string }>(ws, `/providers/${encodeURIComponent(id)}/secret`, { method: 'POST', body: { value } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.providers(ws) }),
+  });
+}
+
+export function useClearProviderSecret(): UseMutationResult<{ ok: boolean; configured: boolean; secretName: string | null }, Error, string> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id) => api.ws<{ ok: boolean; configured: boolean; secretName: string | null }>(ws, `/providers/${encodeURIComponent(id)}/secret`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.providers(ws) }),
+  });
+}
+
+/** Run the on-demand probe; the request itself is the side effect, so nothing is cached. */
+export function useTestProvider(): UseMutationResult<T.ProviderTestReport, Error, { id: string; model?: string }> {
+  const ws = useWs();
+  return useMutation({
+    mutationFn: ({ id, model }) => api.ws<T.ProviderTestReport>(ws, `/providers/${encodeURIComponent(id)}/test`, { method: 'POST', body: model ? { model } : {} }),
+  });
+}
+
 /* --------------------------------------------------------------- tickets */
 
 export interface TicketQuery extends Record<string, string | number | boolean | undefined> {

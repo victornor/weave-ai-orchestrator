@@ -11,6 +11,7 @@ import { useGo, useSearchParams } from '../../app/link';
 import { cx } from '../../lib/cx';
 import { scopeFromSearch, sectionFor, sectionsOfScope, type V2SettingsScope } from './sections';
 import { DaemonModelsSection, WorkspaceModelsSection } from './sections/Models';
+import { ProvidersSection } from './sections/Providers';
 import { ApprovalsSection, GeneralSection, KnowledgeSection, PluginsSection, WeaverSection, WorkerMemorySection } from './sections/Workspace';
 import {
   ChannelsSection,
@@ -60,6 +61,7 @@ function WorkspaceBody({ section }: { section: string }): React.ReactElement | n
     case 'general': return <GeneralSection />;
     case 'weaver': return <WeaverSection />;
     case 'models': return <WorkspaceModelsSection />;
+    case 'providers': return <ProvidersSection />;
     case 'projects': return <ProjectsSection />;
     case 'knowledge': return <KnowledgeSection />;
     case 'worker-memory': return <WorkerMemorySection />;

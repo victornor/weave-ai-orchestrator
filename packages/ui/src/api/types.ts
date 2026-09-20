@@ -133,6 +133,37 @@ export interface WorkspaceModels { weaver: ModelSetting; workers: ModelSetting; 
 export interface WorkspaceModelsPut { weaver?: ModelSetting | null; workers?: ModelSetting | null; workerOptions?: WorkerModelOption[] | null }
 export interface DaemonModels { weaver: ModelSetting | null; workers: ModelSetting | null; workerOptions: WorkerModelOption[] | null }
 
+/* ------------------------------------------------ weave-runtime providers (VS-610) */
+
+/** One model entry a provider profile lists; mirrors the provider schema's `models` values. */
+export interface ProviderModelEntry { contextWindow?: number; maxOutputTokens?: number; compat?: Record<string, unknown>; params?: Record<string, unknown> }
+/**
+ * A `weave`-runtime provider profile as `GET /providers` returns it. Never carries a key: the key
+ * lives in the workspace secret store, named by `apiKeySecret`, and only `secretConfigured` says
+ * whether one is held. Fields the daemon has defaulted are present.
+ */
+export interface ProviderProfile {
+  preset?: string;
+  baseUrl: string;
+  apiKeySecret?: string;
+  auth: string;
+  headers: Record<string, string>;
+  query?: Record<string, string>;
+  discover?: boolean;
+  maxConcurrentRuns?: number;
+  timeouts?: { connectMs?: number; idleMs?: number; requestMs?: number };
+  compat?: Record<string, unknown>;
+  params?: Record<string, unknown>;
+  models: Record<string, ProviderModelEntry>;
+}
+export interface ProviderView { id: string; profile: ProviderProfile; secretConfigured: boolean; models: string[] }
+/** One preset the add-a-provider flow can start from; the daemon owns the id and the description. */
+export interface PresetSummary { id: string; description: string }
+export interface ProvidersPayload { providers: ProviderView[]; presets: PresetSummary[] }
+/** `POST /providers/:id/test` (VS-609): the per-capability probe verdict and the flags it measured. */
+export interface ProviderTestReport { ok?: boolean; provider: string; model: string; checks: Array<{ name: string; ok: boolean; detail: string }>; detected: Record<string, unknown> }
+
+
 /** VS-318: one host tool the daemon needs, as `/api/daemon/host-tools` and `/api/health` report it. */
 export interface HostToolInfo { id: string; available: boolean; version: string | null; path: string | null; need: 'required' | 'recommended'; purpose: string }
 /** VS-318: the daemon host's detected tools plus the configured extra directories. */

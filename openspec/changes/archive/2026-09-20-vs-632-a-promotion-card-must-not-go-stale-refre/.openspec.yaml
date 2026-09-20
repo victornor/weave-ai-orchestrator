@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "A promotion card must not go stale: refresh it when edge moves,
+  re-request weaver review, and say why Approve is refused"

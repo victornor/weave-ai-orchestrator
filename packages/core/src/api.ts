@@ -954,6 +954,22 @@ export interface PromotionRecord {
   heldReason: string | null;
   /** When a pending pull request first waited, so the no-CI grace is bounded. */
   pendingSince?: string | null;
+  /** VS-632: the card's snapshot of the branches, content and waiting tickets at `landingHead`. */
+  landing?: string;
+  defaultBranch?: string;
+  changedFiles?: number;
+  additions?: number;
+  deletions?: number;
+  ahead?: number;
+  behind?: number;
+  tickets?: PromotionTicket[];
+  notes?: string[];
+  /**
+   * VS-632: true when the weaver's review was made at a head the landing branch has since moved past,
+   * so Approve is held until the weaver marks the card at the current head. Recomputed on every
+   * refresh so it clears itself once a review lands; absent reads as not stale.
+   */
+  reviewStale?: boolean;
   updatedAt: string;
 }
 export interface PromotionStatus {
@@ -991,6 +1007,11 @@ export interface PromotionService {
   execute(actor: Actor, d: S.Decision): Promise<{ promotedHead: string | null; prUrl?: string; pending?: boolean }>;
   /** VS-584: complete in-flight promotions whose checks have resolved; called on the supervisor's cadence. */
   advance(): Promise<number>;
+  /**
+   * VS-632: recompute every open promotion card whose landing head has moved — its context, options
+   * and target — and wake the weaver to review the new head. Called on the supervisor's cadence.
+   */
+  refresh(): Promise<number>;
 }
 
 export interface CoreServices {

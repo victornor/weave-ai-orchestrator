@@ -1,0 +1,25 @@
+## 1. Content-based promotion status (squash-aware)
+
+- [x] 1.1 In `packages/core/src/promotion/index.ts` add a `contentAlreadyOnDefault(clone, defaultRef, landingRef, sha)` helper: true when the commit is an ancestor of the default ref, or when `git diff --quiet <defaultRef> <landingRef> -- <the commit's changed paths>` reports no difference; false when the commit carries content the default branch lacks. Verify with a new case in `promotion.test.ts` where an edge commit whose content was squash-promoted is reported as already shipped.
+- [x] 1.2 Use the helper in `waitingTickets` so a ticket is waiting only when its landed content is absent from the default branch, keeping the existing `promotedAt` stamp skip and the `landedOn` guard. Verify the squash case in `promotion.test.ts` lists only the ticket whose content is still missing.
+- [x] 1.3 Compute the commit list and `ahead` from the same content test: `commits` excludes commits whose content is already on the default branch, and `ahead` is that list's length, gated on `content.changedFiles > 0` and bounded by `RANGE_LIMIT`. Verify the squash case asserts `ahead` counts only the unshipped commit and the response omits the shipped commit.
+
+## 2. Refresh an open card and re-ask the weaver
+
+- [x] 2.1 Add `refresh(): Promise<number>` to `PromotionService` (`packages/core/src/api.ts`) and implement it in `packages/core/src/promotion/index.ts`: for every open `promotion_approval`, recompute `status()`, and when the live landing head differs from `target.promotion.landingHead`, rewrite `context`, `optionsJson` and `targetJson.promotion` (heads, tickets, changed-file summary, ahead/behind, notes, held reason, `updatedAt`) and set `reviewStale = weaverReviewedHeadSha != null && !sameGitSha(weaverReviewedHeadSha, liveLandingHead)`. Verify a new `promotion.test.ts` case raises a card at head A, advances edge to B and asserts the stored context and target read B after `refresh()`.
+- [x] 2.2 In the same `refresh()`, enqueue one wake to the workspace weaver per (decision, new head) with a payload naming the card and the new head and an idempotency key derived from both, so repeated ticks do not stack. Verify the `promotion.test.ts` refresh case asserts the fake wake received the weaver wake with the new head, and that a second `refresh()` at the same head enqueues nothing new.
+- [x] 2.3 Refresh must not clear a `concerns` mark and must leave the existing mark in place otherwise. Verify a `promotion.test.ts` case with a `concerns` card whose head moves keeps `weaverReviewStatus === 'concerns'` after `refresh()`.
+- [x] 2.4 Call `refresh()` from the supervisor's existing promotion cadence, beside `deps().promotion.advance()` in the `supervisor:merge_ci_at` due-block in `packages/core/src/supervisor/index.ts`; no new timer. Verify `packages/core/src/supervisor` typechecks and the existing promotion/supervisor tests stay green.
+
+## 3. Approve says why it is refused
+
+- [x] 3.1 Add `weaverReviewHeadMismatch: true` to the `revision_pending` details thrown by `promotion.execute()` when the reviewed head does not match the live landing head, keeping `weaverReviewedHeadSha` and `landingHead`. Verify a `promotion.test.ts` case asserts the refusal carries the flag for a stale card.
+- [x] 3.2 Add a small pure helper (for example `promotionCardReview` in `packages/shared/src/`) that reads a decision's `target.promotion` and `weaverReviewedHeadSha` and returns `{ stale, line }` with the line "edge moved since the last review; the weaver is re-checking it". Verify with a unit test covering stale, current-head and never-reviewed cards.
+- [x] 3.3 Render the held state in the V2 Needs-you card (`packages/ui/src/v2/DecisionCard.tsx`): when the helper reports stale, show the line in place of the ordinary review line and refuse to send Approve, so the card exposes the reason before the human taps. Verify with a render check in `packages/ui/src/test/v2decisions.test.tsx` (or `v2needs.test.tsx`).
+- [x] 3.4 Map the refusal in `packages/ui/src/lib/decisionStaleness.ts`: a `revision_pending` carrying `weaverReviewHeadMismatch` returns the same "edge moved since the last review; the weaver is re-checking it" copy instead of the concerns copy. Verify with a case in `packages/ui/src/lib/decisionStaleness.test.ts`.
+- [x] 3.5 Confirm the held card renders in both themes without raw hex or px, per the UI token rules. Verify the render check runs under both theme fixtures (or the existing theme harness) and `pnpm --filter @weave-ai/ui lint` is clean.
+
+## 4. Verify the whole change
+
+- [x] 4.1 Run `pnpm lint && pnpm typecheck` and the changed-package tests (`pnpm vitest run packages/core packages/shared packages/ui`) while iterating; fix every failure.
+- [x] 4.2 Run one full `pnpm test` at the end with `--maxWorkers=4` and paste both suite blocks verbatim in the ticket report.

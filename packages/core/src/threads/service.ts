@@ -422,6 +422,13 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       });
     },
 
+    hasOutboundForRun(threadId, runId) {
+      return !!db.get(
+        "SELECT 1 FROM thread_messages WHERE thread_id = ? AND run_id = ? AND direction = 'outbound' LIMIT 1",
+        [threadId, runId],
+      );
+    },
+
     messages(threadId, opts = {}) {
       const t = get(threadId);
       const params: Array<string | number> = [t.id];

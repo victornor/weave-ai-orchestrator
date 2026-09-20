@@ -83,6 +83,19 @@ describe('prompt rendering', () => {
       expect(out).not.toMatch(/\{\{|\}\}/);
     });
 
+    it('tells a ticketless session its final message is delivered, and no other kind that (VS-596)', () => {
+      const sessionId = h.addWorker(null, { kind: 'session', worktreePath: null, branch: null });
+      const session = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [sessionId])!;
+      expect(renderSessionInstructions(h.ctx, h.deps, session)).toContain('posted to this conversation on your behalf');
+
+      expect(renderWorkerInstructions(h.ctx, h.deps, worker)).not.toContain('posted to this conversation on your behalf');
+      expect(renderConductorInstructions(h.ctx, h.deps)).not.toContain('posted to this conversation on your behalf');
+
+      const plannerId = h.addWorker(null, { kind: 'planner', worktreePath: null, branch: null });
+      const planner = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [plannerId])!;
+      expect(renderPlannerInstructions(h.ctx, h.deps, planner)).not.toContain('posted to this conversation on your behalf');
+    });
+
     it('gives a ticketed session exactly the same instructions as an ordinary worker on that ticket', () => {
       const sessionId = h.addWorker(ticketId, { kind: 'session', branch: 'ac/tst-42-add-dark-mode', worktreePath: null });
       const session = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [sessionId])!;

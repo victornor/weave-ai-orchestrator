@@ -753,6 +753,8 @@ export interface ThreadsService {
    * `replyToMessageId` (VS-449) is honoured exactly when present — `null` means no target. When it is omitted, `defaultReplyToMessageIds` are the turn's waking human messages: the reply is linked to each one that exists in this thread and that no earlier reply of the same `runId` has linked. `replyToMessageId` ends up the newest of them, so `replyToExcerpt` quotes it.
    */
   outbound(actor: Actor, threadId: string, body: string, opts?: { parts?: unknown[]; runId?: string | null; replyToMessageId?: string | null; defaultReplyToMessageIds?: string[]; attachments?: Array<{ filename: string; mediaType: string; bytes: Buffer }> }): Promise<S.ThreadMessage>;
+  /** VS-596: true when this run has already written an outbound message to the thread — the engine's guard against posting a session's final text twice. */
+  hasOutboundForRun(threadId: string, runId: string): boolean;
   messages(threadId: string, opts?: { before?: string; limit?: number }): S.ThreadMessage[];
   /** `not_found` when the message does not exist, or exists but under a different thread — the same response either way. Full stored body, regardless of whether the wake payload that referenced it was truncated (VS-242). */
   message(threadId: string, messageId: string): S.ThreadMessage;

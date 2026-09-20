@@ -10,6 +10,7 @@ import { makeHarness, type TestHarness } from '../testing/context.js';
 import type { Actor } from '../api.js';
 import { createDecisionsService } from '../decisions/service.js';
 import { createTicketsService } from '../tickets/service.js';
+import { createThreadsService } from '../threads/service.js';
 import { createProjectsService } from '../projects/index.js';
 import { createWakeService } from '../wake/index.js';
 import { createAccountsService } from '../usage/accounts.js';
@@ -2159,6 +2160,249 @@ describe('run engine', () => {
       expect(spy).not.toHaveBeenCalled();
     });
   });
+
+  describe('a persistent session delivers its answer to its thread (VS-596)', () => {
+    const HUMAN: Actor = { kind: 'human', id: 'victor' };
+    let sessionId: string;
+    let threadId: string;
+
+    /** A ticketless session with its own owned conversation thread, as `ensureSession` creates it. */
+    function seedSession(): void {
+      sessionId = h.addWorker(null, { kind: 'session', worktreePath: null, branch: null, runtimeId: 'fake' });
+      threadId = h.services.threads!.createOwned(sessionId, { humanLabel: 'Backend Engineer — persistent session' }).id;
+    }
+    function outbound(): Array<{ id: string; body: string; authorKind: string; authorId: string | null; runId: string | null }> {
+      return h.db.all(
+        "SELECT id, body, author_kind AS authorKind, author_id AS authorId, run_id AS runId FROM thread_messages WHERE thread_id = ? AND direction = 'outbound' ORDER BY created_at, rowid",
+        [threadId],
+      );
+    }
+
+    /** A human-woken run seeded directly, so a cancelled/interrupted outcome can be scripted (VS-254's pattern). */
+    async function seededHumanRun(cancelled?: { mode: 'interrupt' | 'kill'; cause?: 'message' }): Promise<string> {
+      await h.services.threads!.inbound(HUMAN, threadId, 'are you there?');
+      const wake = h.db.get<{ id: string }>(
+        "SELECT id FROM wakeups WHERE agent_id = ? AND source = 'human_message' ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        [sessionId],
+      )!;
+      const runId = newId();
+      h.db.insert('runs', {
+        id: runId, workspaceId: h.workspaceId, agentId: sessionId, wakeupIdsJson: [wake.id], runtimeId: 'fake',
+        status: 'queued', turnEpoch: 1, cwd: h.ctx.paths.weaver, createdAt: nowIso(),
+      });
+      h.db.run('UPDATE wakeups SET run_id = ?, status = ? WHERE id = ?', [runId, 'claimed', wake.id]);
+      if (cancelled) {
+        runState(h.ctx).active.set(runId, { runId, agentId: sessionId, startedAt: Date.now(), pid: null, cancel: async () => undefined, cancelled });
+      }
+      return runId;
+    }
+
+    beforeEach(() => { h.services.threads = createThreadsService(h.ctx, h.deps); });
+
+    it('posts the final answer once, attributed to the session, linked to the waking message', async () => {
+      seedSession();
+      const inbound = await h.services.threads!.inbound(HUMAN, threadId, 'what changed in the api?');
+      // A turn like the affected fern-ofm one: a final prose answer, no tool call, no structured report.
+      runtime.queue.push({ finalText: 'the answer', structured: undefined } as never);
+      const run = await runOnce(sessionId);
+
+      expect(run.status).toBe('succeeded');
+      expect(run.liveness).toBe('empty');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ body: 'the answer', authorKind: 'agent', authorId: sessionId, runId: run.id });
+      const links = h.db.all<{ repliedToMessageId: string }>(
+        'SELECT replied_to_message_id AS repliedToMessageId FROM thread_message_replies WHERE message_id = ?',
+        [rows[0]!.id],
+      );
+      expect(links.map((l) => l.repliedToMessageId)).toEqual([inbound.id]);
+    });
+
+    it('does not double-post when a reply tool already wrote to the thread in the same run', async () => {
+      seedSession();
+      await h.services.threads!.inbound(HUMAN, threadId, 'are you there?');
+      runtime.queue.push(async (input) => {
+        await h.services.threads!.outbound({ kind: 'agent', id: sessionId, runId: input.runId }, threadId, 'from a tool', { runId: input.runId });
+        return { finalText: 'the answer', structured: undefined } as never;
+      });
+      const run = await runOnce(sessionId);
+
+      expect(run.status).toBe('succeeded');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.body).toBe('from a tool');
+    });
+
+    it('posts nothing when the human did not wake the turn', async () => {
+      seedSession();
+      runtime.queue.push({ finalText: 'the answer', structured: undefined } as never);
+      h.services.wake!.enqueue(sessionId, { source: 'self_scheduled', reason: 'check on something later' });
+      const run = await runOnce(sessionId);
+
+      expect(run.status).toBe('succeeded');
+      expect(outbound()).toHaveLength(0);
+    });
+
+    it("never posts into another agent's thread", async () => {
+      seedSession();
+      const foreign = h.services.threads!.createOwned(h.conductorId, { humanLabel: 'someone else' });
+      const inbound = await h.services.threads!.inbound(HUMAN, foreign.id, 'misrouted');
+      runtime.queue.push({ finalText: 'the answer', structured: undefined } as never);
+      h.services.wake!.enqueue(sessionId, {
+        source: 'human_message', reason: 'misrouted',
+        payload: { threadId: foreign.id, messageId: inbound.id, body: 'misrouted' },
+      });
+      const run = await runOnce(sessionId);
+
+      expect(run.status).toBe('succeeded');
+      const foreignOut = h.db.get<{ n: number }>("SELECT COUNT(*) n FROM thread_messages WHERE thread_id = ? AND direction = 'outbound'", [foreign.id]);
+      expect(foreignOut!.n).toBe(0);
+    });
+
+    it('orders the answer after the message that woke the turn, even on a long turn', async () => {
+      seedSession();
+      await h.services.threads!.inbound(HUMAN, threadId, 'take your time');
+      runtime.delayMs = 5;
+      runtime.queue.push({ finalText: 'the answer', structured: undefined } as never);
+      await runOnce(sessionId);
+      runtime.delayMs = 0;
+
+      const page = h.services.threads!.messages(threadId);
+      expect(page.map((m) => m.direction)).toEqual(['inbound', 'outbound']);
+      expect(page.at(-1)!.body).toBe('the answer');
+    });
+
+    it.each([[null], ['  \n']] as const)('states a turn that produced no answer (%s) instead of leaving a blank thread', async (finalText) => {
+      seedSession();
+      await h.services.threads!.inbound(HUMAN, threadId, 'are you there?');
+      runtime.queue.push({ finalText, structured: undefined } as never);
+      const run = await runOnce(sessionId);
+
+      expect(run.status).toBe('succeeded');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ authorKind: 'system', body: 'This turn ended without an answer.' });
+    });
+
+    it('treats a final text that is the structured run report as no answer', async () => {
+      seedSession();
+      await h.services.threads!.inbound(HUMAN, threadId, 'report please');
+      runtime.queue.push({
+        finalText: JSON.stringify({ state: 'done', summary: 'did it', tickets: [], knowledge: { recorded: false, reason: 'x' } }),
+        structured: undefined,
+      } as never);
+      const run = await runOnce(sessionId);
+
+      expect(run.status).toBe('succeeded');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ authorKind: 'system', body: 'This turn ended without an answer.' });
+    });
+
+    it('states the plain reason a failed turn could not answer, with no run ids', async () => {
+      seedSession();
+      await h.services.threads!.inbound(HUMAN, threadId, 'any update?');
+      runtime.queue.push({ error: { code: 'turn_crashed', family: 'unknown', message: 'the runtime crashed unexpectedly' } } as never);
+      const run = await runOnce(sessionId);
+
+      expect(run.status).toBe('failed');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ authorKind: 'system', body: 'The turn failed: the runtime crashed unexpectedly.' });
+      expect(rows[0]!.body).not.toContain(run.id);
+    });
+
+    it('states that a timed-out turn was stopped', async () => {
+      seedSession();
+      await h.services.threads!.inbound(HUMAN, threadId, 'any update?');
+      runtime.queue.push({ timedOut: true } as never);
+      const run = await runOnce(sessionId);
+
+      expect(run.status).toBe('timed_out');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.authorKind).toBe('system');
+      expect(rows[0]!.body).toMatch(/took too long and was stopped/);
+    });
+
+    it('states that a cancelled turn was cancelled', async () => {
+      seedSession();
+      const runId = await seededHumanRun({ mode: 'kill' });
+      runtime.queue.push({ structured: { state: 'idle', summary: 'x', tickets: [], knowledge: { recorded: false, reason: 'x' } } });
+      const run = await executeRun(h.ctx, h.deps, runId);
+
+      expect(run.status).toBe('cancelled');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.authorKind).toBe('system');
+      expect(rows[0]!.body).toMatch(/was cancelled/);
+    });
+
+    it('states that a non-resuming interrupt happened', async () => {
+      seedSession();
+      const runId = await seededHumanRun({ mode: 'interrupt' });
+      runtime.queue.push({ structured: { state: 'idle', summary: 'x', tickets: [], knowledge: { recorded: false, reason: 'x' } } });
+      const run = await executeRun(h.ctx, h.deps, runId);
+
+      expect(run.status).toBe('interrupted');
+      expect(run.errorCode).toBe('interrupted');
+      expect(outbound()).toHaveLength(1);
+      expect(outbound()[0]!.body).toMatch(/was interrupted/);
+    });
+
+    it('does not announce an interruption the daemon resumes on its own', async () => {
+      seedSession();
+
+      const byMessage = await seededHumanRun({ mode: 'interrupt', cause: 'message' });
+      runtime.queue.push({ structured: { state: 'idle', summary: 'x', tickets: [], knowledge: { recorded: false, reason: 'x' } } });
+      const messageRun = await executeRun(h.ctx, h.deps, byMessage);
+      expect(messageRun.errorCode).toBe('interrupted_by_message');
+
+      runState(h.ctx).shuttingDown = { reason: 'SIGTERM', at: nowIso() };
+      const byShutdown = await seededHumanRun({ mode: 'interrupt' });
+      runtime.queue.push({ structured: { state: 'idle', summary: 'x', tickets: [], knowledge: { recorded: false, reason: 'x' } } });
+      const shutdownRun = await executeRun(h.ctx, h.deps, byShutdown);
+      runState(h.ctx).shuttingDown = null;
+      expect(shutdownRun.errorCode).toBe('interrupted_by_shutdown');
+
+      expect(outbound()).toHaveLength(0);
+    });
+
+    it('does not announce a failure the daemon will retry, and the successful retry answers once', async () => {
+      seedSession();
+      await h.services.threads!.inbound(HUMAN, threadId, 'any update?');
+      runtime.queue.push({ error: { code: 'upstream_5xx', family: 'transient_upstream', message: 'upstream unavailable' } } as never);
+      const first = await runOnce(sessionId);
+
+      expect(first.status).toBe('failed');
+      expect(h.db.get<{ scheduledRetryAt: string | null }>('SELECT scheduled_retry_at FROM runs WHERE id = ?', [first.id])!.scheduledRetryAt).toBeTruthy();
+      expect(outbound()).toHaveLength(0);
+
+      // Bring the retry due, and let it succeed: exactly one answer, no earlier failure notice.
+      h.db.run("UPDATE wakeups SET status = 'queued', run_id = NULL, not_before = '2000-01-01T00:00:00.000Z' WHERE agent_id = ? AND source = 'retry'", [sessionId]);
+      runtime.queue.push({ finalText: 'the answer', structured: undefined } as never);
+      const second = await runOnce(sessionId);
+
+      expect(second.status).toBe('succeeded');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ authorKind: 'agent', body: 'the answer' });
+    });
+
+    it('names a usage limit rather than an opaque code', async () => {
+      seedSession();
+      await h.services.threads!.inbound(HUMAN, threadId, 'any update?');
+      runtime.queue.push({ error: { code: 'quota_exceeded', family: 'provider_quota', message: 'You have hit your usage limit.' } } as never);
+      const run = await runOnce(sessionId);
+
+      expect(run.status).toBe('failed');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.body).toMatch(/usage limit/);
+      expect(rows[0]!.body).not.toContain('quota_exceeded');
+    });
+  });
+
 });
 
 describe('dispatcher', () => {

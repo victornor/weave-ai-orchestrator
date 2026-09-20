@@ -187,6 +187,23 @@ describe('V2 worker page', () => {
       // Only the human's own message reads `you`, whatever its direction; nothing else falls back to it.
       expect(screen.getAllByText('you')).toHaveLength(1);
     });
+
+    it("renders the session's answer and a turn that ended without one (VS-596)", () => {
+      state.role = { id: 'r1', name: 'Full-stack Engineer' };
+      state.threadMessages = [
+        message({ id: 'm1', direction: 'inbound', authorKind: 'human', authorId: null, body: 'are you there?' }),
+        message({ id: 'm2', direction: 'outbound', authorKind: 'agent', authorId: 'a1', body: 'Here is the answer.' }),
+        message({ id: 'm3', direction: 'outbound', authorKind: 'system', authorId: null, body: 'This turn ended without an answer.' }),
+      ];
+      render(<WorkerBody workerId="a1" />);
+      // The answer is the session's own message, named by the role.
+      expect(screen.getByText('Here is the answer.')).toBeInTheDocument();
+      expect(screen.getAllByText('Full-stack Engineer').length).toBeGreaterThan(0);
+      // An empty turn is a state, not a blank thread: a centred system notice, labelled as system.
+      const notice = screen.getByText('This turn ended without an answer.');
+      expect(notice.closest('li')).toHaveClass('items-center');
+      expect(screen.getByText('System')).toBeInTheDocument();
+    });
   });
 
   describe('sessionAuthorLabel (VS-553)', () => {

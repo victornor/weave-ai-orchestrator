@@ -82,14 +82,25 @@ function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }: { thre
   if (!history.data?.length) return <p className="text-meta text-text-3">Nothing said yet — say something below.</p>;
   return (
     <ol aria-label={label} className="flex flex-col gap-3">
-      {history.data.map((m) => (
-        <li key={m.id} className={cx('flex flex-col gap-1', m.direction === 'outbound' ? 'items-start' : 'items-end')}>
-          <div className={cx('max-w-[85%] rounded-r6 px-3 py-2 text-meta', m.direction === 'outbound' ? 'bg-bg-2 text-text-1' : 'bg-accent-tint text-text-1')}>
-            <Markdown source={m.body} />
-          </div>
-          <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(m, sessionAgentId, roleName)}</span>
-        </li>
-      ))}
+      {history.data.map((m) =>
+        m.authorKind === 'system' ? (
+          // VS-596: a system notice (e.g. a turn that ended without an answer) is a state, not a
+          // message from either party — centred and muted, never attributed to the session or the human.
+          <li key={m.id} className="flex flex-col items-center gap-1">
+            <div className="max-w-[85%] rounded-r6 border border-line-1 px-3 py-2 text-center text-meta text-text-3">
+              <Markdown source={m.body} />
+            </div>
+            <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(m, sessionAgentId, roleName)}</span>
+          </li>
+        ) : (
+          <li key={m.id} className={cx('flex flex-col gap-1', m.direction === 'outbound' ? 'items-start' : 'items-end')}>
+            <div className={cx('max-w-[85%] rounded-r6 px-3 py-2 text-meta', m.direction === 'outbound' ? 'bg-bg-2 text-text-1' : 'bg-accent-tint text-text-1')}>
+              <Markdown source={m.body} />
+            </div>
+            <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(m, sessionAgentId, roleName)}</span>
+          </li>
+        ),
+      )}
     </ol>
   );
 }

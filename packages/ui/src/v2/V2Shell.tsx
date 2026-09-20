@@ -654,18 +654,17 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
   };
   const activeWsName = useV2WorkspaceName(scope);
   const initial = (ws ? activeWsName : (list[0]?.name ?? 'A')).slice(0, 1).toUpperCase();
-  // A V2 global page has no `WorkspaceProvider`, so nothing updates its cross-workspace decisions
-  // (a card created, answered, superseded or reviewed while it is open) until a stream is
-  // subscribed. Workspace pages get theirs from `V2Workspace`, and Global Chats opens one per pane,
-  // so neither fans in here (VS-369).
-  const fanIn = !ws && !path.startsWith('/chats');
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
-      {/* One fan-in mount only: a global V2 page has no `WorkspaceProvider`, so it holds no stream
-          of its own — fan in one daemon-wide stream so decisions and the rail's counts update live
-          (VS-366, VS-369, VS-509). `fanIn` also excludes Global Chats, whose panes open one each. */}
-      {fanIn ? <FanInStreams ids={ids} /> : null}
+      {/* The daemon-wide stream is mounted on every signed-in page, not only global ones (VS-630):
+          the rail counts every workspace, and a workspace page's own stream carries only that
+          workspace's events, so a worker starting elsewhere never invalidated the rail's counts
+          until a global page (Live) remounted them. `FanInStreams` acquires the one VS-509
+          `GlobalEventStream` entry per document (refcounted), so this is still one connection shared
+          by the whole document — never one per workspace — and Global Chats' per-pane providers do
+          not duplicate it. */}
+      <FanInStreams ids={ids} />
       {collapsed ? (
         <aside className="v2-anim-fade hidden w-[48px] flex-none flex-col items-center border-r border-line-1 bg-bg-1 py-2 md:flex">
           <button

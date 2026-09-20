@@ -35,6 +35,32 @@ export interface LiveOrderKey {
   createdAt: string;
 }
 
+/** Anything the working count can count: a worker list entry, or a Live cell. */
+export interface LiveCountable {
+  id: string;
+}
+
+/**
+ * The working figure over one or more lists — the one derivation the rail's Live badge and the Live
+ * floor's roster figure share (VS-630). A card counts when its id is in `workingIds`: an in-flight
+ * run, or a worker held in the between-turns handover grace `useRunningWorkerIds` applies. `perList`
+ * is aligned with `lists`, so a caller keying by workspace reads its own figure from the same pass
+ * and the badge and the floor cannot disagree by construction.
+ */
+export function liveCounts(
+  lists: readonly (readonly LiveCountable[])[],
+  workingIds: ReadonlySet<string>,
+): { total: number; perList: number[] } {
+  const perList = lists.map((list) => {
+    let n = 0;
+    for (const item of list) if (workingIds.has(item.id)) n += 1;
+    return n;
+  });
+  let total = 0;
+  for (const n of perList) total += n;
+  return { total, perList };
+}
+
 /**
  * Newest-first, but every item in `workingIds` before every item that is not. Order within a group is
  * the floor's existing one (`createdAt` descending, id as the tie-break), so a cell only moves when

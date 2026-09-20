@@ -39,7 +39,7 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 
 vi.mock('../api/context', () => ({
-  // The shell fans in one stream per listed workspace on global pages (VS-366, VS-369); record the calls.
+  // The shell mounts one daemon-wide fan-in on every signed-in page (VS-630); record the calls.
   FanInStreams: ({ ids }: { ids: readonly string[] }) => {
     state.fanIn.push([...ids]);
     return null;
@@ -565,8 +565,8 @@ describe('the rail update entry (VS-421)', () => {
   });
 });
 
-describe('live streams on global pages (VS-366, VS-369)', () => {
-  it('opens exactly one stream per listed workspace on a global page', () => {
+describe('the daemon-wide stream on every signed-in page (VS-366, VS-369, VS-630)', () => {
+  it('opens exactly one fan-in mount per listed workspace on a global page', () => {
     state.path = '/needs';
     state.workspaces = [
       { id: 'acme', name: 'Acme', ticketPrefix: 'ACME', root: '', projects: [], needsYou: 2 },
@@ -577,15 +577,17 @@ describe('live streams on global pages (VS-366, VS-369)', () => {
     expect(state.fanIn).toEqual([['acme', 'beta']]);
   });
 
-  it('does not fan in on a workspace page (V2Workspace owns the stream)', () => {
+  it('mounts it on a workspace page too, so the rail counts every workspace live (VS-630)', () => {
     mountShell();
-    expect(state.fanIn).toEqual([]);
+    // The rail badges every workspace, but a workspace page's own stream carries only its events;
+    // the shell must hold the daemon-wide one here, or a worker starting elsewhere never shows.
+    expect(state.fanIn).toEqual([['acme']]);
   });
 
-  it('does not fan in on Global Chats, which opens one per pane', () => {
+  it('mounts it on Global Chats as well, where the panes stack onto the same document stream', () => {
     state.path = '/chats';
     mountShell();
-    expect(state.fanIn).toEqual([]);
+    expect(state.fanIn).toEqual([['acme']]);
   });
 });
 

@@ -1,8 +1,8 @@
 /** VS-350: the V2 worker page — identity, tabs, shared feed, actions, handover and steer. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, RunEvent, ThreadMessage } from '@weave-ai/shared';
-import { agent, ticket } from './factories';
+import type { Agent, Run, RunEvent, ThreadMessage } from '@weave-ai/shared';
+import { agent, run, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
   agent: null as Agent | null,
@@ -24,12 +24,10 @@ const state = vi.hoisted(() => ({
   resetOption: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   models: null as { workers: { runtime: string; model: string | null }; weaver: { runtime: string; model: string | null }; workerOptions: Array<{ id: string; description: string; runtime: string | null; model: string | null }>; source: { weaver: string; workers: string; workerOptions: string } } | null,
   sessionTurns: null as number | null,
-  /** VS-602: the session agent's active run, so the ticketless feed shows it live. */
-  sessionRun: null as { id: string; runtimeId: string; status: string } | null,
-  /** VS-616: whether that run is still going, and the partials/events the live turn renders. */
-  sessionRunLive: true,
-  sessionEvents: [] as RunEvent[],
-  sessionPartials: [] as Array<{ partId: string; kind: 'text' | 'thinking' | 'tool_input'; text: string }>,
+  /** VS-618: the session agent's runs, and each run's events/partials for its turn transcript. */
+  runs: [] as Run[],
+  runEvents: {} as Record<string, RunEvent[]>,
+  runPartials: {} as Record<string, Array<{ partId: string; kind: 'text' | 'thinking' | 'tool_input'; text: string }>>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -39,8 +37,17 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('../app/link', () => ({ useGo: () => state.go, useSearchParams: () => ({}) }));
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
 vi.mock('../lib/drafts', () => ({ draftKey: () => 'k', useDraft: () => ({ draft: { text: 'steer this' }, patch: state.patch }) }));
-vi.mock('../v2/WorkerFeed', () => ({ WorkerFeed: () => <div data-testid="worker-feed" />, useWorkerRun: () => (state.sessionRun ? { run: state.sessionRun, live: state.sessionRunLive } : { run: null, live: false }) }));
-vi.mock('../api/runStream', () => ({ useRunEventStream: () => ({ events: state.sessionEvents, partials: state.sessionPartials, lastPartialAt: null, partialSince: null, status: { state: 'connected' }, retryNow: vi.fn() }) }));
+vi.mock('../v2/WorkerFeed', () => ({ WorkerFeed: () => <div data-testid="worker-feed" />, useWorkerRun: () => ({ run: null, live: false }) }));
+vi.mock('../api/runStream', () => ({
+  useRunEventStream: (runId: string | null) => ({
+    events: runId ? state.runEvents[runId] ?? [] : [],
+    partials: runId ? state.runPartials[runId] ?? [] : [],
+    lastPartialAt: null,
+    partialSince: null,
+    status: { state: 'connected' },
+    retryNow: vi.fn(),
+  }),
+}));
 vi.mock('../api/hooks', () => ({
   useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: state.noTicket ? null : ticket({ id: 'tk1', identifier: 'ACME-1' }), thread: state.thread, role: state.role, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, sessionTurns: state.sessionTurns, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
   useWorkerBrief: () => ({ data: { brief: '# The brief' } }),
@@ -51,6 +58,7 @@ vi.mock('../api/hooks', () => ({
   useModels: () => ({ data: state.models }),
   useSetSessionOption: () => ({ mutate: state.setOption, isPending: false, reset: state.resetOption, error: null }),
   useThreadMessages: () => ({ data: state.threadMessages, isLoading: false, isError: false, error: null }),
+  useRuns: () => ({ data: state.runs }),
   useHandoverCommand: () => ({ isLoading: false, data: null }),
   useStartHandover: () => ({ mutate: state.start, error: null }),
   useEndHandover: () => ({ mutateAsync: state.end, error: null }),
@@ -82,6 +90,23 @@ const message = (over: Partial<ThreadMessage> = {}): ThreadMessage => ({
   ...over,
 });
 
+/** A session run for the ticketless feed (VS-618). */
+const sessionRun = (over: Partial<Run> = {}): Run =>
+  run({ id: 'run9', agentId: 'a1', ticketId: null, runtimeId: 'opencode', status: 'running', startedAt: '2026-09-20T00:01:00.000Z', createdAt: '2026-09-20T00:01:00.000Z', ...over });
+
+let eventSeq = 0;
+/** A run event with only the fields the transcript reads. */
+const ev = (type: RunEvent['type'], payload: Record<string, unknown> = {}, runId = 'run9'): RunEvent => ({
+  id: `e${(eventSeq += 1)}`,
+  runId,
+  seq: eventSeq,
+  ts: '2026-09-20T00:01:30.000Z',
+  stream: 'stdout',
+  level: 'info',
+  type,
+  payload,
+});
+
 beforeEach(() => {
   state.go = vi.fn();
   state.action = vi.fn();
@@ -101,10 +126,9 @@ beforeEach(() => {
   state.resetOption = vi.fn();
   state.models = null;
   state.sessionTurns = null;
-  state.sessionRun = null;
-  state.sessionRunLive = true;
-  state.sessionEvents = [];
-  state.sessionPartials = [];
+  state.runs = [];
+  state.runEvents = {};
+  state.runPartials = {};
 });
 
 describe('V2 worker page', () => {
@@ -199,28 +223,22 @@ describe('V2 worker page', () => {
       expect(screen.getAllByText('you')).toHaveLength(1);
     });
 
-    it("renders the session's answer and a turn that ended without one (VS-596)", () => {
+    it('keeps the session’s own words when they are not a delivered run answer (VS-618)', () => {
       state.role = { id: 'r1', name: 'Full-stack Engineer' };
       state.threadMessages = [
-        message({ id: 'm1', direction: 'inbound', authorKind: 'human', authorId: null, body: 'are you there?' }),
         message({ id: 'm2', direction: 'outbound', authorKind: 'agent', authorId: 'a1', body: 'Here is the answer.' }),
-        message({ id: 'm3', direction: 'outbound', authorKind: 'system', authorId: null, body: 'This turn ended without an answer.' }),
       ];
       render(<WorkerBody workerId="a1" />);
-      // The answer is the session's own message, named by the role.
       expect(screen.getByText('Here is the answer.')).toBeInTheDocument();
       expect(screen.getAllByText('Full-stack Engineer').length).toBeGreaterThan(0);
-      // An empty turn is a state, not a blank thread: a centred system notice, labelled as system.
-      const notice = screen.getByText('This turn ended without an answer.');
-      expect(notice.closest('li')).toHaveClass('items-center');
-      expect(screen.getByText('System')).toBeInTheDocument();
     });
 
-it('renders a failed-turn notice as the same system notice (VS-598)', () => {
+    it('shows a failed turn’s real reason as a system notice (VS-598)', () => {
       state.role = { id: 'r1', name: 'Full-stack Engineer' };
+      state.runs = [sessionRun({ status: 'failed', finishedAt: '2026-09-20T00:05:00.000Z' })];
       state.threadMessages = [
-        message({ id: 'm1', direction: 'inbound', authorKind: 'human', authorId: null, body: 'any update?' }),
-        message({ id: 'm2', direction: 'outbound', authorKind: 'system', authorId: null, body: 'The turn failed: the runtime crashed unexpectedly.' }),
+        message({ id: 'm1', createdAt: '2026-09-20T00:00:30.000Z', body: 'any update?' }),
+        message({ id: 'm2', direction: 'outbound', authorKind: 'system', authorId: null, runId: 'run9', body: 'The turn failed: the runtime crashed unexpectedly.', createdAt: '2026-09-20T00:05:00.000Z' }),
       ];
       render(<WorkerBody workerId="a1" />);
       const notice = screen.getByText('The turn failed: the runtime crashed unexpectedly.');
@@ -229,8 +247,8 @@ it('renders a failed-turn notice as the same system notice (VS-598)', () => {
     });
 
     it('shows the live activity row for a session turn, never an idle-looking thread (VS-602)', () => {
-      state.sessionRun = { id: 'run9', runtimeId: 'opencode', status: 'running' };
-      state.threadMessages = [message({ id: 'm1', direction: 'outbound', authorKind: 'agent', authorId: 'a1', body: 'Working on it.' })];
+      state.runs = [sessionRun({ status: 'running' })];
+      state.threadMessages = [message({ id: 'm1', createdAt: '2026-09-20T00:00:30.000Z', body: 'are you there?' })];
       render(<WorkerBody workerId="a1" />);
       const row = document.querySelector('[data-live-activity]');
       expect(row).not.toBeNull();
@@ -238,46 +256,87 @@ it('renders a failed-turn notice as the same system notice (VS-598)', () => {
     });
 
     it('shows a live session turn’s streamed text and tool calls, like the worker live view (VS-616)', () => {
-      state.sessionRun = { id: 'run9', runtimeId: 'opencode', status: 'running' };
-      state.sessionPartials = [{ partId: 'p1', kind: 'text', text: 'Looking into the failing test.' }];
-      state.sessionEvents = [
-        { id: 'e1', runId: 'run9', seq: 1, ts: '2026-09-20T00:00:00.000Z', stream: 'stdout', level: 'info', type: 'tool.call', payload: { name: 'bash', callId: 'c1', target: 'pnpm test' } } as RunEvent,
-      ];
+      state.runs = [sessionRun({ status: 'running' })];
+      state.threadMessages = [message({ id: 'm1', createdAt: '2026-09-20T00:00:30.000Z', body: 'are you there?' })];
+      state.runPartials = { run9: [{ partId: 'p1', kind: 'text', text: 'Looking into the failing test.' }] };
+      state.runEvents = { run9: [ev('tool.call', { name: 'bash', callId: 'c1', target: 'pnpm test' })] };
       render(<WorkerBody workerId="a1" />);
       expect(document.querySelector('[data-live-partials]')).toHaveTextContent('Looking into the failing test.');
-      expect(document.querySelector('[data-trace-tool]')).toHaveTextContent('bash');
+      expect(screen.getByText('bash')).toBeInTheDocument();
       expect(document.querySelector('[data-live-activity]')).not.toBeNull();
+      // The conversation scrolls as one page: no nested scroller.
+      expect(document.querySelector('[role="log"]')).toBeNull();
     });
 
-    it('replaces the live turn with the delivered answer, with no duplicated text (VS-616)', () => {
-      state.sessionRun = { id: 'run9', runtimeId: 'opencode', status: 'finished' };
-      state.sessionRunLive = false;
-      state.sessionPartials = [{ partId: 'p1', kind: 'text', text: 'Here is the answer.' }];
+    it('renders each turn’s transcript between the human’s messages (VS-618)', () => {
+      state.runs = [sessionRun({ status: 'succeeded', finishedAt: '2026-09-20T00:05:00.000Z' })];
       state.threadMessages = [
-        message({ id: 'm2', direction: 'outbound', authorKind: 'agent', authorId: 'a1', runId: 'run9', body: 'Here is the answer.' }),
+        message({ id: 'm1', createdAt: '2026-09-20T00:00:30.000Z', body: 'fix the failing test' }),
+        message({ id: 'm2', createdAt: '2026-09-20T00:10:00.000Z', body: 'what did you find?' }),
       ];
+      state.runEvents = {
+        run9: [
+          ev('assistant.text', { text: 'Looking at the failing test.' }),
+          ev('tool.call', { name: 'Edit', callId: 'c1', input: { file_path: 'work/src/util.ts', old_string: 'const a = 1;', new_string: 'const a = 2;' } }),
+          ev('tool.call', { name: 'Write', callId: 'c2', input: { file_path: 'work/README.md', content: '# Hello\n' } }),
+          ev('command.executed', { command: 'pnpm test', exitCode: 0, stdout: 'all green' }),
+        ],
+      };
       render(<WorkerBody workerId="a1" />);
-      // The delivered message is the record; the run view is gone and the words appear once.
-      expect(screen.queryAllByText('Here is the answer.')).toHaveLength(1);
-      expect(document.querySelector('[data-live-turn-section]')).toBeNull();
-      expect(document.querySelector('[data-live-partials]')).toBeNull();
+      // The turn's assistant text, an edit diff, a written-file preview and a command with output.
+      expect(screen.getByText('Looking at the failing test.')).toBeInTheDocument();
+      expect(screen.getByText('util.ts')).toBeInTheDocument();
+      expect(screen.getByText('README.md')).toBeInTheDocument();
+      expect(screen.getByText('pnpm test')).toBeInTheDocument();
+      expect(screen.getByText('all green')).toBeInTheDocument();
+      // The transcript sits between the two human messages.
+      const items = Array.from(document.querySelectorAll('ol[aria-label] > li'));
+      const turnIndex = items.findIndex((li) => li.querySelector('[data-session-turn]'));
+      expect(turnIndex).toBeGreaterThan(0);
+      expect(items[turnIndex - 1]).toHaveTextContent('fix the failing test');
+      expect(items[turnIndex + 1]).toHaveTextContent('what did you find?');
     });
 
-    it('replaces the live turn with the turn-ended system notice, consistently (VS-616)', () => {
-      state.sessionRun = { id: 'run9', runtimeId: 'opencode', status: 'finished' };
-      state.sessionRunLive = false;
-      state.sessionPartials = [{ partId: 'p1', kind: 'text', text: 'half an answer' }];
+    it('shows the final text once, from the transcript, not again as a message (VS-618)', () => {
+      state.runs = [sessionRun({ status: 'succeeded', finishedAt: '2026-09-20T00:05:00.000Z' })];
       state.threadMessages = [
-        message({ id: 'm3', direction: 'outbound', authorKind: 'system', authorId: null, runId: 'run9', body: 'This turn ended without an answer.' }),
+        message({ id: 'm1', createdAt: '2026-09-20T00:00:30.000Z', body: 'are you there?' }),
+        message({ id: 'm2', direction: 'outbound', authorKind: 'agent', authorId: 'a1', runId: 'run9', body: 'Here is the answer.', createdAt: '2026-09-20T00:05:00.000Z' }),
       ];
+      state.runEvents = { run9: [ev('assistant.text', { text: 'Here is the answer.' })] };
       render(<WorkerBody workerId="a1" />);
-      expect(document.querySelector('[data-live-turn-section]')).toBeNull();
-      expect(screen.getByText('This turn ended without an answer.')).toBeInTheDocument();
-      expect(screen.queryByText('half an answer')).toBeNull();
+      expect(screen.getAllByText('Here is the answer.')).toHaveLength(1);
+    });
+
+    it('still shows a delivered answer a runtime did not put in the events (VS-618)', () => {
+      state.runs = [sessionRun({ status: 'succeeded', finishedAt: '2026-09-20T00:05:00.000Z' })];
+      state.threadMessages = [
+        message({ id: 'm1', createdAt: '2026-09-20T00:00:30.000Z', body: 'are you there?' }),
+        message({ id: 'm2', direction: 'outbound', authorKind: 'agent', authorId: 'a1', runId: 'run9', body: 'Only in the final text.', createdAt: '2026-09-20T00:05:00.000Z' }),
+      ];
+      state.runEvents = { run9: [ev('tool.call', { name: 'bash', callId: 'c1', target: 'ls' })] };
+      render(<WorkerBody workerId="a1" />);
+      expect(screen.getAllByText('Only in the final text.')).toHaveLength(1);
+    });
+
+    it('a turn that ended after a tool result shows no notice and no error (VS-618)', () => {
+      state.runs = [sessionRun({ status: 'succeeded', finishedAt: '2026-09-20T00:05:00.000Z' })];
+      state.threadMessages = [message({ id: 'm1', createdAt: '2026-09-20T00:00:30.000Z', body: 'run the tests' })];
+      state.runEvents = {
+        run9: [
+          ev('tool.call', { name: 'bash', callId: 'c1', target: 'pnpm test' }),
+          ev('tool.result', { name: 'bash', callId: 'c1', content: 'all green' }),
+        ],
+      };
+      render(<WorkerBody workerId="a1" />);
+      expect(screen.queryByText(/ended without an answer/i)).toBeNull();
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(screen.getByText('bash')).toBeInTheDocument();
     });
 
     it('says a non-streaming session runtime reports whole steps only (VS-616)', () => {
-      state.sessionRun = { id: 'run9', runtimeId: 'not-a-runtime', status: 'running' };
+      state.runs = [sessionRun({ status: 'running', runtimeId: 'not-a-runtime' })];
+      state.threadMessages = [message({ id: 'm1', createdAt: '2026-09-20T00:00:30.000Z' })];
       render(<WorkerBody workerId="a1" />);
       expect(document.querySelector('[data-live-activity]')).not.toBeNull();
       expect(document.querySelector('[data-live-whole-steps]')).not.toBeNull();

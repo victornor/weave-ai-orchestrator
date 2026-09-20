@@ -485,6 +485,16 @@ describe('prompt rendering', () => {
     }
   });
 
+  it('gives a ticketless session a conversation instruction, not the worker delivery one (VS-618)', async () => {
+    const sessionId = h.addWorker(null, { kind: 'session', worktreePath: null, branch: null });
+    const session = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [sessionId])!;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, session, [wakeFor('w-session')], {});
+    expect(prompt).toContain('This is a standing conversation');
+    expect(prompt).toContain('Write your reply as your final message');
+    expect(prompt).not.toContain('do the phase your ticket status asks for');
+    expect(prompt).not.toContain('structured final report');
+  });
+
   describe('interactive session contract in the brief and worker AGENTS.md (VS-213)', () => {
     it('with the built-in fallback templates: conversation-only done when the ticket is interactive', () => {
       h.db.update('tickets', ticketId, { interactiveSession: true });

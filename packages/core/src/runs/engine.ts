@@ -723,8 +723,9 @@ function pendingHumanMessages(
  * text to the conversation thread that woke it. Reads the normalized `TurnResult`, so it behaves the
  * same on every runtime; runs after finalize and never fails the finished run. A turn that already
  * wrote an outbound message to the thread (a reply tool) is left alone. A missing or whitespace-only
- * answer leaves a system notice instead of a blank thread, and a turn that ends without an answer —
- * failed, timed out, cancelled or interrupted — leaves a plain-reason system notice, unless the daemon
+ * answer posts nothing (VS-618: a turn that only ran tools is a complete turn, not a notice), and a
+ * turn that ends without an answer — failed, timed out, cancelled or interrupted — leaves a
+ * plain-reason system notice, unless the daemon
  * is going to retry or resume it, in which case it stays unannounced until the final outcome. VS-598:
  * when the wake carries no thread (the watchdog's retry), the session's own thread supplies both the
  * target and the unanswered human message, so a resumed turn still delivers.
@@ -752,12 +753,10 @@ async function deliverSessionAnswer(
       const text = typeof raw === 'string' ? raw.trim() : '';
       // A runtime that returned the structured run report as its final text must not leak JSON.
       const answer = text.length > 0 && extractReport(text) === null ? text : null;
-      if (answer === null) {
-        await deps().threads.outbound(
-          { kind: 'system', id: null }, threadId, 'This turn ended without an answer.', { runId: input.run.id },
-        );
-        return;
-      }
+      // VS-618: a turn that produced no final text (it only ran tools, or ended after a tool result)
+      // is a normal, complete turn — post nothing, not a notice. The report guard stays so a runtime
+      // cannot leak report JSON into the conversation.
+      if (answer === null) return;
       await deps().threads.outbound(
         { kind: 'agent', id: input.agent.id, runId: input.run.id },
         threadId,

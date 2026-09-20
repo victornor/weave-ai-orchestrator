@@ -45,7 +45,7 @@ A persistent session's agent SHALL NOT be counted by, and SHALL NOT be gated by,
 
 ### Requirement: Conversation is the default posture until asked to do work
 
-Every turn of a persistent session that has no ticket SHALL be conversational: the agent answers, investigates and explains, and SHALL NOT be instructed to run any ticket delivery phase. The session's instructions SHALL tell it, when the human proposes work, to offer setting up a ticket and a worktree rather than proceeding informally, and SHALL make clear that both are opt-in: the human may decline either, in which case the session keeps working the conversation with no ticket and no worktree.
+Every turn of a persistent session that has no ticket SHALL be conversational: the agent answers, investigates and explains, and SHALL NOT be instructed to run any ticket delivery phase. It SHALL NOT be instructed to produce the worker's structured final report or any formatted reply for its own sake; the answer is its own words. The session's instructions SHALL tell it, when the human proposes work, to offer setting up a ticket and a worktree rather than proceeding informally, and SHALL make clear that both are opt-in: the human may decline either, in which case the session keeps working the conversation with no ticket and no worktree.
 
 #### Scenario: A work-shaped request produces an offer, not a ticket
 
@@ -54,8 +54,13 @@ Every turn of a persistent session that has no ticket SHALL be conversational: t
 
 #### Scenario: Declining keeps the conversation ticketless
 
-- **WHEN** a human declines the offer of a ticket and worktree
+- **WHEN** the human declines the offer of a ticket and worktree
 - **THEN** the session continues the conversation with no ticket and no worktree
+
+#### Scenario: A ticketless session is not shaped to a report
+
+- **WHEN** a ticketless persistent session's turn prompt is rendered
+- **THEN** it instructs the session to answer the conversation directly and does not instruct it to run a ticket delivery phase or to finish with the worker's structured final report
 
 ### Requirement: A persistent session takes a ticket only when asked, and works it under normal gates
 
@@ -249,7 +254,7 @@ When the turn already produced an outbound message to that thread — a reply to
 
 When a turn the daemon stopped on its own is resumed by a retry wake that carries no thread context, the daemon SHALL resolve the session's own thread for the delivery, and SHALL deliver only while that thread still holds a human message that no `agent`-authored outbound message follows — a system notice is not an answer — so an unrelated turn never answers a message that is no longer waiting, and the stopped attempt's own notice never stands in for the answer.
 
-When the turn's final text is absent or whitespace-only, the daemon SHALL NOT write an answer message; the thread SHALL instead show, as a system notice, that the turn ended without an answer, so the conversation is never left silently blank.
+When the turn's final text is absent or whitespace-only, the daemon SHALL write no message for that turn. A turn that only ran tools, or ended after a tool result, is a normal, complete turn: the daemon SHALL NOT write a system notice for it. The turn's account of itself is its own transcript in the session's conversation surface.
 
 #### Scenario: The answer lands in the thread
 
@@ -288,8 +293,8 @@ When the turn's final text is absent or whitespace-only, the daemon SHALL NOT wr
 
 #### Scenario: An empty answer is not a blank thread
 
-- **WHEN** a session's turn ends with no final text or only whitespace
-- **THEN** no answer message is written, and the thread states as a system notice that the turn ended without an answer
+- **WHEN** a human-woken session turn ends with no final text or only whitespace, having run tools
+- **THEN** no message — neither an answer nor a system notice — is written to the thread for that turn, and the conversation is not left blank because the turn's own transcript is shown
 
 #### Scenario: Every runtime behaves the same
 
@@ -336,3 +341,41 @@ A notice for a usage limit SHALL name the limit, SHALL give the reset instant wh
 
 - **WHEN** a session turn the daemon stopped on its own is resumed by a retry wake and that resumed turn finally fails
 - **THEN** exactly one notice is posted for the resumed turn, after whatever the stopped attempt itself posted
+
+### Requirement: A session's conversation shows each turn's transcript
+
+A persistent session's conversation surface SHALL render the conversation as the raw session, not as a list of delivered answers. For each turn it SHALL show, in order, the human message that woke it and then that turn's transcript: the assistant text as it was written, each tool call and its result, `edit`/`write` as diffs, file previews and command rows with their output, with the transcript renderer's syntax highlighting. The transcript SHALL render live while the turn runs and SHALL be unchanged after it ends. The surface SHALL scroll as one page and SHALL NOT nest a second scrolling region inside it.
+
+A turn's final text SHALL be shown exactly once: the transcript is where it appears, and the delivered copy of that final text SHALL NOT be rendered a second time as its own message. A runtime whose final text is not among the turn's recorded events SHALL still have that text shown as part of the turn, so an answer is never lost.
+
+A system notice SHALL still render as a notice, centred and attributed to the system, not as a message from either party.
+
+#### Scenario: Several turns, each with its transcript
+
+- **WHEN** a ticketless persistent session's conversation has had more than one human-woken turn
+- **THEN** the surface shows each human message followed by that turn's transcript, in the order they happened
+
+#### Scenario: A turn's tools, diff and file render between two messages
+
+- **WHEN** a session turn between two human messages called a tool, edited a file and wrote another
+- **THEN** the surface shows that turn's tool rows, the edit's diff, the written file's preview and any command output between the two human messages, syntax-highlighted
+
+#### Scenario: Live, then unchanged
+
+- **WHEN** a session's turn runs and then ends
+- **THEN** its transcript streams while the turn runs and reads the same after it ends, with no second scrolling region inside the conversation
+
+#### Scenario: The final text is shown once
+
+- **WHEN** a turn's final text is delivered to the thread
+- **THEN** the words appear once, in the turn's transcript, and not again as a separate message
+
+#### Scenario: An answer not in the recorded events is still shown
+
+- **WHEN** a finished turn's transcript carries no assistant text but the turn delivered a final answer to the thread
+- **THEN** that answer is shown as part of the turn, once
+
+#### Scenario: A failed turn still names its cause
+
+- **WHEN** a session turn ends failed, timed out or cancelled
+- **THEN** the conversation shows the turn's transcript and the system notice naming the plain reason

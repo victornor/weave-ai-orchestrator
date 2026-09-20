@@ -2325,19 +2325,18 @@ describe('run engine', () => {
       expect(page.at(-1)!.body).toBe('the answer');
     });
 
-    it.each([[null], ['  \n']] as const)('states a turn that produced no answer (%s) instead of leaving a blank thread', async (finalText) => {
+    it.each([[null], ['  \n']] as const)('posts nothing for a turn that produced no answer (%s) (VS-618)', async (finalText) => {
       seedSession();
       await h.services.threads!.inbound(HUMAN, threadId, 'are you there?');
       runtime.queue.push({ finalText, structured: undefined } as never);
       const run = await runOnce(sessionId);
 
       expect(run.status).toBe('succeeded');
-      const rows = outbound();
-      expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ authorKind: 'system', body: 'This turn ended without an answer.' });
+      // A turn that only ran tools, or ended after a tool result, is a normal, complete turn.
+      expect(outbound()).toHaveLength(0);
     });
 
-    it('treats a final text that is the structured run report as no answer', async () => {
+    it('posts nothing for a final text that is the structured run report (VS-618)', async () => {
       seedSession();
       await h.services.threads!.inbound(HUMAN, threadId, 'report please');
       runtime.queue.push({
@@ -2347,9 +2346,7 @@ describe('run engine', () => {
       const run = await runOnce(sessionId);
 
       expect(run.status).toBe('succeeded');
-      const rows = outbound();
-      expect(rows).toHaveLength(1);
-      expect(rows[0]).toMatchObject({ authorKind: 'system', body: 'This turn ended without an answer.' });
+      expect(outbound()).toHaveLength(0);
     });
 
     it('states the plain reason a failed turn could not answer, with no run ids', async () => {

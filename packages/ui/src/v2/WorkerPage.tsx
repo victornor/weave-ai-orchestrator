@@ -15,6 +15,7 @@ import {
   useHandoverCommand,
   useModels,
   usePostThreadMessage,
+  useRuns,
   useSetSessionOption,
   useStartHandover,
   useThreadMessages,
@@ -36,11 +37,10 @@ import { Tabs } from '../components/Tabs';
 import { draftKey, useDraft } from '../lib/drafts';
 import { cents, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
+import { sessionConversationRows } from '../lib/sessionConversation';
 import { V2Page } from './V2Page';
-import { WorkerFeed, useWorkerRun } from './WorkerFeed';
-import { LiveTurnSection } from './LiveTurnSection';
-import { useLiveRunSettle, type LiveChatRun } from './ChatConversation';
-import { useRunEventStream } from '../api/runStream';
+import { WorkerFeed } from './WorkerFeed';
+import { SessionTurn } from './SessionTurn';
 
 const TABS = [
   { key: 'transcript', label: 'Transcript' },
@@ -78,75 +78,57 @@ export function sessionAuthorLabel(
  * `ChatConversation`'s weaver/planner-only extras (see `PlanTab`), and a persistent session's
  * ticketless turns raise none of them.
  *
- * VS-602/VS-616: it does show the live turn — the streaming text, each tool call and result, and the
- * activity row — through the same `LiveTurnSection` the chats use, because a persistent session is a
- * direct conversation with that worker (captain, 2026-09-20). The turn is held on screen after it
- * finishes until the thread carries its answer, so the delivered message replaces it with nothing
- * duplicated.
+ * VS-618: it renders the raw session, not a list of delivered answers. The human's messages,
+ * system notices and relays are interleaved in time with each turn's own transcript (assistant
+ * text, tool calls, diffs, file previews, commands), live while a turn runs and unchanged after.
+ * The engine's delivered copy of a turn's final text is not rendered again — the transcript holds
+ * those words — so nothing is shown twice.
  */
-function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }: { threadId: string; label: string; sessionAgentId: string; roleName: string }): React.ReactElement {
+export function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }: { threadId: string; label: string; sessionAgentId: string; roleName: string }): React.ReactElement {
   const history = useThreadMessages(threadId);
-  // Follow the session agent's current run, and hold it once it finishes so the answer can replace
-  // it in the same render rather than leaving a frame of empty space.
-  const { run, live } = useWorkerRun(sessionAgentId);
-  const stream = useRunEventStream(run?.id ?? null, { live });
-  const [liveRun, setLiveRun] = useState<LiveChatRun | null>(null);
-  useEffect(() => {
-    if (!run) return;
-    setLiveRun((cur) => (cur && cur.id === run.id ? { ...cur, running: live } : { id: run.id, running: live, fromStart: false }));
-  }, [run, live]);
-  const threadRunIds = useMemo(
-    () => new Set((history.data ?? []).map((m) => m.runId).filter((id): id is string => Boolean(id))),
-    [history.data],
+  // The session's runs come from the same `useRuns` query `useWorkerRun` already makes, so this is a
+  // cache hit, not a second request. Bound them to the loaded conversation window so a long history
+  // does not mount a transcript per turn ever recorded.
+  const recent = useRuns({ limit: 200 });
+  const messages = history.data ?? [];
+  const oldest = messages[0]?.createdAt;
+  const runs = useMemo(
+    () => (oldest ? (recent.data ?? []).filter((r) => r.agentId === sessionAgentId && (r.startedAt ?? r.createdAt) >= oldest) : []),
+    [recent.data, sessionAgentId, oldest],
   );
-  // The same settle the weaver and planner chats use: clear once a message accounts for the run, or
-  // after the settle delay if none does (VS-616).
-  useLiveRunSettle(liveRun, setLiveRun, threadRunIds);
+  const { rows, answersByRun } = useMemo(
+    () => sessionConversationRows(messages, runs, sessionAgentId),
+    [messages, runs, sessionAgentId],
+  );
   if (history.isLoading) return <SkeletonRows rows={4} />;
   if (history.isError) return <ErrorState code="THREAD_UNREADABLE" message={history.error?.message ?? 'Could not load this conversation.'} />;
-  const body = !history.data?.length ? (
-    <p className="text-meta text-text-3">Nothing said yet — say something below.</p>
-  ) : (
+  if (!rows.length) return <p className="text-meta text-text-3">Nothing said yet — say something below.</p>;
+  return (
     <ol aria-label={label} className="flex flex-col gap-3">
-      {history.data.map((m) =>
-        m.authorKind === 'system' ? (
-          // VS-596: a system notice (e.g. a turn that ended without an answer) is a state, not a
-          // message from either party — centred and muted, never attributed to the session or the human.
-          <li key={m.id} className="flex flex-col items-center gap-1">
+      {rows.map((row) =>
+        row.kind === 'turn' ? (
+          <li key={row.key}>
+            <SessionTurn run={row.run} deliveredText={answersByRun.get(row.run.id) ?? null} />
+          </li>
+        ) : row.message.authorKind === 'system' ? (
+          // VS-596: a system notice (a real failure reason) is a state, not a message from either
+          // party — centred and muted, never attributed to the session or the human.
+          <li key={row.key} className="flex flex-col items-center gap-1">
             <div className="max-w-[85%] rounded-r6 border border-line-1 px-3 py-2 text-center text-meta text-text-3">
-              <Markdown source={m.body} />
+              <Markdown source={row.message.body} />
             </div>
-            <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(m, sessionAgentId, roleName)}</span>
+            <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(row.message, sessionAgentId, roleName)}</span>
           </li>
         ) : (
-          <li key={m.id} className={cx('flex flex-col gap-1', m.direction === 'outbound' ? 'items-start' : 'items-end')}>
-            <div className={cx('max-w-[85%] rounded-r6 px-3 py-2 text-meta', m.direction === 'outbound' ? 'bg-bg-2 text-text-1' : 'bg-accent-tint text-text-1')}>
-              <Markdown source={m.body} />
+          <li key={row.key} className={cx('flex flex-col gap-1', row.message.direction === 'outbound' ? 'items-start' : 'items-end')}>
+            <div className={cx('max-w-[85%] rounded-r6 px-3 py-2 text-meta', row.message.direction === 'outbound' ? 'bg-bg-2 text-text-1' : 'bg-accent-tint text-text-1')}>
+              <Markdown source={row.message.body} />
             </div>
-            <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(m, sessionAgentId, roleName)}</span>
+            <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(row.message, sessionAgentId, roleName)}</span>
           </li>
         ),
       )}
     </ol>
-  );
-  // The live turn renders below the delivered messages, where the next answer will land, and only
-  // while the thread has not yet accounted for its run — so the answer (or the run-id-carrying
-  // VS-596 system notice) replaces it in the same render, with no duplicated text.
-  const showLive = Boolean(liveRun && run && liveRun.id === run.id && !threadRunIds.has(run.id));
-  return (
-    <div className="flex flex-col gap-2">
-      {body}
-      {showLive && run ? (
-        <LiveTurnSection
-          events={stream.events}
-          partials={stream.partials}
-          lastPartialAt={stream.lastPartialAt}
-          partialSince={stream.partialSince}
-          runtimeId={run.runtimeId}
-          runId={run.id}
-        />
-      ) : null}
-    </div>
   );
 }
 

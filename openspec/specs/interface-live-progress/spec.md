@@ -52,7 +52,7 @@ The weaver chat and every planner chat SHALL render the live activity row — th
 
 ### Requirement: Role sessions show live progress
 
-A persistent role session's thread feed SHALL render the live turn the way the other conversation surfaces do: the streaming text and reasoning still being generated, each tool call and its result as they arrive, and the live activity row — all for the session agent's active run, so a ticketless session is never indistinguishable from an idle one. The live turn SHALL render below the conversation's delivered messages, where the turn's answer will land. When the turn's final message is delivered into the thread, the live turn section SHALL be replaced by that message with no duplicated text and no frame of empty space. When the turn ends without an answer, the thread's system notice SHALL replace the live turn section the same way. Streaming SHALL affect only the run view: partial output SHALL NOT create or edit a thread message. A session whose runtime declares no partial output SHALL still say so in words, as the live row does.
+A persistent role session's thread feed SHALL render the live turn the way the other conversation surfaces do: the streaming text and reasoning still being generated, each tool call and its result as they arrive, and the live activity row — all for the session agent's active run, so a ticketless session is never indistinguishable from an idle one. The live turn SHALL render below the conversation's delivered messages, where the turn's answer will land. When the turn ends, its transcript SHALL remain in the conversation as that turn's record, unchanged, with its final text appearing once. A turn that produced no final text SHALL NOT be announced with a system notice; a turn that failed, timed out or was cancelled SHALL still leave its real reason. Streaming SHALL affect only the run view: partial output SHALL NOT create or edit a thread message. A session whose runtime declares no partial output SHALL still say so in words, as the live row does.
 
 #### Scenario: A ticketless session works
 
@@ -62,12 +62,12 @@ A persistent role session's thread feed SHALL render the live turn the way the o
 #### Scenario: The answer replaces the live turn
 
 - **WHEN** the turn's final answer is delivered into the session's thread
-- **THEN** the live turn section is gone and the answer appears exactly once, with no duplicated text and no gap of empty space
+- **THEN** the streaming live turn section is replaced by the turn's finished transcript, with the answer's words shown exactly once and no gap of empty space
 
 #### Scenario: A turn that ends without an answer
 
-- **WHEN** the turn ends without an answer and its system notice lands in the thread
-- **THEN** the live turn section is replaced by that notice, the same way a delivered answer replaces it
+- **WHEN** the turn ends with no final text, having run tools
+- **THEN** no system notice is shown, and the turn's finished transcript remains as the record of it
 
 #### Scenario: A runtime that cannot stream
 

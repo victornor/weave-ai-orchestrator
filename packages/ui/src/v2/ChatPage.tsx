@@ -48,7 +48,7 @@ import { ChatMessage } from './ChatMessage';
 import { ChatComposer } from './ChatComposer';
 import { ChatConversation, useLiveRunSettle } from './ChatConversation';
 import type { ChatConversationHandle } from './ChatConversation';
-import { V2DispatchChip, V2WorkerChip } from './ChatChips';
+import { V2TicketStrip, V2WorkerChip } from './ChatChips';
 import { V2DecisionCard, type V2Answer } from './DecisionCard';
 import { useExitPresence } from './motion';
 import { SearchPanel } from './SearchPanel';
@@ -735,23 +735,16 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
     );
   }, [decisionsById, ticketsById, projectsById, showInlineDecisionCard, exitingDecisionIds, answer.isPending, agentNameById, onAnswer, ws]);
 
-  const renderAfterTrace = useCallback((entry: ChatEntry): React.ReactNode => {
-    if (!entry.dispatches.length) return null;
-    return (
-      <div className="flex flex-wrap gap-1.5" data-v2-dispatch-row>
-        {entry.dispatches.map((d) => (
-          <V2DispatchChip
-            key={d.ticket.id}
-            identifier={d.ticket.identifier}
-            name={d.worker?.name ?? d.ticket.title}
-            status={d.status}
-            projectColorVar={d.ticket.projectId ? projectColorVar(d.ticket.projectId, projectIds) : undefined}
-            onClick={() => (d.worker ? openWorker(d.worker.id) : openTicket(d.ticket.identifier))}
-          />
-        ))}
-      </div>
-    );
-  }, [projectIds, openWorker, openTicket]);
+  // VS-634: under every weaver message that references tickets, a live status strip — one chip per
+  // ticket (identifier, worker name or title, current status), opening the ticket through the same
+  // handler the message's inline identifiers use. `V2TicketStrip` renders nothing when there are
+  // none, so a message that references no ticket reserves no height.
+  const renderAfterTrace = useCallback(
+    (entry: ChatEntry): React.ReactNode => (
+      <V2TicketStrip references={entry.references} projectIds={projectIds} open={openTicket} />
+    ),
+    [projectIds, openTicket],
+  );
 
   const footer = unattributed.length ? (
     <div className="flex flex-wrap gap-1.5" data-v2-live-worker-row>

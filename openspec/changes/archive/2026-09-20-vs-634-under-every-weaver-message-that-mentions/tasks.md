@@ -1,0 +1,19 @@
+## 1. Ticket references in the view model
+
+- [x] 1.1 In `packages/ui/src/lib/ticketLinks.ts`, extract the fence/inline-code scan shared by `linkTicketIdentifiers` into one private walker and add `ticketIdentifiersIn(source): string[]` returning identifiers in body order, excluding code spans and fences. Extend `packages/ui/src/test/ticketLinks.test.ts` with a prose case, a code-span case, a fence case and a mixed line; verify `pnpm --filter @weave-ai/ui test -- ticketLinks`.
+- [x] 1.2 In `packages/ui/src/lib/dispatch.ts`, add `references: Dispatch[]` to `ChatEntry`: union of the message body's resolved identifiers (first-mention order, de-duplicated, unresolved skipped) and its anchored `dispatches` (deduplicated, dispatch order). Broaden the `anchored` set used for `unattributed` to every ticket a message chips, and set `references` to `[]` for inbound messages. Extend `packages/ui/src/test/dispatch.test.tsx` with: two mentions → two chips; the same ticket twice → one; an unresolved identifier → none; a mention plus its dispatch → one; dispatch-only → included; text order before dispatch-only; and a running worker whose ticket is mentioned is not in `unattributed`; verify `pnpm --filter @weave-ai/ui test -- dispatch`.
+
+## 2. The ticket-status strip
+
+- [x] 2.1 In `packages/ui/src/v2/ChatChips.tsx`, add `V2TicketStrip({ references, projectIds, onOpen })`: a wrapped row of the existing chip recipe (identifier, `worker?.name ?? ticket.title`, `dispatchStatus` glyph/status hue, project colour on the identifier), at most six chips plus a `+N more` chip that reveals the rest in place through local state; key each chip by `ticket.id`. Verify with `pnpm --filter @weave-ai/ui typecheck`.
+- [x] 2.2 Add `packages/ui/src/test/v2ticketstrip.test.tsx`: a seven-reference strip renders six chips and `+N more`, activating it renders all seven in place; clicking a chip calls the passed handler with the ticket identifier; a rerender with a moved status updates the existing chip (assert no remount, e.g. same node identity / one `StatusGlyph` per ticket); a strip with an empty `references` renders nothing. Verify `pnpm --filter @weave-ai/ui test -- v2ticketstrip`.
+
+## 3. Wire it into the chat
+
+- [x] 3.1 In `packages/ui/src/v2/ChatPage.tsx`, render `renderAfterTrace` as `V2TicketStrip` from `entry.references` with `onOpen={openTicket}` (the `useTicketLink` handler the message body already uses) and `projectIds`, removing the old dispatch row and its `openWorker` branch; keep `footer` for the narrowed `unattributed` row. Verify `pnpm --filter @weave-ai/ui test -- v2chat v2plantab`.
+- [x] 3.2 In `packages/ui/src/test/v2chat.test.tsx`, add: a weaver message that merely names two tickets renders two chips and a message that names none renders no strip; clicking a chip opens the ticket modal (desktop) and the identifier in its text does the same; a running worker whose ticket is chipped does not also render in the bottom row; and the planner chat (`v2plantab.test.tsx` or `v2chat.test.tsx`) renders no strip. Verify `pnpm --filter @weave-ai/ui test -- v2chat v2plantab`.
+
+## 4. Rendered evidence and full checks
+
+- [x] 4.1 Capture rendered evidence with a real browser against the built app (`pnpm --filter @weave-ai/ui build`): a weaver conversation with three messages (one filing a ticket, one merely mentioning two, one with none), chips under the first two, one chip reading "working", the modal open after a chip click — in both themes at desktop 1440 and at phone 390; state any spacing change against the current chat. Save captures outside `work/`, open each to confirm it shows what is intended, and attach each with `weave_ticket_attachment_put`; verify they appear on the ticket.
+- [x] 4.2 Run `pnpm lint`, `pnpm typecheck` and one full `pnpm test` with `VITEST_MAX_WORKERS=4`; verify green and paste both suite blocks verbatim in the report.

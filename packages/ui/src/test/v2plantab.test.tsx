@@ -144,6 +144,13 @@ describe('PlanTab (VS-556, from VS-398/VS-442)', () => {
     expect(state.posted[0]).toMatchObject({ threadId: 'th_plan', body: 'Start with the API', projectId: 'p1', files: [] });
   });
 
+  it('renders no ticket strip for a planner message that names a ticket (VS-634)', () => {
+    state.messages = [{ id: 'm1', threadId: 'th_plan', direction: 'outbound', authorKind: 'agent', authorId: 'planner_1', runId: null, body: 'I filed VS-9 for the follow-up.', replyToMessageIds: [], parts: [], createdAt: 't0' } as unknown as ThreadMessage];
+    const { container } = mount();
+    expect(container.textContent).toContain('VS-9');
+    expect(container.querySelector('[data-v2-ticket-strip]')).toBeNull();
+  });
+
   it('sends an attachment through to the plan thread', () => {
     mount();
     const file = new File(['notes'], 'notes.txt', { type: 'text/plain' });

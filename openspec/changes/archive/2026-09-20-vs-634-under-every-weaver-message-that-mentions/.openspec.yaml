@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: Under every weaver message that mentions tickets, show a live ticket
+  status strip that opens the ticket modal

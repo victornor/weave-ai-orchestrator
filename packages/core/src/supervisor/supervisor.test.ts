@@ -61,6 +61,26 @@ describe('supervisor', () => {
     expect(events[0]!.payload.action).toBe('boot_recovery');
   });
 
+  // VS-625: a restart puts an interrupted worker back to work, so a card that still says it is
+  // stopped is stale and must close before the re-queued turn is claimed.
+  it('closes a recovered worker\'s stale parking card on a daemon restart', async () => {
+    const decisions = createDecisionsService(h.ctx, h.deps);
+    h.services.decisions = decisions;
+    const ticketId = seedTicket(h);
+    const workerId = h.addWorker(ticketId, { status: 'running' });
+    const card = decisions.create({ kind: 'system', id: null }, { ticketId, kind: 'retry_approval', owner: 'human', title: 'failed', correlationKey: `retry:${workerId}`, target: { agentId: workerId, ticketId } });
+    h.db.insert('runs', {
+      id: newId(), workspaceId: h.workspaceId, agentId: workerId, ticketId, wakeupIdsJson: [], runtimeId: 'claude',
+      status: 'running', turnEpoch: 1, cwd: '/tmp/w', pid: 999_999, startedAt: nowIso(), createdAt: nowIso(),
+    });
+
+    await supervisor.tick();
+
+    expect(decisions.get(card.id).status).toBe('superseded');
+    expect(decisions.get(card.id).answerText).toMatch(/daemon restart/);
+    expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('active');
+  });
+
   it('spawns a worker for a ticket that needs one', async () => {
     const ticketId = seedTicket(h);
     await supervisor.tick();

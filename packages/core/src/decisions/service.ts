@@ -142,6 +142,52 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
   }
 
   /**
+   * VS-625: close one decision as `superseded` because the situation it described has been
+   * overtaken, recording `reason` — unlike `create()`'s correlation-key supersede, which has a
+   * replacement card to point at and no reason of its own. Refuses anything not `open`, so an
+   * answered card is never rewritten.
+   */
+  function supersede(actor: Actor, id: string, reason: string): Decision {
+    const d = get(id);
+    if (d.status !== 'open') throw new OcError('wrong_status', `decision ${id} is ${d.status}`);
+    return tx(db, () => {
+      db.update('decisions', d.id, { status: 'superseded' as DecisionStatus, answerText: reason });
+      const next = get(d.id);
+      recordActivity(db, ws, actor, 'decision.superseded', 'decision', d.id, { reason }, d.ticketId);
+      ctx.events.emit('decision.superseded', 'decision', d.id, next);
+      return next;
+    });
+  }
+
+  /** The supervisor's per-worker stall escalation lives under this correlation key. */
+  const stalledWorkerKey = (workerId: string): string => `stalled-worker:${workerId}`;
+
+  /**
+   * VS-625: every open card that says this worker is stopped — its parking `retry_approval` and the
+   * supervisor's stalled-worker `gate_finding` — closed because the worker has been put back to
+   * work. Matched on the worker the card names, never on the ticket, so nothing about another agent
+   * is touched; a card the human has already answered is not open and so is never rewritten.
+   */
+  function supersedeWorkerStopCards(actor: Actor, workerId: string, reason: string): number {
+    const rows = db
+      .all<Record<string, unknown>>("SELECT * FROM decisions WHERE workspace_id = ? AND status = 'open'", [ws])
+      .map(asDecision);
+    let closed = 0;
+    for (const d of rows) {
+      const parking = d.kind === 'retry_approval' && (d.target as { agentId?: string } | null)?.agentId === workerId;
+      const stalled = d.kind === 'gate_finding' && d.correlationKey === stalledWorkerKey(workerId);
+      if (!parking && !stalled) continue;
+      try {
+        supersede(actor, d.id, reason);
+        closed += 1;
+      } catch (e) {
+        log.warn({ err: String(e), decisionId: d.id, workerId }, 'could not close a worker stop card');
+      }
+    }
+    return closed;
+  }
+
+  /**
    * Which project a decision belongs to, resolved once here rather than derived on every read
    * (VS-92): the ticket's project wins and is not overridable — a card naming a project other than
    * its ticket's would be a lie — then the project the asker named, then the asker's own. Null is
@@ -388,6 +434,22 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
   async function applyRetryApproval(actor: Actor, d: Decision, key: string): Promise<void> {
     const target = (d.target ?? {}) as { agentId?: string; ticketId?: string | null; resetAt?: string | null };
     if (!target.agentId) return;
+    // VS-625: the resume that cancels this card out normally closes it first, but an answer can
+    // still be in flight when the worker goes back to work. A card describing a worker that is no
+    // longer stopped acts on nothing: no second turn, no booked retry, no model switch. The answer
+    // is already recorded, so say on the ticket why nothing happened rather than discard it.
+    const current = db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [target.agentId]);
+    if (current && current.status !== 'paused') {
+      recordActivity(db, ws, actor, 'decision.retry_stale', 'decision', d.id, { key, agentStatus: current.status }, d.ticketId);
+      if (d.ticketId) {
+        try {
+          deps().tickets.comment({ kind: 'system', id: null }, d.ticketId,
+            `The retry card was answered after the worker had already resumed; nothing was started (the worker is ${current.status}).`,
+            'status', 'trusted');
+        } catch { /* the ticket record is best effort; the activity above already holds it */ }
+      }
+      return;
+    }
     if (key === 'cancel') {
       if (target.ticketId) deps().tickets.cancel(actor, target.ticketId, 'cancelled from the retry decision');
       else await deps().workers.cancel(actor, target.agentId, 'cancelled from the retry decision');
@@ -775,6 +837,10 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     supersedeForTarget(actor, ticketId, correlationKey) {
       return tx(db, () => supersedeOpen(actor, ticketId, correlationKey));
     },
+
+    supersede,
+
+    supersedeWorkerStopCards,
 
     withdrawForTicket(actor, ticketId, reason) {
       return tx(db, () => withdrawOpenForTicket(actor, ticketId, reason));

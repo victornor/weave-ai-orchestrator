@@ -1685,6 +1685,27 @@ describe('run engine', () => {
         .toMatchObject({ pauseReason: null, pauseDetail: null });
     });
 
+    // VS-625: a resume closes the old card, so a later failure is a fresh card rather than a
+    // supersession of one that is still open. The engine raises it exactly as it always has.
+    it('raises a fresh card when the worker fails again after a resume closed the old one', async () => {
+      const { ticketId, workerId } = await failOnce({ error: { code: 'boom', family: 'unknown', message: 'the CLI died' } });
+      const first = openFor(ticketId).find((d) => d.kind === 'retry_approval')!;
+
+      // What a resume does: close the stop cards. Then the worker runs and fails again.
+      h.services.decisions!.supersedeWorkerStopCards({ kind: 'system', id: null }, workerId, 'the worker was resumed by the human');
+      expect(h.services.decisions!.get(first.id).status).toBe('superseded');
+
+      h.db.update('agents', workerId, { status: 'active' });
+      runtime.queue.push(resultFor(workerId, { error: { code: 'boom', family: 'unknown', message: 'the CLI died again' } } as never));
+      h.services.wake!.enqueue(workerId, { source: 'retry', reason: 'back on it' });
+      await runOnce(workerId);
+      await tick();
+
+      const open = openFor(ticketId).filter((d) => d.kind === 'retry_approval');
+      expect(open).toHaveLength(1);
+      expect(open[0]!.id).not.toBe(first.id);
+    });
+
     // VS-118: parking used to lose the ticket's real status because resuming picked `in_progress` vs
     // `todo` from `ticket.executionRunId`, which this very `finalize()` already nulls a few lines
     // above the `parkForHuman` call below — so it was always `todo`, and a `change` ticket that was

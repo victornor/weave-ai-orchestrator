@@ -206,6 +206,11 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       ctx.db.update('runs', run.id, { status: 'interrupted', finishedAt: nowIso(), errorCode: 'interrupted', errorFamily: 'tooling' });
       ctx.db.run("UPDATE wakeups SET status = 'failed', finished_at = ? WHERE run_id = ? AND status IN ('claimed','queued')", [nowIso(), run.id]);
       ctx.db.update('agents', run.agentId, { status: 'active', updatedAt: nowIso() });
+      // VS-625: the restart has put this worker back to work; a card that still says it is stopped
+      // is stale, so close it before the re-queued turn is claimed. Best effort: recovery stands.
+      try {
+        deps().decisions.supersedeWorkerStopCards({ kind: 'system', id: null }, run.agentId, `the worker was resumed after a daemon restart at ${nowIso()}`);
+      } catch (e) { log.warn({ runId: run.id, agentId: run.agentId, err: String(e) }, 'closing a recovered worker\'s stop cards failed'); }
       supervisorEvent(run.id, 'boot_recovery', { previousStatus: 'running' });
       try {
         deps().wake.enqueue(run.agentId, { source: 'retry', reason: 'previous turn was interrupted', payload: { retryOfRunId: run.id, interrupted: true }, idempotencyKey: `boot-retry:${run.id}`, requestedBy: { kind: 'system', id: null } });

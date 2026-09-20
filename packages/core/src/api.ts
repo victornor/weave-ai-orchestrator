@@ -247,6 +247,20 @@ export interface DecisionsService {
    */
   sweepTerminalTickets(actor: Actor, olderThanMs: number): number;
   supersedeForTarget(actor: Actor, ticketId: string, correlationKey: string): number;
+  /**
+   * VS-625: close an open decision as `superseded` because the situation it described has been
+   * overtaken — the worker it named has been put back to work — recording `reason` so the record
+   * says what closed it. Distinct from `supersedeForTarget`, which the correlation-key path uses
+   * when a replacement card is about to be raised and which keeps no reason of its own. Refuses a
+   * decision that is not open, so an answered card is never rewritten.
+   */
+  supersede(actor: Actor, id: string, reason: string): S.Decision;
+  /**
+   * VS-625: close every open decision that describes `workerId` being stopped — its parking
+   * `retry_approval` and the supervisor's `stalled-worker:<workerId>` escalation — because
+   * something other than an answer has put it back to work. Returns the count closed.
+   */
+  supersedeWorkerStopCards(actor: Actor, workerId: string, reason: string): number;
   expireDue(): Promise<S.Decision[]>;
 }
 

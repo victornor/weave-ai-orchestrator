@@ -7,6 +7,7 @@ import type { WorktreeProvider } from '@weave-ai/plugin-sdk';
 import type { Agent, Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createWorkersService, ticketBranch, branchSlug } from './index.js';
+import { createDecisionsService } from '../decisions/service.js';
 import { createRolesService } from '../roles/index.js';
 import { createPlanningService } from '../planning/index.js';
 import { createThreadsService } from '../threads/service.js';
@@ -536,6 +537,58 @@ describe('workers', () => {
       workers.resume(HUMAN, worker.id);
 
       expect(h.services.tickets!.transition).toHaveBeenCalledWith(HUMAN, ticket.id, expect.objectContaining({ to: 'in_progress' }));
+    });
+
+    // VS-625: the worker going back to work makes the card raised for its stop stale, so it must be
+    // closed before the turn is claimed — otherwise a late answer could start a second turn.
+    it('closes the worker\'s open retry card when it is resumed', async () => {
+      const { ticket, worker } = await parked();
+      const decisions = createDecisionsService(h.ctx, h.deps);
+      h.services.decisions = decisions;
+      const card = decisions.create(SYSTEM, { ticketId: ticket.id, kind: 'retry_approval', owner: 'human', title: 'failed', correlationKey: `retry:${worker.id}`, target: { agentId: worker.id, ticketId: ticket.id } });
+
+      workers.resume(HUMAN, worker.id);
+
+      expect(decisions.get(card.id)).toMatchObject({ status: 'superseded' });
+      expect(decisions.get(card.id).answerText).toMatch(/resumed by the human/);
+      expect(decisions.list({ status: ['open'], ticketId: ticket.id })).toHaveLength(0);
+    });
+
+    it('closes the worker\'s stalled-worker finding when it is resumed', async () => {
+      const { ticket, worker } = await parked();
+      const decisions = createDecisionsService(h.ctx, h.deps);
+      h.services.decisions = decisions;
+      const finding = decisions.create(SYSTEM, { ticketId: ticket.id, kind: 'gate_finding', owner: 'weaver', title: 'stalled', correlationKey: `stalled-worker:${worker.id}` });
+
+      workers.resume(HUMAN, worker.id);
+
+      expect(decisions.get(finding.id).status).toBe('superseded');
+    });
+
+    it('closes the retry card when the conductor relaunches a parked worker', async () => {
+      const { ticket, worker } = await parked();
+      const decisions = createDecisionsService(h.ctx, h.deps);
+      h.services.decisions = decisions;
+      const card = decisions.create(SYSTEM, { ticketId: ticket.id, kind: 'retry_approval', owner: 'human', title: 'failed', correlationKey: `retry:${worker.id}`, target: { agentId: worker.id, ticketId: ticket.id } });
+
+      await workers.relaunch(CONDUCTOR, worker.id, 'you look stuck');
+
+      expect(decisions.get(card.id).status).toBe('superseded');
+      expect(decisions.get(card.id).answerText).toMatch(/resumed by the weaver/);
+    });
+
+    it('raises a fresh retry card when the worker fails again after a resume', async () => {
+      const { ticket, worker } = await parked();
+      const decisions = createDecisionsService(h.ctx, h.deps);
+      h.services.decisions = decisions;
+      const first = decisions.create(SYSTEM, { ticketId: ticket.id, kind: 'retry_approval', owner: 'human', title: 'failed', correlationKey: `retry:${worker.id}`, target: { agentId: worker.id, ticketId: ticket.id } });
+
+      workers.resume(HUMAN, worker.id);
+      expect(decisions.get(first.id).status).toBe('superseded');
+      // A later failure raises the card again under the same key; nothing is left to supersede.
+      const second = decisions.create(SYSTEM, { ticketId: ticket.id, kind: 'retry_approval', owner: 'human', title: 'failed again', correlationKey: `retry:${worker.id}`, target: { agentId: worker.id, ticketId: ticket.id } });
+      expect(decisions.get(second.id).status).toBe('open');
+      expect(decisions.list({ status: ['open'], ticketId: ticket.id })).toHaveLength(1);
     });
 
     it('queues nothing for a worker that was not paused', async () => {

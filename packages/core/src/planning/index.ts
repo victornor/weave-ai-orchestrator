@@ -5,7 +5,7 @@
  * See `openspec/changes/vs-398-captain-can-t-plan-a-large-feature-inter`.
  */
 import { newId, nowIso } from '@weave-ai/db';
-import { OcError, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, PLAN_TITLE_MAX_WORDS, TICKET_PRIORITIES, type Plan, type PlanDraft, type PlanDraftKind, type PlanDraftTier, type PlanOrigin, type PlanStatus, type PlanSummary, type PlanTitleSource, type TicketPriority } from '@weave-ai/shared';
+import { OcError, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, PLAN_DRAFT_SUMMARY_MAX, PLAN_TITLE_MAX_WORDS, TICKET_PRIORITIES, type Plan, type PlanDraft, type PlanDraftKind, type PlanDraftTier, type PlanOrigin, type PlanStatus, type PlanSummary, type PlanTitleSource, type TicketPriority } from '@weave-ai/shared';
 import type { Actor, CoreServices, PlanDraftInput, PlanDraftPatch, PlanningService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { tx } from '../tickets/tx.js';
@@ -82,6 +82,21 @@ export function createPlanningService(ctx: WorkspaceContext, deps: () => CoreSer
   const requireTitle = (title: string): string => {
     const trimmed = title.trim();
     if (!trimmed) throw new OcError('validation', 'title is required');
+    return trimmed;
+  };
+
+  /**
+   * VS-622: a draft's optional short summary shown on its collapsed card. Trimmed; blank clears it to
+   * null (the card then falls back to the description's first sentence). Over the cap is refused, not
+   * truncated, so a card never silently loses meaning.
+   */
+  const requireSummary = (summary: string | null | undefined): string | null => {
+    if (summary === undefined || summary === null) return null;
+    const trimmed = summary.trim();
+    if (!trimmed) return null;
+    if (trimmed.length > PLAN_DRAFT_SUMMARY_MAX) {
+      throw new OcError('validation', `summary is ${trimmed.length} characters, over the ${PLAN_DRAFT_SUMMARY_MAX}-character cap`, { max: PLAN_DRAFT_SUMMARY_MAX, actual: trimmed.length });
+    }
     return trimmed;
   };
 
@@ -278,7 +293,7 @@ export function createPlanningService(ctx: WorkspaceContext, deps: () => CoreSer
       const id = newId();
       tx(db, () => {
         db.insert('plan_drafts', {
-          id, planId, position: nextPosition(planId), title, description: input.description ?? '',
+          id, planId, position: nextPosition(planId), title, summary: requireSummary(input.summary), description: input.description ?? '',
           kind: input.kind, priority, targetRoleId, suggestedTier: input.suggestedTier,
           tierOverride: input.tierOverride ?? null, status: 'pending', createdAt: now, updatedAt: now,
         });
@@ -295,6 +310,7 @@ export function createPlanningService(ctx: WorkspaceContext, deps: () => CoreSer
       requireDrafting(plan);
       const fields: Record<string, unknown> = {};
       if (patch.title !== undefined) fields.title = requireTitle(patch.title);
+      if (patch.summary !== undefined) fields.summary = requireSummary(patch.summary);
       if (patch.description !== undefined) fields.description = patch.description;
       if (patch.kind !== undefined) {
         if (!isDraftKind(patch.kind)) throw new OcError('validation', `kind must be ${PLAN_DRAFT_KINDS.join('|')}`);

@@ -54,6 +54,26 @@ describe('threads', () => {
     expect(h.db.get('SELECT id FROM channels WHERE workspace_id = ? AND kind = ?', [h.workspaceId, 'web'])).toBeTruthy();
   });
 
+  it('setMessageParts replaces a message\'s plan-artifact card only, never its text (VS-622)', async () => {
+    const t = threads.createOwned('ag_planner');
+    const card = (revision: number) => ({
+      type: 'card', title: 'Ticket graph', body: `revision ${revision}`,
+      actions: [{ key: 'open', label: 'Open artifact' }],
+      ref: { kind: 'plan-artifact', planId: 'plan_1', key: 'graph', revision },
+    });
+    const msg = await threads.outbound({ kind: 'agent', id: 'ag_planner' }, t.id, 'Artifact: graph', { parts: [card(1)] });
+
+    expect(threads.setMessageParts(msg.id, [card(2)])).toBe(true);
+    const after = threads.messages(t.id).find((m) => m.id === msg.id)!;
+    expect(after.body).toBe('Artifact: graph');
+    expect(after.parts).toEqual([card(2)]);
+
+    // Anything but a plan-artifact card is refused, so this can never rewrite a human message.
+    expect(() => threads.setMessageParts(msg.id, [{ type: 'text', text: 'overwrite' }])).toThrowError(/plan-artifact card/);
+    expect(() => threads.setMessageParts(msg.id, [])).toThrowError(/plan-artifact card/);
+    expect(() => threads.setMessageParts('no-such-message', [card(3)])).toThrowError(/not found/);
+  });
+
   it('list() excludes a planner-owned thread even when it is the most recently active one, and keeps it primary-first otherwise (VS-398 merge review)', async () => {
     h.db.insert('agents', {
       id: 'agent-planner-1', workspaceId: h.workspaceId, kind: 'planner', name: 'Planner', runtimeId: 'claude',

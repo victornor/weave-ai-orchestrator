@@ -109,7 +109,7 @@ const PROJECTS = [project({ id: 'p1', slug: 'api', name: 'API' }), project({ id:
 type TestDraft = PlanDraft & { blockedBy: string[]; ticketStatus?: string; report?: string | null };
 function draft(over: Partial<TestDraft> = {}): TestDraft {
   return {
-    id: 'd1', planId: 'plan_1', position: 0, title: 'Add token plumbing', description: '', kind: 'change',
+    id: 'd1', planId: 'plan_1', position: 0, title: 'Add token plumbing', summary: null, description: '', kind: 'change',
     priority: 'medium', targetRoleId: null, suggestedTier: 'standard', tierOverride: null, status: 'pending',
     createdTicketId: null, failureReason: null, createdAt: 't0', updatedAt: 't0', blockedBy: [], ...over,
   };
@@ -176,6 +176,7 @@ describe('PlanTab (VS-556, from VS-398/VS-442)', () => {
     expect(screen.getByText('B')).toBeInTheDocument();
     expect(screen.getByText('Depends on 1 draft')).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Expand A' }));
     fireEvent.click(screen.getAllByRole('button', { name: 'deep' })[0]!);
     expect(state.patched).toEqual([{ projectId: 'p1', planId: 'plan_1', draftId: 'a', patch: { tierOverride: 'deep' } }]);
   });
@@ -183,8 +184,63 @@ describe('PlanTab (VS-556, from VS-398/VS-442)', () => {
   it('clearing an override by re-selecting the suggested tier sends null', () => {
     state.drafts = [draft({ id: 'a', title: 'A', suggestedTier: 'standard', tierOverride: 'deep' })];
     mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand A' }));
     fireEvent.click(screen.getAllByRole('button', { name: 'standard' })[0]!);
     expect(state.patched).toEqual([{ projectId: 'p1', planId: 'plan_1', draftId: 'a', patch: { tierOverride: null } }]);
+  });
+
+  it('collapses every draft card by default and expands one on demand, showing the draft count (VS-622)', () => {
+    state.drafts = [
+      draft({ id: 'a', title: 'A', summary: 'A summary', description: 'A full description.' }),
+      draft({ id: 'b', title: 'B', summary: 'B summary', description: 'B full description.' }),
+    ];
+    mount();
+    expect(screen.getByText('2 drafts')).toBeInTheDocument();
+    // Collapsed: title and short summary only, no full description.
+    expect(screen.getByText('A summary')).toBeInTheDocument();
+    expect(screen.queryByText('A full description.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Expand A' })).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand A' }));
+    expect(screen.getByText('A full description.')).toBeInTheDocument();
+    // B stays collapsed.
+    expect(screen.queryByText('B full description.')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Collapse A' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('falls back to the description’s first sentence when a draft has no summary (VS-622)', () => {
+    state.drafts = [draft({ id: 'a', title: 'A', summary: null, description: 'First sentence. Second sentence.' })];
+    mount();
+    expect(screen.getByText('First sentence.')).toBeInTheDocument();
+    expect(screen.queryByText('First sentence. Second sentence.')).not.toBeInTheDocument();
+  });
+
+  it('expands and collapses all draft cards at once (VS-622)', () => {
+    state.drafts = [
+      draft({ id: 'a', title: 'A', description: 'A full description. More detail.' }),
+      draft({ id: 'b', title: 'B', description: 'B full description. More detail.' }),
+    ];
+    mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
+    expect(screen.getByText('A full description. More detail.')).toBeInTheDocument();
+    expect(screen.getByText('B full description. More detail.')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse all' }));
+    expect(screen.queryByText('A full description. More detail.')).not.toBeInTheDocument();
+    expect(screen.queryByText('B full description. More detail.')).not.toBeInTheDocument();
+  });
+
+  it('keeps a card’s expanded state when the plan refreshes under it (VS-622)', () => {
+    state.drafts = [draft({ id: 'a', title: 'A', description: 'A full description. More detail.' })];
+    const { rerender } = mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand A' }));
+    expect(screen.getByText('A full description. More detail.')).toBeInTheDocument();
+
+    // The planner edits the draft — a fresh plan payload arrives, same draft id.
+    state.drafts = [draft({ id: 'a', title: 'A (edited)', description: 'A full description. More detail.' })];
+    rerender(<PlanTab ws="ws1" projectId="p1" planId="plan_1" projects={PROJECTS} focused plannerRuntimeId="claude" onSubmitted={state.onSubmitted} />);
+    expect(screen.getByText('A (edited)')).toBeInTheDocument();
+    expect(screen.getByText('A full description. More detail.')).toBeInTheDocument();
   });
 
   it('reorders with the up/down controls, disabled at the ends', () => {
@@ -265,13 +321,14 @@ describe('PlanTab (VS-556, from VS-398/VS-442)', () => {
     expect(state.onSubmitted).toHaveBeenCalledWith('plan_1');
   });
 
-  it('edits a draft’s title, description, kind, priority and target role inline', () => {
+  it('edits a draft’s title, summary, description, kind, priority and target role inline', () => {
     state.drafts = [draft({ id: 'a', title: 'A', description: 'Old body', kind: 'change', priority: 'medium', targetRoleId: null })];
     state.roles = [role({ id: 'r1', name: 'Platform Engineer' })];
     mount();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit A' }));
     fireEvent.change(screen.getByLabelText('Title of A'), { target: { value: 'A, revised' } });
+    fireEvent.change(screen.getByLabelText('Summary of A'), { target: { value: 'Short note' } });
     fireEvent.change(screen.getByLabelText('Description of A'), { target: { value: 'New body' } });
     fireEvent.change(screen.getByLabelText('Kind of A'), { target: { value: 'task' } });
     fireEvent.change(screen.getByLabelText('Priority of A'), { target: { value: 'high' } });
@@ -280,7 +337,7 @@ describe('PlanTab (VS-556, from VS-398/VS-442)', () => {
 
     expect(state.patched).toEqual([{
       projectId: 'p1', planId: 'plan_1', draftId: 'a',
-      patch: { title: 'A, revised', description: 'New body', kind: 'task', priority: 'high', targetRoleId: 'r1' },
+      patch: { title: 'A, revised', summary: 'Short note', description: 'New body', kind: 'task', priority: 'high', targetRoleId: 'r1' },
     }]);
     expect(screen.queryByLabelText('Title of A')).not.toBeInTheDocument();
   });
@@ -335,6 +392,22 @@ describe('PlanTab (VS-556, from VS-398/VS-442)', () => {
     expect(screen.getByRole('heading', { name: 'Approach' })).toBeInTheDocument();
     expect(screen.getAllByRole('listitem').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('pnpm test').tagName).toBe('CODE');
+  });
+
+  it('renders a planner-published plan artifact as a card that opens the sandboxed reader (VS-622)', () => {
+    state.messages = [{
+      id: 'm1', threadId: 'th_plan', direction: 'outbound', authorKind: 'agent', authorId: 'planner_1',
+      body: 'Artifact: graph', replyToMessageIds: [], createdAt: 't0',
+      parts: [{
+        type: 'card', title: 'Ticket graph', body: 'Plan artifact · diagram · revision 1',
+        actions: [{ key: 'open', label: 'Open artifact', style: 'primary' }],
+        ref: { kind: 'plan-artifact', planId: 'plan_1', key: 'graph', revision: 1 },
+      }],
+    } as unknown as ThreadMessage];
+    mount();
+    expect(screen.getByText('Ticket graph')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open artifact' }));
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/plans/$planId/artifacts/$key', { params: { ws: 'ws1', planId: 'plan_1', key: 'graph' } });
   });
 
   it('summarises a finished planner turn as “Planner did …” with tools, tokens and session (VS-442)', () => {

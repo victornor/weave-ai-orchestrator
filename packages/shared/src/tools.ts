@@ -49,6 +49,8 @@ export const PLANNER_TOOLS = [
   'weave_spec_list', 'weave_spec_get', 'weave_spec_search', 'weave_spec_change_get', 'weave_openspec_status',
   'weave_knowledge_docs', 'weave_knowledge_doc_get', 'weave_knowledge_get', 'weave_knowledge_search', 'weave_knowledge_semantic_search',
   'weave_role_list', 'weave_role_get',
+  /** VS-622: the artifact kit (scope `all`) and the plan-scoped publishing tool, so the planner can build and publish a compliant artifact for its own plan. Publishing is plan storage, never a repository or ticket write. */
+  'weave_artifact_kit', 'weave_plan_artifact_put',
   'weave_plan_get', 'weave_plan_draft_add', 'weave_plan_draft_update', 'weave_plan_draft_remove', 'weave_plan_draft_reorder',
   /** VS-517: the one, narrow exception to "the planner can never create a real ticket" — a scout draft in its own drafting plan, dispatched before submission. Captain has the same action from the Plan modal (POST .../drafts/:draftId/dispatch); both call the same core `dispatchDraft`. */
   'weave_plan_draft_dispatch',

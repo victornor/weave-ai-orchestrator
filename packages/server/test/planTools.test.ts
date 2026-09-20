@@ -64,8 +64,25 @@ describe('the weave_plan_* tools (VS-398)', () => {
     expect(after.drafts.map((d) => d.title)).toEqual(['Second']);
   });
 
-  it('refuses a planner acting on a plan other than its own', async () => {
+  it('stores an optional short draft summary and clears or refuses it through the same tools (VS-622)', async () => {
     const h = makeHarness(); harness = h; seed(h);
+    const plan = startPlan(h);
+    const claims = planner(plan.id);
+
+    const added = dataOf<PlanDraft>(await call(h, 'weave_plan_draft_add', { title: 'A', kind: 'change', suggestedTier: 'standard', summary: '  Token plumbing first.  ', description: 'Full text. More detail.' }, claims));
+    expect(added.summary).toBe('Token plumbing first.');
+    expect(added.description).toBe('Full text. More detail.');
+
+    const cleared = dataOf<PlanDraft>(await call(h, 'weave_plan_draft_update', { draftId: added.id, summary: '' }, claims));
+    expect(cleared.summary).toBeNull();
+    expect(cleared.description).toBe('Full text. More detail.');
+
+    const over = await call(h, 'weave_plan_draft_update', { draftId: added.id, summary: 'x'.repeat(241) }, claims);
+    expect(over.ok).toBe(false);
+    expect(h.runtime.services.planning.getDraft(added.id).summary).toBeNull();
+  });
+
+  it('refuses a planner acting on a plan other than its own', async () => {    const h = makeHarness(); harness = h; seed(h);
     const mine = startPlan(h, 'proj1');
     h.db.run("INSERT INTO channel_threads (id, channel_id, agent_id, created_at) VALUES ('th2','c1','ag_planner2','t0')");
     const theirs = h.runtime.services.planning.create({ kind: 'human', id: 'victor' }, 'proj2', { threadId: 'th2' });
@@ -149,6 +166,7 @@ describe('the weave_plan_* tools (VS-398)', () => {
       ['weave_plan_draft_update', { draftId: draft.id, title: 'x' }],
       ['weave_plan_draft_remove', { draftId: draft.id }],
       ['weave_plan_draft_reorder', { draftId: draft.id, position: 0 }],
+      ['weave_plan_artifact_put', { key: 'x', html: '<html></html>' }],
     ] as const) {
       const res = await call(h, name, input, WEAVER);
       expect(res.ok).toBe(false);
@@ -230,6 +248,7 @@ describe('the weave_plan_* tools (VS-398)', () => {
       ['weave_plan_draft_add', { title: 'x', kind: 'change', suggestedTier: 'standard' }],
       ['weave_plan_set_title', { title: 'x' }],
       ['weave_plan_draft_link', { draftId: 'd1', ticketId: 't1' }],
+      ['weave_plan_artifact_put', { key: 'x', html: '<html></html>' }],
     ] as const) {
       const res = await call(h, name, input, WORKER);
       expect(res.ok).toBe(false);

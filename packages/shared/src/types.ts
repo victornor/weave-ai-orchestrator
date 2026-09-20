@@ -599,6 +599,8 @@ export interface PlanDraft {
   planId: string;
   position: number;
   title: string;
+  /** VS-622: an optional short summary shown on the collapsed card, distinct from the full `description`; null falls back to the description's first sentence at render time. */
+  summary: string | null;
   description: string;
   kind: E.PlanDraftKind;
   priority: E.TicketPriority;

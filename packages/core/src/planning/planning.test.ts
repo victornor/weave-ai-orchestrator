@@ -117,6 +117,20 @@ describe('planning (VS-398)', () => {
     expect(planning.getDrafting(OTHER_PROJECT)?.id).toBe(theirs.id);
   });
 
+  it('stores an optional short summary, clears it, and refuses one over the cap (VS-622)', () => {
+    const plan = startPlan();
+    const draft = addDraft(plan.id, { title: 'A', summary: '  Token plumbing first.  ', description: 'First sentence. Second sentence.' });
+    expect(draft.summary).toBe('Token plumbing first.');
+    expect(draft.description).toBe('First sentence. Second sentence.');
+
+    const cleared = planning.updateDraft(HUMAN, draft.id, { summary: '   ' });
+    expect(cleared.summary).toBeNull();
+    expect(cleared.description).toBe('First sentence. Second sentence.');
+
+    expect(() => planning.updateDraft(HUMAN, draft.id, { summary: 'x'.repeat(241) })).toThrow(/cap/);
+    expect(planning.getDraft(draft.id).summary).toBeNull();
+  });
+
   it('adds a draft with defaults and appends it to the plan order', () => {
     const plan = startPlan();
     const a = addDraft(plan.id, { title: 'A' });

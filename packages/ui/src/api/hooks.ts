@@ -357,6 +357,8 @@ export function useRemoveRoadmapItem(): UseMutationResult<unknown, Error, { proj
 
 export interface PlanDraftPatchBody {
   title?: string;
+  /** VS-622: set the collapsed card's short summary; null or blank clears it back to the description fallback. */
+  summary?: string | null;
   description?: string;
   kind?: PlanDraft['kind'];
   priority?: PlanDraft['priority'];
@@ -434,6 +436,26 @@ export function usePlanOrigins(): UseQueryResult<Map<string, PlanOrigin>> {
   return useQuery({
     queryKey: qk.planOrigins(ws),
     queryFn: () => api.ws<{ origins: PlanOrigin[] }>(ws, '/plan-origins').then((r) => new Map(r.origins.map((o) => [o.ticketId, o]))),
+  });
+}
+
+/** VS-622: a plan's own published artifacts — the source the `/w/:ws/plans/:planId/artifacts/:key` reader resolves a key against. */
+export function usePlanArtifacts(planId: string | null | undefined): UseQueryResult<T.PlanArtifactSummary[]> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.planArtifacts(ws, planId ?? ''),
+    queryFn: () => api.ws<unknown>(ws, `/plans/${planId}/artifacts`).then((r) => listOf<T.PlanArtifactSummary>(r)),
+    enabled: Boolean(planId),
+  });
+}
+
+export function usePlanArtifactRevisions(planId: string | null | undefined, key: string): UseQueryResult<T.DocumentRevision[]> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.planArtifactRevisions(ws, planId ?? '', key),
+    queryFn: () => api.ws<Array<{ revision: number; authorKind: string; createdAt: string }>>(ws, `/plans/${planId}/artifacts/${key}/revisions`)
+      .then((rows) => rows.map((r) => ({ ...r, reason: null }))),
+    enabled: Boolean(planId) && Boolean(key),
   });
 }
 

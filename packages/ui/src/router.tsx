@@ -143,6 +143,8 @@ const v2ChangesRoute = createRoute({
 const v2TicketRoute = v2WsRouteFor('tickets/$ticketId', 'V2TicketPage');
 const v2TicketArtifactRoute = v2WsRouteFor('tickets/$ticketId/artifacts/$key', 'V2TicketArtifactReader');
 const v2ArtifactRoute = v2WsRouteFor('artifacts/$key', 'V2ArtifactPage');
+// VS-622: a planner-published plan artifact, opened from its card in the plan conversation.
+const v2PlanArtifactRoute = v2WsRouteFor('plans/$planId/artifacts/$key', 'V2PlanArtifactReader');
 const v2WorkerRoute = v2WsRouteFor('workers/$workerId', 'V2WorkerPage');
 const v2PluginPageRoute = v2WsRouteFor('plugins/$pluginId', 'V2PluginPage');
 
@@ -269,6 +271,7 @@ const routeTree = rootRoute.addChildren([
         v2TicketRoute,
         v2TicketArtifactRoute,
         v2ArtifactRoute,
+        v2PlanArtifactRoute,
         v2WorkerRoute,
         v2PluginPageRoute,
       ]),

@@ -137,6 +137,14 @@ export const PLAN_TITLE_MAX_WORDS = 6;
 export const PLAN_DRAFT_KINDS = ['change', 'task', 'scout', 'operational'] as const;
 export type PlanDraftKind = (typeof PLAN_DRAFT_KINDS)[number];
 
+/**
+ * VS-622: a draft's optional short summary, shown on its collapsed Plan-tab card. A sentence or two;
+ * ~200 characters is the intent, with a little headroom before the hard cap. Beyond it the summary is
+ * refused rather than truncated, so a card never silently loses meaning. When a draft has none, the
+ * card falls back to the first sentence of the description.
+ */
+export const PLAN_DRAFT_SUMMARY_MAX = 240;
+
 /** What became of a draft once its plan was submitted: still pending, linked to the ticket the weaver created, or recorded as failed with a reason. */
 export const PLAN_DRAFT_STATUSES = ['pending', 'created', 'failed'] as const;
 export type PlanDraftStatus = (typeof PLAN_DRAFT_STATUSES)[number];

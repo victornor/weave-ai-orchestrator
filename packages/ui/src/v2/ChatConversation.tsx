@@ -103,6 +103,8 @@ export interface ChatConversationProps {
   older?: OlderPages;
   /** Weaver-only: render a decision-card message in place of its bubble, or null to fall through. */
   renderDecisionMessage?: (message: ThreadMessage) => React.ReactNode | null;
+  /** VS-622: plan-only — render a plan-artifact card message in place of its bubble, or null to fall through. */
+  renderPlanArtifactMessage?: (message: ThreadMessage) => React.ReactNode | null;
   /** Weaver-only: chips rendered after a message's trace (its dispatches). */
   renderAfterTrace?: (entry: ChatEntry) => React.ReactNode;
   /** Weaver-only: the live workers no message accounts for, below the conversation. */
@@ -205,6 +207,7 @@ export function ChatConversation({
   ready = true,
   older,
   renderDecisionMessage,
+  renderPlanArtifactMessage,
   renderAfterTrace,
   footer,
 }: ChatConversationProps): React.ReactElement {
@@ -283,7 +286,7 @@ export function ChatConversation({
               if (row.kind !== 'message') return null;
               const m = row.entry.message;
               const highlighted = highlightIds.has(m.id);
-              const decision = renderDecisionMessage?.(m) ?? null;
+              const decision = renderDecisionMessage?.(m) ?? renderPlanArtifactMessage?.(m) ?? null;
               return (
                 <div
                   key={row.key}

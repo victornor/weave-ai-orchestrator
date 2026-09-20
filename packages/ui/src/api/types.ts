@@ -364,6 +364,15 @@ export interface WeaverArtifactSummary {
   updatedAt: string;
 }
 
+/** One row of `GET /plans/:planId/artifacts` (VS-622): a planner's plan-scoped artifact. */
+export interface PlanArtifactSummary {
+  key: string;
+  title: string | null;
+  kind: string | null;
+  revision: number;
+  updatedAt: string;
+}
+
 export interface OpenSpecState {
   changeName: string | null;
   state: string | null;

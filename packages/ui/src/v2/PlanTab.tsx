@@ -11,9 +11,9 @@
  */
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { PlanDraft, PlanDraftKind, Project, RunTrace, TicketPriority, WorkspaceEvent } from '@weave-ai/shared';
+import type { PlanDraft, PlanDraftKind, Project, RunTrace, ThreadMessage, TicketPriority, WorkspaceEvent } from '@weave-ai/shared';
 import { PLAN_DRAFT_KINDS, TICKET_PRIORITIES, projectLabel } from '@weave-ai/shared';
-import { resolveModel } from '@weave-ai/render';
+import { draftSummary, planArtifactCardPartsOf, resolveModel } from '@weave-ai/render';
 import {
   usePlan, usePatchPlanDraft, useRemovePlanDraft, useDispatchPlanDraft, useSubmitPlan,
   useThreadMessages, usePostThreadMessage, useRoles, useRunTraces, useRuntimes, useRuntimeModels,
@@ -48,10 +48,15 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
   const [text, setText] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
+  const [editSummary, setEditSummary] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editKind, setEditKind] = useState<PlanDraftKind>('change');
   const [editPriority, setEditPriority] = useState<TicketPriority>('medium');
   const [editTargetRoleId, setEditTargetRoleId] = useState('');
+  // VS-622: which draft cards are expanded. Empty means every card is collapsed (the default). Keyed by
+  // draft id and never derived from the fetched list, so a refresh under an open tab leaves each
+  // card's state exactly as captain left it.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set<string>());
 
   const conn = useConnection();
   const go = useGo();
@@ -147,6 +152,7 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
   const beginEdit = (d: PlanDraft): void => {
     setEditingId(d.id);
     setEditTitle(d.title);
+    setEditSummary(d.summary ?? '');
     setEditDescription(d.description);
     setEditKind(d.kind);
     setEditPriority(d.priority);
@@ -161,11 +167,48 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
         projectId,
         planId: plan.data.plan.id,
         draftId,
-        patch: { title, description: editDescription, kind: editKind, priority: editPriority, targetRoleId: editTargetRoleId || null },
+        patch: { title, summary: editSummary.trim() || null, description: editDescription, kind: editKind, priority: editPriority, targetRoleId: editTargetRoleId || null },
       },
       { onSuccess: () => setEditingId(null) },
     );
   };
+
+  const toggleDraft = (draftId: string): void =>
+    setExpanded((cur) => {
+      const next = new Set(cur);
+      if (next.has(draftId)) next.delete(draftId); else next.add(draftId);
+      return next;
+    });
+  const expandAll = (ids: string[]): void => setExpanded(new Set(ids));
+  const collapseAll = (): void => setExpanded(new Set());
+  const allExpanded = drafts.length > 0 && drafts.every((d) => expanded.has(d.id));
+
+  // VS-622: a planner-published artifact renders as a card in the conversation, at its publish point,
+  // opening the same sandboxed viewer the ticket and workspace artifacts use.
+  const renderPlanArtifactMessage = useCallback(
+    (m: ThreadMessage): React.ReactNode | null => {
+      const [part] = planArtifactCardPartsOf(m.parts);
+      if (!part) return null;
+      const action = part.actions[0];
+      return (
+        <div className="rounded-r4 border border-line-2 bg-bg-2 p-2.5" data-plan-artifact-card={part.ref.key}>
+          <div className="flex items-center gap-1.5">
+            <span className="v2-tag text-nano">artifact</span>
+            <span className="min-w-0 flex-1 truncate text-micro text-text-1">{part.title}</span>
+          </div>
+          {part.body ? <p className="mt-0.5 text-nano text-text-3">{part.body}</p> : null}
+          <button
+            type="button"
+            className="v2-tag mt-1.5 text-nano"
+            onClick={() => go('/w/$ws/plans/$planId/artifacts/$key', { params: { ws, planId: part.ref.planId, key: part.ref.key } })}
+          >
+            {action?.label ?? 'Open artifact'}
+          </button>
+        </div>
+      );
+    },
+    [go, ws],
+  );
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-plan-tab>
@@ -203,6 +246,7 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
             onTicket={openTicket}
             projectName={projectName}
             resolveContext={resolveContext}
+            renderPlanArtifactMessage={renderPlanArtifactMessage}
             ready={messages.data !== undefined}
           />
           <div className="flex-none border-t border-line-1 p-2.5">
@@ -234,6 +278,29 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
 
         <aside className={cx('flex min-h-0 min-w-0 flex-col md:w-[380px] md:flex-none', phoneTab === 'chat' && 'hidden md:flex')} aria-label="Draft tickets">
           <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <div className="mb-2 flex items-center gap-1.5">
+              <span className="text-nano text-text-3">{drafts.length} draft{drafts.length === 1 ? '' : 's'}</span>
+              {drafts.length > 0 ? (
+                <div className="ml-auto flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => expandAll(drafts.map((d) => d.id))}
+                    disabled={allExpanded}
+                    className="v2-tag text-nano text-text-3 disabled:opacity-40"
+                  >
+                    Expand all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={collapseAll}
+                    disabled={expanded.size === 0}
+                    className="v2-tag text-nano text-text-3 disabled:opacity-40"
+                  >
+                    Collapse all
+                  </button>
+                </div>
+              ) : null}
+            </div>
             {drafts.length === 0 ? (
               <p className="text-micro text-text-3">No drafts yet — the planner adds them here as you talk.</p>
             ) : (
@@ -241,6 +308,8 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
                 {drafts.map((d, i) => {
                   const effectiveTier = d.tierOverride ?? d.suggestedTier;
                   const editing = editingId === d.id;
+                  const isOpen = expanded.has(d.id);
+                  const summaryText = draftSummary(d);
                   return (
                     <li key={d.id} className="rounded-r4 border border-line-2 bg-bg-2 p-2.5">
                       {editing ? (
@@ -249,6 +318,13 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
                             value={editTitle}
                             onChange={(e) => setEditTitle(e.target.value)}
                             aria-label={`Title of ${d.title}`}
+                            className="h-8 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1 outline-none"
+                          />
+                          <input
+                            value={editSummary}
+                            onChange={(e) => setEditSummary(e.target.value)}
+                            aria-label={`Summary of ${d.title}`}
+                            placeholder="Short summary (shown collapsed)"
                             className="h-8 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro text-text-1 outline-none"
                           />
                           <textarea
@@ -296,72 +372,91 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
                         </div>
                       ) : (
                         <>
-                          <div className="flex items-center gap-1.5">
-                            <span className="v2-tag text-nano">{d.kind}</span>
-                            <span className="v2-tag text-nano">{d.priority}</span>
-                            <div className="ml-auto flex items-center gap-1">
-                              {d.status === 'pending' ? (
-                                <>
-                                  <button type="button" aria-label={`Move ${d.title} up`} disabled={i === 0} onClick={() => move(d.id, i - 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
-                                    ↑
-                                  </button>
-                                  <button type="button" aria-label={`Move ${d.title} down`} disabled={i === drafts.length - 1} onClick={() => move(d.id, i + 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
-                                    ↓
-                                  </button>
-                                  <button type="button" aria-label={`Edit ${d.title}`} onClick={() => beginEdit(d)} className="text-text-4 hover:text-text-1">
-                                    Edit
-                                  </button>
-                                  {d.kind === 'scout' && plan.data?.plan.status === 'drafting' ? (
-                                    <button
-                                      type="button"
-                                      aria-label={`Dispatch ${d.title}`}
-                                      disabled={dispatchDraft.isPending}
-                                      onClick={() => plan.data && dispatchDraft.mutate({ projectId, planId: plan.data.plan.id, draftId: d.id })}
-                                      className="text-nano text-text-2 hover:text-text-1"
-                                    >
-                                      Dispatch
-                                    </button>
+                          <div className="flex items-start gap-1.5">
+                            <button
+                              type="button"
+                              aria-expanded={isOpen}
+                              aria-label={`${isOpen ? 'Collapse' : 'Expand'} ${d.title}`}
+                              onClick={() => toggleDraft(d.id)}
+                              className="mt-0.5 flex-none text-text-4 hover:text-text-1"
+                            >
+                              {isOpen ? '▾' : '▸'}
+                            </button>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="v2-tag text-nano">{d.kind}</span>
+                                <span className="v2-tag text-nano">{d.priority}</span>
+                                <span className="v2-tag text-nano">{effectiveTier}</span>
+                                <div className="ml-auto flex items-center gap-1">
+                                  {d.status === 'pending' ? (
+                                    <>
+                                      <button type="button" aria-label={`Move ${d.title} up`} disabled={i === 0} onClick={() => move(d.id, i - 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
+                                        ↑
+                                      </button>
+                                      <button type="button" aria-label={`Move ${d.title} down`} disabled={i === drafts.length - 1} onClick={() => move(d.id, i + 1)} className="text-text-4 hover:text-text-1 disabled:opacity-30">
+                                        ↓
+                                      </button>
+                                      <button type="button" aria-label={`Edit ${d.title}`} onClick={() => beginEdit(d)} className="text-text-4 hover:text-text-1">
+                                        Edit
+                                      </button>
+                                      {d.kind === 'scout' && plan.data?.plan.status === 'drafting' ? (
+                                        <button
+                                          type="button"
+                                          aria-label={`Dispatch ${d.title}`}
+                                          disabled={dispatchDraft.isPending}
+                                          onClick={() => plan.data && dispatchDraft.mutate({ projectId, planId: plan.data.plan.id, draftId: d.id })}
+                                          className="text-nano text-text-2 hover:text-text-1"
+                                        >
+                                          Dispatch
+                                        </button>
+                                      ) : null}
+                                      <button
+                                        type="button"
+                                        aria-label={`Remove ${d.title}`}
+                                        onClick={() => plan.data && removeDraft.mutate({ projectId, planId: plan.data.plan.id, draftId: d.id })}
+                                        className="text-text-4 hover:text-text-1"
+                                      >
+                                        ×
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <span className="text-nano text-text-3">
+                                      {d.status === 'failed'
+                                        ? `Failed${d.failureReason ? `: ${d.failureReason}` : ''}`
+                                        : d.ticketStatus && ['done', 'cancelled'].includes(d.ticketStatus)
+                                          ? 'Reported'
+                                          : 'Dispatched — running'}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <p className="mt-1 text-micro text-text-1">{d.title}</p>
+                              {summaryText ? <p className="mt-0.5 text-nano text-text-3" data-draft-summary>{summaryText}</p> : null}
+                              {d.targetRoleId ? <p className="mt-0.5 text-nano text-text-4">Role: {roles.data?.find((r) => r.id === d.targetRoleId)?.name ?? d.targetRoleId}</p> : null}
+                              {d.blockedBy.length > 0 ? <p className="mt-0.5 text-nano text-text-4">Depends on {d.blockedBy.length} draft{d.blockedBy.length > 1 ? 's' : ''}</p> : null}
+                              {isOpen ? (
+                                <div data-draft-detail>
+                                  {d.description ? <p className="mt-1 whitespace-pre-wrap text-nano text-text-2">{d.description}</p> : null}
+                                  {d.status === 'pending' ? (
+                                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                                      <span className="text-nano text-text-4">Tier ({d.suggestedTier} suggested):</span>
+                                      {TIERS.map((t) => (
+                                        <button
+                                          key={t}
+                                          type="button"
+                                          aria-pressed={effectiveTier === t}
+                                          onClick={() => setTier(d.id, effectiveTier, t, d.suggestedTier)}
+                                          className={cx('v2-tag text-nano', effectiveTier === t ? 'bg-bg-3 text-text-1' : 'text-text-3')}
+                                        >
+                                          {t}
+                                        </button>
+                                      ))}
+                                    </div>
                                   ) : null}
-                                  <button
-                                    type="button"
-                                    aria-label={`Remove ${d.title}`}
-                                    onClick={() => plan.data && removeDraft.mutate({ projectId, planId: plan.data.plan.id, draftId: d.id })}
-                                    className="text-text-4 hover:text-text-1"
-                                  >
-                                    ×
-                                  </button>
-                                </>
-                              ) : (
-                                <span className="text-nano text-text-3">
-                                  {d.status === 'failed'
-                                    ? `Failed${d.failureReason ? `: ${d.failureReason}` : ''}`
-                                    : d.ticketStatus && ['done', 'cancelled'].includes(d.ticketStatus)
-                                      ? 'Reported'
-                                      : 'Dispatched — running'}
-                                </span>
-                              )}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
-                          <p className="mt-1 text-micro text-text-1">{d.title}</p>
-                          {d.description ? <p className="mt-0.5 whitespace-pre-wrap text-nano text-text-3">{d.description}</p> : null}
-                          {d.targetRoleId ? <p className="mt-0.5 text-nano text-text-4">Role: {roles.data?.find((r) => r.id === d.targetRoleId)?.name ?? d.targetRoleId}</p> : null}
-                          {d.blockedBy.length > 0 ? <p className="mt-0.5 text-nano text-text-4">Depends on {d.blockedBy.length} draft{d.blockedBy.length > 1 ? 's' : ''}</p> : null}
-                          {d.status === 'pending' ? (
-                            <div className="mt-1.5 flex flex-wrap items-center gap-1">
-                              <span className="text-nano text-text-4">Tier ({d.suggestedTier} suggested):</span>
-                              {TIERS.map((t) => (
-                                <button
-                                  key={t}
-                                  type="button"
-                                  aria-pressed={effectiveTier === t}
-                                  onClick={() => setTier(d.id, effectiveTier, t, d.suggestedTier)}
-                                  className={cx('v2-tag text-nano', effectiveTier === t ? 'bg-bg-3 text-text-1' : 'text-text-3')}
-                                >
-                                  {t}
-                                </button>
-                              ))}
-                            </div>
-                          ) : null}
                         </>
                       )}
                     </li>

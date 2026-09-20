@@ -13,7 +13,7 @@ import {
   TICKET_KINDS, TICKET_STATUSES, TICKET_PRIORITIES, REPORT_STATES, KNOWLEDGE_SCOPES, WORK_PRODUCT_TYPES, ROADMAP_STATUSES, ROADMAP_BLOCK_STATUSES,
   COMMENT_KINDS, USAGE_WINDOWS, USAGE_GRAINS, ASKABLE_DECISION_KINDS, DECISION_INPUT_TYPES,
   ROUTINE_ACTIONS, ROUTINE_STATUSES, INCIDENT_REPORTER_KINDS, INCIDENT_STATUS_FILTERS, ATTACHMENT_MAX_PER_MESSAGE,
-  PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, WEAVER_REVIEW_WAITING_ON_MAX, TERMINAL_TICKET_STATUSES,
+  PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, PLAN_DRAFT_SUMMARY_MAX, WEAVER_REVIEW_WAITING_ON_MAX, TERMINAL_TICKET_STATUSES,
   isAttachmentImageType, isAttachmentTextType, isWithMcpContent, mcpContentOf, withMcpContent, validateArtifactImageDataUris,
   isWorkerOptionConfigured,
   type ToolResult, type Ticket, type Wakeup, type KnowledgeScope, type McpImageBlock, type AgentKind,
@@ -1280,6 +1280,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: 'weave_plan_draft_add', scope: 'planner', input: z.object({
       title: z.string().min(1),
+      summary: z.string().max(PLAN_DRAFT_SUMMARY_MAX).nullish(),
       description: z.string().optional(),
       kind: z.enum(PLAN_DRAFT_KINDS),
       priority: z.enum(TICKET_PRIORITIES).optional(),
@@ -1288,11 +1289,11 @@ export const TOOLS: ToolDef[] = [
       tierOverride: z.enum(PLAN_DRAFT_TIERS).nullish(),
       blockedBy: z.array(z.string().min(1)).optional(),
     }),
-    description: 'Add a draft ticket to the plan, appended to the end of the order. blockedBy names other draft ids in this same plan — a dependency, not prose. There is no title/description length limit here; write it the way you would write a real ticket, because it becomes one.',
+    description: 'Add a draft ticket to the plan, appended to the end of the order. blockedBy names other draft ids in this same plan — a dependency, not prose. `summary` is an optional one-or-two-sentence gist shown on the collapsed card in the plan list; the full `description` is still what becomes the ticket. There is no title/description length limit here; write it the way you would write a real ticket, because it becomes one.',
     handler: (ctx, i) => {
       const planId = requireOwnPlanner(ctx);
       return svc(ctx).planning.addDraft(ctx.actor, planId, {
-        title: i.title, description: i.description, kind: i.kind, priority: i.priority,
+        title: i.title, summary: i.summary ?? null, description: i.description, kind: i.kind, priority: i.priority,
         targetRoleId: i.targetRoleId ?? null, suggestedTier: i.suggestedTier, tierOverride: i.tierOverride ?? null, blockedBy: i.blockedBy,
       });
     },
@@ -1301,6 +1302,7 @@ export const TOOLS: ToolDef[] = [
     name: 'weave_plan_draft_update', scope: 'planner', input: z.object({
       draftId: z.string().min(1),
       title: z.string().min(1).optional(),
+      summary: z.string().max(PLAN_DRAFT_SUMMARY_MAX).nullish(),
       description: z.string().optional(),
       kind: z.enum(PLAN_DRAFT_KINDS).optional(),
       priority: z.enum(TICKET_PRIORITIES).optional(),
@@ -1309,7 +1311,7 @@ export const TOOLS: ToolDef[] = [
       tierOverride: z.enum(PLAN_DRAFT_TIERS).nullish(),
       blockedBy: z.array(z.string().min(1)).optional(),
     }),
-    description: 'Edit a draft already in this plan. Send only the fields that changed. blockedBy replaces the full dependency set for this draft, not adds to it.',
+    description: 'Edit a draft already in this plan. Send only the fields that changed. blockedBy replaces the full dependency set for this draft, not adds to it. A null or empty `summary` clears it, so the collapsed card falls back to the first sentence of the description.',
     handler: (ctx, i) => {
       const { draftId, ...patch } = i;
       requireOwnDraft(ctx, draftId);
@@ -1330,6 +1332,41 @@ export const TOOLS: ToolDef[] = [
     name: 'weave_plan_draft_dispatch', scope: 'planner', input: z.object({ draftId: z.string().min(1) }),
     description: 'Dispatch a `scout` draft in this plan as a real ticket right now, before the plan is submitted — the only draft kind, and the one narrow exception to never creating a real ticket. Refused for any other draft kind, a draft already dispatched or otherwise linked to a ticket, a draft with no target role, or a plan that is no longer drafting. Captain can do this too from the Plan modal; either way the report reaches you here, not the weaver — once the ticket finishes, call weave_plan_get again and read the linked draft\'s `report`.',
     handler: (ctx, i) => { requireOwnDraft(ctx, i.draftId); return svc(ctx).planning.dispatchDraft(ctx.actor, i.draftId); },
+  },
+  {
+    name: 'weave_plan_artifact_put', scope: 'planner', input: z.object({
+      key: z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'lowercase letters, digits and hyphens only, starting with a letter or digit, max 64 chars'),
+      html: z.string(),
+      title: z.string().max(200).optional(),
+      kind: z.string().max(40).optional(),
+    }),
+    description:
+      'Publish a self-contained HTML artifact (a diagram, comparison table, dependency/sequence view, or mock of the intended change — see the weave-ai-artifacts skill and weave_artifact_kit) to the plan you are drafting. '
+      + 'Stores it as a new revision under `key` and posts a card for it in this plan\'s conversation, with a stable URL a human can open. '
+      + 'This is plan storage, NOT a repository or ticket write — it creates no ticket and changes no file. Using it does not replace `weave_plan_reply`: still send your answer through that tool; the artifact supports the reply. '
+      + 'There is no read tool for an artifact: its body can never be read back by any agent, including you. To revise one, call this again with the same `key`.',
+    handler: async (ctx, i) => {
+      validateArtifactHtml(i.html);
+      const planId = requireOwnPlanner(ctx);
+      const plan = svc(ctx).planning.get(planId);
+      const { revision, cardMessageId, created } = svc(ctx).planArtifacts.put(ctx.actor, planId, i.key, i.html, { title: i.title, kind: i.kind });
+      const card = {
+        type: 'card',
+        title: i.title ?? i.key,
+        body: `Plan artifact${i.kind ? ` · ${i.kind}` : ''} · revision ${revision}`,
+        actions: [{ key: 'open', label: 'Open artifact', style: 'primary' }],
+        ref: { kind: 'plan-artifact', planId, key: i.key, revision },
+      };
+      // One card per (plan, key): the first publish posts it and records its id; a republish refreshes
+      // that same message rather than adding a second card.
+      if (created || !cardMessageId) {
+        const msg = await svc(ctx).threads.outbound(ctx.actor, plan.threadId, i.title ?? `Artifact: ${i.key}`, { parts: [card] });
+        svc(ctx).planArtifacts.setCardMessage(planId, i.key, msg.id);
+      } else {
+        svc(ctx).threads.setMessageParts(cardMessageId, [card]);
+      }
+      return { url: `/w/${ctx.ws.id}/plans/${planId}/artifacts/${i.key}`, revision };
+    },
   },
   {
     name: 'weave_plan_reply', scope: 'planner', input: z.object({ body: z.string().min(1) }),

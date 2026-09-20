@@ -14,7 +14,7 @@ import { Badge } from '../../components/StatusGlyph';
 import { SkeletonRows } from '../../components/Skeleton';
 import { EmptyState } from '../../components/States';
 import { A } from '../../app/link';
-import { useTicket, useTicketDocumentRevisions, useTicketWorkProducts, useWorkspaceArtifacts, useWorkspaceArtifactRevisions } from '../../api/hooks';
+import { useTicket, useTicketDocumentRevisions, useTicketWorkProducts, useWorkspaceArtifacts, useWorkspaceArtifactRevisions, usePlanArtifacts, usePlanArtifactRevisions } from '../../api/hooks';
 import type { TicketDetail, WorkProduct } from '../../api/types';
 import { projectColorVar } from '../../lib/projectColor';
 import { ago } from '../../lib/format';
@@ -221,6 +221,46 @@ export function V2WorkspaceArtifactReader(): React.ReactElement {
             <ArtifactViewer
               ws={ws}
               artifact={{ key: summary.key, title: summary.title, url: `/api/w/${ws}/artifacts/${summary.key}/raw` }}
+              revisions={revisions.data}
+            />
+            <SandboxNote />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * VS-622: the plan-scoped reader — `/w/$ws/plans/$planId/artifacts/$key`, what a planner-published
+ * artifact's card opens. Same viewer, same sandbox as the ticket and workspace readers; it resolves
+ * the key against the named plan's own artifact list, so a key from another plan is not found. The
+ * address needs only the plan id, so it stays valid after the plan is submitted or discarded.
+ */
+export function V2PlanArtifactReader(): React.ReactElement {
+  const { ws, planId, key } = useParams({ strict: false }) as { ws: string; planId: string; key: string };
+  const artifacts = usePlanArtifacts(planId);
+  const revisions = usePlanArtifactRevisions(planId, key);
+  const summary = (artifacts.data ?? []).find((a) => a.key === key) ?? null;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <header className="flex flex-none items-center gap-2.5 border-b border-line-1 bg-bg-1 px-4 py-2">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-ui font-semibold text-text-1">{summary?.title ?? key}</span>
+          <span className="ac-mono text-nano text-text-2">{summary?.kind ?? 'artifact'} · plan</span>
+        </span>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        {artifacts.isLoading ? (
+          <SkeletonRows rows={3} />
+        ) : !summary ? (
+          <EmptyState title="Artifact not found." detail="It may have been republished under a different key, or never existed in this plan." />
+        ) : (
+          <div className="mx-auto flex max-w-5xl flex-col gap-4">
+            <ArtifactViewer
+              ws={ws}
+              artifact={{ key: summary.key, title: summary.title, url: `/api/w/${ws}/plans/${planId}/artifacts/${summary.key}/raw` }}
               revisions={revisions.data}
             />
             <SandboxNote />

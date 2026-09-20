@@ -158,6 +158,32 @@ export interface WeaverArtifactsService {
   revisions(workspaceId: string, key: string): Array<{ revision: number; authorKind: string; createdAt: string }>;
 }
 
+// ---------- plan artifacts ----------
+/**
+ * VS-622: a planning agent has no ticket and no workspace-write mandate, so its artifacts live in a
+ * separate store keyed by `(planId, key)`. Same validation, revisioning and sandboxed serving as
+ * `WeaverArtifactsService`, but scoped to one plan so two plans (or a plan and the workspace) can
+ * never collide. Publishing is never a repository or ticket write. The store also remembers the
+ * conversation card a publish posted, so a republish refreshes that one card rather than adding a
+ * second. No read-back: no method returns a stored `body` except the raw-serve route itself.
+ */
+export interface PlanArtifactsService {
+  /**
+   * First publish under `key` returns revision 1 and `created: true` with no card yet; publishing
+   * again increments the revision, leaves exactly one artifact for `(planId, key)`, and returns the
+   * existing `cardMessageId` so the caller refreshes that card in place.
+   */
+  put(actor: Actor, planId: string, key: string, html: string, opts?: { title?: string; kind?: string }): { revision: number; cardMessageId: string | null; created: boolean };
+  /** Record the conversation card posted for an artifact, so the next republish updates it rather than posting a second. */
+  setCardMessage(planId: string, key: string, messageId: string): void;
+  /** `revision` omitted reads the current one. Null when the key or the named revision does not exist. */
+  getRevision(planId: string, key: string, revision?: number): { body: string; revision: number } | null;
+  /** Metadata only (no `body`), most-recently-updated first — scoped to one plan. */
+  list(planId: string): Array<{ key: string; title: string | null; kind: string | null; revision: number; updatedAt: string }>;
+  /** Every revision of one artifact, oldest first — the viewer page's revision picker. */
+  revisions(planId: string, key: string): Array<{ revision: number; authorKind: string; createdAt: string }>;
+}
+
 // ---------- merge queue ----------
 /** One ticket's place in a project's merge queue. `position` is null for a ticket already merging. */
 export interface MergeQueueEntry { ticketId: string; identifier: string; title: string; projectId: string | null; position: number | null; queuedAt: string | null; startedAt: string | null; workerId: string | null; /** The ticket's priority, and whether its position is ahead of an earlier join (VS-390). */ priority: S.TicketPriority; ahead: boolean; /** VS-391: the active merge's pull-request check state, or null when not yet observed. */ ciState: 'pending' | 'success' | 'failure' | 'none' | null; /** VS-391: when `ciState` was first observed, so the wait's duration is known. */ ciStateAt: string | null }
@@ -757,6 +783,13 @@ export interface ThreadsService {
   outbound(actor: Actor, threadId: string, body: string, opts?: { parts?: unknown[]; runId?: string | null; replyToMessageId?: string | null; defaultReplyToMessageIds?: string[]; attachments?: Array<{ filename: string; mediaType: string; bytes: Buffer }> }): Promise<S.ThreadMessage>;
   /** VS-596: true when this run has already written an outbound message to the thread — the engine's guard against posting a session's final text twice. */
   hasOutboundForRun(threadId: string, runId: string): boolean;
+  /**
+   * VS-622: replace one message's parts with a plan-artifact card, so a republished artifact refreshes
+   * its single card in place instead of appending a second. Deliberately narrow — only an array of
+   * `type: 'card'` parts whose ref is `plan-artifact` is accepted, and the message's text is never
+   * touched — so it cannot become a general message editor. `not_found` for an unknown message.
+   */
+  setMessageParts(messageId: string, parts: unknown[]): boolean;
   messages(threadId: string, opts?: { before?: string; limit?: number }): S.ThreadMessage[];
   /** `not_found` when the message does not exist, or exists but under a different thread — the same response either way. Full stored body, regardless of whether the wake payload that referenced it was truncated (VS-242). */
   message(threadId: string, messageId: string): S.ThreadMessage;
@@ -953,6 +986,8 @@ export interface CoreServices {
   openspec: OpenSpecService; usage: UsageService; knowledgeUsage: KnowledgeUsageService; accounts: AccountsService; threads: ThreadsService; briefing: BriefingService; jobs: JobsService;
   changelog: ChangelogService; models: ModelsService; secrets: SecretsService; pullRequests: PullRequestsService;
   routines: RoutinesService; weaverArtifacts: WeaverArtifactsService;
+  /** VS-622: a plan-scoped artifact store beside `weaverArtifacts`, for a planning agent's own plan. */
+  planArtifacts: PlanArtifactsService;
   /** VS-397: a project's roadmap of future ideas — list, create, update (reorder/status/ticket) and delete. */
   roadmap: RoadmapService;
   /** VS-328: the live per-worker activity line and last test tally the board reads and streams. */
@@ -969,6 +1004,8 @@ export interface CoreServices {
 
 export interface PlanDraftInput {
   title: string;
+  /** VS-622: an optional short summary shown on the collapsed card; over `PLAN_DRAFT_SUMMARY_MAX` is refused. */
+  summary?: string | null;
   description?: string;
   kind: S.PlanDraftKind;
   priority?: S.TicketPriority;
@@ -981,6 +1018,8 @@ export interface PlanDraftInput {
 
 export interface PlanDraftPatch {
   title?: string;
+  /** VS-622: set the short summary; null or blank clears it back to the description fallback. */
+  summary?: string | null;
   description?: string;
   kind?: S.PlanDraftKind;
   priority?: S.TicketPriority;

@@ -69,6 +69,21 @@ export function useStream(
   return connection;
 }
 
+/**
+ * One clock per component that asks for it (VS-603): the live row's elapsed times must age without a
+ * network request, exactly as the web row's do. Stops while `active` is false.
+ */
+export function useNow(active: boolean, everyMs = 1000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), everyMs);
+    return () => clearInterval(id);
+  }, [active, everyMs]);
+  return now;
+}
+
 export function useTerminalSize(): { columns: number; rows: number } {
   const { stdout } = useStdout();
   const [size, setSize] = useState({ columns: stdout?.columns ?? 80, rows: stdout?.rows ?? 24 });

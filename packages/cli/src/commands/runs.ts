@@ -1,9 +1,16 @@
 /** `weave runs list|show|tail|cancel` (PLAN §16.1, §20). */
 import type { Command } from 'commander';
-import type { Run, RunEvent } from '@weave-ai/shared';
-import { formatCost, formatDuration, formatTokens, runEventsToTranscript, type TranscriptBlock } from '@weave-ai/render';
+import type { Run, RunDeltaFrame, RunEvent, RunLiveSnapshot } from '@weave-ai/shared';
+import { RUNTIME_PARTIAL_OUTPUT } from '@weave-ai/shared';
+import { applyDelta, dropSuperseded, formatCost, formatDuration, formatTokens, fromSnapshot, liveTurn, liveTurnLine, runEventFromFrame, runEventsToTranscript, type LiveTurn, type PartialMap, type TranscriptBlock } from '@weave-ai/render';
 import { emit, fields, heading, style, table, write } from '../output.js';
 import { items, run as guard, session, unwrap } from './util.js';
+
+/** The live `liveTurn` for a followed run, over its events and partial output (VS-603). */
+export function runsTailTurn(events: readonly RunEvent[], partials: readonly { partId: string; kind: 'text' | 'thinking' | 'tool_input'; text: string }[], now: number, runtimeId: string | null): LiveTurn {
+  const partialOutput = runtimeId ? RUNTIME_PARTIAL_OUTPUT[runtimeId] ?? 'none' : 'none';
+  return liveTurn(events, partials, now, { partialOutput });
+}
 
 /** One transcript block as a terminal line (the TUI renders the same model with widgets). */
 export function renderBlock(block: TranscriptBlock): string[] {
@@ -92,24 +99,56 @@ export function register(program: Command): void {
     .description('follow a run live')
     .action(async (id: string, _opts: unknown, command: Command) => guard(async () => {
       const { client } = await session(command);
-      const seen = items<RunEvent>(await client.wget(`/runs/${encodeURIComponent(id)}/events`, { limit: 200 }), 'events');
-      for (const block of runEventsToTranscript(seen)) for (const line of renderBlock(block)) write(line);
-      const lastSeq = seen.length ? seen[seen.length - 1]!.seq : 0;
+      const runtimeId = unwrap<Run>(await client.wget<unknown>(`/runs/${encodeURIComponent(id)}`), 'run')?.runtimeId ?? null;
+      const events = items<RunEvent>(await client.wget(`/runs/${encodeURIComponent(id)}/events`, { limit: 200 }), 'events');
+      for (const block of runEventsToTranscript(events)) for (const line of renderBlock(block)) write(line);
+      const lastSeq = events.length ? events[events.length - 1]!.seq : 0;
+
+      // VS-603: the live row. Frames arrive many times a second; the line is printed only when the
+      // state or label changes, so a busy turn does not flood the transcript.
+      let partials: PartialMap = new Map();
+      let lastLabel: string | null = null;
+      const printLive = (): void => {
+        const turn = runsTailTurn(events, dropSuperseded(partials, events), Date.now(), runtimeId);
+        if (turn.label === lastLabel) return;
+        lastLabel = turn.label;
+        write(style.dim(liveTurnLine(turn)));
+      };
+      const readLive = (): void => {
+        void client.wget<RunLiveSnapshot>(`/runs/${encodeURIComponent(id)}/live`)
+          .then((snap) => { if (snap?.partials?.length) { partials = fromSnapshot(snap); printLive(); } })
+          .catch(() => undefined);
+      };
+      readLive();
 
       await new Promise<void>((resolve) => {
         const subscription = client.stream(client.w(`/runs/${encodeURIComponent(id)}/events/stream`), {
           after: lastSeq,
           onMessage: (message) => {
-            const event = message.json as RunEvent | { payload?: RunEvent } | null;
-            const runEvent = (event && 'payload' in (event as object) ? (event as { payload?: RunEvent }).payload : event) as RunEvent | null;
+            const runEvent = runEventFromFrame(message.json);
             if (!runEvent) return;
+            events.push(runEvent);
+            if (events.length > 500) events.splice(0, events.length - 500);
             for (const block of runEventsToTranscript([runEvent])) for (const line of renderBlock(block)) write(line);
           },
           onError: (_error, attempt) => {
             if (attempt === 1) write(style.warn('reconnecting…'));
           },
         });
-        process.once('SIGINT', () => { subscription.close(); resolve(); });
+        // `run.delta` is live-only on the workspace stream (never on the per-run one), so the live
+        // row needs its own subscription here.
+        const liveSubscription = client.stream(client.w('/events'), {
+          onMessage: (message) => {
+            if (message.type !== 'run.delta') return;
+            const frame = (message.json as { payload?: RunDeltaFrame } | null)?.payload ?? null;
+            if (!frame || frame.runId !== id || !Array.isArray(frame.parts)) return;
+            const applied = applyDelta(partials, frame.parts);
+            partials = applied.map;
+            if (applied.gap) readLive();
+            printLive();
+          },
+        });
+        process.once('SIGINT', () => { subscription.close(); liveSubscription.close(); resolve(); });
       });
     }));
 

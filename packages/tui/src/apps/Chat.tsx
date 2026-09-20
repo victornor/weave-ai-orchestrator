@@ -3,11 +3,12 @@
  * Commands: `/talk <ticket>` binds the thread to a ticket, `/weaver` goes back,
  * `/d <decision> <key|number>` answers a decision, `/quit` leaves.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
-import type { Agent, ChannelThread, Decision, Run, RunEvent, ThreadMessage } from '@weave-ai/shared';
+import type { Agent, ChannelThread, Decision, Run, RunDeltaFrame, RunEvent, RunLiveSnapshot, ThreadMessage } from '@weave-ai/shared';
 import { isActiveRun } from '@weave-ai/shared';
-import { chatTranscript, decisionToCard, formatRelative, type CardModel, type TranscriptBlock } from '@weave-ai/render';
+import { applyDelta, chatTranscript, decisionToCard, dropSuperseded, formatRelative, fromSnapshot, runEventFromFrame, type CardModel, type PartialMap, type TranscriptBlock } from '@weave-ai/render';
+import { ActivityLine } from '../components/ActivityLine.js';
 import { DecisionCardView } from '../components/DecisionCard.js';
 import { StatusBar } from '../components/StatusBar.js';
 import { TextInput } from '../components/TextInput.js';
@@ -38,9 +39,29 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
   const [pending, setPending] = useState(false);
   const [boundTicket, setBoundTicket] = useState<string | null>(options.ticketId ?? null);
   const [conductorId, setConductorId] = useState<string | null>(null);
+  const [conductorRuntimeId, setConductorRuntimeId] = useState<string | null>(null);
   /** The conductor run being streamed, or null when it is idle. */
   const [runId, setRunId] = useState<string | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
+  /** VS-603: the live row's partial output and clock. */
+  const [partials, setPartials] = useState<PartialMap>(() => new Map());
+  const [partialClock, setPartialClock] = useState<{ last: number | null; since: number | null }>({ last: null, since: null });
+  const runIdRef = useRef<string | null>(null);
+  useEffect(() => { runIdRef.current = runId; }, [runId]);
+  const partialsRef = useRef<PartialMap>(partials);
+  useEffect(() => { partialsRef.current = partials; }, [partials]);
+
+  /** VS-603: a chat opened mid-turn, or reconnected, reads the run's partials once. */
+  const readLive = useCallback(async (id: string) => {
+    try {
+      const snap = await client.wget<RunLiveSnapshot>(`/runs/${encodeURIComponent(id)}/live`);
+      if (!snap?.partials?.length) return;
+      setPartials(fromSnapshot(snap));
+      setPartialClock((c) => ({ last: Date.now(), since: c.since ?? Date.now() }));
+    } catch {
+      /* the live row is an extra; the thread still works without it */
+    }
+  }, [client]);
 
   const loadDecisions = useCallback(async () => {
     try {
@@ -83,6 +104,7 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
         if (cancelled) return;
         const agent = unwrap<Agent>(payload, 'agent', 'worker');
         setConductorId(agent?.id ?? null);
+        setConductorRuntimeId(agent?.runtimeId ?? null);
         const last = (payload as { lastRun?: Run } | null)?.lastRun ?? null;
         if (last?.id && isActiveRun(last.status)) setRunId((cur) => cur ?? last.id);
       } catch {
@@ -108,13 +130,24 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
   }, [client, runId]);
 
   useStream(client, runId ? client.w(`/runs/${encodeURIComponent(runId)}/events/stream`) : null, (message) => {
-    const raw = message.json as RunEvent | { payload?: RunEvent } | null;
-    const event = (raw && typeof raw === 'object' && 'payload' in raw ? (raw as { payload?: RunEvent }).payload : raw) as RunEvent | null;
-    if (!event || typeof event.seq !== 'number') return;
+    const event = runEventFromFrame(message.json);
+    if (!event) return;
     setEvents((prev) => (prev.some((e) => e.id === event.id) ? prev : [...prev, event]));
   });
 
   const connection = useStream(client, client.workspace ? client.w('/events') : null, (message) => {
+    if (message.type === 'run.delta') {
+      const delta = (message.json as { payload?: RunDeltaFrame } | null)?.payload ?? null;
+      if (!delta || !Array.isArray(delta.parts)) return;
+      const current = runIdRef.current;
+      if (!current || delta.runId !== current) return;
+      const applied = applyDelta(partialsRef.current, delta.parts);
+      partialsRef.current = applied.map;
+      setPartials(applied.map);
+      setPartialClock((c) => ({ last: Date.now(), since: c.since ?? Date.now() }));
+      if (applied.gap) void readLive(delta.runId);
+      return;
+    }
     if (message.type === 'thread.message') {
       const payload = (message.json as { payload?: ThreadMessage } | null)?.payload;
       if (!payload || (thread?.id && String(payload.threadId) !== String(thread.id))) return;
@@ -128,9 +161,15 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
       if (!conductorId || frame?.payload?.agentId !== conductorId) return;
       const id = String(frame?.entityId ?? '');
       if (message.type === 'run.started') {
-        if (id) { setRunId(id); setEvents([]); }
+        if (id) { runIdRef.current = id; setRunId(id); setEvents([]); }
+        partialsRef.current = new Map();
+        setPartials(new Map());
+        setPartialClock({ last: null, since: null });
       } else {
         setRunId((cur) => (cur === null || cur === id ? null : cur));
+        partialsRef.current = new Map();
+        setPartials(new Map());
+        setPartialClock({ last: null, since: null });
         setPending(false);
       }
       return;
@@ -138,9 +177,19 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
     if (message.type.startsWith('decision.')) void loadDecisions();
   });
 
+  // A chat opened mid-turn, or one whose stream dropped and came back, reads the run's partials once.
+  useEffect(() => {
+    if (runId) void readLive(runId);
+  }, [runId, readLive]);
+  useEffect(() => {
+    if (connection === 'connected' && runId) void readLive(runId);
+  }, [connection, runId, readLive]);
+
   // The reply renders as the thread message weave_human_send created; showing the call too would
   // put the same words on screen twice.
   const blocks: TranscriptBlock[] = useMemo(() => chatTranscript(events), [events]);
+  /** VS-603: the partials not yet superseded, so the row says "Writing", not "Waiting". */
+  const livePartials = useMemo(() => dropSuperseded(partials, events), [partials, events]);
   const working = pending || runId !== null;
 
   const cards: CardModel[] = useMemo(() => decisions.map((d) => decisionToCard(d, {})), [decisions]);
@@ -244,7 +293,14 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
           messages stand alone, so the reply is never on screen twice. */}
       {working ? (
         <Box flexDirection="column" marginBottom={1}>
-          <Text dimColor>{runId ? 'weaver is working…' : 'weaver is starting…'}</Text>
+          <ActivityLine
+            events={events}
+            partials={livePartials}
+            runtimeId={conductorRuntimeId}
+            partialSince={partialClock.since}
+            lastPartialAt={partialClock.last}
+            live={working}
+          />
           {blocks.length ? <TranscriptView blocks={blocks} maxLines={12} /> : null}
         </Box>
       ) : null}

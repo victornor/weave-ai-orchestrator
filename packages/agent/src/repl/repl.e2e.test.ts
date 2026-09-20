@@ -278,6 +278,43 @@ describe('-p, -c and --resume from the shell, with no daemon and no workspace', 
     expect((await runP([...flags(), '--resume', 'nosuch', '-p', 'x'])).code).toBe(2);
   });
 
+  it('uses a provider defined only in the daemon\'s daemon.yaml, with no workspace and no agent.yaml (VS-633)', async () => {
+    const cfgDir = join(dir, 'home', '.config', 'weave');
+    mkdirSync(cfgDir, { recursive: true });
+    writeFileSync(join(cfgDir, 'daemon.yaml'), `version: 1
+providers:
+  mock:
+    baseUrl: ${mock.baseUrl}
+    apiKeySecret: WEAVE_LLM_MOCK_KEY
+    models:
+      mock-model: {}
+`);
+    mock.script({ chunks: textChunks('daemon answer') });
+    const r = await runP(['-p', 'go']);
+    expect(r).toMatchObject({ code: 0, stdout: 'daemon answer\n' });
+    expect(mock.requests[0]!.headers['authorization']).toBe(`Bearer ${KEY}`);
+    expect(r.stdout + r.stderr).not.toContain(KEY);
+  });
+
+  it('still refuses a literal apiKey outside the user file: one in daemon.yaml is skipped, not used (VS-633)', async () => {
+    const cfgDir = join(dir, 'home', '.config', 'weave');
+    mkdirSync(cfgDir, { recursive: true });
+    const literal = 'sk-daemon-literal-must-not-work';
+    writeFileSync(join(cfgDir, 'daemon.yaml'), `version: 1
+providers:
+  mock:
+    baseUrl: ${mock.baseUrl}
+    apiKey: ${literal}
+    models:
+      mock-model: {}
+`);
+    const r = await runP(['--provider', 'mock', '--model', 'mock-model', '-p', 'go'], { WEAVE_LLM_MOCK_KEY: '' });
+    expect(r.code).toBe(2);
+    expect(r.stderr).toContain('apiKey');
+    expect(r.stdout + r.stderr).not.toContain(literal);
+    expect(mock.requests).toHaveLength(0);
+  });
+
   it('works from any directory with a literal apiKey in the user\'s agent.yaml and no workspace (VS-631)', async () => {
     const literal = 'sk-literal-user-config-31337';
     const cfgDir = join(dir, 'home', '.config', 'weave');

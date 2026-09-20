@@ -112,7 +112,7 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
 
     async detect(): Promise<RuntimeDetection> {
       if (!existsSync(entry())) return { status: 'broken', notes: `agent entry not found at ${entry()}` };
-      if (Object.keys(providers()).length === 0) return { status: 'unsupported', notes: 'No model provider is configured: add one under `providers` in the workspace config.' };
+      if (Object.keys(providers()).length === 0) return { status: 'unsupported', notes: 'No model provider is configured: add one under Settings → Providers (daemon), or under `providers` in a workspace config.' };
       return { status: 'available', path: entry() };
     },
 
@@ -169,7 +169,7 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
         const parts = splitModel(input.model);
         if (!parts) return fail('model_not_configured', 'The weave runtime needs a model written as providerId/modelId.');
         const profile = providers(input.workspaceId)[parts.providerId];
-        if (!profile) return fail('provider_not_configured', `No provider "${parts.providerId}" in the workspace config.`);
+        if (!profile) return fail('provider_not_configured', `No provider "${parts.providerId}" in the daemon settings or this workspace config.`);
         const preset = presetOf(profile);
         if (!preset) return fail('preset_unknown', `Provider "${parts.providerId}" names preset "${profile.preset}", which does not exist.`);
         const keyVar = profile.apiKeySecret;
@@ -207,7 +207,7 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
       const parts = splitModel(input.model);
       if (!parts) return failure(sink, 'model_not_configured', 'tooling', 'The weave runtime needs a model written as providerId/modelId.');
       const profile = providers(input.workspaceId)[parts.providerId];
-      if (!profile) return failure(sink, 'provider_not_configured', 'tooling', `No provider "${parts.providerId}" in the workspace config.`);
+      if (!profile) return failure(sink, 'provider_not_configured', 'tooling', `No provider "${parts.providerId}" in the daemon settings or this workspace config.`);
       const keyVar = profile.apiKeySecret;
       // The run's own environment first (a role that carries the secret still wins, and the host
       // environment keeps its VS-92 precedence), then the secret store of the run's own workspace.

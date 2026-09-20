@@ -37,6 +37,9 @@ export const qk = {
   models: (ws: string) => ['w', ws, 'models'] as const,
   providers: (ws: string) => ['w', ws, 'providers'] as const,
   mcpServers: (ws: string) => ['w', ws, 'mcp'] as const,
+  /** VS-633: the daemon-level providers and MCP servers. */
+  daemonProviders: () => ['daemon', 'providers'] as const,
+  daemonMcpServers: () => ['daemon', 'mcp'] as const,
 
   tickets: (ws: string) => ['w', ws, 'tickets'] as const,
   ticket: (ws: string, id: string) => ['w', ws, 'tickets', id] as const,

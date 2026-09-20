@@ -15,6 +15,8 @@ export interface V2SettingsSection {
 export const V2_DAEMON_SECTIONS: V2SettingsSection[] = [
   { key: 'updates', label: 'Updates', scope: 'daemon' },
   { key: 'models', label: 'Models', scope: 'daemon' },
+  { key: 'providers', label: 'Providers', scope: 'daemon' },
+  { key: 'mcp', label: 'MCP servers', scope: 'daemon' },
   { key: 'security', label: 'Security & devices', scope: 'daemon' },
   { key: 'host-tools', label: 'Host tools', scope: 'daemon' },
   { key: 'dictation', label: 'Dictation', scope: 'daemon' },

@@ -49,6 +49,8 @@ function DaemonBody({ section }: { section: string }): React.ReactElement | null
   switch (section) {
     case 'updates': return <UpdatesSection />;
     case 'models': return <DaemonModelsSection />;
+    case 'providers': return <ProvidersSection scope="daemon" />;
+    case 'mcp': return <McpServersSection scope="daemon" />;
     case 'security': return <SecuritySection />;
     case 'host-tools': return <HostToolsSection />;
     case 'dictation': return <DictationSection />;
@@ -62,8 +64,8 @@ function WorkspaceBody({ section }: { section: string }): React.ReactElement | n
     case 'general': return <GeneralSection />;
     case 'weaver': return <WeaverSection />;
     case 'models': return <WorkspaceModelsSection />;
-    case 'providers': return <ProvidersSection />;
-    case 'mcp': return <McpServersSection />;
+    case 'providers': return <ProvidersSection scope="workspace" />;
+    case 'mcp': return <McpServersSection scope="workspace" />;
     case 'projects': return <ProjectsSection />;
     case 'knowledge': return <KnowledgeSection />;
     case 'worker-memory': return <WorkerMemorySection />;

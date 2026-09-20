@@ -23,6 +23,7 @@ import { makeRedactor } from './engine.js';
 import { runTokenSecret, verifyRunToken } from './runtoken.js';
 import { git } from '../util/git.js';
 import { runState } from './active.js';
+import { daemonSecretStore } from '../secrets/daemon.js';
 
 const tick = () => new Promise((r) => setImmediate(r));
 
@@ -2759,7 +2760,7 @@ describe('MCP servers (VS-621)', () => {
       noSecret: server({ type: 'http', url: 'https://mcp.test/sse', headers: { Authorization: 'Bearer ${MCP_ABSENT}' } }),
     };
     h.services.secrets!.put({ kind: 'human', id: 'victor' }, { name: 'MCP_GITHUB_TOKEN' }, SECRET);
-    h.db.update('roles', h.roleId, { mcpServersJson: ['github', 'noSecret', 'ghost'] });
+    h.db.update('roles', h.roleId, { mcpServersJson: ['github', 'noSecret'] });
     const ticketId = seedTicket(h, { status: 'in_progress' });
     const workerId = h.addWorker(ticketId, {}); 
     h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
@@ -2799,6 +2800,114 @@ describe('MCP servers (VS-621)', () => {
     runtime.queue.push({ structured: { state: 'done', summary: 'x', tickets: [], knowledge: { recorded: false, reason: 't' } } });
     await runOnce(workerB);
     expect(Object.keys(runtime.inputs[0]!.mcpServers)).toEqual(['weave-ai']);
+  });
+
+  // VS-633: daemon-level servers, workspace override, daemon secrets, and a missing allowed server.
+  describe('daemon-level servers and secrets', () => {
+    async function workerRun(weave: WeaveFakeRuntime, allowed: string[]): Promise<Run> {
+      h.ctx.registries.runtimes.set('weave', weave);
+      h.ctx.config.models.workers = { runtime: 'weave', model: null };
+      h.db.update('roles', h.roleId, { mcpServersJson: allowed });
+      const ticketId = seedTicket(h, { status: 'in_progress' });
+      const workerId = h.addWorker(ticketId, {});
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+      return weaveRun(weave, workerId);
+    }
+
+    it('resolves a server defined only in the daemon config, with no workspace definition', async () => {
+      const weave = new WeaveFakeRuntime();
+      h.ctx.daemon.mcpServers = { docs: server({ env: { A: 'daemon' } }) };
+      await workerRun(weave, ['docs']);
+      expect(weave.inputs[0]!.mcpServers['docs']!.env).toEqual({ A: 'daemon' });
+    });
+
+    it('lets a workspace entry replace the daemon entry whole, and restores it when removed', async () => {
+      const weave = new WeaveFakeRuntime();
+      h.ctx.daemon.mcpServers = { docs: server({ env: { A: 'daemon' }, readOnly: true }) };
+      h.ctx.config.mcpServers = { docs: server({ env: { B: 'ws' } }) };
+      await workerRun(weave, ['docs']);
+      expect(weave.inputs[0]!.mcpServers['docs']!.env).toEqual({ B: 'ws' });
+      expect(weave.inputs[0]!.mcpServers['docs']!.readOnly).toBe(false);
+      h.ctx.config.mcpServers = {};
+      const weave2 = new WeaveFakeRuntime();
+      const ticketB = seedTicket(h, { number: 2, identifier: 'TST-2', status: 'in_progress' });
+      const workerB = h.addWorker(ticketB, {});
+      h.ctx.registries.runtimes.set('weave', weave2);
+      h.services.wake!.enqueue(workerB, { source: 'ticket_assigned', reason: 'TST-2' });
+      await weaveRun(weave2, workerB);
+      expect(weave2.inputs[0]!.mcpServers['docs']!.env).toEqual({ A: 'daemon' });
+    });
+
+    it('fails the run, naming the server and the role, when an allowed server exists at neither level', async () => {
+      const weave = new WeaveFakeRuntime();
+      const run = await workerRun(weave, ['ghost']);
+      expect(run.status).toBe('failed');
+      expect(weave.inputs).toHaveLength(0);
+      const err = h.db.get<{ lastError: string | null }>('SELECT last_error FROM runs WHERE id = ?', [run.id])?.lastError ?? '';
+      expect(err).toContain('"ghost"');
+      expect(err).toContain('neither in the daemon settings nor in this workspace');
+    });
+
+    it('a workspace that disables an inherited server does not see it, so an allow-list naming it fails', async () => {
+      const weave = new WeaveFakeRuntime();
+      h.ctx.daemon.mcpServers = { docs: server({}) };
+      h.ctx.config.disabledMcpServers = ['docs'];
+      const run = await workerRun(weave, ['docs']);
+      expect(run.status).toBe('failed');
+    });
+
+    it('finds a daemon-stored secret, prefers the workspace one of the same name, and redacts both', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'ws-daemon-'));
+      try {
+        h.ctx.daemonConfigDir = dir;
+        const DAEMON_SECRET = 'daemon-secret-value-0123456789';
+        daemonSecretStore(dir)!.put('MCP_TOKEN', DAEMON_SECRET);
+        h.ctx.daemon.mcpServers = { docs: server({ env: { TOKEN: '${MCP_TOKEN}' } }) };
+        const weave = new (class extends WeaveFakeRuntime {
+          override async runTurn(input: TurnInput, sink: TurnSink): Promise<TurnResult> {
+            sink.onEvent({ ts: nowIso(), type: 'assistant.text', payload: { text: `token=${input.mcpServers['docs']!.env!['TOKEN']}` } });
+            return super.runTurn(input, sink);
+          }
+        })();
+        const run = await workerRun(weave, ['docs']);
+        expect(weave.inputs[0]!.mcpServers['docs']!.env!['TOKEN']).toBe(DAEMON_SECRET);
+        const joined = h.db.all<{ payload: unknown }>('SELECT payload_json FROM run_events WHERE run_id = ?', [run.id]).map((r) => JSON.stringify(r.payload)).join('\n');
+        expect(joined).not.toContain(DAEMON_SECRET);
+        expect(readFileSync(join(h.ctx.paths.runs, run.id, 'mcp.json'), 'utf8')).not.toContain(DAEMON_SECRET);
+
+        h.services.secrets!.put({ kind: 'human', id: 'victor' }, { name: 'MCP_TOKEN' }, SECRET);
+        const weave2 = new WeaveFakeRuntime();
+        h.ctx.registries.runtimes.set('weave', weave2);
+        const ticketB = seedTicket(h, { number: 2, identifier: 'TST-2', status: 'in_progress' });
+        const workerB = h.addWorker(ticketB, {});
+        h.services.wake!.enqueue(workerB, { source: 'ticket_assigned', reason: 'TST-2' });
+        await weaveRun(weave2, workerB);
+        expect(weave2.inputs[0]!.mcpServers['docs']!.env!['TOKEN']).toBe(SECRET);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
+
+    it('redacts a daemon-stored provider key from what the turn records', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'ws-daemon-'));
+      try {
+        h.ctx.daemonConfigDir = dir;
+        const KEY = 'daemon-provider-key-0123456789';
+        daemonSecretStore(dir)!.put('WEAVE_LLM_FAKE_KEY', KEY);
+        h.ctx.daemon.providers = { fake: ProviderProfileSchema.parse({ baseUrl: 'https://llm.example.test/v1', apiKeySecret: 'WEAVE_LLM_FAKE_KEY', models: { m: {} } }) };
+        const weave = new (class extends WeaveFakeRuntime {
+          override async runTurn(input: TurnInput, sink: TurnSink): Promise<TurnResult> {
+            sink.onEvent({ ts: nowIso(), type: 'assistant.text', payload: { text: `the key is ${KEY}` } });
+            return super.runTurn(input, sink);
+          }
+        })();
+        h.ctx.config.models = { weaver: { runtime: 'weave', model: 'fake/m' }, workers: { runtime: 'weave', model: 'fake/m' }, workerOptions: [] };
+        h.ctx.registries.runtimes.set('weave', weave);
+        h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+        const run = await weaveRun(weave, h.conductorId);
+        const rows = h.db.all<{ payload: { text?: string } }>("SELECT payload_json FROM run_events WHERE run_id = ? AND type = 'assistant.text'", [run.id]);
+        expect(rows[0]!.payload.text).toContain('[redacted]');
+        expect(rows[0]!.payload.text).not.toContain(KEY);
+      } finally { rmSync(dir, { recursive: true, force: true }); }
+    });
   });
 
   it('uses the workspace weaver list for a weaver run', async () => {

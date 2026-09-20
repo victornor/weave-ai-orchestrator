@@ -156,3 +156,86 @@ providers:
     expect(loadReplConfig({ flags: {}, env: env(), cwd: dir, home }).warnings).toEqual([]);
   });
 });
+
+// VS-633: the daemon's providers and MCP servers are the lowest source, read from its config directory.
+describe('the daemon config (VS-633)', () => {
+  const daemonDir = (): string => join(home, '.config', 'weave');
+  const writeDaemon = (yaml: string): void => { mkdirSync(daemonDir(), { recursive: true }); writeFileSync(join(daemonDir(), 'daemon.yaml'), yaml); };
+  const daemonYaml = `version: 1
+providers:
+  shared:
+    baseUrl: http://127.0.0.1:4000/v1
+    apiKeySecret: WEAVE_LLM_SHARED_KEY
+    models:
+      big: {}
+  other:
+    baseUrl: http://127.0.0.1:4001/v1
+    models:
+      small: {}
+mcpServers:
+  docs:
+    type: http
+    url: http://127.0.0.1:5000/mcp
+    headers:
+      Authorization: "Bearer \${DOCS_TOKEN}"
+`;
+
+  it('picks up a daemon-level provider and MCP server with no workspace and no agent.yaml', () => {
+    writeDaemon(daemonYaml);
+    const c = loadReplConfig({ flags: {}, env: env(), cwd: dir, home });
+    expect(Object.keys(c.providers).sort()).toEqual(['other', 'shared']);
+    expect(Object.keys(c.mcpServers)).toEqual(['docs']);
+    expect(c.workspace).toBeNull();
+    expect(c.daemonDir).toBe(daemonDir());
+    expect(c.sources.some((s) => s.startsWith('daemon '))).toBe(true);
+  });
+
+  it('has no daemon source when the config directory holds no daemon.yaml', () => {
+    const c = loadReplConfig({ flags: {}, env: env(), cwd: dir, home });
+    expect(c.daemonDir).toBeNull();
+  });
+
+  it('finds the directory through AC_CONFIG_HOME', () => {
+    const elsewhere = join(dir, 'elsewhere');
+    mkdirSync(elsewhere);
+    writeFileSync(join(elsewhere, 'daemon.yaml'), daemonYaml);
+    const c = loadReplConfig({ flags: {}, env: env({ AC_CONFIG_HOME: elsewhere }), cwd: dir, home });
+    expect(Object.keys(c.providers).sort()).toEqual(['other', 'shared']);
+  });
+
+  it('lets the user file and then a workspace replace a daemon entry whole, not merge it', () => {
+    writeDaemon(daemonYaml);
+    writeFileSync(join(daemonDir(), 'agent.yaml'), 'providers:\n  shared:\n    baseUrl: http://127.0.0.1:9001/v1\n    models:\n      mine: {}\n');
+    let c = loadReplConfig({ flags: {}, env: env(), cwd: dir, home });
+    expect(c.providers['shared']).toMatchObject({ baseUrl: 'http://127.0.0.1:9001/v1', models: { mine: {} } });
+    expect(c.providers['shared']!.apiKeySecret).toBeUndefined();
+    writeFileSync(join(ws, 'workspace.yaml'), `version: 1\nid: acme\nname: Acme\nticketPrefix: AC\nproviders:\n  shared:\n    baseUrl: http://127.0.0.1:9002/v1\n    models:\n      theirs: {}\n`);
+    c = loadReplConfig({ flags: {}, env: env(), cwd: ws, home });
+    expect(c.providers['shared']).toMatchObject({ baseUrl: 'http://127.0.0.1:9002/v1', models: { theirs: {} } });
+    expect(c.providers['other']).toBeDefined();
+  });
+
+  it('drops a daemon entry the workspace disables, unless the workspace defines its own', () => {
+    writeDaemon(daemonYaml);
+    writeFileSync(join(ws, 'workspace.yaml'), `version: 1\nid: acme\nname: Acme\nticketPrefix: AC\ndisabledProviders: [other, shared]\ndisabledMcpServers: [docs]\nproviders:\n  shared:\n    baseUrl: http://127.0.0.1:9002/v1\n    models:\n      theirs: {}\n`);
+    const c = loadReplConfig({ flags: {}, env: env(), cwd: ws, home });
+    expect(Object.keys(c.providers)).toEqual(['shared']);
+    expect(c.providers['shared']!.baseUrl).toBe('http://127.0.0.1:9002/v1');
+    expect(c.mcpServers['docs']).toBeUndefined();
+  });
+
+  it('refuses a literal apiKey in daemon.yaml, naming the field and never the value', () => {
+    writeDaemon('version: 1\nproviders:\n  bad:\n    baseUrl: http://127.0.0.1:1/v1\n    apiKey: sk-daemon-literal-999\n    models: { m1: {} }\n');
+    const c = loadReplConfig({ flags: { provider: 'bad', model: 'm1' }, env: env(), cwd: dir, home });
+    expect(c.providers['bad']).toBeUndefined();
+    expect(c.providerErrors['bad']).toContain('apiKey');
+    expect(JSON.stringify(c)).not.toContain('sk-daemon-literal-999');
+  });
+
+  it('resolves keys and MCP references from the daemon secret store after the environment and the workspace', () => {
+    // The file format is the real store's; packages/server/src/repl-secrets.test.ts opens a real one.
+    const profile = { baseUrl: 'http://x/v1', apiKeySecret: 'WEAVE_LLM_SHARED_KEY' } as never;
+    expect(resolveApiKey({ providerId: 'shared', profile, env: {}, workspace: null, daemonDir: join(dir, 'nowhere') })).toMatchObject({ key: undefined, source: 'none' });
+    expect(resolveApiKey({ providerId: 'shared', profile, env: { WEAVE_LLM_SHARED_KEY: 'from-env' }, workspace: null, daemonDir: join(dir, 'nowhere') })).toMatchObject({ key: 'from-env', source: 'env' });
+  });
+});

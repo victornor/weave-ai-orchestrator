@@ -1,7 +1,8 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { daemonSecretStore } from '@weave-ai/core';
 import { createApp } from '../src/app.js';
 import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import { authed, makeHarness, type Harness } from './fakes.js';
@@ -135,5 +136,76 @@ describe('MCP server administration (VS-621)', () => {
         expect([method, path, kind, res.status]).toEqual([method, path, kind, 403]);
       }
     }
+  });
+});
+
+// VS-633: the daemon scope, and the merged, marked view a workspace gets.
+describe('daemon-level MCP servers', () => {
+  const dreq = (h: Harness, method: string, path: string, payload?: unknown) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/daemon/mcp-servers${path}`, { method, headers: { ...authed(), 'content-type': 'application/json' }, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}) }));
+  const withDir = (): { dir: string; h: Harness } => { const dir = mkdtempSync(join(tmpdir(), 'vs633-daemon-')); return { dir, h: makeHarness({ daemonConfigDir: dir }) }; };
+
+  it('defines a server in daemon.yaml that a workspace lists marked from the daemon, tests, and removes', async () => {
+    const { dir, h } = withDir(); harness = h;
+    try {
+      const put = await dreq(h, 'PUT', '/demo', stdioServerConfig());
+      expect(put.status).toBe(200);
+      expect(readFileSync(join(dir, 'daemon.yaml'), 'utf8')).toContain('demo:');
+      const ws = await (await req(h, 'GET', '/mcp')).json() as { servers: Array<{ name: string; source: string }> };
+      expect(ws.servers.map((s) => `${s.name}:${s.source}`)).toEqual(['demo:daemon']);
+      const test = await (await dreq(h, 'POST', '/demo/test')).json() as { ok: boolean; tools: unknown[] };
+      expect(test.ok).toBe(true);
+      expect((await req(h, 'POST', '/mcp/demo/test')).status).toBe(200);
+      expect((await dreq(h, 'DELETE', '/demo')).status).toBe(200);
+      expect((await dreq(h, 'DELETE', '/demo')).status).toBe(404);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('keeps a referenced secret in the daemon store and reports only held or not', async () => {
+    const { dir, h } = withDir(); harness = h;
+    try {
+      await dreq(h, 'PUT', '/demo', { ...stdioServerConfig(), env: { TOKEN: '${MCP_D_TOKEN}' } });
+      expect(((await (await req(h, 'GET', '/mcp')).json()) as { servers: Array<{ secrets: Array<{ configured: boolean }> }> }).servers[0]!.secrets[0]!.configured).toBe(false);
+      const set = await dreq(h, 'POST', '/secrets/MCP_D_TOKEN', { value: 'daemon-mcp-secret-0000' });
+      expect(JSON.stringify(await set.json())).not.toContain('daemon-mcp-secret');
+      expect(daemonSecretStore(dir)!.get('MCP_D_TOKEN')).toBe('daemon-mcp-secret-0000');
+      expect(h.runtime.services.secrets.has('MCP_D_TOKEN')).toBe(false);
+      const list = await (await req(h, 'GET', '/mcp')).text();
+      expect(list).not.toContain('daemon-mcp-secret');
+      expect(JSON.parse(list).servers[0].secrets[0].configured).toBe(true);
+      expect((await (await dreq(h, 'POST', '/demo/test')).json() as { ok: boolean }).ok).toBe(true);
+      await dreq(h, 'DELETE', '/secrets/MCP_D_TOKEN');
+      expect(JSON.parse(await (await req(h, 'GET', '/mcp')).text()).servers[0].secrets[0].configured).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('a workspace overrides a daemon server whole and restores it when removed; it can also disable one', async () => {
+    const { dir, h } = withDir(); harness = h;
+    try {
+      persistConfig(h);
+      await dreq(h, 'PUT', '/demo', stdioServerConfig());
+      expect((await req(h, 'DELETE', '/mcp/demo')).status).toBe(400);
+      const over = await req(h, 'PUT', '/mcp/demo', { type: 'http', url: 'https://w.example.test/mcp' });
+      expect(await over.json()).toMatchObject({ source: 'override' });
+      expect(h.runtime.ctx.daemon.mcpServers['demo']!.type).toBe('stdio');
+      expect((await req(h, 'DELETE', '/mcp/demo')).status).toBe(200);
+      expect(((await (await req(h, 'GET', '/mcp')).json()) as { servers: Array<{ source: string; config: { type: string } }> }).servers.map((s) => `${s.source}:${s.config.type}`)).toEqual(['daemon:stdio']);
+      expect((await req(h, 'POST', '/mcp/demo/disable')).status).toBe(200);
+      const hidden = await (await req(h, 'GET', '/mcp')).json() as { servers: unknown[]; disabled: Array<{ name: string }> };
+      expect(hidden.servers).toEqual([]);
+      expect(hidden.disabled.map((d) => d.name)).toEqual(['demo']);
+      expect((await req(h, 'DELETE', '/mcp/demo/disable')).status).toBe(200);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('refuses a run token on every daemon MCP route', async () => {
+    const { dir, h } = withDir(); harness = h;
+    try {
+      h.deps.listener = 'loopback';
+      const token = await signRunToken(runTokenSecret(h.runtime.ctx.db), { workspaceId: 'ws1', runId: 'run_1', agentId: 'ag_1', agentKind: 'weaver', projectId: 'p1', ticketId: null, roleId: null, planId: null, firstTurn: false } as never);
+      for (const [method, path, payload] of [['GET', '', undefined], ['PUT', '/demo', { type: 'stdio', command: 'npx' }], ['POST', '/demo/test', undefined], ['POST', '/secrets/MCP_X', { value: 'x' }]] as const) {
+        const res = await createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/daemon/mcp-servers${path}`, { method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}) }));
+        expect([method, path, res.status]).toEqual([method, path, 403]);
+      }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

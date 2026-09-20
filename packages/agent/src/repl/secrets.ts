@@ -9,8 +9,15 @@ import { join } from 'node:path';
  * the real store wrote, so a change to that format fails there.
  */
 export function openWorkspaceSecret(stateDir: string, name: string): string | null {
-  const file = join(stateDir, 'secrets.enc');
-  const keyFile = join(stateDir, 'secrets.key');
+  return openSecret(join(stateDir, 'secrets.enc'), join(stateDir, 'secrets.key'), name);
+}
+
+/** VS-633: the daemon's own store (`daemon-secrets.enc` / `daemon-secrets.key` in its config directory), same format. */
+export function openDaemonSecret(daemonDir: string, name: string): string | null {
+  return openSecret(join(daemonDir, 'daemon-secrets.enc'), join(daemonDir, 'daemon-secrets.key'), name);
+}
+
+function openSecret(file: string, keyFile: string, name: string): string | null {
   if (!existsSync(file) || !existsSync(keyFile)) return null;
   try {
     const all = JSON.parse(readFileSync(file, 'utf8')) as Record<string, { iv?: string; tag?: string; body?: string } | undefined>;

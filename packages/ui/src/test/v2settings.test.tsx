@@ -71,6 +71,8 @@ vi.mock('../api/hooks', () => ({
   useSetMcpSecret: () => ({ mutate: () => undefined, isPending: false }),
   useClearMcpSecret: () => ({ mutate: () => undefined, isPending: false }),
   useTestMcpServer: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }),
+  useSetProviderDisabled: () => ({ mutate: () => undefined }),
+  useSetMcpDisabled: () => ({ mutate: () => undefined }),
 }));
 
 vi.mock('../settings/sections', () => ({

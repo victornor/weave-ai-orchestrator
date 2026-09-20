@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: Providers and MCP servers for the built-in agent live at the daemon level,
+  with an optional per-workspace override

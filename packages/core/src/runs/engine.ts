@@ -25,6 +25,7 @@ import { emitRunEvent, runState } from './active.js';
 import { PartialBuffer } from './partials.js';
 import { effectiveModels, modelSettingFor, modelsFor } from '../models/resolve.js';
 import { runTokenSecret, signRunToken } from './runtoken.js';
+import { effectiveMcpServers, effectiveProviders, scopedSecretValue } from '../scoped.js';
 
 /**
  * An interactive session's agent's first turn (VS-101, VS-462): read the ticket and its comments,
@@ -202,9 +203,9 @@ function roleSecretsEnv(ctx: WorkspaceContext, deps: () => CoreServices, role: R
 function providerStoreKey(ctx: WorkspaceContext, deps: () => CoreServices, model: string | null | undefined): string | undefined {
   const providerId = model?.split('/')[0];
   if (!providerId || providerId === model) return undefined;
-  const profile = ctx.config.providers?.[providerId];
+  const profile = effectiveProviders(ctx)[providerId];
   if (!profile?.apiKeySecret) return undefined;
-  return deps().secrets.value(profile.apiKeySecret) ?? undefined;
+  return scopedSecretValue(ctx, (n) => deps().secrets.value(n), profile.apiKeySecret) ?? undefined;
 }
 
 function classifyLiveness(status: Run['status'], report: RunReport | null, ticketStatus: string | null): RunLiveness {
@@ -531,8 +532,16 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     let mcpSecretValues: string[] = [];
     if (setting.runtime === 'weave') {
       const allowed = agent.kind === 'weaver' ? (ctx.config.weaver?.mcpServers ?? []) : (role?.mcpServers ?? []);
-      const built = buildMcpServers({ configServers: ctx.config.mcpServers ?? {}, allowed, resolveSecret: (name) => deps().secrets.value(name) });
-      if (built.unknown.length > 0) log.info({ names: built.unknown }, 'allowed MCP servers are not defined in this workspace');
+      const built = buildMcpServers({ configServers: effectiveMcpServers(ctx), allowed, resolveSecret: (name) => scopedSecretValue(ctx, (n) => deps().secrets.value(n), name) });
+      // VS-633: a name the run's role (or the weaver) allows that neither the daemon nor this
+      // workspace defines is a configuration error, not something to run without.
+      if (built.unknown.length > 0) {
+        const who = agent.kind === 'weaver' ? 'the weaver' : `role ${role?.id ?? agent.roleId ?? '(none)'}`;
+        throw Object.assign(
+          new Error(`${who} allows MCP server${built.unknown.length > 1 ? 's' : ''} ${built.unknown.map((n) => `"${n}"`).join(', ')}, which ${built.unknown.length > 1 ? 'are' : 'is'} defined neither in the daemon settings nor in this workspace; define it or remove it from the allow list`),
+          { ocFamily: 'tooling' as RunErrorFamily, ocCode: 'mcp_server_missing' },
+        );
+      }
       if (built.missing.length > 0) log.warn({ refs: built.missing }, 'MCP servers omitted: a referenced secret has no value');
       mcpServers = { ...baseMcpServers, ...built.servers };
       mcpJsonServers = { ...baseMcpServers, ...built.definitions };

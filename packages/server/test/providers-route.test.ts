@@ -1,7 +1,12 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
+import { daemonSecretStore } from '@weave-ai/core';
 import { createApp } from '../src/app.js';
+import { runTokenSecret, signRunToken } from '../src/runtoken.js';
 import { authed, makeHarness, type Harness } from './fakes.js';
 
 let harness: Harness | null = null;
@@ -132,5 +137,103 @@ describe('POST /providers/:id/test', () => {
     const res = await post(harness, '/providers/bare/test');
     expect(res.status).toBe(400);
     expect((await res.json() as { error: { code: string } }).error.code).toBe('validation');
+  });
+});
+
+// VS-633: the daemon scope, and the merged, marked view a workspace gets.
+describe('daemon-level providers', () => {
+  const dreq = (h: Harness, method: string, path: string, payload?: unknown) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/daemon/providers${path}`, { method, headers: { ...authed(), 'content-type': 'application/json' }, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}) }));
+  const scratchDir = (): string => mkdtempSync(join(tmpdir(), 'vs633-daemon-'));
+  const profile = (baseUrl: string) => ({ baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_D_KEY', models: { m1: {} } });
+  const withDir = (): { dir: string; h: Harness } => { const dir = scratchDir(); const h = makeHarness({ daemonConfigDir: dir }); return { dir, h }; };
+
+  it('creates a provider in daemon.yaml, visible to a workspace marked from the daemon, and removes it', async () => {
+    const { dir, h } = withDir(); harness = h;
+    try {
+      const put = await dreq(h, 'PUT', '/dp', profile('https://d.example.test/v1'));
+      expect(put.status).toBe(200);
+      expect(readFileSync(join(dir, 'daemon.yaml'), 'utf8')).toContain('dp:');
+      const ws = await (await req(h, 'GET', '/providers')).json() as { providers: Array<{ id: string; source: string }> };
+      expect(ws.providers.map((p) => `${p.id}:${p.source}`)).toEqual(['dp:daemon']);
+      expect((await dreq(h, 'DELETE', '/dp')).status).toBe(200);
+      expect((await (await req(h, 'GET', '/providers')).json() as { providers: unknown[] }).providers).toEqual([]);
+      expect((await dreq(h, 'DELETE', '/dp')).status).toBe(404);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('holds a daemon key in the daemon store: found by a workspace with no secret, never returned, cleared on request', async () => {
+    const { dir, h } = withDir(); harness = h;
+    try {
+      await dreq(h, 'PUT', '/dp', profile('https://d.example.test/v1'));
+      const set = await dreq(h, 'POST', '/dp/secret', { value: 'sk-daemon-secret-0000' });
+      expect(await set.json()).toMatchObject({ ok: true, configured: true, secretName: 'WEAVE_LLM_D_KEY' });
+      expect(daemonSecretStore(dir)!.get('WEAVE_LLM_D_KEY')).toBe('sk-daemon-secret-0000');
+      expect(h.runtime.services.secrets.has('WEAVE_LLM_D_KEY')).toBe(false);
+      const daemonList = await (await dreq(h, 'GET', '')).text();
+      const wsList = await (await req(h, 'GET', '/providers')).text();
+      expect(daemonList).not.toContain('sk-daemon-secret');
+      expect(wsList).not.toContain('sk-daemon-secret');
+      expect(JSON.parse(wsList).providers[0]).toMatchObject({ id: 'dp', secretConfigured: true });
+      await dreq(h, 'DELETE', '/dp/secret');
+      expect(JSON.parse(await (await req(h, 'GET', '/providers')).text()).providers[0].secretConfigured).toBe(false);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('a workspace overrides a daemon provider whole, and removing the override restores it', async () => {
+    const { dir, h } = withDir(); harness = h;
+    try {
+      persistConfig(h);
+      await dreq(h, 'PUT', '/dp', profile('https://d.example.test/v1'));
+      // Inherited entries cannot be edited or given a key from the workspace scope.
+      expect((await req(h, 'DELETE', '/providers/dp')).status).toBe(400);
+      expect((await post(h, '/providers/dp/secret', { value: 'sk-x-000000' })).status).toBe(400);
+      const over = await req(h, 'PUT', '/providers/dp', { ...profile('https://w.example.test/v1'), models: { other: {} } });
+      expect(await over.json()).toMatchObject({ source: 'override', models: ['other'] });
+      expect(h.runtime.ctx.daemon.providers['dp']!.baseUrl).toBe('https://d.example.test/v1');
+      expect((await req(h, 'DELETE', '/providers/dp')).status).toBe(200);
+      const back = await (await req(h, 'GET', '/providers')).json() as { providers: Array<{ id: string; source: string; profile: { baseUrl: string } }> };
+      expect(back.providers.map((p) => `${p.id}:${p.source}:${p.profile.baseUrl}`)).toEqual(['dp:daemon:https://d.example.test/v1']);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('a workspace can disable an inherited provider and enable it again', async () => {
+    const { dir, h } = withDir(); harness = h;
+    try {
+      persistConfig(h);
+      await dreq(h, 'PUT', '/dp', profile('https://d.example.test/v1'));
+      expect((await req(h, 'POST', '/providers/dp/disable')).status).toBe(200);
+      const hidden = await (await req(h, 'GET', '/providers')).json() as { providers: unknown[]; disabled: Array<{ id: string }> };
+      expect(hidden.providers).toEqual([]);
+      expect(hidden.disabled.map((d) => d.id)).toEqual(['dp']);
+      expect((await req(h, 'DELETE', '/providers/dp/disable')).status).toBe(200);
+      expect((await (await req(h, 'GET', '/providers')).json() as { providers: unknown[] }).providers).toHaveLength(1);
+      expect((await req(h, 'POST', '/providers/ghost/disable')).status).toBe(404);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('tests a daemon provider from the daemon scope with its daemon key, and from a workspace that inherits it', async () => {
+    const { dir, h } = withDir(); harness = h;
+    try {
+      const ep = await endpoint();
+      await dreq(h, 'PUT', '/dp', { ...profile(ep.baseUrl), preset: 'openai' });
+      const noKey = await (await dreq(h, 'POST', '/dp/test', {})).json() as { ok: boolean; checks: Array<{ detail: string }> };
+      expect(noKey.ok).toBe(false);
+      expect(noKey.checks[0]!.detail).toContain('WEAVE_LLM_D_KEY');
+      await dreq(h, 'POST', '/dp/secret', { value: 'held-daemon-key' });
+      const ok = await (await dreq(h, 'POST', '/dp/test', {})).json() as { ok: boolean };
+      expect(ok.ok).toBe(true);
+      expect((await (await post(h, '/providers/dp/test', {})).json() as { ok: boolean }).ok).toBe(true);
+      expect(new Set(ep.seen.filter((s) => s.auth).map((s) => s.auth))).toEqual(new Set(['Bearer held-daemon-key']));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('refuses a run token on the daemon routes', async () => {
+    const { dir, h } = withDir(); harness = h;
+    try {
+      h.deps.listener = 'loopback';
+      const token = await signRunToken(runTokenSecret(h.runtime.ctx.db), { workspaceId: 'ws1', runId: 'run_1', agentId: 'ag_1', agentKind: 'worker', projectId: 'p1', ticketId: null, roleId: null, planId: null, firstTurn: false } as never);
+      const res = await createApp(h.deps).fetch(new Request('http://127.0.0.1:7433/api/daemon/providers/x', { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(profile('https://d.example.test/v1')) }));
+      expect(res.status).toBe(403);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });

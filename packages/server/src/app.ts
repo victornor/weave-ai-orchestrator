@@ -55,6 +55,8 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
 
   // ---- daemon level ----
   app.route('/api/auth', authRoutes(deps));
+  app.route('/api/daemon/providers', providerRoutes({ daemon: deps }));
+  app.route('/api/daemon/mcp-servers', mcpServerRoutes({ daemon: deps }));
   app.route('/api', daemonRoutes(deps, admin));
   app.route('/api/events', globalEventRoutes(deps));
 

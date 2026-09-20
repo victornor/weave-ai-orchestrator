@@ -17,9 +17,7 @@
   },
   "dependencies": {
     "@weave-ai/shared": "workspace:*",
-    "js-tiktoken": "^1.0.21"
-  },
-  "devDependencies": {
+    "js-tiktoken": "^1.0.21",
     "yaml": "^2.9.0"
   }
 }

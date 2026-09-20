@@ -26,7 +26,9 @@ export interface InitMessage {
   systemPrompt: { text: string; mode: 'inject' | 'skip' };
   /** S7: when set, the child offers a `submit_result` tool with these parameters and returns the call's arguments as `result.structured`. */
   outputSchema?: Record<string, unknown>;
-  session: { path: string; id: string };
+  session: { path: string; id: string; /** Marks a session file a person started from the terminal REPL; written to the header of a new file. */ origin?: 'repl' };
+  /** The REPL's skill directories, earlier wins; absent: the default `<cwd>/.agents/skills` (a daemon turn). */
+  skillRoots?: Array<{ dir: string; source: string }>;
   mcpServers: Record<string, { type?: 'http' | 'stdio'; url?: string; headers?: Record<string, string>; command?: string; args?: string[]; env?: Record<string, string>; listTimeoutMs?: number; callTimeoutMs?: number; readOnly?: boolean }>;
   toolEnv: Record<string, string>;
 }

@@ -24,7 +24,7 @@ export class Session {
   readonly messages: Message[];
   private constructor(readonly id: string, readonly path: string, messages: Message[], private ids: string[], private compaction: CompactionRecord | null, private leaf: string | null, private fd: number) { this.messages = messages; }
 
-  static open(opts: { path: string; id: string; cwd: string }): Session {
+  static open(opts: { path: string; id: string; cwd: string; origin?: 'repl' }): Session {
     const messages: Message[] = [];
     const ids: string[] = [];
     let compaction: CompactionRecord | null = null;
@@ -39,7 +39,7 @@ export class Session {
       }
     } else {
       mkdirSync(dirname(opts.path), { recursive: true });
-      appendFileSync(opts.path, JSON.stringify({ type: 'session', v: 1, id: opts.id, createdAt: new Date().toISOString(), cwd: opts.cwd }) + '\n');
+      appendFileSync(opts.path, JSON.stringify({ type: 'session', v: 1, id: opts.id, createdAt: new Date().toISOString(), cwd: opts.cwd, ...(opts.origin ? { origin: opts.origin } : {}) }) + '\n');
     }
     // A torn last line has no newline: make sure the next entry starts on its own line.
     const raw = existsSync(opts.path) ? readFileSync(opts.path, 'utf8') : '';

@@ -15,6 +15,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
+    "@weave-ai/agent": "workspace:*",
     "@weave-ai/db": "workspace:*",
     "@weave-ai/presenter": "workspace:*",
     "@weave-ai/release": "workspace:*",

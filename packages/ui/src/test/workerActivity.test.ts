@@ -29,7 +29,7 @@ describe('merging a pushed activity frame over the workers read', () => {
   });
 
   it('carries the live-turn state the daemon computed (VS-602)', () => {
-    const live = { state: 'waiting', label: 'Waiting for the model', since: '2026-09-13T12:00:04.000Z', toolCount: 3, turnMs: 9000, sinceLastMs: 4000, wholeStepsOnly: false };
+    const live = { state: 'waiting', label: 'Working', since: '2026-09-13T12:00:04.000Z', toolCount: 3, turnMs: 9000, sinceLastMs: 4000, wholeStepsOnly: false };
     const pushed = new Map([['a1', frame({ live })]]);
     expect(mergeWorkerActivity({ id: 'a1' }, pushed)?.live).toEqual(live);
   });
@@ -54,8 +54,8 @@ describe('choosing the line to render', () => {
   });
 
   it('prefers the live-turn state over the per-event line, so a card is never a bare word (VS-602)', () => {
-    const live = { state: 'waiting', label: 'Waiting for the model', since: '2026-09-13T12:00:09.000Z', toolCount: 3, turnMs: 9000, sinceLastMs: 4000, wholeStepsOnly: false };
-    expect(activityLine({ ...summary, live }, null)).toEqual({ label: 'Waiting for the model', since: '2026-09-13T12:00:09.000Z' });
+    const live = { state: 'waiting', label: 'Working', since: '2026-09-13T12:00:09.000Z', toolCount: 3, turnMs: 9000, sinceLastMs: 4000, wholeStepsOnly: false };
+    expect(activityLine({ ...summary, live }, null)).toEqual({ label: 'Working', since: '2026-09-13T12:00:09.000Z' });
   });
 
   it('shows the last run summary between turns, without an elapsed clock', () => {

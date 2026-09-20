@@ -14,9 +14,9 @@ describe('liveTurn (VS-595)', () => {
     expect(liveTurn([], [], now(2), {})).toMatchObject({ state: 'starting', label: 'Starting the turn' });
   });
 
-  it('reads "waiting for the model" with elapsed seconds between a finished tool and the next step', () => {
+  it('reads "Working" with elapsed seconds between a finished tool and the next step', () => {
     const t = liveTurn([call('a', 1), result('a', 2)], [], now(6), { partialOutput: 'full' });
-    expect(t).toMatchObject({ state: 'waiting', label: 'Waiting for the model', stateMs: 4000, sinceLastMs: 4000, turnMs: 5000, toolCount: 1, wholeStepsOnly: false });
+    expect(t).toMatchObject({ state: 'waiting', label: 'Working', stateMs: 4000, sinceLastMs: 4000, turnMs: 5000, toolCount: 1, wholeStepsOnly: false });
   });
 
   it('shows a running tool with its command and elapsed time, and completes it in place', () => {
@@ -58,7 +58,7 @@ describe('liveTurn (VS-595)', () => {
 describe('liveTurnLine (VS-602)', () => {
   it('names the state and its elapsed seconds, with the tool count for a non-tool state', () => {
     const t = liveTurn([call('a', 1), result('a', 2)], [], now(6), { partialOutput: 'full' });
-    expect(liveTurnLine(t)).toBe('Waiting for the model · 4 s · 1 tool call');
+    expect(liveTurnLine(t)).toBe('Working · 4 s · 1 tool call');
   });
 
   it('shows a running tool with its command and elapsed time', () => {
@@ -82,10 +82,10 @@ describe('liveActivityLine (VS-603)', () => {
     expect(liveActivityLine([], [], now(2), {})).toBe('Starting the turn · 0 s · whole steps only');
     expect(liveActivityLine([call('a', 1, 'sleep 3; ls')], [], now(4), { partialOutput: 'full' })).toBe('Running bash sleep 3; ls · 3 s');
     const done = [call('a', 1), result('a', 2)];
-    expect(liveActivityLine(done, [], now(6), { partialOutput: 'full' })).toBe('Waiting for the model · 4 s · 1 tool call');
+    expect(liveActivityLine(done, [], now(6), { partialOutput: 'full' })).toBe('Working · 4 s · 1 tool call');
     expect(liveActivityLine(done, [{ partId: 'p', kind: 'text', text: 'Hi' }], now(3), { partialOutput: 'full', partialSince: now(2.5) })).toBe('Writing · 0 s · 1 tool call');
     expect(liveActivityLine(done, [{ partId: 'p', kind: 'thinking', text: 'hm' }], now(3), { partialOutput: 'full' })).toBe('Thinking · 1 s · 1 tool call');
-    expect(liveActivityLine(done, [], now(3), { partialOutput: 'none' })).toBe('Waiting for the model · 1 s · 1 tool call · whole steps only');
+    expect(liveActivityLine(done, [], now(3), { partialOutput: 'none' })).toBe('Working · 1 s · 1 tool call · whole steps only');
   });
 });
 
@@ -101,7 +101,7 @@ describe('progressLine (VS-604)', () => {
 
   it('states the model wait, the writing and the thinking states with their seconds', () => {
     const e = [call('a', 1), result('a', 2)];
-    expect(progressLine(liveTurn(e, [], now(6), { partialOutput: 'full' }))).toBe('Waiting for the model · 4 s · 1 tool call');
+    expect(progressLine(liveTurn(e, [], now(6), { partialOutput: 'full' }))).toBe('Working · 4 s · 1 tool call');
     expect(progressLine(liveTurn(e, [{ partId: 'p', kind: 'text', text: 'Hi' }], now(3), { partialOutput: 'full', partialSince: now(2.5) }))).toBe('Writing · 0 s · 1 tool call');
     expect(progressLine(liveTurn(e, [{ partId: 'p', kind: 'thinking', text: 'hm' }], now(3), { partialOutput: 'full' }))).toBe('Thinking · 1 s · 1 tool call');
   });

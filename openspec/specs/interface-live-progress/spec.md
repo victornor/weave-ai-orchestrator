@@ -10,7 +10,7 @@ An interface that displays or talks to a running agent SHALL derive its live sta
 
 #### Scenario: The conductor is generating
 - **WHEN** the weaver chat is following a live turn whose last event was a completed tool result and nothing has arrived for 4 s
-- **THEN** the live section reads "waiting for the model" with 4 s elapsed and the turn total, not "working"
+- **THEN** the live section reads "Working" with 4 s elapsed and the turn total
 
 #### Scenario: A surface with no live row
 - **WHEN** any audited surface is rendered during a live turn
@@ -109,7 +109,7 @@ Where the run's runtime declares no partial output, every web surface SHALL say 
 #### Scenario: A turn between steps
 
 - **WHEN** `weave attach` is following a turn whose last event is a completed tool result and nothing has arrived for 4 s
-- **THEN** the row above the status bar reads "Waiting for the model" with 4 s elapsed and the tool count, not "working"
+- **THEN** the row above the status bar reads "Working" with 4 s elapsed and the tool count
 
 #### Scenario: A frame moves the row without a run event
 

@@ -24,12 +24,12 @@ describe('RunTranscript live activity', () => {
     expect(row.textContent).toContain('Starting the turn');
   });
 
-  it('between steps it says it is waiting for the model, and the seconds tick on the page clock', () => {
+  it('between steps it says Working, and the seconds tick on the page clock', () => {
     const events = [ev('tool.call', { id: 'a', name: 'bash', input: { command: 'ls' } }, 1), ev('tool.result', { id: 'a', name: 'bash' }, 2)];
     const { container } = render(<RunTranscript events={events} live stream={noStream} runtimeId="opencode" label="t" />);
     const row = () => container.querySelector('[data-live-activity]')!;
     expect(row().getAttribute('data-live-state')).toBe('waiting');
-    expect(row().textContent).toContain('Waiting for the model');
+    expect(row().textContent).toContain('Working');
     expect(row().textContent).toContain('4 s');
     act(() => { vi.advanceTimersByTime(3000); });
     expect(row().textContent).toContain('7 s');

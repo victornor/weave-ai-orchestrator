@@ -18,6 +18,6 @@ describe('fleetActivityLabel (VS-603)', () => {
   });
 
   it('does not invent an elapsed time when there is no since', () => {
-    expect(fleetActivityLabel({ live: { ...live('Waiting for the model', 0), since: undefined as unknown as string } }, 'working', T0 + 5000)).toBe('Waiting for the model');
+    expect(fleetActivityLabel({ live: { ...live('Working', 0), since: undefined as unknown as string } }, 'working', T0 + 5000)).toBe('Working');
   });
 });

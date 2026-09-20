@@ -278,14 +278,14 @@ describe('channel progress (VS-604)', () => {
 
     // A changed state one second later is dropped by the coalescer.
     vi.setSystemTime(new Date('2026-09-20T10:00:01.000Z'));
-    await emit(h, summary('ag_conductor', { live: live({ state: 'waiting', label: 'Waiting for the model', since: '2026-09-20T10:00:00.500Z' }) }));
+    await emit(h, summary('ag_conductor', { live: live({ state: 'waiting', label: 'Working', since: '2026-09-20T10:00:00.500Z' }) }));
     expect(adapter.progressCalls.map((c) => c.phase)).toEqual(['start']);
 
     // Three seconds after the start, the same changed state becomes the update.
     vi.setSystemTime(new Date('2026-09-20T10:00:03.000Z'));
-    await emit(h, summary('ag_conductor', { live: live({ state: 'waiting', label: 'Waiting for the model', since: '2026-09-20T10:00:00.500Z' }) }));
+    await emit(h, summary('ag_conductor', { live: live({ state: 'waiting', label: 'Working', since: '2026-09-20T10:00:00.500Z' }) }));
     expect(adapter.progressCalls.map((c) => c.phase)).toEqual(['start', 'update']);
-    expect(adapter.progressCalls[1]!.text).toBe('Waiting for the model · 2 s · 1 tool call');
+    expect(adapter.progressCalls[1]!.text).toBe('Working · 2 s · 1 tool call');
 
     vi.setSystemTime(new Date('2026-09-20T10:00:04.000Z'));
     await emit(h, summary('ag_conductor', { live: null }));

@@ -16,13 +16,13 @@ describe('runsTailTurn (VS-603)', () => {
     expect(liveTurnLine(runsTailTurn([], [], now(2), 'full'))).toBe('Starting the turn · 0 s');
     expect(liveTurnLine(runsTailTurn([call('a', 1, 'sleep 3; ls')], [], now(4), 'full'))).toBe('Running bash sleep 3; ls · 3 s');
     const done = [call('a', 1), result('a', 2)];
-    expect(liveTurnLine(runsTailTurn(done, [], now(6), 'full'))).toBe('Waiting for the model · 4 s · 1 tool call');
+    expect(liveTurnLine(runsTailTurn(done, [], now(6), 'full'))).toBe('Working · 4 s · 1 tool call');
     expect(liveTurnLine(runsTailTurn(done, [{ partId: 'p', kind: 'text', text: 'Hi' }], now(3), 'full'))).toBe('Writing · 1 s · 1 tool call');
   });
 
   it('flags a runtime that reports whole steps only', () => {
     const done = [call('a', 1), result('a', 2)];
-    expect(liveTurnLine(runsTailTurn(done, [], now(3), 'none'))).toBe('Waiting for the model · 1 s · 1 tool call · whole steps only');
+    expect(liveTurnLine(runsTailTurn(done, [], now(3), 'none'))).toBe('Working · 1 s · 1 tool call · whole steps only');
   });
 
   it('produces the same label for repeated frames of one state, so tail does not reprint', () => {

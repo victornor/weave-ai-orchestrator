@@ -85,21 +85,31 @@ export function workerFromRoleChatPath(pathname: string): string | null {
  * The open-or-resume call every role-chat surface makes (VS-525, VS-581): resolve the role's session,
  * creating it on first use, and navigate to it. `ws` is the session's workspace — the sidebar passes
  * its project's own workspace because the shell is above the provider and spans workspaces.
+ *
+ * VS-617: the navigation runs from the mutation's own success, not a callback passed to `mutate`, so
+ * it still fires when the surface that owns the row unmounts before the request resolves (the phone
+ * More sheet closes as it opens). `onOpened` runs just before navigation, for a surface that must
+ * close itself once the session is open.
  */
-export function useRoleChatOpen(ws: string): {
+export function useRoleChatOpen(
+  ws: string,
+  onOpened?: () => void,
+): {
   open: (role: Pick<Role, 'id' | 'projectId'>, workerModelId?: string) => void;
   isPending: boolean;
   isError: boolean;
   error: unknown;
 } {
   const go = useGo();
-  const persistentSession = usePersistentSession(ws);
+  const persistentSession = usePersistentSession(ws, {
+    onOpened: (agent) => {
+      onOpened?.();
+      go('/w/$ws/workers/$workerId', { params: { ws, workerId: agent.id } });
+    },
+  });
   return {
     open: (role, workerModelId) =>
-      persistentSession.mutate(
-        { projectId: role.projectId, roleId: role.id, ...(workerModelId ? { workerModelId } : {}) },
-        { onSuccess: ({ agent }) => go('/w/$ws/workers/$workerId', { params: { ws, workerId: agent.id } }) },
-      ),
+      persistentSession.mutate({ projectId: role.projectId, roleId: role.id, ...(workerModelId ? { workerModelId } : {}) }),
     isPending: persistentSession.isPending,
     isError: persistentSession.isError,
     error: persistentSession.error,
@@ -158,6 +168,11 @@ export function RoleChatControl({
  * the same `useRoleChatOpen` the shared control uses. A role that cannot chat is a static,
  * non-actionable row that carries the reason as its title and accessible name. `current` marks the
  * role whose session is the page shown.
+ *
+ * VS-617: `onNavigate` is called once the session is open, immediately before the shell navigates to
+ * it — not on click. The phone More sheet uses it to close only on success, so closing the sheet can
+ * never cancel the open, and a failed open keeps the row (and the sheet) standing with its `not
+ * opened` state.
  */
 export function RoleChatRow({
   role,
@@ -170,11 +185,12 @@ export function RoleChatRow({
   role: Pick<Role, 'id' | 'projectId' | 'name' | 'status'>;
   session: Agent | null;
   ws: string;
+  /** Called when the session has opened, just before navigating to it. */
   onNavigate?: () => void;
   tall?: boolean;
   current?: boolean;
 }): React.ReactElement {
-  const chat = useRoleChatOpen(ws);
+  const chat = useRoleChatOpen(ws, onNavigate);
   const blocked = roleChatBlockedReason(role);
   const rowClass = cx('v2-row v2-row-child', tall && 'min-h-11', current && 'v2-row-child-current');
 
@@ -197,10 +213,7 @@ export function RoleChatRow({
       type="button"
       disabled={chat.isPending}
       title={roleChatStateLabel(session !== null)}
-      onClick={() => {
-        onNavigate?.();
-        chat.open(role);
-      }}
+      onClick={() => chat.open(role)}
       data-role-chat-row={role.id}
       data-role-chat-current={current ? 'true' : undefined}
       className={cx(rowClass, 'disabled:opacity-40')}

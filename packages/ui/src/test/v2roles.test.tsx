@@ -71,8 +71,11 @@ vi.mock('../api/hooks', () => ({
     isError: state.startSessionError !== null,
     error: state.startSessionError ? new Error(state.startSessionError) : null,
   }),
-  usePersistentSession: () => ({
-    mutate: state.persistentSession,
+  usePersistentSession: (_ws?: string, options?: { onOpened?: (agent: { id: string }) => void }) => ({
+    mutate: (body: unknown) => {
+      state.persistentSession(body);
+      options?.onOpened?.({ id: 'a_new' });
+    },
     isPending: false,
     isError: false,
     error: null,
@@ -127,10 +130,7 @@ beforeEach(() => {
   state.updateRole.mockClear();
   state.putCharter.mockClear();
   state.rollback.mockClear();
-  state.persistentSession.mockReset();
-  state.persistentSession.mockImplementation((_v: unknown, opts?: { onSuccess?: (r: { agent: { id: string } }) => void }) =>
-    opts?.onSuccess?.({ agent: { id: 'a_new' } }),
-  );
+  state.persistentSession.mockClear();
   state.startSession.mockClear();
 });
 
@@ -193,10 +193,7 @@ describe('the V2 Roles screen', () => {
     render(<V2RolesScreen />);
     fireEvent.change(screen.getByLabelText("Worker option for Backend Engineer's session"), { target: { value: 'deep' } });
     fireEvent.click(screen.getByRole('button', { name: 'Start chat' }));
-    expect(state.persistentSession).toHaveBeenCalledWith(
-      { projectId: 'p1', roleId: 'r1', workerModelId: 'deep' },
-      expect.anything(),
-    );
+    expect(state.persistentSession).toHaveBeenCalledWith({ projectId: 'p1', roleId: 'r1', workerModelId: 'deep' });
   });
 
   it('shows awaiting hire approval for a pending role', () => {
@@ -404,7 +401,7 @@ describe('the V2 Roles screen’s role chat (VS-525)', () => {
     render(<V2RolesScreen />);
     const button = screen.getByRole('button', { name: 'Start chat' });
     fireEvent.click(button);
-    expect(state.persistentSession).toHaveBeenCalledWith({ projectId: 'p1', roleId: 'r1' }, expect.objectContaining({ onSuccess: expect.any(Function) }));
+    expect(state.persistentSession).toHaveBeenCalledWith({ projectId: 'p1', roleId: 'r1' });
     expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'a_new' } });
   });
 

@@ -252,7 +252,7 @@ A persistent session that holds no ticket and whose turn was woken by a human me
 
 When the turn already produced an outbound message to that thread — a reply tool the session called — the daemon SHALL NOT add a second message for the same turn. A turn the human did not wake SHALL post nothing.
 
-When a turn the daemon stopped on its own is resumed by a retry wake that carries no thread context, the daemon SHALL resolve the session's own thread for the delivery, and SHALL deliver only while that thread still holds a human message that no `agent`-authored outbound message follows — a system notice is not an answer — so an unrelated turn never answers a message that is no longer waiting, and the stopped attempt's own notice never stands in for the answer.
+When a turn the daemon stopped on its own is resumed by a retry wake that carries no thread context, the daemon SHALL resolve the session's own thread for the delivery and SHALL deliver only the human messages the resumed run was woken by — the `human_message` wakes of the run the retry names — falling back to the thread's inbound messages that no `agent`-authored outbound message follows when the retry names no such run or it was not woken by a human. A system notice is not an answer. So a message that a completed tool-only turn already handled is never re-quoted by a later turn or resume, an unrelated turn never answers a message that is no longer waiting, and the stopped attempt's own notice never stands in for the answer.
 
 When the turn's final text is absent or whitespace-only, the daemon SHALL write no message for that turn. A turn that only ran tools, or ended after a tool result, is a normal, complete turn: the daemon SHALL NOT write a system notice for it. The turn's account of itself is its own transcript in the session's conversation surface.
 
@@ -290,6 +290,11 @@ When the turn's final text is absent or whitespace-only, the daemon SHALL write 
 
 - **WHEN** a session's own thread ends in a human message the daemon stopped on its own, and an unrelated turn (a self-scheduled or system wake) runs without a retry
 - **THEN** that turn posts nothing, because the fallback applies to a resume, not to any turn that finds an old message
+
+#### Scenario: A completed tool-only turn's message is not re-quoted
+
+- **WHEN** a session turn that posted no message (it only ran tools) has finished successfully, a second human message arrives, and that second turn is later resumed by a retry wake that carries no thread context
+- **THEN** the resumed turn's answer is linked to the second human message only, never to the first message the completed tool-only turn already handled
 
 #### Scenario: An empty answer is not a blank thread
 
@@ -379,3 +384,27 @@ A system notice SHALL still render as a notice, centred and attributed to the sy
 
 - **WHEN** a session turn ends failed, timed out or cancelled
 - **THEN** the conversation shows the turn's transcript and the system notice naming the plain reason
+
+### Requirement: A ticketless persistent session installs no ticket-delivery skill
+
+A ticketless persistent session's home SHALL install only the shipped skills whose `skills/manifest.json` audience applies to it — the `all`-audience skills — and SHALL NOT install `weave-ai-worker`, `weave-ai-openspec` or `weave-ai-scout`, whose rules are the worker's ticket protocol. When the session takes a ticket, the daemon SHALL re-render the session's home at that moment, so the worker-audience skills (`weave-ai-worker`, `weave-ai-openspec`, `weave-ai-scout`) are installed and a ticketed session is equipped exactly as a transient worker. When that ticket reaches a terminal status and the session returns to being ticketless, the daemon SHALL re-render the home again, so the ticket-delivery skills are removed. Re-rendering SHALL remove a skill the new posture no longer carries, not merely add the new ones.
+
+#### Scenario: A ticketless session's home has no ticket-delivery skill
+
+- **WHEN** a ticketless persistent session's home is rendered
+- **THEN** the all-audience skills (`weave-ai-knowledge`, `weave-ai-artifacts`) are installed and none of `weave-ai-worker`, `weave-ai-openspec` or `weave-ai-scout` is
+
+#### Scenario: Taking a ticket installs the worker skills at that moment
+
+- **WHEN** a persistent session takes a ticket, whether existing or newly filed
+- **THEN** its home is re-rendered as part of taking the ticket, and the worker-audience skills are installed under its runtime's skill path
+
+#### Scenario: A finished ticket returns the session to the ticketless skill set
+
+- **WHEN** a persistent session's ticket reaches a terminal status and the session returns to being ticketless
+- **THEN** its home is rendered again, and the worker-audience skills are no longer present in it
+
+#### Scenario: A transient worker is unaffected
+
+- **WHEN** a transient worker's home is rendered
+- **THEN** it installs exactly the worker- and all-audience skills it installs today

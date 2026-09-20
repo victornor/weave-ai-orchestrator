@@ -147,6 +147,8 @@ export interface WorkerTemplateData extends Record<string, unknown> {
   openspecPath: boolean;
   /** VS-578: true for a `change` ticket that takes the short-plan fast path (OpenSpec off, no bound change). */
   fastPath: boolean;
+  /** VS-624: true when the ticket must publish an `artifact:plan` before `proposed`, fixed at plan start. */
+  planArtifact: boolean;
 }
 
 export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agent: S.Agent, opts: { relaunchNote?: string | null } = {}): WorkerTemplateData {
@@ -193,6 +195,7 @@ export function workerData(ctx: WorkspaceContext, deps: () => CoreServices, agen
     knowledge: inlineKnowledge(ctx, deps, agent),
     openspecPath: Boolean(t?.openspecChangeName) || Boolean(p?.openspecEnabled),
     fastPath: (t?.kind === 'change') && !(Boolean(t?.openspecChangeName) || Boolean(p?.openspecEnabled)),
+    planArtifact: Boolean(t?.planArtifactRequired),
   };
 }
 

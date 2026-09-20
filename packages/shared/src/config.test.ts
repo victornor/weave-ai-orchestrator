@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
-import { compactionThreshold, DEFAULT_MERGE_CONCURRENCY, DEFAULT_MODEL_SETTING, DEFAULT_PROMOTION_MODE, DEFAULT_WORKER_TIERS, DEFAULT_WORKSPACE_MODELS, DaemonConfigSchema, DaemonModelsSchema, McpServerSchema, McpServersSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, promotionModeOf, promotionPrTitleOf, promotionStrategyOf, RoleSpecSchema, WorkerModelOptionSchema, WORKER_MEMORY_MIN_MB, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, deriveWorkerMemoryMb, isWorkerOptionConfigured, mergeConcurrencyOf, resolveWorkerMemoryMb, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
+import { compactionThreshold, DEFAULT_MERGE_CONCURRENCY, DEFAULT_MODEL_SETTING, DEFAULT_PROMOTION_MODE, DEFAULT_WORKER_TIERS, DEFAULT_WORKSPACE_MODELS, DaemonConfigSchema, DaemonModelsSchema, McpServerSchema, McpServersSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, promotionModeOf, promotionPrTitleOf, promotionStrategyOf, RoleSpecSchema, WorkerModelOptionSchema, WORKER_MEMORY_MIN_MB, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, deriveWorkerMemoryMb, isWorkerOptionConfigured, mergeConcurrencyOf, resolveWorkerMemoryMb, toLegacyRoleSpec, toLegacySpelling, visualPlanArtifactEnabled, withKeyAlias, yoloEnabled } from './config.js';
 
 describe('automatic compaction policy', () => {
   it('is a fraction of the window for percent and the exact number for tokens', () => {
@@ -44,6 +44,27 @@ describe('project config: knowledgeRepo (VS-358)', () => {
   it('parses an explicit opt-in', () => {
     const cfg = ProjectConfigSchema.parse({ id: 'api', url: 'git@example.com:acme/api.git', knowledgeRepo: { enabled: true } });
     expect(cfg.knowledgeRepo).toEqual({ enabled: true });
+  });
+});
+
+describe('project policies: visualPlanArtifact (VS-624)', () => {
+  it('reads off when absent, false or malformed', () => {
+    expect(visualPlanArtifactEnabled({})).toBe(false);
+    expect(visualPlanArtifactEnabled(null)).toBe(false);
+    expect(visualPlanArtifactEnabled(undefined)).toBe(false);
+    expect(visualPlanArtifactEnabled({ visualPlanArtifact: false })).toBe(false);
+    expect(visualPlanArtifactEnabled({ visualPlanArtifact: 'yes' })).toBe(false);
+  });
+
+  it('reads on only for an explicit true', () => {
+    expect(visualPlanArtifactEnabled({ visualPlanArtifact: true })).toBe(true);
+  });
+
+  it('round-trips through the project config schema', () => {
+    const cfg = ProjectConfigSchema.parse({ id: 'api', url: 'git@example.com:acme/api.git', policies: { visualPlanArtifact: true } });
+    expect(cfg.policies.visualPlanArtifact).toBe(true);
+    const off = ProjectConfigSchema.parse({ id: 'api', url: 'git@example.com:acme/api.git' });
+    expect(off.policies.visualPlanArtifact).toBeUndefined();
   });
 });
 

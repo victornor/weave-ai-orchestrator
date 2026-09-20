@@ -47,6 +47,10 @@ An artifact you've drafted has to actually be published — it never reaches any
 attachment.
 
 - **A worker, with a ticket:** call `weave_ticket_artifact_put(id, key, html, { title?, kind? })`.
+  When the ticket's project requires a visual plan artifact (`weave_ticket_get(id).planArtifactRequired`),
+  publish it under the reserved key **`plan`** — the plan approval card and Plan view show that one,
+  and the daemon refuses the `proposed` transition until it exists. It supports the written plan; it
+  never replaces the proposal, design, tasks or the fast path's `approach` document.
   It returns a URL; share that URL (in a comment, or in your final report), never the raw HTML file.
   Calling it again with the same `key` republishes a new revision — you republish, you never
   read-modify-write, because there is no matching read tool: an artifact's body can never be read

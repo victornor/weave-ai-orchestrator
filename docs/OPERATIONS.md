@@ -621,6 +621,27 @@ When the mode is off, `weave_openspec_status` reports `enabled: false`, `weave_s
 says the mode is off, and the weaver is not warned about a missing `openspec` binary while no project
 needs it.
 
+### Visual plan artifacts are optional per project (VS-624)
+
+**Experimental, off by default.** A project can require that every `change` ticket's plan also comes
+with a visual artifact — a diagram, a comparison, a sequence or dependency view, or a mock of the
+intended result. It is a project policy, set from the project config key
+`policies.visualPlanArtifact`, the Settings Projects section (the "Visual plan artifact" control), or
+`weave project set-policy <id> visualPlanArtifact=true`. The add-project form offers the same choice,
+defaulting off.
+
+When it is on, a `change` ticket must publish a plan artifact with `weave_ticket_artifact_put` under
+the key `plan` before it can reach `proposed`; the daemon refuses the transition with a message naming
+the tool and the key, on both the OpenSpec path and the fast path. The artifact is stored and served
+by the same sandboxed pipeline as any other ticket artifact, and is shown on the plan approval card
+and the Plan view through the same viewer. It supports the written plan; it does not replace it.
+
+**It costs worker tokens on every plan**, which is why it defaults off and says so in Settings. The
+rule is fixed on the ticket when it begins planning, so flipping the policy never traps a ticket in
+flight: a ticket that started while it was off is never asked for an artifact, and one that started
+while it was on keeps the requirement even if the policy is turned off. `task`, `scout`, `question`
+and `operational` tickets are never affected.
+
 ### Workers stall or pile up
 
 ```bash

@@ -209,6 +209,33 @@ describe('prompt rendering', () => {
       expect(instructions).not.toContain('weave-ai-openspec');
       expect(instructions).not.toMatch(/\{\{[#/]?[a-z]/i);
     });
+
+    it.runIf(existsSync(SHIPPED_TEMPLATES))('with the shipped templates: the plan-artifact rule is stated only when the ticket carries it (VS-624)', () => {
+      h.ctx.templatesDir = SHIPPED_TEMPLATES;
+      const dir = mkdtempSync(join(tmpdir(), 'ac-worktree-'));
+      dirs.push(dir);
+      const id = newId();
+      const now = nowIso();
+      h.db.insert('tickets', {
+        id, workspaceId: h.workspaceId, projectId: h.projectId, number: 951, identifier: 'TST-951', kind: 'change',
+        title: 'Visual plan', description: '', status: 'todo', priority: 'medium', assigneeRoleId: h.roleId,
+        createdByKind: 'human', planArtifactRequired: 1, createdAt: now, updatedAt: now,
+      });
+      const wid = h.addWorker(id, { branch: 'ac/tst-951-visual-plan', worktreePath: dir });
+      const w = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [wid])!;
+
+      const brief = renderBrief(h.ctx, h.deps, w);
+      expect(brief).toContain('requires a visual plan artifact');
+      expect(brief).toContain('weave_ticket_artifact_put');
+      expect(brief).not.toMatch(/\{\{|\}\}/);
+      const instructions = renderWorkerInstructions(h.ctx, h.deps, w);
+      expect(instructions).toContain('publish a visual plan artifact under the key `plan`');
+      expect(instructions).not.toMatch(/\{\{[#/]?[a-z]/i);
+
+      h.db.update('tickets', id, { planArtifactRequired: 0 });
+      const w2 = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [wid])!;
+      expect(renderBrief(h.ctx, h.deps, w2)).not.toContain('requires a visual plan artifact');
+    });
   });
 
   it('renders the weaver instructions with the live portfolio', () => {

@@ -86,6 +86,12 @@ export const ProjectPoliciesSchema = z.object({
   /** YOLO mode for this project (PLAN §15, VS-382); off unless this project sets it true. */
   yolo: z.boolean(),
   /**
+   * VS-624: experimental opt-in that every `change` ticket's plan comes with a visual artifact
+   * (`artifact:plan`) shown on its plan approval card. Off unless a project sets it true; it costs
+   * worker tokens on every plan, so a typo must never silently turn it on.
+   */
+  visualPlanArtifact: z.boolean(),
+  /**
    * What going live does, shown verbatim on the promotion card and carried into the promotion pull
    * request's body when landing differs from default (VS-568, VS-584).
    */
@@ -124,6 +130,19 @@ export function yoloEnabled(policies: Record<string, unknown> | null | undefined
   const raw = (policies as { yolo?: unknown } | null | undefined)?.yolo;
   if (raw === undefined || raw === null) return false;
   const parsed = ProjectPoliciesSchema.shape.yolo.safeParse(raw);
+  return parsed.success && parsed.data === true;
+}
+
+/**
+ * VS-624: whether a project requires a visual artifact for every `change` plan. Like YOLO it is a
+ * per-project opt-in with no workspace default: only an explicit project `visualPlanArtifact: true`
+ * turns it on, and an absent or malformed value is off — the setting spends tokens on every plan, so
+ * it must never be on by accident.
+ */
+export function visualPlanArtifactEnabled(policies: Record<string, unknown> | null | undefined): boolean {
+  const raw = (policies as { visualPlanArtifact?: unknown } | null | undefined)?.visualPlanArtifact;
+  if (raw === undefined || raw === null) return false;
+  const parsed = ProjectPoliciesSchema.shape.visualPlanArtifact.safeParse(raw);
   return parsed.success && parsed.data === true;
 }
 

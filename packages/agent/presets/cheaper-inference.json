@@ -1,0 +1,13 @@
+{
+  "description": "cheaper-inference gateway (deepseek, gpt and other models behind one key). Accepts both output-cap spellings and reasoning_effort; a gateway 502 says routes failed after N attempts.",
+  "compat": {
+    "reasoning": {
+      "field": "auto",
+      "effortParam": "reasoning_effort"
+    }
+  },
+  "verified": {
+    "reasoning.field": "real-cheaper-deepseek-tool.sse",
+    "streamUsage": "real-cheaper-gpt-usage.sse"
+  }
+}

@@ -121,6 +121,13 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
       for (const ws of workspaces.values()) for (const [id, profile] of Object.entries(ws.ctx.config.providers ?? {})) out[id] ??= profile;
       return out;
     },
+    providerKey: (providerId) => {
+      for (const ws of workspaces.values()) {
+        const profile = ws.ctx.config.providers?.[providerId];
+        if (profile) return profile.apiKeySecret ? ws.services.secrets.value(profile.apiKeySecret) ?? undefined : undefined;
+      }
+      return undefined;
+    },
   });
   const { publicUrl, host, port } = resolveUrls(daemonCfg);
 

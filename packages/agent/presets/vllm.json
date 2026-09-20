@@ -1,0 +1,7 @@
+{
+  "description": "vLLM. Discovery reports max_model_len.",
+  "compat": {
+    "contextField": "max_model_len"
+  },
+  "verified": false
+}

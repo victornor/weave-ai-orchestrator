@@ -1,0 +1,13 @@
+{
+  "description": "OpenRouter. Thinking arrives as reasoning plus reasoning_details; effort goes in reasoning.effort.",
+  "compat": {
+    "reasoning": {
+      "field": "reasoning",
+      "effortParam": "reasoning.effort"
+    },
+    "contextField": "context_length"
+  },
+  "verified": {
+    "reasoning.field": "real-openrouter-tool.sse"
+  }
+}

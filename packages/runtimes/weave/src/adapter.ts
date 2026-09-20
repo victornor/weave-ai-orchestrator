@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { agentEntryPath, type ChildResult } from '@weave-ai/agent';
+import { agentEntryPath, headersWithExtras, loadPreset, requestHeaders, resolveProvider, type ChildResult } from '@weave-ai/agent';
 import { childEnv, installBundleFiles, spawnLines, type AgentHome, type InstructionBundle, type JsonSchema, type RuntimeAdapter, type RuntimeCapabilities, type RuntimeDetection, type RuntimeEvent, type RuntimeHost, type RuntimeModel, type SessionRef, type TurnHandle, type TurnInput, type TurnResult, type TurnSink } from '@weave-ai/runtime-sdk';
 import type { ProviderProfile } from '@weave-ai/shared';
 import { buildInit, childBaseEnv, layoutFor, splitModel, toolEnvFor } from './child.js';
 import { parseChildLine } from './events.js';
+import { Semaphore } from './semaphore.js';
 
 export const capabilities: RuntimeCapabilities = {
   resumableSessions: true, forkSessions: false, streamingInput: false, systemPromptInjection: 'system_prompt',
@@ -13,13 +14,23 @@ export const capabilities: RuntimeCapabilities = {
   partialOutput: 'full',
 };
 
+const num = (description: string, minimum: number, maximum?: number) => ({ type: 'number', minimum, ...(maximum !== undefined ? { maximum } : {}), description });
 const CONFIG_SCHEMA: JsonSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    temperature: { type: 'number', minimum: 0, maximum: 2, description: 'Sent only when set' },
-    topP: { type: 'number', minimum: 0, maximum: 1, description: 'Sent only when set' },
-    maxOutputTokens: { type: 'integer', minimum: 1, description: 'Sent as max_tokens only when set' },
+    temperature: num('Sampling temperature; sent only when set', 0, 2),
+    topP: num('Nucleus sampling; sent only when set', 0, 1),
+    frequencyPenalty: num('Frequency penalty; sent only when set', -2, 2),
+    presencePenalty: num('Presence penalty; sent only when set', -2, 2),
+    maxOutputTokens: { type: 'integer', minimum: 1, description: 'Output cap, sent under the provider\'s max-tokens name only when set' },
+    seed: { type: 'integer', description: 'Sampling seed; sent only when set' },
+    stop: { type: 'array', items: { type: 'string' }, description: 'Stop sequences; sent only when set' },
+    toolChoice: { type: 'string', enum: ['auto', 'required', 'none'], description: 'How the model may pick tools; sent only when set and the endpoint allows it' },
+    parallelToolCalls: { type: 'boolean', description: 'Whether the model may call several tools at once; sent only when set and the endpoint takes it' },
+    responseFormat: { type: 'string', enum: ['text', 'json_object'], description: 'Response format; sent only when set and the endpoint lists it' },
+    extraBody: { type: 'string', description: 'A JSON object merged last into the request body (a string, because an option cannot hold an object)' },
+    extraHeaders: { type: 'array', items: { type: 'string' }, description: 'Extra request headers, one "Name: value" per entry' },
     contextWindowTokens: { type: 'integer', minimum: 1, description: 'The model\'s context window when the endpoint does not say' },
   },
 };
@@ -30,12 +41,54 @@ export interface WeaveAdapterOptions {
   /** Arguments before the entry, e.g. a loader for a source checkout. */
   nodeArgs?: string[];
   host?: RuntimeHost;
+  /** For discovery; defaults to the global fetch. */
+  fetch?: typeof fetch;
+  now?: () => number;
 }
+
+const DISCOVERY_TTL_MS = 10 * 60_000;
+const DISCOVERY_FAILURE_TTL_MS = 60_000;
+interface Discovered { id: string; contextWindow?: number }
 
 export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
   let host: RuntimeHost | undefined = opts.host;
   const entry = (): string => opts.entry ?? agentEntryPath();
   const providers = (): Record<string, ProviderProfile> => host?.providers() ?? {};
+  const doFetch = opts.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
+  const now = opts.now ?? Date.now;
+  const presetOf = (p: ProviderProfile) => loadPreset(p.preset ?? 'openai-compatible');
+  const gates = new Map<string, Semaphore>();
+
+  /** `GET {baseUrl}{modelsPath}`, cached ten minutes per provider. A failure is remembered for a minute and yields nothing, so the static models still list. */
+  const cache = new Map<string, { at: number; ok: boolean; models: Discovered[] }>();
+  async function discover(pid: string, profile: ProviderProfile): Promise<Discovered[]> {
+    if (profile.discover === false) return [];
+    const key = `${pid}|${profile.baseUrl}`;
+    const hit = cache.get(key);
+    if (hit && now() - hit.at < (hit.ok ? DISCOVERY_TTL_MS : DISCOVERY_FAILURE_TTL_MS)) return hit.models;
+    let models: Discovered[] = []; let ok = false;
+    try {
+      const { compat, params } = resolveProvider({ preset: presetOf(profile), profile });
+      const apiKey = host?.providerKey?.(pid);
+      const headers = requestHeaders({ id: pid, baseUrl: profile.baseUrl, auth: profile.auth, headers: headersWithExtras(profile.headers, params.extraHeaders).headers, ...(apiKey ? { apiKey } : {}) });
+      const qs = new URLSearchParams(profile.query ?? {}).toString();
+      const res = await doFetch(`${profile.baseUrl.replace(/\/+$/, '')}${compat.modelsPath}${qs ? `?${qs}` : ''}`, { headers: { ...headers, accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json() as { data?: unknown };
+      const list = Array.isArray(json.data) ? json.data : Array.isArray(json) ? json as unknown[] : [];
+      const field = compat.contextField;
+      for (const m of list) {
+        if (typeof m !== 'object' || m === null) continue;
+        const id = (m as Record<string, unknown>)['id'];
+        if (typeof id !== 'string' || !id) continue;
+        const w = field ? field.split('.').reduce<unknown>((o, k) => (typeof o === 'object' && o !== null ? (o as Record<string, unknown>)[k] : undefined), m) : undefined;
+        models.push({ id, ...(typeof w === 'number' && w > 0 ? { contextWindow: Math.floor(w) } : {}) });
+      }
+      ok = true;
+    } catch { models = []; }
+    cache.set(key, { at: now(), ok, models });
+    return models;
+  }
 
   const failure = (sink: TurnSink, code: string, family: 'auth' | 'tooling', message: string): TurnResult => {
     sink.onEvent({ ts: new Date().toISOString(), type: 'error', payload: { code, family, message } });
@@ -57,14 +110,28 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
     async listModels(): Promise<RuntimeModel[]> {
       const out: RuntimeModel[] = [];
       for (const [pid, profile] of Object.entries(providers())) {
-        for (const [mid, m] of Object.entries(profile.models)) out.push({ id: `${pid}/${mid}`, label: `${mid} (${pid})`, provider: pid, source: 'static', ...(m.contextWindow ? { contextWindowTokens: m.contextWindow } : {}) });
+        const seen = new Set<string>();
+        const add = (mid: string, contextWindow: number | undefined, source: RuntimeModel['source']): void => {
+          if (seen.has(mid)) return;
+          seen.add(mid);
+          const efforts = resolveProvider({ preset: presetOf(profile), profile, model: profile.models[mid] }).compat.reasoning.effortLevels;
+          out.push({ id: `${pid}/${mid}`, label: `${mid} (${pid})`, provider: pid, source, ...(contextWindow ? { contextWindowTokens: contextWindow } : {}), ...(efforts.length > 0 ? { efforts } : {}) });
+        };
+        // Configured models first: what the workspace wrote wins over what the endpoint reports.
+        const found = await discover(pid, profile);
+        const byId = new Map(found.map((d) => [d.id, d]));
+        for (const [mid, m] of Object.entries(profile.models)) add(mid, m.contextWindow ?? byId.get(mid)?.contextWindow, 'static');
+        for (const d of found) add(d.id, d.contextWindow, 'detected');
       }
       return out;
     },
 
     async modelContextWindow(model): Promise<number | undefined> {
       const parts = splitModel(model);
-      return parts ? providers()[parts.providerId]?.models[parts.modelId]?.contextWindow : undefined;
+      if (!parts) return undefined;
+      const profile = providers()[parts.providerId];
+      if (!profile) return undefined;
+      return profile.models[parts.modelId]?.contextWindow ?? (await discover(parts.providerId, profile)).find((d) => d.id === parts.modelId)?.contextWindow;
     },
 
     configSchema(): JsonSchema { return structuredClone(CONFIG_SCHEMA); },
@@ -89,38 +156,59 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
       const apiKey = keyVar ? input.env[keyVar] : undefined;
       if (profile.auth !== 'none' && keyVar && !apiKey) return failure(sink, 'key_missing', 'auth', `The provider key ${keyVar} is not in this run's environment: attach the secret to the role.`);
 
+      const preset = presetOf(profile);
+      if (!preset) return failure(sink, 'preset_unknown', 'tooling', `Provider "${parts.providerId}" names preset "${profile.preset}", which does not exist.`);
+      const resolved = resolveProvider({ preset, profile, model: profile.models[parts.modelId], options: input.options });
+      const extra = headersWithExtras(profile.headers, resolved.params.extraHeaders);
+      const optionErrors = [...resolved.errors, ...extra.errors];
+      if (optionErrors.length > 0) return failure(sink, 'invalid_option', 'tooling', `The model options are not valid: ${optionErrors.join('; ')}`);
+
       const layout = layoutFor(input);
       const prior = input.session.ref && typeof input.session.ref['id'] === 'string' && typeof input.session.ref['path'] === 'string' ? input.session.ref : null;
       const session = prior ? { id: String(prior['id']), path: String(prior['path']) } : (() => { const id = randomUUID(); return { id, path: join(layout.sessionsDir, `${id}.jsonl`) }; })();
       const base = childEnv();
-      const init = buildInit(input, { ...parts, profile, apiKey, session, layout, toolEnv: toolEnvFor(input, base, keyVar) });
+      const init = buildInit(input, { ...parts, profile, apiKey, session, layout, toolEnv: toolEnvFor(input, base, keyVar), resolved, headers: extra.headers });
 
-      let seq = 0;
-      const emit = (ev: RuntimeEvent): void => sink.onEvent({ ...ev, seq: seq++ });
-      emit({ ts: new Date().toISOString(), type: prior ? 'session.resumed' : 'session.started', payload: { sessionId: session.id } });
+      // At most `maxConcurrentRuns` children per provider; a run cancelled while it waits never takes a slot.
+      const wait = new AbortController();
+      let live: ReturnType<typeof spawnLines> | null = null;
+      onHandle?.({ get pid() { return live?.child.pid ?? null; }, cancel: async (mode) => { wait.abort(); await live?.cancel(mode); } });
+      let release = (): void => undefined;
+      if (profile.maxConcurrentRuns) {
+        const gate = gates.get(parts.providerId) ?? new Semaphore(profile.maxConcurrentRuns);
+        gates.set(parts.providerId, gate);
+        gate.setLimit(profile.maxConcurrentRuns);
+        try { release = await gate.acquire(wait.signal); }
+        catch { return { exitCode: 143, signal: 'SIGTERM', timedOut: false, session: input.session.ref, finalText: null, provider: parts.providerId }; }
+      }
+      try {
+        let seq = 0;
+        const emit = (ev: RuntimeEvent): void => sink.onEvent({ ...ev, seq: seq++ });
+        emit({ ts: new Date().toISOString(), type: prior ? 'session.resumed' : 'session.started', payload: { sessionId: session.id } });
 
-      let result: ChildResult | null = null;
-      let lastStderr = '';
-      const run = spawnLines({
-        cmd: process.execPath, args: [...(opts.nodeArgs ?? []), entry()], cwd: input.cwd, env: childBaseEnv(base),
-        stdin: `${JSON.stringify(init)}\n`, stdinMode: 'open',
-        // The child stops itself 30 s before the limit; this is the backstop.
-        timeoutMs: input.limits.timeoutMs + 60_000,
-        ...(input.containment ? { containment: input.containment } : {}),
-        onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
-        onLine: (stream, line) => {
-          if (stream === 'stderr') { lastStderr = line; sink.onRaw('stderr', line); return; }
-          const m = parseChildLine(line);
-          if (m.kind === 'event') emit(m.ev);
-          else if (m.kind === 'partial') sink.onPartial?.(m.partial);
-          else if (m.kind === 'log') sink.onRaw('stderr', m.text);
-          else if (m.kind === 'result') result = m.result;
-          else sink.onRaw('stdout', m.text);
-        },
-      });
-      onHandle?.({ pid: run.child.pid ?? null, cancel: (mode) => run.cancel(mode) });
-      const outcome = await run.done;
-      return finish(result, outcome, lastStderr, input, parts.providerId);
+        let result: ChildResult | null = null;
+        let lastStderr = '';
+        const run = spawnLines({
+          cmd: process.execPath, args: [...(opts.nodeArgs ?? []), entry()], cwd: input.cwd, env: childBaseEnv(base),
+          stdin: `${JSON.stringify(init)}\n`, stdinMode: 'open',
+          // The child stops itself 30 s before the limit; this is the backstop.
+          timeoutMs: input.limits.timeoutMs + 60_000,
+          ...(input.containment ? { containment: input.containment } : {}),
+          onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
+          onLine: (stream, line) => {
+            if (stream === 'stderr') { lastStderr = line; sink.onRaw('stderr', line); return; }
+            const m = parseChildLine(line);
+            if (m.kind === 'event') emit(m.ev);
+            else if (m.kind === 'partial') sink.onPartial?.(m.partial);
+            else if (m.kind === 'log') sink.onRaw('stderr', m.text);
+            else if (m.kind === 'result') result = m.result;
+            else sink.onRaw('stdout', m.text);
+          },
+        });
+        live = run;
+        const outcome = await run.done;
+        return finish(result, outcome, lastStderr, input, parts.providerId);
+      } finally { release(); }
     },
   };
 }

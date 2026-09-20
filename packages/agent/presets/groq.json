@@ -1,0 +1,9 @@
+{
+  "description": "Groq.",
+  "compat": {
+    "reasoning": {
+      "field": "reasoning"
+    }
+  },
+  "verified": false
+}

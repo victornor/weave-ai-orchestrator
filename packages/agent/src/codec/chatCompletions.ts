@@ -1,42 +1,28 @@
-import type { AgentError, ContentBlock, Message, Usage } from '../types.js';
+import type { AgentError, Message, Usage } from '../types.js';
+import { applyParams, DEFAULT_COMPAT, ThinkTagSplitter, toWireMessages, type Compat, type Params } from './params.js';
 
+export { toWireMessages };
 export interface ToolSpec { name: string; description: string; parameters: Record<string, unknown> }
-export interface RequestOptions { temperature?: number; topP?: number; maxOutputTokens?: number; contextWindowTokens?: number }
+export type RequestOptions = Params;
 
 /**
- * The request body for one step. Only parameters the user set are present: a value nobody chose is
- * not sent, so the provider's own default applies. The output cap is always `max_tokens`, the name
- * every probed endpoint honoured (`max_completion_tokens` was ignored by one of them).
+ * The request body for one step. Only parameters a layer set are present: a value nobody chose is
+ * not sent, so the provider's own default applies. Names and shapes follow the resolved `compat`
+ * flags; the defaults are the ones every probed endpoint honoured.
  */
-export function buildRequest(input: { model: string; system: string; messages: Message[]; tools: ToolSpec[]; options: RequestOptions }): Record<string, unknown> {
+export function buildRequest(input: { model: string; system: string; messages: Message[]; tools: ToolSpec[]; options: RequestOptions; compat?: Compat; effort?: string | null; warnings?: string[] }): Record<string, unknown> {
+  const compat = input.compat ?? DEFAULT_COMPAT;
+  const tools = compat.tools.supported ? input.tools : [];
   const body: Record<string, unknown> = {
     model: input.model,
     stream: true,
-    stream_options: { include_usage: true },
-    messages: [...(input.system ? [{ role: 'system', content: input.system }] : []), ...toWireMessages(input.messages)],
+    messages: [...(input.system ? [{ role: compat.systemRole, content: input.system }] : []), ...toWireMessages(input.messages, compat)],
   };
-  if (input.tools.length > 0) body['tools'] = input.tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } }));
-  const o = input.options;
-  if (o.temperature !== undefined) body['temperature'] = o.temperature;
-  if (o.topP !== undefined) body['top_p'] = o.topP;
-  if (o.maxOutputTokens !== undefined) body['max_tokens'] = o.maxOutputTokens;
+  if (compat.streamUsage === 'stream_options') body['stream_options'] = { include_usage: true };
+  if (tools.length > 0) body['tools'] = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters, ...(compat.tools.strict ? { strict: true } : {}) } }));
+  const { warnings } = applyParams(body, input.options, compat, input.effort, tools.length > 0);
+  input.warnings?.push(...warnings);
   return body;
-}
-
-export function toWireMessages(messages: Message[]): Array<Record<string, unknown>> {
-  const out: Array<Record<string, unknown>> = [];
-  for (const m of messages) {
-    if (m.role === 'user') out.push({ role: 'user', content: m.text });
-    else if (m.role === 'toolResult') out.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.text });
-    else {
-      const text = m.content.filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text').map((b) => b.text).join('');
-      const calls = m.content.filter((b): b is Extract<ContentBlock, { type: 'toolCall' }> => b.type === 'toolCall');
-      const msg: Record<string, unknown> = { role: 'assistant', content: text || (calls.length > 0 ? null : '') };
-      if (calls.length > 0) msg['tool_calls'] = calls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.raw ?? JSON.stringify(c.args ?? {}) } }));
-      out.push(msg);
-    }
-  }
-  return out;
 }
 
 export interface AssembledCall { id: string; name: string; argsText: string }
@@ -44,6 +30,7 @@ export interface StepResult {
   text: string; thinking: string; calls: AssembledCall[]; finishReason: string | null; usage: Usage | null; model: string | null;
   error: { message: string; code?: string; type?: string } | null;
 }
+export interface ReducerOptions { reasoningField?: Compat['reasoning']['field'] }
 export interface ReducerHandlers {
   onText?(delta: string): void;
   onThinking?(delta: string): void;
@@ -73,7 +60,11 @@ export class StreamReducer {
   private error: StepResult['error'] = null;
   private seq = 0;
 
-  constructor(private handlers: ReducerHandlers = {}, private idPrefix = 'call') {}
+  private splitter: ThinkTagSplitter | null;
+  constructor(private handlers: ReducerHandlers = {}, private idPrefix = 'call', private opts: ReducerOptions = {}) { this.splitter = opts.reasoningField === 'think_tags' ? new ThinkTagSplitter() : null; }
+
+  private addText(t: string): void { if (t) { this.text += t; this.handlers.onText?.(t); } }
+  private addThinking(t: string): void { if (t) { this.thinking += t; this.handlers.onThinking?.(t); } }
 
   push(chunk: unknown): void {
     if (!isObj(chunk)) return;
@@ -88,9 +79,10 @@ export class StreamReducer {
     if (typeof choice['finish_reason'] === 'string') this.finish = choice['finish_reason'];
     const delta = choice['delta'];
     if (!isObj(delta)) return;
-    if (typeof delta['content'] === 'string' && delta['content']) { this.text += delta['content']; this.handlers.onText?.(delta['content']); }
-    const think = reasoningOf(delta);
-    if (think) { this.thinking += think; this.handlers.onThinking?.(think); }
+    if (typeof delta['content'] === 'string' && delta['content']) {
+      if (this.splitter) { const r = this.splitter.push(delta['content']); this.addText(r.text); this.addThinking(r.thinking); } else this.addText(delta['content']);
+    }
+    this.addThinking(reasoningOf(delta, this.opts.reasoningField ?? 'auto'));
     if (Array.isArray(delta['tool_calls'])) for (const tc of delta['tool_calls']) if (isObj(tc)) this.toolDelta(tc);
   }
 
@@ -113,14 +105,17 @@ export class StreamReducer {
   }
 
   result(): StepResult {
+    if (this.splitter) { const r = this.splitter.flush(); this.addText(r.text); this.addThinking(r.thinking); }
     return { text: this.text, thinking: this.thinking, calls: this.slots.filter((s) => s.name).map((s) => ({ id: s.id, name: s.name, argsText: s.args.trim() === '' ? '{}' : s.args })), finishReason: this.finish, usage: this.usage, model: this.model, error: this.error };
   }
 }
 
-function reasoningOf(delta: Json): string {
-  for (const k of ['reasoning_content', 'reasoning']) if (typeof delta[k] === 'string' && delta[k]) return delta[k] as string;
+/** Where thinking arrives. `auto` accepts the three spellings seen on real endpoints, first non-empty wins; a named field reads only that one. */
+function reasoningOf(delta: Json, field: NonNullable<ReducerOptions['reasoningField']>): string {
+  if (field === 'none' || field === 'think_tags') return '';
+  for (const k of ['reasoning_content', 'reasoning']) if ((field === 'auto' || field === k) && typeof delta[k] === 'string' && delta[k]) return delta[k] as string;
   const details = delta['reasoning_details'];
-  if (Array.isArray(details)) return details.map((d) => (isObj(d) && typeof d['text'] === 'string' ? d['text'] : '')).join('');
+  if ((field === 'auto' || field === 'reasoning_details') && Array.isArray(details)) return details.map((d) => (isObj(d) && typeof d['text'] === 'string' ? d['text'] : '')).join('');
   return '';
 }
 
@@ -138,6 +133,8 @@ export function parseArgs(text: string): { ok: true; value: unknown } | { ok: fa
   try { return { ok: true, value: JSON.parse(text) }; } catch (e) { return { ok: false, error: (e as Error).message }; }
 }
 
+const GATEWAY_EXHAUSTED = /routes failed after \d+ attempts?/i;
+
 /** Classify an HTTP failure. A 402 is quota, not a bad request. */
 export function classifyHttp(status: number, body: string, retryAfterMs?: number): AgentError {
   let message = body.slice(0, 500);
@@ -148,6 +145,8 @@ export function classifyHttp(status: number, body: string, retryAfterMs?: number
   if (status === 402 || /insufficient[_ ](quota|balance)|billing|quota/.test(lower) && (status === 429 || status === 403)) return { code: 'quota_exhausted', family: 'provider_quota', message, status, ...withRetry };
   if (status === 401 || status === 403) return { code: 'auth_failed', family: 'auth', message, status };
   if (status === 429) return { code: 'rate_limited', family: 'transient_upstream', message, status, ...withRetry };
+  // A gateway that already tried its own routes says so: another try from us multiplies that, so cap it at one.
+  if (status >= 500 && GATEWAY_EXHAUSTED.test(message)) return { code: 'gateway_routes_failed', family: 'transient_upstream', message, status, maxRetries: 1, ...withRetry };
   if (status === 408 || status === 409 || status >= 500) return { code: 'upstream_error', family: 'transient_upstream', message, status, ...withRetry };
   if (status === 400 && /context|maximum.*length|too many tokens|token limit/.test(lower)) return { code: 'context_overflow', family: 'resource', message, status };
   if (status === 404) return { code: 'model_not_found', family: 'tooling', message, status };

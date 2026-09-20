@@ -1,3 +1,4 @@
+import { completeCompat } from './codec/params.js';
 import { buildRequest, classifyHttp, parseArgs, StreamReducer, type StepResult } from './codec/chatCompletions.js';
 import { McpHttpClient } from './mcp/http.js';
 import { chatCompletionsUrl, requestHeaders, requestOptions, shellEnv } from './profile.js';
@@ -67,7 +68,8 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
   const emit = (type: string, payload: Record<string, unknown>): void => io.emit({ ts: now(), type, payload });
   const batch = new PartialBatcher((p) => io.partial(p), deps.partialFlushMs ?? 25);
   const session = Session.open({ path: init.session.path, id: init.session.id, cwd: run.cwd });
-  const opts = requestOptions(run.options);
+  const opts = provider.params ?? requestOptions(run.options);
+  const compat = completeCompat(provider.compat);
   const wtCwd = run.worktree?.path ?? run.cwd;
   const env = shellEnv(init.toolEnv, provider.apiKey);
   const isFirst = session.messages.length === 0;
@@ -82,6 +84,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
   let sendStreamOptions = true;
   /** The step being streamed, so a cancel can persist the text seen so far. */
   let inFlightReducer: StreamReducer | null = null;
+  const warned = new Set<string>();
 
   const result = (over: Partial<ChildResult>): ChildResult => ({
     exitCode: 0, signal: null, timedOut: false, session: session.ref(), finalText,
@@ -135,7 +138,9 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       steps++;
       const messageId = `${run.runId}:${steps}`;
       emit('turn.started', { messageId });
-      const body = buildRequest({ model: run.model, system, messages: session.messages, tools: toolSpecs([...tools.values()]), options: opts });
+      const reqWarnings: string[] = [];
+      const body = buildRequest({ model: run.model, system, messages: session.messages, tools: toolSpecs([...tools.values()]), options: opts, compat, effort: run.effort, warnings: reqWarnings });
+      for (const w of reqWarnings.splice(0)) if (!warned.has(w)) { warned.add(w); io.log('warn', w); }
       const step = await streamStep(body);
       inFlightReducer = null;
       if (step.model) model = step.model;
@@ -183,7 +188,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
           if (signal.aborted || e instanceof Cancelled) throw new Cancelled();
           if (e instanceof DropStreamOptions) { io.log('info', 'endpoint rejected stream_options; retrying without it'); attempt--; continue; }
           const err = e instanceof StepFailure ? e.err : { code: 'network', family: 'transient_upstream' as const, message: (e as Error).message };
-          if (err.family !== 'transient_upstream' || attempt >= MAX_RETRIES) throw new StepFailure(err);
+          if (err.family !== 'transient_upstream' || attempt >= Math.min(MAX_RETRIES, err.maxRetries ?? MAX_RETRIES)) throw new StepFailure(err);
           const delay = err.retryAfterMs ?? Math.min(30_000, 2000 * 2 ** attempt) * (1 + Math.random() * 0.25);
           io.log('warn', 'provider request failed; retrying', { attempt: attempt + 1, code: err.code, delayMs: Math.round(delay) });
           await sleep(delay, signal);
@@ -194,7 +199,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       const stepCtl = new AbortController();
       const onAbort = (): void => stepCtl.abort();
       signal.addEventListener('abort', onAbort, { once: true });
-      const idleMs = deps.idleTimeoutMs ?? 120_000;
+      const idleMs = deps.idleTimeoutMs ?? provider.timeouts?.idleMs ?? 120_000;
       let idle: NodeJS.Timeout | undefined;
       const armIdle = (): void => { if (idle) clearTimeout(idle); idle = setTimeout(() => stepCtl.abort(new Error(`no data from the provider for ${Math.round(idleMs / 1000)}s`)), idleMs); };
       const messageId = `${run.runId}:${steps}`;
@@ -202,11 +207,11 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
         onText: (d) => batch.add({ kind: 'text', partId: `${messageId}:t`, messageId, text: d }),
         onThinking: (d) => batch.add({ kind: 'thinking', partId: `${messageId}:k`, messageId, text: d }),
         onToolInput: (id, d) => batch.add({ kind: 'tool_input', partId: id, toolCallId: id, messageId, text: d }),
-      }, `call_${run.runId.slice(-6)}_${steps}`);
+      }, `call_${run.runId.slice(-6)}_${steps}`, { reasoningField: compat.reasoning.field });
       inFlightReducer = reducer;
       try {
         armIdle();
-        const res = await f(chatCompletionsUrl(provider.baseUrl), { method: 'POST', headers: requestHeaders(provider), body: JSON.stringify(body), signal: stepCtl.signal });
+        const res = await f(chatCompletionsUrl(provider.baseUrl, provider.query), { method: 'POST', headers: requestHeaders(provider), body: JSON.stringify(body), signal: stepCtl.signal });
         if (!res.ok) {
           const retryAfter = parseRetryAfter(res.headers.get('retry-after'));
           const errBody = await res.text();

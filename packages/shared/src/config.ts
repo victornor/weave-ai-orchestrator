@@ -508,15 +508,80 @@ export type PluginEntry = z.infer<typeof PluginEntrySchema>;
  * this file. `auth` is `bearer`, `none`, or `header:<Name>` for a provider that wants the key in a
  * named header. `models` carries what the endpoint does not say itself.
  */
+/**
+ * VS-609: request parameters, settable at every layer (provider, model, role or worker option).
+ * A parameter nobody sets is never sent. `extraBody` is a JSON object written as a string and
+ * `extraHeaders` a list of `Name: value` lines, because a runtime option cannot hold an object.
+ */
+export const ProviderParamsSchema = z.object({
+  temperature: z.number().min(0).max(2).optional(),
+  topP: z.number().min(0).max(1).optional(),
+  frequencyPenalty: z.number().min(-2).max(2).optional(),
+  presencePenalty: z.number().min(-2).max(2).optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
+  seed: z.number().int().optional(),
+  stop: z.array(z.string()).optional(),
+  toolChoice: z.enum(['auto', 'required', 'none']).optional(),
+  parallelToolCalls: z.boolean().optional(),
+  responseFormat: z.enum(['text', 'json_object']).optional(),
+  extraBody: z.string().optional(),
+  extraHeaders: z.array(z.string()).optional(),
+});
+export type ProviderParams = z.infer<typeof ProviderParamsSchema>;
+
+/** What one endpoint or model accepts and how it words things. Every field is optional: the codec fills the defaults. */
+export const ProviderCompatSchema = z.object({
+  maxTokensParam: z.enum(['max_completion_tokens', 'max_tokens']).optional(),
+  streamUsage: z.enum(['stream_options', 'always', 'never']).optional(),
+  systemRole: z.enum(['system', 'developer']).optional(),
+  /** Wire body keys this endpoint rejects or ignores: never sent, even through `extraBody`. */
+  omitParams: z.array(z.string()).optional(),
+  reasoning: z.object({
+    field: z.enum(['auto', 'reasoning_content', 'reasoning', 'reasoning_details', 'think_tags', 'none']).optional(),
+    passBack: z.enum(['none', 'reasoning_content', 'all']).optional(),
+    effortParam: z.enum(['reasoning_effort', 'reasoning.effort', 'none']).optional(),
+    effortMap: z.record(z.string(), z.string()).optional(),
+    effortLevels: z.array(z.string()).optional(),
+  }).optional(),
+  tools: z.object({
+    supported: z.boolean().optional(),
+    parallel: z.boolean().optional(),
+    choice: z.array(z.enum(['auto', 'required', 'none', 'named'])).optional(),
+    strict: z.boolean().optional(),
+    idFormat: z.enum(['any', 'alnum9', 'safe64']).optional(),
+  }).optional(),
+  strictAlternation: z.boolean().optional(),
+  emptyContent: z.enum(['null', 'empty']).optional(),
+  responseFormat: z.array(z.enum(['json_object', 'json_schema'])).optional(),
+  seedParam: z.string().optional(),
+  stopMax: z.number().int().positive().optional(),
+  modelsPath: z.string().optional(),
+  contextField: z.string().optional(),
+});
+export type ProviderCompat = z.infer<typeof ProviderCompatSchema>;
+
 export const ProviderModelSchema = z.object({
   contextWindow: z.number().int().positive().optional(),
   maxOutputTokens: z.number().int().positive().optional(),
+  compat: ProviderCompatSchema.optional(),
+  params: ProviderParamsSchema.optional(),
 });
 export const ProviderProfileSchema = z.object({
+  /** A built-in preset (`packages/agent/presets`) supplying base flags; omit for the generic OpenAI-compatible one. */
+  preset: z.string().optional(),
   baseUrl: z.string().url(),
   apiKeySecret: z.string().regex(/^[A-Z][A-Z0-9_]*$/).optional(),
   auth: z.string().regex(/^(bearer|none|header:[A-Za-z0-9-]+)$/).default('bearer'),
   headers: z.record(z.string(), z.string()).default({}),
+  /** Query parameters added to every request (Azure's `api-version`). */
+  query: z.record(z.string(), z.string()).optional(),
+  /** Ask `GET {baseUrl}{modelsPath}` for models (default true); the static `models` always apply. */
+  discover: z.boolean().optional(),
+  /** At most this many concurrent runs on this provider; further runs wait. */
+  maxConcurrentRuns: z.number().int().positive().optional(),
+  timeouts: z.object({ connectMs: z.number().int().positive().optional(), idleMs: z.number().int().positive().optional(), requestMs: z.number().int().positive().optional() }).optional(),
+  compat: ProviderCompatSchema.optional(),
+  params: ProviderParamsSchema.optional(),
   models: z.record(z.string(), ProviderModelSchema).default({}),
 });
 export type ProviderProfile = z.infer<typeof ProviderProfileSchema>;

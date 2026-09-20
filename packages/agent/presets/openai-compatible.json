@@ -1,0 +1,5 @@
+{
+  "description": "Generic OpenAI-compatible Chat Completions endpoint: the universal spellings, nothing provider-specific.",
+  "compat": {},
+  "verified": false
+}

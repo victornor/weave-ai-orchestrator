@@ -1,0 +1,13 @@
+{
+  "description": "Z.ai (GLM). max_completion_tokens is ignored, so the output cap is max_tokens.",
+  "compat": {
+    "maxTokensParam": "max_tokens",
+    "reasoning": {
+      "field": "reasoning_content"
+    }
+  },
+  "verified": {
+    "maxTokensParam": "real-zai-max-tokens.json",
+    "reasoning.field": "real-zai-tool.sse"
+  }
+}

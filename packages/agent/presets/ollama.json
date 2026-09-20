@@ -1,0 +1,10 @@
+{
+  "description": "Ollama (local). No key; silently truncates context, so set contextWindow on each model.",
+  "compat": {
+    "reasoning": {
+      "field": "reasoning"
+    }
+  },
+  "verified": false,
+  "params": {}
+}

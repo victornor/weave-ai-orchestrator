@@ -19,6 +19,7 @@ import { workspaceRoutes } from './routes/workspace.js';
 import { eventRoutes, globalEventRoutes } from './routes/events.js';
 import { modelRoutes } from './routes/models.js';
 import { providerRoutes } from './routes/providers.js';
+import { mcpServerRoutes } from './routes/mcpServers.js';
 import { projectRoutes } from './routes/projects.js';
 import { jobRoutes } from './routes/jobs.js';
 import { roleRoutes } from './routes/roles.js';
@@ -70,6 +71,7 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   ws.route('/events', eventRoutes());
   ws.route('/models', modelRoutes());
   ws.route('/providers', providerRoutes());
+  ws.route('/mcp', mcpServerRoutes());
   ws.route('/projects', projectRoutes());
   ws.route('/jobs', jobRoutes());
   ws.route('/roles', roleRoutes());

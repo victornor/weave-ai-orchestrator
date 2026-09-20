@@ -1311,6 +1311,58 @@ export function useTestProvider(): UseMutationResult<T.ProviderTestReport, Error
   });
 }
 
+/* ------------------------------------------------------ MCP servers (VS-621) */
+
+/** This workspace's MCP servers, each with the names it references and whether those are set. */
+export function useMcpServers(): UseQueryResult<T.McpServersPayload> {
+  const ws = useWs();
+  return useQuery({ queryKey: qk.mcpServers(ws), queryFn: () => api.ws<T.McpServersPayload>(ws, '/mcp') });
+}
+
+/** Create or replace an MCP server definition; the body is the definition, `name` is the config key. */
+export function useSaveMcpServer(): UseMutationResult<T.McpServerView, Error, { name: string; config: Omit<T.McpServer, 'headers' | 'args' | 'env' | 'listTimeoutMs' | 'callTimeoutMs' | 'readOnly'> & Partial<T.McpServer> }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, config }) => api.ws<T.McpServerView>(ws, `/mcp/${encodeURIComponent(name)}`, { method: 'PUT', body: config }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.mcpServers(ws) }),
+  });
+}
+
+export function useDeleteMcpServer(): UseMutationResult<{ ok: boolean }, Error, string> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name) => api.ws<{ ok: boolean }>(ws, `/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.mcpServers(ws) }),
+  });
+}
+
+/** Connect to a saved server and list its tools; the request is the side effect, so nothing is cached. */
+export function useTestMcpServer(): UseMutationResult<T.McpTestReport, Error, string> {
+  const ws = useWs();
+  return useMutation({ mutationFn: (name) => api.ws<T.McpTestReport>(ws, `/mcp/${encodeURIComponent(name)}/test`, { method: 'POST' }) });
+}
+
+/** Set or replace a secret a server references; only a status comes back, never the value. */
+export function useSetMcpSecret(): UseMutationResult<{ ok: boolean; name: string; configured: boolean }, Error, { name: string; value: string }> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, value }) => api.ws<{ ok: boolean; name: string; configured: boolean }>(ws, `/mcp/secrets/${encodeURIComponent(name)}`, { method: 'POST', body: { value } }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.mcpServers(ws) }),
+  });
+}
+
+export function useClearMcpSecret(): UseMutationResult<{ ok: boolean; name: string; configured: boolean }, Error, string> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name) => api.ws<{ ok: boolean; name: string; configured: boolean }>(ws, `/mcp/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.mcpServers(ws) }),
+  });
+}
+
 /* --------------------------------------------------------------- tickets */
 
 export interface TicketQuery extends Record<string, string | number | boolean | undefined> {

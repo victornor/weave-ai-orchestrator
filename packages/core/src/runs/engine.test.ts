@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
 import { FakeRuntime, type RuntimeEvent, type TurnHandle, type TurnInput, type TurnSink, type TurnResult } from '@weave-ai/runtime-sdk';
-import { ProviderProfileSchema, RECORDED_RUN_PHASES, RUN_PHASES, type Decision, type Run, type Wakeup } from '@weave-ai/shared';
+import { ProviderProfileSchema, RECORDED_RUN_PHASES, RUN_PHASES, type Decision, type McpServer, type Run, type Wakeup } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import type { Actor } from '../api.js';
 import { createDecisionsService } from '../decisions/service.js';
@@ -368,10 +368,10 @@ describe('run engine', () => {
   it('broadcasts redacted run.delta frames, stores none, and drops the partial once the part completes', async () => {
     const frames: Array<{ parts: Array<{ text: string }> }> = [];
     const orig = h.ctx.events.broadcast.bind(h.ctx.events);
-    vi.spyOn(h.ctx.events, 'broadcast').mockImplementation(((type: string, et: string, id: string, payload: unknown) => {
+    vi.spyOn(h.ctx.events, 'broadcast').mockImplementation((((type: string, et: string, id: string, payload: unknown) => {
       if (type === 'run.delta') frames.push(payload as { parts: Array<{ text: string }> });
       return (orig as (...a: unknown[]) => unknown)(type, et, id, payload);
-    }) as never);
+    }) as never));
     let liveDuring: unknown = null;
     class StreamingRuntime extends FakeRuntime {
       override async runTurn(input: TurnInput, sink: TurnSink): Promise<TurnResult> {
@@ -2678,6 +2678,108 @@ describe('run engine', () => {
       });
     });
   });
+
+describe('MCP servers (VS-621)', () => {
+  /** A fake that is registered under the `weave` runtime id, so the engine's weave-only wiring runs. */
+  class WeaveFakeRuntime extends FakeRuntime {
+    constructor() { super(); Object.defineProperty(this, 'id', { value: 'weave' }); }
+  }
+  /** A realistic-length fixture: makeRedactor ignores values under 8 characters. */
+  const SECRET = 'mcp-secret-value-0123456789';
+  const server = (over: Partial<McpServer> = {}): McpServer => ({
+    type: 'stdio', command: 'npx', args: [], env: {}, headers: {}, listTimeoutMs: 30_000, callTimeoutMs: 60_000, readOnly: false, ...over,
+  });
+
+  async function weaveRun(weave: WeaveFakeRuntime, agentId: string): Promise<Run> {
+    weave.queue.push({ structured: { state: 'done', summary: 'x', tickets: [], knowledge: { recorded: false, reason: 't' } } });
+    return runOnce(agentId);
+  }
+
+  it("gives a weave run only its role-allowed servers, resolving a secret and omitting an unresolved one", async () => {
+    const weave = new WeaveFakeRuntime();
+    h.ctx.registries.runtimes.set('weave', weave);
+    h.ctx.config.models.workers = { runtime: 'weave', model: null };
+    h.ctx.config.mcpServers = {
+      github: server({ env: { TOKEN: '${MCP_GITHUB_TOKEN}' }, listTimeoutMs: 1234, readOnly: true }),
+      noSecret: server({ type: 'http', url: 'https://mcp.test/sse', headers: { Authorization: 'Bearer ${MCP_ABSENT}' } }),
+    };
+    h.services.secrets!.put({ kind: 'human', id: 'victor' }, { name: 'MCP_GITHUB_TOKEN' }, SECRET);
+    h.db.update('roles', h.roleId, { mcpServersJson: ['github', 'noSecret', 'ghost'] });
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const workerId = h.addWorker(ticketId, {}); 
+    h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+
+    const run = await weaveRun(weave, workerId);
+    const mcp = weave.inputs[0]!.mcpServers;
+    expect(Object.keys(mcp).sort()).toEqual(['github', 'weave-ai']);
+    expect(mcp['github']!.type).toBe('stdio');
+    expect(mcp['github']!.env!['TOKEN']).toBe(SECRET);
+    expect(mcp['github']!.listTimeoutMs).toBe(1234);
+    expect(mcp['github']!.readOnly).toBe(true);
+
+    const file = readFileSync(join(h.ctx.paths.runs, run.id, 'mcp.json'), 'utf8');
+    expect(file).toContain('${MCP_GITHUB_TOKEN}');
+    expect(file).not.toContain(SECRET);
+    expect(file).toContain('[redacted]');
+  });
+
+  it('gives a weave run only the run-scoped server when its role names none, and never a CLI runtime a user server', async () => {
+    const weave = new WeaveFakeRuntime();
+    h.ctx.registries.runtimes.set('weave', weave);
+    h.ctx.config.models.workers = { runtime: 'weave', model: null };
+    h.ctx.config.mcpServers = { github: server({ env: { TOKEN: '${MCP_GITHUB_TOKEN}' } }) };
+    h.services.secrets!.put({ kind: 'human', id: 'victor' }, { name: 'MCP_GITHUB_TOKEN' }, SECRET);
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const workerId = h.addWorker(ticketId, {});
+    h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+    await weaveRun(weave, workerId);
+    expect(Object.keys(weave.inputs[0]!.mcpServers)).toEqual(['weave-ai']);
+
+    // A CLI runtime keeps its own MCP config: the engine adds no user server for it.
+    h.ctx.config.models.workers = { runtime: 'fake', model: null };
+    h.db.update('roles', h.roleId, { mcpServersJson: ['github'] });
+    const ticketB = seedTicket(h, { number: 2, identifier: 'TST-2', status: 'in_progress' });
+    const workerB = h.addWorker(ticketB, {});
+    h.services.wake!.enqueue(workerB, { source: 'ticket_assigned', reason: 'TST-2' });
+    runtime.queue.push({ structured: { state: 'done', summary: 'x', tickets: [], knowledge: { recorded: false, reason: 't' } } });
+    await runOnce(workerB);
+    expect(Object.keys(runtime.inputs[0]!.mcpServers)).toEqual(['weave-ai']);
+  });
+
+  it('uses the workspace weaver list for a weaver run', async () => {
+    const weave = new WeaveFakeRuntime();
+    h.ctx.registries.runtimes.set('weave', weave);
+    h.ctx.config.models.weaver = { runtime: 'weave', model: null };
+    h.ctx.config.mcpServers = { github: server({}) };
+    h.ctx.config.weaver = { ...h.ctx.config.weaver, mcpServers: ['github'] };
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    await weaveRun(weave, h.conductorId);
+    expect(Object.keys(weave.inputs[0]!.mcpServers).sort()).toEqual(['github', 'weave-ai']);
+  });
+
+  it('redacts a referenced MCP secret from the events the turn records', async () => {
+    const weave = new (class extends WeaveFakeRuntime {
+      override async runTurn(input: TurnInput, sink: TurnSink): Promise<TurnResult> {
+        sink.onEvent({ ts: nowIso(), type: 'assistant.text', payload: { text: `token=${input.mcpServers['github']!.env!['TOKEN']}` } });
+        return super.runTurn(input, sink);
+      }
+    })();
+    h.ctx.registries.runtimes.set('weave', weave);
+    h.ctx.config.models.workers = { runtime: 'weave', model: null };
+    h.ctx.config.mcpServers = { github: server({ env: { TOKEN: '${MCP_GITHUB_TOKEN}' } }) };
+    h.services.secrets!.put({ kind: 'human', id: 'victor' }, { name: 'MCP_GITHUB_TOKEN' }, SECRET);
+    h.db.update('roles', h.roleId, { mcpServersJson: ['github'] });
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const workerId = h.addWorker(ticketId, {});
+    h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+    const run = await weaveRun(weave, workerId);
+    const rows = h.db.all<{ payload: unknown }>('SELECT payload_json FROM run_events WHERE run_id = ?', [run.id]);
+    const joined = rows.map((r) => JSON.stringify(r.payload)).join('\n');
+    expect(joined).not.toContain(SECRET);
+    expect(joined).toContain('[redacted]');
+  });
+});
+
 
 });
 

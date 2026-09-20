@@ -43,6 +43,7 @@ function rowToSpec(ctx: WorkspaceContext, role: Role): RoleSpec {
     responsibilities: role.responsibilities, capabilities: role.capabilities, rules: role.rules,
     sessionPolicy: role.sessionPolicy, maxWorkers: role.maxWorkers, memoryLimitMb: role.memoryLimitMb,
     permission: role.permission, secrets: role.secrets, createdBy: role.createdBy,
+    mcpServers: role.mcpServers,
   });
 }
 
@@ -100,6 +101,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
       responsibilitiesJson: spec.responsibilities, capabilitiesJson: spec.capabilities, rulesJson: spec.rules,
       sessionPolicy: spec.sessionPolicy,
       maxWorkers: spec.maxWorkers, memoryLimitMb: spec.memoryLimitMb, permissionJson: spec.permission, secretsJson: spec.secrets,
+      mcpServersJson: spec.mcpServers,
       specRevision: role.specRevision + 1, updatedAt: nowIso(),
     });
     return get(role.id);
@@ -135,6 +137,7 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
           responsibilitiesJson: spec.responsibilities, capabilitiesJson: spec.capabilities, rulesJson: spec.rules,
           permissionJson: spec.permission,
           sessionPolicy: spec.sessionPolicy, maxWorkers: spec.maxWorkers, memoryLimitMb: spec.memoryLimitMb, secretsJson: spec.secrets,
+          mcpServersJson: spec.mcpServers,
           status: autoActivate ? 'active' : 'pending_activation', specRevision: 1, createdBy: spec.createdBy,
           createdAt: now, updatedAt: now,
         });
@@ -223,6 +226,9 @@ export function createRolesService(ctx: WorkspaceContext, deps: () => CoreServic
       }
       if ('secrets' in patch) throw new OcError('validation', 'a role\'s secrets are changed with weave_role_set_secrets, which validates the names against the store');
       if ('maxWorkers' in patch) throw new OcError('validation', 'a role\'s maxWorkers is changed with weave_role_set_max_workers');
+      // VS-621: a role's MCP servers (which servers its `weave` runs may use) are set by the human in
+      // Settings, never by an agent tool — allowing a server can make a later run execute host code.
+      if ('mcpServers' in patch) throw new OcError('validation', 'a role\'s MCP servers are set in Settings, not by an agent tool');
       const checked = RoleSpecSchema.partial().strict().safeParse(patch);
       if (!checked.success) {
         throw new OcError('validation', `invalid role patch: ${checked.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);

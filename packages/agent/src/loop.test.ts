@@ -388,6 +388,26 @@ describe('MCP transports and naming through the loop', () => {
       expect(names.some((n) => /^mcp__a_b__dup_\d+$/.test(n))).toBe(true);
     } finally { await a.close(); await b.close(); }
   });
+
+  // VS-621: `restricted` keeps a user server only when the human declared it read-only.
+  it('drops a user MCP server in restricted unless its definition is read-only', async () => {
+    const open = await startMockMcp([{ name: 'x' }], () => 'open');
+    const ro = await startMockMcp([{ name: 'y' }], () => 'ro');
+    try {
+      const servers = { open: { url: open.url, readOnly: false }, ro: { url: ro.url, readOnly: true } };
+      mock.script({ chunks: textChunks('hi') });
+      await runAgentTurn(makeInit({ mode: 'restricted', mcpServers: servers }), harness().io, new AbortController().signal, fast);
+      let names = (mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name);
+      expect(names).toContain('mcp__ro__y');
+      expect(names).not.toContain('mcp__open__x');
+
+      mock.script({ chunks: textChunks('hi') });
+      await runAgentTurn(makeInit({ mode: 'auto', mcpServers: servers }), harness().io, new AbortController().signal, fast);
+      names = (mock.requests[1]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name);
+      expect(names).toContain('mcp__open__x');
+      expect(names).toContain('mcp__ro__y');
+    } finally { await open.close(); await ro.close(); }
+  });
 });
 
 const PNG_HEADER = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 1, 1, 1, 1]);

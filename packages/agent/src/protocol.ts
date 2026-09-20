@@ -23,7 +23,7 @@ export interface InitMessage {
   prompt: string;
   systemPrompt: { text: string; mode: 'inject' | 'skip' };
   session: { path: string; id: string };
-  mcpServers: Record<string, { type?: 'http' | 'stdio'; url?: string; headers?: Record<string, string>; command?: string; args?: string[]; env?: Record<string, string> }>;
+  mcpServers: Record<string, { type?: 'http' | 'stdio'; url?: string; headers?: Record<string, string>; command?: string; args?: string[]; env?: Record<string, string>; listTimeoutMs?: number; callTimeoutMs?: number; readOnly?: boolean }>;
   toolEnv: Record<string, string>;
 }
 export type ParentMessage = InitMessage | { type: 'send'; text: string } | { type: 'cancel'; mode: 'interrupt' | 'kill' };

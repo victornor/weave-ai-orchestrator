@@ -42,10 +42,15 @@ export function buildInit(input: TurnInput, p: { providerId: string; modelId: st
   for (const [name, cfg] of Object.entries(input.mcpServers)) {
     // Both transports ride the init line; the child routes by `type` (S8). An entry with neither a
     // url nor a command names no reachable server and is dropped.
+    const timeouts = {
+      ...(cfg.listTimeoutMs !== undefined ? { listTimeoutMs: cfg.listTimeoutMs } : {}),
+      ...(cfg.callTimeoutMs !== undefined ? { callTimeoutMs: cfg.callTimeoutMs } : {}),
+      ...(cfg.readOnly !== undefined ? { readOnly: cfg.readOnly } : {}),
+    };
     if (cfg.type === 'stdio' && cfg.command) {
-      mcpServers[name] = { type: 'stdio', command: cfg.command, ...(cfg.args ? { args: cfg.args } : {}), ...(cfg.env ? { env: cfg.env } : {}) };
+      mcpServers[name] = { type: 'stdio', command: cfg.command, ...(cfg.args ? { args: cfg.args } : {}), ...(cfg.env ? { env: cfg.env } : {}), ...timeouts };
     } else if (cfg.url) {
-      mcpServers[name] = { type: 'http', url: cfg.url, ...(cfg.headers ? { headers: cfg.headers } : {}) };
+      mcpServers[name] = { type: 'http', url: cfg.url, ...(cfg.headers ? { headers: cfg.headers } : {}), ...timeouts };
     }
   }
   return {

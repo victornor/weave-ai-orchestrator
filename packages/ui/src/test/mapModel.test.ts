@@ -23,6 +23,7 @@ function role(over: Partial<Role> = {}): Role {
     maxWorkers: 2,
     memoryLimitMb: null,
     secrets: [],
+    mcpServers: [],
     status: 'active',
     pauseReason: null,
     specRevision: 1,

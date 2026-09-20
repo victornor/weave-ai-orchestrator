@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
-import { compactionThreshold, DEFAULT_MERGE_CONCURRENCY, DEFAULT_MODEL_SETTING, DEFAULT_PROMOTION_MODE, DEFAULT_WORKER_TIERS, DEFAULT_WORKSPACE_MODELS, DaemonConfigSchema, DaemonModelsSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, promotionModeOf, promotionPrTitleOf, promotionStrategyOf, RoleSpecSchema, WorkerModelOptionSchema, WORKER_MEMORY_MIN_MB, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, deriveWorkerMemoryMb, isWorkerOptionConfigured, mergeConcurrencyOf, resolveWorkerMemoryMb, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
+import { compactionThreshold, DEFAULT_MERGE_CONCURRENCY, DEFAULT_MODEL_SETTING, DEFAULT_PROMOTION_MODE, DEFAULT_WORKER_TIERS, DEFAULT_WORKSPACE_MODELS, DaemonConfigSchema, DaemonModelsSchema, McpServerSchema, McpServersSchema, ModelSettingSchema, PresentationConfigSchema, ProjectConfigSchema, ProjectPoliciesSchema, promotionModeOf, promotionPrTitleOf, promotionStrategyOf, RoleSpecSchema, WorkerModelOptionSchema, WORKER_MEMORY_MIN_MB, WorkspaceConfigSchema, WorkspaceDefaultsSchema, WorkspaceModelsSchema, daemonConfigToLegacySpelling, deriveWorkerMemoryMb, isWorkerOptionConfigured, mergeConcurrencyOf, resolveWorkerMemoryMb, toLegacyRoleSpec, toLegacySpelling, withKeyAlias, yoloEnabled } from './config.js';
 
 describe('automatic compaction policy', () => {
   it('is a fraction of the window for percent and the exact number for tokens', () => {
@@ -561,7 +561,7 @@ describe('toLegacySpelling / daemonConfigToLegacySpelling (VS-263 Decision 6)', 
     });
     const legacy = toLegacySpelling(cfg) as Record<string, unknown>;
     expect(legacy).not.toHaveProperty('weaver');
-    expect(legacy['conductor']).toEqual({ humanName: 'captain', channels: ['web'] });
+    expect(legacy['conductor']).toEqual({ humanName: 'captain', channels: ['web'], mcpServers: [] });
     expect((legacy['models'] as Record<string, unknown>)['conductor']).toEqual({ runtime: 'codex', model: 'gpt-5' });
     expect((legacy['models'] as Record<string, unknown>)).not.toHaveProperty('weaver');
     const defaults = legacy['defaults'] as Record<string, unknown>;
@@ -637,3 +637,46 @@ describe('providers (VS-607)', () => {
     expect(RUNTIME_PARTIAL_OUTPUT['weave']).toBe('full');
   });
 });
+
+describe('MCP servers (VS-621)', () => {
+  const base = { version: 1, id: 'acme', name: 'Acme', ticketPrefix: 'ACME' } as const;
+
+  it('defaults to none everywhere, so an existing workspace and role still parse', () => {
+    expect(WorkspaceConfigSchema.parse(base).mcpServers).toEqual({});
+    expect(WorkspaceConfigSchema.parse(base).weaver.mcpServers).toEqual([]);
+    expect(RoleSpecSchema.parse({ id: 'r', name: 'R', project: 'p', charterSummary: 'x', scope: 'y' }).mcpServers).toEqual([]);
+  });
+
+  it('requires a command for stdio and a url for http', () => {
+    expect(McpServerSchema.safeParse({ type: 'stdio' }).success).toBe(false);
+    expect(McpServerSchema.safeParse({ type: 'http' }).success).toBe(false);
+    expect(McpServerSchema.safeParse({ type: 'stdio', command: 'npx' }).success).toBe(true);
+    expect(McpServerSchema.safeParse({ type: 'http', url: 'https://mcp.example/sse' }).success).toBe(true);
+  });
+
+  it('parses defaults on a valid server and refuses an unknown key', () => {
+    expect(McpServerSchema.parse({ type: 'stdio', command: 'npx' })).toEqual({
+      type: 'stdio', command: 'npx', headers: {}, args: [], env: {}, listTimeoutMs: 30_000, callTimeoutMs: 60_000, readOnly: false,
+    });
+    expect(McpServerSchema.safeParse({ type: 'stdio', command: 'npx', nope: 1 }).success).toBe(false);
+  });
+
+  it('accepts a ${SECRET_NAME} reference and a literal value, and refuses a malformed reference', () => {
+    const ok = McpServerSchema.safeParse({ type: 'http', url: 'https://x.test', headers: { Authorization: 'Bearer ${MCP_LINEAR_TOKEN}' }, env: { NODE_ENV: 'production' } });
+    expect(ok.success).toBe(true);
+    expect(McpServerSchema.safeParse({ type: 'http', url: 'https://x.test', env: { TOKEN: '${not a name}' } }).success).toBe(false);
+  });
+
+  it('refuses the reserved run-scoped server name', () => {
+    expect(McpServersSchema.safeParse({ 'weave-ai': { type: 'http', url: 'https://x.test' } }).success).toBe(false);
+    expect(McpServersSchema.safeParse({ github: { type: 'stdio', command: 'npx' } }).success).toBe(true);
+  });
+
+  it('carries the weaver allow list and the role allow list through the workspace and role schemas', () => {
+    const cfg = WorkspaceConfigSchema.parse({ ...base, mcpServers: { github: { type: 'stdio', command: 'npx' } }, weaver: { mcpServers: ['github'] } });
+    expect(cfg.mcpServers['github']?.command).toBe('npx');
+    expect(cfg.weaver.mcpServers).toEqual(['github']);
+    expect(RoleSpecSchema.parse({ id: 'r', name: 'R', project: 'p', charterSummary: 'x', scope: 'y', mcpServers: ['github'] }).mcpServers).toEqual(['github']);
+  });
+});
+

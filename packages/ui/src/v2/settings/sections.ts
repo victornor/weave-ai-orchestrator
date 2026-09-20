@@ -27,6 +27,7 @@ export const V2_WORKSPACE_SECTIONS: V2SettingsSection[] = [
   { key: 'weaver', label: 'Weaver', scope: 'workspace' },
   { key: 'models', label: 'Models', scope: 'workspace' },
   { key: 'providers', label: 'Providers', scope: 'workspace' },
+  { key: 'mcp', label: 'MCP servers', scope: 'workspace' },
   { key: 'projects', label: 'Projects', scope: 'workspace' },
   { key: 'knowledge', label: 'Knowledge', scope: 'workspace' },
   { key: 'worker-memory', label: 'Worker memory', scope: 'workspace' },

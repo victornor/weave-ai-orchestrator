@@ -171,6 +171,7 @@ export function role(over: Partial<Role> = {}): Role {
     maxWorkers: 4,
     memoryLimitMb: null,
     secrets: [],
+    mcpServers: [],
     status: 'active',
     pauseReason: null,
     specRevision: 1,

@@ -14,6 +14,10 @@ rl.on('line', (line) => {
   started = true;
   const record = { pid: process.pid, ppid: process.ppid, pgid: Number(readFileSync('/proc/self/stat', 'utf8').split(') ')[1].split(' ')[2]), argv: process.argv, env: process.env, init: m };
   writeFileSync(m.run.cwd + '/record.json', JSON.stringify(record));
+  if (process.argv.includes('--compact')) {
+    out({ t: 'result', result: { exitCode: 0, signal: null, timedOut: false, session: m.session, finalText: null, compaction: { ok: true, tokensBefore: 100, tokensAfter: 10 } } });
+    process.exit(0);
+  }
   const scenario = m.prompt;
   if (scenario === 'replay') {
     for (const l of readFileSync(new URL('./fixtures/tool-turn.ndjson', import.meta.url), 'utf8').split('\n')) if (l.trim()) process.stdout.write(l + '\n');

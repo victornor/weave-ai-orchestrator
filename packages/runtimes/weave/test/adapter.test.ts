@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -278,5 +278,61 @@ describe('the S2 events', () => {
       const line = parseChildLine(JSON.stringify({ t: 'event', ev: { ts: '2026-09-20T00:00:00Z', type, payload: { path: 'a.ts' } } }));
       expect(line).toMatchObject({ kind: 'event', ev: { type } });
     }
+  });
+});
+
+describe('sessions: window, fork, describe, compact', () => {
+  it('declares fork support and a compaction point', () => {
+    expect(capabilities).toMatchObject({ forkSessions: true, contextCompactionAt: 0.85 });
+  });
+  it('passes the model\'s own window to the child when no option sets it, and lets the option win', async () => {
+    await runFake('replay');
+    expect(record().init['provider'].params.contextWindowTokens).toBe(128000);
+    await runFake('replay', { options: { contextWindowTokens: 9000 } });
+    expect(record().init['provider'].params.contextWindowTokens).toBe(9000);
+  });
+  it('accepts sessionRetentionDays and rejects a negative one', () => {
+    const schema = adapterWith().configSchema();
+    expect(validateRuntimeOptions(schema, { sessionRetentionDays: 7 })).toEqual({ valid: true, byKey: {} });
+    expect(validateRuntimeOptions(schema, { sessionRetentionDays: -1 }).byKey).toEqual({ sessionRetentionDays: 'must be at least 0' });
+  });
+  it('forks by copying the session file under a new id, leaving the original', async () => {
+    const path = join(dir, 'orig.jsonl');
+    writeFileSync(path, '{"type":"session","v":1,"id":"orig"}\n{"id":"a1","parentId":null,"type":"message","message":{"role":"user","text":"hi"}}\n');
+    const ref = await adapterWith().forkSession!({ v: 1, id: 'orig', path, leafId: 'a1' }, dir);
+    expect(ref['id']).not.toBe('orig');
+    expect(ref['path']).not.toBe(path);
+    expect(ref['leafId']).toBe('a1');
+    const forked = readFileSync(String(ref['path']), 'utf8').split('\n');
+    expect(JSON.parse(forked[0]!)).toMatchObject({ id: ref['id'], forkedFrom: 'orig' });
+    expect(forked[1]).toContain('"text":"hi"');
+    expect(readFileSync(path, 'utf8')).toContain('"id":"orig"');
+    await expect(adapterWith().forkSession!({ v: 1, id: 'x', path: join(dir, 'missing.jsonl'), leafId: null }, dir)).rejects.toThrow(/does not exist/);
+  });
+  it('describes a session by whether its file exists', async () => {
+    const path = join(dir, 'd.jsonl'); writeFileSync(path, '{}\n');
+    expect(await adapterWith().describeSession!({ v: 1, id: 'd', path, leafId: null })).toEqual({ displayId: 'd', exists: true });
+    expect((await adapterWith().describeSession!({ v: 1, id: 'd', path: join(dir, 'no.jsonl'), leafId: null })).exists).toBe(false);
+  });
+  it('compacts through the child in compact mode, the key on stdin only', async () => {
+    const path = join(dir, 'c.jsonl'); writeFileSync(path, '{"type":"session","v":1,"id":"c"}\n');
+    const r = await adapterWith().compactSession!({ ref: { v: 1, id: 'c', path, leafId: null }, cwd: dir, model: 'test/big-model', env: { WEAVE_LLM_TEST_KEY: KEY } });
+    expect(r).toMatchObject({ ok: true, via: 'child', detail: { ok: true, tokensBefore: 100, tokensAfter: 10 } });
+    const rec = record();
+    expect(rec.argv).toContain('--compact');
+    expect(JSON.stringify(rec.argv)).not.toContain(KEY);
+    expect(JSON.stringify(rec.env)).not.toContain(KEY);
+    expect(rec.init).toMatchObject({ mode: 'compact', prompt: '', session: { id: 'c', path }, provider: { apiKey: KEY } });
+    expect(rec.init['provider'].params.contextWindowTokens).toBe(128000);
+  });
+  it('takes the key from the host when the caller has none, and never throws', async () => {
+    const path = join(dir, 'e.jsonl'); writeFileSync(path, '{}\n');
+    const ref = { v: 1, id: 'e', path, leafId: null };
+    expect(await adapterWith().compactSession!({ ref, cwd: dir, model: 'test/big-model' })).toMatchObject({ ok: false, error: { code: 'key_missing' } });
+    const withKey = createAdapter({ entry: FAKE, host: { providers: () => ({ test: profile }), providerKey: () => KEY } });
+    expect((await withKey.compactSession!({ ref, cwd: dir, model: 'test/big-model' })).ok).toBe(true);
+    expect(await adapterWith().compactSession!({ ref: { ...ref, path: join(dir, 'gone.jsonl') }, cwd: dir, model: 'test/big-model' })).toMatchObject({ ok: false, error: { code: 'session_missing' } });
+    expect(await adapterWith().compactSession!({ ref, cwd: dir, model: 'nope' })).toMatchObject({ ok: false, error: { code: 'model_not_configured' } });
+    expect(await adapterWith().compactSession!({ ref, cwd: dir, model: 'ghost/m' })).toMatchObject({ ok: false, error: { code: 'provider_not_configured' } });
   });
 });

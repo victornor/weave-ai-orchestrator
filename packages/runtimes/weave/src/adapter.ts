@@ -1,17 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
-import { agentEntryPath, headersWithExtras, loadPreset, requestHeaders, resolveProvider, type ChildResult } from '@weave-ai/agent';
-import { childEnv, installBundleFiles, spawnLines, type AgentHome, type InstructionBundle, type JsonSchema, type RuntimeAdapter, type RuntimeCapabilities, type RuntimeDetection, type RuntimeEvent, type RuntimeHost, type RuntimeModel, type SessionRef, type TurnHandle, type TurnInput, type TurnResult, type TurnSink } from '@weave-ai/runtime-sdk';
+import { dirname } from 'node:path';
+import { agentEntryPath, forkSessionFile, headersWithExtras, loadPreset, requestHeaders, resolveProvider, type ChildResult } from '@weave-ai/agent';
+import { childEnv, installBundleFiles, spawnLines, type AgentHome, type CompactSessionInput, type CompactSessionResult, type InstructionBundle, type JsonSchema, type RuntimeAdapter, type RuntimeCapabilities, type RuntimeDetection, type RuntimeEvent, type RuntimeHost, type RuntimeModel, type SessionRef, type TurnHandle, type TurnInput, type TurnResult, type TurnSink } from '@weave-ai/runtime-sdk';
 import type { ProviderProfile } from '@weave-ai/shared';
-import { buildInit, childBaseEnv, layoutFor, splitModel, toolEnvFor } from './child.js';
+import { buildCompactInit, buildInit, childBaseEnv, layoutFor, splitModel, toolEnvFor } from './child.js';
 import { parseChildLine } from './events.js';
 import { Semaphore } from './semaphore.js';
 
 export const capabilities: RuntimeCapabilities = {
-  resumableSessions: true, forkSessions: false, streamingInput: false, systemPromptInjection: 'system_prompt',
+  resumableSessions: true, forkSessions: true, streamingInput: false, systemPromptInjection: 'system_prompt',
   structuredOutput: false, mcp: true, usageReporting: 'per_turn', costReporting: false, permissionModes: ['auto', 'restricted', 'bypass'],
   partialOutput: 'full',
+  // Below the agent's own trigger (window less max(16384, output cap)) for every window worth running; only the meter reads it.
+  contextCompactionAt: 0.85,
 };
 
 const num = (description: string, minimum: number, maximum?: number) => ({ type: 'number', minimum, ...(maximum !== undefined ? { maximum } : {}), description });
@@ -33,6 +36,7 @@ const CONFIG_SCHEMA: JsonSchema = {
     extraHeaders: { type: 'array', items: { type: 'string' }, description: 'Extra request headers, one "Name: value" per entry' },
     contextWindowTokens: { type: 'integer', minimum: 1, description: 'The model\'s context window when the endpoint does not say' },
     maxTurnTokens: { type: 'integer', minimum: 1, description: 'Stop the turn (as tooling/budget_exhausted) once it has used this many tokens; unset means no cap' },
+    sessionRetentionDays: { type: 'integer', minimum: 0, description: 'Delete sessions unused for this many days (default 30, 0 keeps them)' },
     debugWire: { type: 'boolean', description: 'Record each request and response, redacted, under the run\'s wire directory. Sensitive: message content is kept' },
     webFetch: { type: 'boolean', description: 'Enable the web_fetch tool; off by default and denied in restricted mode' },
   },
@@ -147,6 +151,52 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
       installBundleFiles(home, bundle, { instructions: { 'AGENTS.md': bundle.instructions }, skillsDir: '.agents/skills' });
     },
 
+    async forkSession(base: SessionRef): Promise<SessionRef> {
+      const from = typeof base['path'] === 'string' ? base['path'] : '';
+      if (!from || !existsSync(from)) throw new Error('the session file to fork does not exist');
+      const id = randomUUID();
+      const to = join(dirname(from), `${id}.jsonl`);
+      forkSessionFile(from, to, id);
+      return { v: 1, id, path: to, leafId: typeof base['leafId'] === 'string' ? base['leafId'] : null };
+    },
+
+    async compactSession(input: CompactSessionInput): Promise<CompactSessionResult> {
+      const fail = (code: string, message: string): CompactSessionResult => ({ ok: false, error: { code, message } });
+      try {
+        const path = typeof input.ref['path'] === 'string' ? input.ref['path'] : '';
+        if (!path || !existsSync(path)) return fail('session_missing', 'The session file does not exist.');
+        const parts = splitModel(input.model);
+        if (!parts) return fail('model_not_configured', 'The weave runtime needs a model written as providerId/modelId.');
+        const profile = providers()[parts.providerId];
+        if (!profile) return fail('provider_not_configured', `No provider "${parts.providerId}" in the workspace config.`);
+        const preset = presetOf(profile);
+        if (!preset) return fail('preset_unknown', `Provider "${parts.providerId}" names preset "${profile.preset}", which does not exist.`);
+        const keyVar = profile.apiKeySecret;
+        const apiKey = (keyVar ? input.env?.[keyVar] : undefined) ?? host?.providerKey?.(parts.providerId);
+        if (profile.auth !== 'none' && keyVar && !apiKey) return fail('key_missing', `The provider key ${keyVar} is not available.`);
+        const resolved = resolveProvider({ preset, profile, model: profile.models[parts.modelId] });
+        if (resolved.params.contextWindowTokens === undefined) {
+          const w = profile.models[parts.modelId]?.contextWindow ?? (await discover(parts.providerId, profile)).find((d) => d.id === parts.modelId)?.contextWindow;
+          if (w) resolved.params.contextWindowTokens = w;
+        }
+        const extra = headersWithExtras(profile.headers, resolved.params.extraHeaders);
+        if (extra.errors.length > 0) return fail('invalid_option', extra.errors.join('; '));
+        const id = typeof input.ref['id'] === 'string' ? input.ref['id'] : 'unknown';
+        const init = buildCompactInit({ cwd: input.cwd, ...(input.configHome ? { configHome: input.configHome } : {}), ...parts, profile, apiKey, session: { id, path }, resolved, headers: extra.headers, timeoutMs: input.timeoutMs ?? 300_000 });
+        let result: ChildResult | null = null;
+        const run = spawnLines({
+          cmd: process.execPath, args: [...(opts.nodeArgs ?? []), entry(), '--compact'], cwd: input.cwd, env: childBaseEnv(childEnv()),
+          stdin: `${JSON.stringify(init)}\n`, stdinMode: 'open', timeoutMs: (input.timeoutMs ?? 300_000) + 30_000,
+          onLine: (stream, line) => { if (stream !== 'stdout') return; const m = parseChildLine(line); if (m.kind === 'result') result = m.result; },
+        });
+        await run.done;
+        const r = result as ChildResult | null;
+        if (!r) return fail('agent_crashed', 'The agent process ended without reporting a result.');
+        if (r.error) return fail(r.error.code, r.error.message);
+        return { ok: true, via: 'child', detail: { ...(r.compaction ?? {}) } };
+      } catch (e) { return fail('compact_failed', (e as Error).message); }
+    },
+
     async describeSession(ref: SessionRef) {
       const id = typeof ref['id'] === 'string' ? ref['id'] : 'unknown';
       return { displayId: id, exists: typeof ref['path'] === 'string' && existsSync(ref['path']) };
@@ -166,6 +216,11 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
       const preset = presetOf(profile);
       if (!preset) return failure(sink, 'preset_unknown', 'tooling', `Provider "${parts.providerId}" names preset "${profile.preset}", which does not exist.`);
       const resolved = resolveProvider({ preset, profile, model: profile.models[parts.modelId], options: input.options });
+      // The option wins; otherwise the model's own window from the profile or discovery, so the child can compact before an overflow.
+      if (resolved.params.contextWindowTokens === undefined) {
+        const w = profile.models[parts.modelId]?.contextWindow ?? (await discover(parts.providerId, profile)).find((d) => d.id === parts.modelId)?.contextWindow;
+        if (w) resolved.params.contextWindowTokens = w;
+      }
       const extra = headersWithExtras(profile.headers, resolved.params.extraHeaders);
       const optionErrors = [...resolved.errors, ...extra.errors];
       if (optionErrors.length > 0) return failure(sink, 'invalid_option', 'tooling', `The model options are not valid: ${optionErrors.join('; ')}`);

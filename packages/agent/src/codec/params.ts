@@ -22,13 +22,15 @@ export interface Compat {
   stopMax: number | undefined;
   modelsPath: string;
   contextField: string | undefined;
+  promptCache: 'none' | 'key' | 'anthropic';
+  cachedTokensField: string | undefined;
 }
 
 export const DEFAULT_COMPAT: Compat = {
   maxTokensParam: 'max_tokens', streamUsage: 'stream_options', systemRole: 'system', omitParams: [],
   reasoning: { field: 'auto', passBack: 'none', effortParam: 'none', effortMap: {}, effortLevels: [] },
   tools: { supported: true, parallel: true, choice: ['auto', 'required', 'none'], strict: false, idFormat: 'any' },
-  strictAlternation: false, emptyContent: 'null', image: { input: 'user' }, responseFormat: ['json_object'], seedParam: 'seed', stopMax: undefined, modelsPath: '/models', contextField: undefined,
+  strictAlternation: false, emptyContent: 'null', image: { input: 'user' }, responseFormat: ['json_object'], seedParam: 'seed', stopMax: undefined, modelsPath: '/models', contextField: undefined, promptCache: 'none', cachedTokensField: undefined,
 };
 
 /** Fill the defaults under a (possibly partial) compat block. */
@@ -42,7 +44,7 @@ export function completeCompat(c: ProviderCompat | undefined): Compat {
     tools: { supported: t?.supported ?? d.tools.supported, parallel: t?.parallel ?? d.tools.parallel, choice: t?.choice ?? d.tools.choice, strict: t?.strict ?? d.tools.strict, idFormat: t?.idFormat ?? d.tools.idFormat },
     strictAlternation: c?.strictAlternation ?? d.strictAlternation, emptyContent: c?.emptyContent ?? d.emptyContent,
     image: { input: c?.image?.input ?? d.image.input },
-    responseFormat: c?.responseFormat ?? d.responseFormat, seedParam: c?.seedParam ?? d.seedParam, stopMax: c?.stopMax, modelsPath: c?.modelsPath ?? d.modelsPath, contextField: c?.contextField,
+    responseFormat: c?.responseFormat ?? d.responseFormat, seedParam: c?.seedParam ?? d.seedParam, stopMax: c?.stopMax, modelsPath: c?.modelsPath ?? d.modelsPath, contextField: c?.contextField, promptCache: c?.promptCache ?? d.promptCache, cachedTokensField: c?.cachedTokensField,
   };
 }
 

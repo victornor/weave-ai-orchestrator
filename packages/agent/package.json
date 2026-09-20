@@ -16,7 +16,8 @@
     "conformance": "node --import tsx src/conformance.ts"
   },
   "dependencies": {
-    "@weave-ai/shared": "workspace:*"
+    "@weave-ai/shared": "workspace:*",
+    "js-tiktoken": "^1.0.21"
   },
   "devDependencies": {
     "yaml": "^2.9.0"

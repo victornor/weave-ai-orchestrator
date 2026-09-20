@@ -68,3 +68,21 @@ export function buildInit(input: TurnInput, p: { providerId: string; modelId: st
 }
 
 export { agentEntryPath };
+
+/** The init for an out-of-band compaction: the provider and the session, and nothing a turn needs. */
+export function buildCompactInit(p: { cwd: string; configHome?: string; providerId: string; modelId: string; profile: ProviderProfile; apiKey: string | undefined; session: { id: string; path: string }; resolved: Resolved; headers: Record<string, string>; timeoutMs: number }): InitMessage {
+  return {
+    type: 'init', v: 1, mode: 'compact',
+    run: {
+      runId: `compact-${p.session.id.slice(0, 8)}`, turnEpoch: 0, cwd: p.cwd, worktree: null, limits: { timeoutMs: p.timeoutMs },
+      permission: { mode: 'restricted' }, model: p.modelId, effort: null, options: {}, spillDir: join(p.cwd, '.weave-agent', 'tool-output', 'compact'),
+      ...(p.configHome ? { configHome: p.configHome } : {}),
+    },
+    provider: {
+      id: p.providerId, baseUrl: p.profile.baseUrl, auth: p.profile.auth, headers: p.headers, ...(p.profile.query ? { query: p.profile.query } : {}), ...(p.apiKey ? { apiKey: p.apiKey } : {}),
+      compat: JSON.parse(JSON.stringify(p.resolved.compat)) as NonNullable<InitMessage['provider']['compat']>, params: JSON.parse(JSON.stringify(p.resolved.params)) as NonNullable<InitMessage['provider']['params']>,
+      ...(p.profile.timeouts && Object.keys(p.profile.timeouts).length > 0 ? { timeouts: { ...p.profile.timeouts } } : {}),
+    },
+    prompt: '', systemPrompt: { text: '', mode: 'skip' }, session: p.session, mcpServers: {}, toolEnv: {},
+  };
+}

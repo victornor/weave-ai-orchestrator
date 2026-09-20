@@ -7,6 +7,8 @@ export const PROTOCOL_VERSION = 1;
 export interface InitMessage {
   type: 'init';
   v: 1;
+  /** `compact`: summarise the session and exit, with no prompt and no tools. Absent or `turn`: run a turn. */
+  mode?: 'turn' | 'compact';
   run: {
     runId: string; turnEpoch: number; cwd: string; worktree: { path: string; branch: string } | null;
     limits: { timeoutMs: number; maxTurns?: number };
@@ -34,6 +36,8 @@ export interface ChildResult {
   finalText: string | null;
   usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number; contextTokens?: number; basis: 'per_turn'; firstRequest?: { freshTokens: number; cachedTokens: number } };
   model?: string; provider?: string;
+  /** Set by a `compact`-mode run. */
+  compaction?: { ok: boolean; tokensBefore?: number; tokensAfter?: number; reason?: string };
   error?: AgentError;
 }
 export type ChildMessage =

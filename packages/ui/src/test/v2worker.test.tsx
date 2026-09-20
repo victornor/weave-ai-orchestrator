@@ -1,7 +1,7 @@
 /** VS-350: the V2 worker page — identity, tabs, shared feed, actions, handover and steer. */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, ThreadMessage } from '@weave-ai/shared';
+import type { Agent, RunEvent, ThreadMessage } from '@weave-ai/shared';
 import { agent, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -26,6 +26,10 @@ const state = vi.hoisted(() => ({
   sessionTurns: null as number | null,
   /** VS-602: the session agent's active run, so the ticketless feed shows it live. */
   sessionRun: null as { id: string; runtimeId: string; status: string } | null,
+  /** VS-616: whether that run is still going, and the partials/events the live turn renders. */
+  sessionRunLive: true,
+  sessionEvents: [] as RunEvent[],
+  sessionPartials: [] as Array<{ partId: string; kind: 'text' | 'thinking' | 'tool_input'; text: string }>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -35,8 +39,8 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('../app/link', () => ({ useGo: () => state.go, useSearchParams: () => ({}) }));
 vi.mock('../api/context', () => ({ useWs: () => 'ws1' }));
 vi.mock('../lib/drafts', () => ({ draftKey: () => 'k', useDraft: () => ({ draft: { text: 'steer this' }, patch: state.patch }) }));
-vi.mock('../v2/WorkerFeed', () => ({ WorkerFeed: () => <div data-testid="worker-feed" />, useWorkerRun: () => (state.sessionRun ? { run: state.sessionRun, live: true } : { run: null, live: false }) }));
-vi.mock('../api/runStream', () => ({ useRunEventStream: () => ({ events: [], partials: [], lastPartialAt: null, partialSince: null, status: { state: 'connected' }, retryNow: vi.fn() }) }));
+vi.mock('../v2/WorkerFeed', () => ({ WorkerFeed: () => <div data-testid="worker-feed" />, useWorkerRun: () => (state.sessionRun ? { run: state.sessionRun, live: state.sessionRunLive } : { run: null, live: false }) }));
+vi.mock('../api/runStream', () => ({ useRunEventStream: () => ({ events: state.sessionEvents, partials: state.sessionPartials, lastPartialAt: null, partialSince: null, status: { state: 'connected' }, retryNow: vi.fn() }) }));
 vi.mock('../api/hooks', () => ({
   useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: state.noTicket ? null : ticket({ id: 'tk1', identifier: 'ACME-1' }), thread: state.thread, role: state.role, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, sessionTurns: state.sessionTurns, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
   useWorkerBrief: () => ({ data: { brief: '# The brief' } }),
@@ -98,6 +102,9 @@ beforeEach(() => {
   state.models = null;
   state.sessionTurns = null;
   state.sessionRun = null;
+  state.sessionRunLive = true;
+  state.sessionEvents = [];
+  state.sessionPartials = [];
 });
 
 describe('V2 worker page', () => {
@@ -228,6 +235,52 @@ it('renders a failed-turn notice as the same system notice (VS-598)', () => {
       const row = document.querySelector('[data-live-activity]');
       expect(row).not.toBeNull();
       expect(row?.textContent).toContain('Starting the turn');
+    });
+
+    it('shows a live session turn’s streamed text and tool calls, like the worker live view (VS-616)', () => {
+      state.sessionRun = { id: 'run9', runtimeId: 'opencode', status: 'running' };
+      state.sessionPartials = [{ partId: 'p1', kind: 'text', text: 'Looking into the failing test.' }];
+      state.sessionEvents = [
+        { id: 'e1', runId: 'run9', seq: 1, ts: '2026-09-20T00:00:00.000Z', stream: 'stdout', level: 'info', type: 'tool.call', payload: { name: 'bash', callId: 'c1', target: 'pnpm test' } } as RunEvent,
+      ];
+      render(<WorkerBody workerId="a1" />);
+      expect(document.querySelector('[data-live-partials]')).toHaveTextContent('Looking into the failing test.');
+      expect(document.querySelector('[data-trace-tool]')).toHaveTextContent('bash');
+      expect(document.querySelector('[data-live-activity]')).not.toBeNull();
+    });
+
+    it('replaces the live turn with the delivered answer, with no duplicated text (VS-616)', () => {
+      state.sessionRun = { id: 'run9', runtimeId: 'opencode', status: 'finished' };
+      state.sessionRunLive = false;
+      state.sessionPartials = [{ partId: 'p1', kind: 'text', text: 'Here is the answer.' }];
+      state.threadMessages = [
+        message({ id: 'm2', direction: 'outbound', authorKind: 'agent', authorId: 'a1', runId: 'run9', body: 'Here is the answer.' }),
+      ];
+      render(<WorkerBody workerId="a1" />);
+      // The delivered message is the record; the run view is gone and the words appear once.
+      expect(screen.queryAllByText('Here is the answer.')).toHaveLength(1);
+      expect(document.querySelector('[data-live-turn-section]')).toBeNull();
+      expect(document.querySelector('[data-live-partials]')).toBeNull();
+    });
+
+    it('replaces the live turn with the turn-ended system notice, consistently (VS-616)', () => {
+      state.sessionRun = { id: 'run9', runtimeId: 'opencode', status: 'finished' };
+      state.sessionRunLive = false;
+      state.sessionPartials = [{ partId: 'p1', kind: 'text', text: 'half an answer' }];
+      state.threadMessages = [
+        message({ id: 'm3', direction: 'outbound', authorKind: 'system', authorId: null, runId: 'run9', body: 'This turn ended without an answer.' }),
+      ];
+      render(<WorkerBody workerId="a1" />);
+      expect(document.querySelector('[data-live-turn-section]')).toBeNull();
+      expect(screen.getByText('This turn ended without an answer.')).toBeInTheDocument();
+      expect(screen.queryByText('half an answer')).toBeNull();
+    });
+
+    it('says a non-streaming session runtime reports whole steps only (VS-616)', () => {
+      state.sessionRun = { id: 'run9', runtimeId: 'not-a-runtime', status: 'running' };
+      render(<WorkerBody workerId="a1" />);
+      expect(document.querySelector('[data-live-activity]')).not.toBeNull();
+      expect(document.querySelector('[data-live-whole-steps]')).not.toBeNull();
     });
   });
 

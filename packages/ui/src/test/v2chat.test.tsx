@@ -6,11 +6,12 @@
  * VS-412: the live ticket and worker chips — a turn's dispatches under its reply and the row of
  * unattributed live workers.
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 import type { Agent, Decision, RunEvent, RunTrace, ThreadMessage, Ticket } from '@weave-ai/shared';
 import { agent, ticket } from './factories';
+import { writeShowLiveRunOutput } from '../lib/liveRunPrefs';
 
 const state = vi.hoisted(() => ({
   width: 900,
@@ -241,6 +242,10 @@ function liveEvent(seq: number, type: RunEvent['type'], payload: Record<string, 
 }
 
 beforeEach(() => {
+  // VS-616: the weaver chat's streamed text and trace are opt-in (off by default). These tests are
+  // about the chat's live trace, so they open with it on; the default-off behaviour has its own
+  // describe at the end that turns it back off.
+  writeShowLiveRunOutput(true);
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
   state.width = 900;
   state.messages = [];
@@ -367,6 +372,9 @@ describe('the V2 Chat screen', () => {
       return el;
     })) as HTMLElement;
     expect(partials).toHaveTextContent('Draft reply in progress');
+    // VS-616: the stream sits in a container explicitly marked as in-progress run output, so it
+    // cannot be read as a delivered message.
+    expect(document.querySelector('[data-live-run-view-label]')).toHaveTextContent('not sent yet');
     // The same live activity row a worker page shows, in its streaming state — not a bare "working".
     const row = document.querySelector('[data-live-state]');
     expect(row).not.toBeNull();
@@ -901,5 +909,54 @@ describe('the V2 Chat screen', () => {
     const bubble = screen.getByText('unknown block').closest('[data-chat-message]') as HTMLElement;
     expect(bubble.querySelector('[data-block-tag]')).toBeNull();
     expect(bubble.textContent).not.toContain('bX');
+  });
+});
+
+describe('the weaver chat stream is opt-in (VS-616)', () => {
+  /** A live turn that has streamed text and called one tool. */
+  const liveTurn = (): void => {
+    state.lastRun = { id: 'r9', status: 'running' };
+    state.runPartials = [{ partId: 'm1:0', kind: 'text', text: 'Draft reply in progress' }];
+    state.lastPartialAt = Date.now();
+    state.runEvents = [
+      { id: 'e1', runId: 'r9', seq: 1, ts: '2026-09-20T00:00:00.000Z', stream: 'stdout', level: 'info', type: 'tool.call', payload: { name: 'Read', callId: 'c1', target: 'src/a.ts' } } as RunEvent,
+    ];
+  };
+
+  it('off by default: shows sent messages and the activity row, no streamed text and no trace', () => {
+    writeShowLiveRunOutput(false);
+    liveTurn();
+    state.messages = [message({ id: 'm1', body: 'have you started?' })];
+    render(<V2ChatPage />);
+    // The sent message and the one-line activity row are there...
+    expect(screen.getByText('have you started?')).toBeInTheDocument();
+    expect(document.querySelector('[data-live-activity]')).not.toBeNull();
+    // ...but the weaver's unsent words and its tool trace are not.
+    expect(document.querySelector('[data-live-partials]')).toBeNull();
+    expect(document.querySelector('[data-live-run-view]')).toBeNull();
+    expect(document.querySelector('[data-trace-tool]')).toBeNull();
+  });
+
+  it('turning the switch on shows the stream marked as in-progress run output', () => {
+    writeShowLiveRunOutput(false);
+    liveTurn();
+    render(<V2ChatPage />);
+    expect(document.querySelector('[data-live-partials]')).toBeNull();
+
+    act(() => writeShowLiveRunOutput(true));
+    expect(document.querySelector('[data-live-partials]')).toHaveTextContent('Draft reply in progress');
+    expect(document.querySelector('[data-live-run-view-label]')).toHaveTextContent('not sent yet');
+    expect(document.querySelector('[data-trace-tool]')).not.toBeNull();
+  });
+
+  it('shows a delivered message once, with no run view beside it', () => {
+    writeShowLiveRunOutput(true);
+    // The run has finished and its answer was delivered by the normal outbound path.
+    state.lastRun = null;
+    state.messages = [message({ id: 'm1', direction: 'outbound', body: 'Here is the answer.' })];
+    render(<V2ChatPage />);
+    expect(screen.getByText('Here is the answer.')).toBeInTheDocument();
+    expect(screen.queryAllByText('Here is the answer.')).toHaveLength(1);
+    expect(document.querySelector('[data-live-partials]')).toBeNull();
   });
 });

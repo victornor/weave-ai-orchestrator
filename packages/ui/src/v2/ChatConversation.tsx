@@ -19,10 +19,10 @@ import type { ChatEntry, ChatRow } from '../lib/dispatch';
 import { replyTargets } from '../lib/replyTargets';
 import { cx } from '../lib/cx';
 import { useRunEventStream } from '../api/runStream';
-import { LiveActivity, LivePartials } from '../components/LiveActivity';
 import type { PartialText } from '../lib/livePartials';
 import { ChatMessage } from './ChatMessage';
 import { ChatTrace, ChatTurnTrace, CompactionRow } from './ChatTrace';
+import { LiveTurnSection } from './LiveTurnSection';
 
 /** A finished turn is held on screen this long when no row replaces it (V1's `SETTLE_MS`). */
 export const LIVE_SETTLE_MS = 4000;
@@ -79,6 +79,12 @@ export interface ChatConversationProps {
   working: boolean;
   /** The live run's runtime id, so its live activity row resolves partial-output coverage (VS-599). */
   runtimeId?: string | null;
+  /**
+   * VS-616: whether the live section shows the streamed text and the mid-turn tool trace. Defaults
+   * to true, so the planner chat streams as before; the weaver chat passes its device switch, which
+   * is off by default. The activity row always renders either way.
+   */
+  showStreamedOutput?: boolean;
   /** Only the focused pane holds a live stream to its run (VS-199). */
   focused?: boolean;
   /** Outbound messages that genuinely arrived after this thread opened, so only those reveal. */
@@ -113,6 +119,7 @@ function LiveSection({
   lastPartialAt,
   partialSince,
   runtimeId,
+  showStreamedOutput,
   runStreamStatus,
   onRetry,
 }: {
@@ -124,6 +131,8 @@ function LiveSection({
   partialSince: number | null;
   /** The run's runtime, so the row can say "whole steps only" for one that cannot stream (VS-599). */
   runtimeId?: string | null;
+  /** VS-616: whether the streamed text and the mid-turn trace render (the weaver's device switch). */
+  showStreamedOutput: boolean;
   runStreamStatus: { state: string };
   onRetry: () => void;
 }): React.ReactElement {
@@ -141,30 +150,33 @@ function LiveSection({
   return (
     <section aria-label={workingAriaLabel} className="flex flex-col gap-2">
       {compacting ? (
-        // VS-454: the live compaction row, shared with the screenshot harness and tests.
-        <CompactionRow />
-      ) : (
-        // VS-599: the chat shows the same live activity row and streaming text as any run surface,
-        // instead of a bare "working" with nothing said between steps.
+        // VS-454: the live compaction row, shared with the screenshot harness and tests. The trace
+        // still renders beside it, exactly as it did before VS-616.
         <>
-          <LivePartials partials={partials} />
-          <LiveActivity
-            events={liveEvents}
-            partials={partials}
-            lastPartialAt={lastPartialAt}
-            partialSince={partialSince}
-            runtimeId={runtimeId}
-          />
+          <CompactionRow />
+          {liveEvents.length || live?.fromStart ? (
+            <ChatTrace events={liveEvents} runId={live?.id ?? null} className="border-l border-line-1 pl-2.5" reveal />
+          ) : null}
         </>
+      ) : (
+        // VS-599/VS-616: one shared live turn — the activity row always, and the streamed text and
+        // trace when the surface asks for them (the weaver chat's switch is off by default).
+        <LiveTurnSection
+          events={liveEvents}
+          partials={partials}
+          lastPartialAt={lastPartialAt}
+          partialSince={partialSince}
+          runtimeId={runtimeId}
+          runId={live?.id ?? null}
+          showOutput={showStreamedOutput}
+          mountTrace={Boolean(live?.fromStart)}
+        />
       )}
       {live && (runStreamStatus.state === 'unreachable' || runStreamStatus.state === 'offline') ? (
         <p className="text-nano text-text-3">
           The live stream dropped.{' '}
           <button type="button" onClick={onRetry} className="text-text-3 underline">Refresh</button>
         </p>
-      ) : null}
-      {liveEvents.length || live?.fromStart ? (
-        <ChatTrace events={liveEvents} runId={live?.id ?? null} className="border-l border-line-1 pl-2.5" reveal />
       ) : null}
     </section>
   );
@@ -182,6 +194,7 @@ export function ChatConversation({
   live,
   working,
   runtimeId,
+  showStreamedOutput = true,
   focused = true,
   revealIds,
   onTicket,
@@ -315,6 +328,7 @@ export function ChatConversation({
               lastPartialAt={lastPartialAt ?? null}
               partialSince={partialSince ?? null}
               runtimeId={runtimeId}
+              showStreamedOutput={showStreamedOutput}
               runStreamStatus={runStreamStatus}
               onRetry={retryNow}
             />

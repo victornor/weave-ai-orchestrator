@@ -56,6 +56,7 @@ import { useTheme } from '../lib/theme';
 import { TEXT_SIZE_STEPS, useTextSize } from '../v2/textSize';
 import { MessageBody, MessageBubble } from '../v2/ChatMessage';
 import { readShowSilentTurns, writeShowSilentTurns } from '../lib/chatPrefs';
+import { useShowLiveRunOutput, writeShowLiveRunOutput } from '../lib/liveRunPrefs';
 import { useDictationDiagnosticsEnabled, writeDictationDiagnosticsEnabled } from '../lib/dictationDiagnostics';
 import { useDictationAutoSend, writeDictationAutoSend } from '../lib/dictationAutoSend';
 import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, runningVersionLabel, shortSha } from '../lib/upgrade';
@@ -1552,6 +1553,8 @@ export function DeviceSection({ themeControl = 'full' }: { themeControl?: 'full'
   // The chat reads this through `useShowSilentTurns`; the writer publishes, so a chat already
   // mounted behind this page follows without a reload.
   const [silentTurns, setSilentTurns] = useState(readShowSilentTurns);
+  // VS-616: the same for the weaver chat's streamed text and mid-turn tool trace, also off by default.
+  const showLiveRunOutput = useShowLiveRunOutput();
   const dictationDiagnostics = useDictationDiagnosticsEnabled();
 
   /** Every category currently toggled on, in the shape the subscription stores it. */
@@ -1641,6 +1644,31 @@ export function DeviceSection({ themeControl = 'full' }: { themeControl?: 'full'
               )}
             >
               <span className={cx('size-3.5 rounded-pill', silentTurns ? 'bg-accent-on' : 'bg-text-nav')} />
+            </button>
+          </label>
+        </div>
+        <div className="ac-card mt-2">
+          <label className="flex items-center gap-3 px-3.5 py-3">
+            <span className="min-w-0 flex-1">
+              <span className="block text-meta text-text-1">Live weaver output</span>
+              <span className="block text-micro text-text-3">
+                Show the weaver&apos;s words and tool calls as they stream, in a marked in-progress section that clears when its
+                real message arrives. Off, the chat shows only what the weaver has sent plus the activity row. Stored in this
+                browser, not on the daemon.
+              </span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={showLiveRunOutput}
+              aria-label="Live weaver output"
+              onClick={() => writeShowLiveRunOutput(!showLiveRunOutput)}
+              className={cx(
+                'flex h-5 w-9 flex-none items-center rounded-pill border px-0.5 transition-colors duration-(--dur-fast) ease-ac',
+                showLiveRunOutput ? 'justify-end border-accent bg-accent' : 'justify-start border-line-2 bg-bg-3',
+              )}
+            >
+              <span className={cx('size-3.5 rounded-pill', showLiveRunOutput ? 'bg-accent-on' : 'bg-text-nav')} />
             </button>
           </label>
         </div>

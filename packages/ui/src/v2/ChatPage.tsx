@@ -17,6 +17,7 @@ import { isClosedRefusal, staleAnswerCopy } from '../lib/decisionStaleness';
 import { chatEntries, chatRows } from '../lib/dispatch';
 import type { ChatEntry } from '../lib/dispatch';
 import { draftKey, readDraft, takeSeededDraft, useDraft } from '../lib/drafts';
+import { useShowLiveRunOutput } from '../lib/liveRunPrefs';
 import { enqueue, useQueueCount } from '../lib/queue';
 import { useNewOutboundMessageIds } from '../lib/streamReveal';
 import { cx } from '../lib/cx';
@@ -369,6 +370,9 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // `weaver.lastRun`; the live trace mounts on it before the run's first event so that line streams
   // (VS-440), while a resumed run still waits for its events so the ones already there stay whole.
   const [live, setLive] = useState<{ id: string; running: boolean; fromStart: boolean } | null>(null);
+  // VS-616: the weaver's streamed text and mid-turn tool trace are opt-in (off by default). The
+  // planner chat (PlanTab) passes nothing and keeps streaming.
+  const showStreamedOutput = useShowLiveRunOutput();
   const [searchOpen, setSearchOpen] = useState(false);
   const [anchor, setAnchor] = useState<string | null>(null);
   const [answerError, setAnswerError] = useState<string | null>(null);
@@ -811,6 +815,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
               actorName="weaver"
               workingAriaLabel="Weaver is working"
               runtimeId={conductorRuntime}
+              showStreamedOutput={showStreamedOutput}
               live={live}
               working={working}
               focused={focused}

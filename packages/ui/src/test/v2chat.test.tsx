@@ -378,7 +378,9 @@ describe('the V2 Chat screen', () => {
 
   it('says a non-streaming runtime reports whole steps only in the chat row (VS-599)', () => {
     state.lastRun = { id: 'r9', status: 'running' };
-    state.weaverRuntimeId = 'gemini';
+    // Every integrated runtime now streams (VS-600); a runtime absent from the coverage table stands
+    // in for one that declares none.
+    state.weaverRuntimeId = 'unknown';
     render(<V2ChatPage />);
     expect(document.querySelector('[data-live-activity]')).not.toBeNull();
     expect(document.querySelector('[data-live-whole-steps]')).not.toBeNull();

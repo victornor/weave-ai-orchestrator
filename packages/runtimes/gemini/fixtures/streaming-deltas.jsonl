@@ -1,0 +1,14 @@
+# NOT a live recording. Gemini needs credentials this host does not hold, and launching a coding CLI
+# from a ticket is forbidden. These bytes are transcribed from the installed gemini 0.60.0 bundle's
+# stream-json emit sites: every assistant chunk is a `message` event with `delta: true`, there is no
+# non-delta completion message, and the turn ends at `result`. The adapter coalesces the chunks into
+# one persisted `assistant.text` per message.
+{"type":"init","timestamp":"2026-09-20T00:00:00.000Z","session_id":"7c2e9d10-4b8a-4f1e-9c3d-2a6b5e8f0d47","model":"gemini-3-pro-preview"}
+{"type":"message","timestamp":"2026-09-20T00:00:00.010Z","role":"user","content":"Run `echo pong` then report."}
+{"type":"message","timestamp":"2026-09-20T00:00:00.900Z","role":"assistant","content":"Let me ","delta":true}
+{"type":"message","timestamp":"2026-09-20T00:00:00.960Z","role":"assistant","content":"check.","delta":true}
+{"type":"tool_use","timestamp":"2026-09-20T00:00:01.200Z","tool_name":"run_shell_command","tool_id":"call_1","parameters":{"command":"echo pong"}}
+{"type":"tool_result","timestamp":"2026-09-20T00:00:01.400Z","tool_id":"call_1","status":"success","output":"pong\n"}
+{"type":"message","timestamp":"2026-09-20T00:00:02.000Z","role":"assistant","content":"```json\n{\"state\":\"done\",","delta":true}
+{"type":"message","timestamp":"2026-09-20T00:00:02.050Z","role":"assistant","content":"\"summary\":\"said pong\"}\n```","delta":true}
+{"type":"result","timestamp":"2026-09-20T00:00:02.100Z","status":"success","stats":{"total_tokens":1420,"input_tokens":1300,"output_tokens":120,"cached":900,"input":400,"duration_ms":2100,"tool_calls":1,"models":{"gemini-3-pro-preview":{"total_tokens":1420,"input_tokens":1300,"output_tokens":120,"cached":900,"input":400}}}}

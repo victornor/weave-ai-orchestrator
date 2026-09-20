@@ -22,6 +22,8 @@ export const capabilities: RuntimeCapabilities = {
   usageReporting: 'none',
   costReporting: false,
   permissionModes: ['auto', 'restricted', 'bypass'],
+  // VS-600: text deltas via `--stream-partial-output`; no reasoning or tool-input deltas.
+  partialOutput: 'text',
 };
 
 /**
@@ -87,7 +89,11 @@ export const adapter: RuntimeAdapter = {
     writeFiles(built.files);
 
     const requestedModel = namedModel(input);
-    const parser = createCursorParser({ resumed: built.resumed });
+    const parser = createCursorParser({
+      resumed: built.resumed,
+      streamPartial: true,
+      onPartial: (p) => sink.onPartial?.(p),
+    });
     let seq = 0;
     let sawOutput = false;
     let noOutputTimedOut = false;

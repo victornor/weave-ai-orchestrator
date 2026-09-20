@@ -20,6 +20,8 @@ export const capabilities: RuntimeCapabilities = {
   usageReporting: 'per_turn',
   costReporting: false,
   permissionModes: ['auto', 'restricted', 'bypass'],
+  // VS-600: assistant text deltas; gemini's stream-json emits no reasoning or tool-input deltas.
+  partialOutput: 'text',
 };
 
 const MODELS: RuntimeModel[] = [
@@ -76,7 +78,7 @@ export const adapter: RuntimeAdapter = {
     const built = buildArgs(input, { newSessionId: randomUUID() });
     writeFiles(built.files);
 
-    const parser = createGeminiParser({ resumed: built.resumed });
+    const parser = createGeminiParser({ resumed: built.resumed, onPartial: (p) => sink.onPartial?.(p) });
     let seq = 0;
     const run = spawnLines({
       cmd: built.cmd,

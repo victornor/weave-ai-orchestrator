@@ -54,7 +54,9 @@ function pushExtra(args: string[], extra: unknown): void {
 
 /** Pure: TurnInput -> the exact `cursor-agent` invocation. */
 export function buildArgs(input: TurnInput): CursorBuiltCommand {
-  const args: string[] = ['-p', '--output-format', 'stream-json', '--trust'];
+  // VS-600: `--stream-partial-output` is valid only with `--print --output-format stream-json`, which
+  // this invocation always uses; it makes cursor-agent write one `assistant` text event per delta.
+  const args: string[] = ['-p', '--output-format', 'stream-json', '--stream-partial-output', '--trust'];
 
   const prev = asCursorSession(input.session.ref);
   if (prev) args.push('--resume', prev.sessionId);

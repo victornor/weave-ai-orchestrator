@@ -53,7 +53,7 @@ If a runtime's partial stream ends without a completed part, the page SHALL disc
 - **THEN** the run is cancelled as before and the page shows no partial text after the cancellation event
 
 ### Requirement: Runtime coverage is declared
-Each runtime adapter SHALL declare `capabilities.partialOutput` as `none`, `text` or `full`, and the value the page reads SHALL agree with that declaration. opencode (`full`), Claude (`full`) and Codex (`full`) are delivered; every other runtime SHALL show the "whole steps only" state until its own follow-up change declares partial output.
+Each runtime adapter SHALL declare `capabilities.partialOutput` as `none`, `text` or `full`, and the value the page reads SHALL agree with that declaration. opencode (`full`), Claude (`full`), Codex (`full`), Cursor (`text`) and Gemini (`text`) are delivered; every other runtime SHALL show the "whole steps only" state until its own follow-up change declares partial output.
 
 #### Scenario: Claude now streams
 - **WHEN** a Claude run is live and generating text
@@ -62,6 +62,14 @@ Each runtime adapter SHALL declare `capabilities.partialOutput` as `none`, `text
 #### Scenario: Codex now streams
 - **WHEN** a Codex run is live and its app-server is running
 - **THEN** the page shows streaming text, reasoning and running tools, not the whole-steps-only statement
+
+#### Scenario: Cursor streams text
+- **WHEN** a cursor run is generating assistant text
+- **THEN** the page shows the growing text and the row reads as writing, not as "whole steps only"
+
+#### Scenario: Gemini streams text
+- **WHEN** a gemini run is generating assistant text
+- **THEN** the page shows the growing text and the row reads as writing, not as "whole steps only"
 
 #### Scenario: Unsupported runtime
 - **WHEN** a run of a runtime that declares `none` is live

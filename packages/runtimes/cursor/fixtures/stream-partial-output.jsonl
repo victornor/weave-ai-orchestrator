@@ -1,0 +1,23 @@
+# NOT a live recording. `cursor-agent` needs the owner's live Cursor login, and launching a coding CLI
+# from a ticket is forbidden (one OAuth refresh rotates the daemon's shared credential). These bytes are
+# transcribed from the installed cursor-agent 2026.09.10 bundle (versions/2026.09.10-fd3934a), whose
+# `--stream-partial-output` help reads "Stream partial output as individual text deltas (only works with
+# --print and stream-json format)". With the flag on:
+#   - each text delta is one `{"type":"assistant", ...}` event whose message content is just the chunk,
+#     carrying `timestamp_ms` and no `model_call_id`;
+#   - before each tool call, and at turn end, the whole accumulated model-call text is flushed as one
+#     `assistant` event of the same shape (the tool-call flush carries `model_call_id` + `timestamp_ms`;
+#     the turn-end flush carries only `session_id`);
+#   - `tool_call` started/completed and `result` follow as before.
+# The owner must check one real run against this shape.
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/home/agent","session_id":"2f9a1c44-6f3b-4b7e-9a1d-5c8e2b0f7d31","model":"Claude 4 Sonnet","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Read README.md then report"}]},"session_id":"2f9a1c44-6f3b-4b7e-9a1d-5c8e2b0f7d31","timestamp_ms":1760000000000}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me "}]},"session_id":"2f9a1c44-6f3b-4b7e-9a1d-5c8e2b0f7d31","timestamp_ms":1760000000100}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"read the README."}]},"session_id":"2f9a1c44-6f3b-4b7e-9a1d-5c8e2b0f7d31","timestamp_ms":1760000000150}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me read the README."}]},"session_id":"2f9a1c44-6f3b-4b7e-9a1d-5c8e2b0f7d31","model_call_id":"mc_0001","timestamp_ms":1760000000200}
+{"type":"tool_call","subtype":"started","call_id":"toolu_read_1","tool_call":{"readToolCall":{"args":{"path":"README.md"}}},"model_call_id":"mc_0001","session_id":"2f9a1c44-6f3b-4b7e-9a1d-5c8e2b0f7d31","timestamp_ms":1760000000205}
+{"type":"tool_call","subtype":"completed","call_id":"toolu_read_1","tool_call":{"readToolCall":{"args":{"path":"README.md"},"result":{"success":{"content":"# Project\n","isEmpty":false,"totalLines":1,"totalChars":10}}}},"session_id":"2f9a1c44-6f3b-4b7e-9a1d-5c8e2b0f7d31","timestamp_ms":1760000000400}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done"}]},"session_id":"2f9a1c44-6f3b-4b7e-9a1d-5c8e2b0f7d31","timestamp_ms":1760000000500}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"."}]},"session_id":"2f9a1c44-6f3b-4b7e-9a1d-5c8e2b0f7d31","timestamp_ms":1760000000550}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done."}]},"session_id":"2f9a1c44-6f3b-4b7e-9a1d-5c8e2b0f7d31"}
+{"type":"result","subtype":"success","duration_ms":1200,"duration_api_ms":1200,"is_error":false,"result":"Let me read the README.Done.","session_id":"2f9a1c44-6f3b-4b7e-9a1d-5c8e2b0f7d31","request_id":"req_1"}

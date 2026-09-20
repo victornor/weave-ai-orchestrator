@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
+import type { RuntimeEvent, RuntimePartial } from '@weave-ai/runtime-sdk';
 import { truncate } from '@weave-ai/runtime-sdk';
 import { parseTestSummary } from '@weave-ai/shared';
 
@@ -10,6 +10,20 @@ export interface CursorParseState {
   isError: boolean;
   errorMessage: string | null;
   resultSeen: boolean;
+  /** VS-600: the delta text of the assistant message being streamed, awaiting its flush. */
+  partialBuffer: string;
+  /** The `partId` the current message's deltas and its completed event share. */
+  currentPartId: string | null;
+  /** Monotonic per-message counter behind the synthesized `partId`s. */
+  partialSeq: number;
+}
+
+export interface CursorParseOptions {
+  resumed?: boolean;
+  /** VS-600: `--stream-partial-output` is on, so `assistant` text events may be deltas. */
+  streamPartial?: boolean;
+  /** Called for each text delta while streaming. */
+  onPartial?: (p: RuntimePartial) => void;
 }
 
 type Json = Record<string, unknown>;
@@ -25,10 +39,11 @@ const WRITE_KEYS = new Set(['writeToolCall', 'editToolCall']);
  * Event shapes transcribed from Cursor CLI docs (2026-09-09): system/init, user, assistant,
  * tool_call started/completed, result. SYNTHETIC fixtures — not a live recording.
  */
-export function createCursorParser(opts: { resumed: boolean } = { resumed: false }) {
+export function createCursorParser(opts: CursorParseOptions = {}) {
   const state: CursorParseState = {
     sessionId: null, model: null, finalText: null, assistantText: '',
     isError: false, errorMessage: null, resultSeen: false,
+    partialBuffer: '', currentPartId: null, partialSeq: 0,
   };
 
   function handle(line: string): RuntimeEvent[] {
@@ -58,19 +73,57 @@ export function createCursorParser(opts: { resumed: boolean } = { resumed: false
     }];
   }
 
+  function nextPartId(): string {
+    return `cursor:msg:${state.partialSeq++}`;
+  }
+
+  /**
+   * VS-600: with `--stream-partial-output`, cursor-agent writes one `assistant` event per text delta
+   * and, before each tool call and at turn end, flushes the whole accumulated model-call text as one
+   * `assistant` event. A flush carries `model_call_id` (at a tool call) or no `timestamp_ms` (at turn
+   * end); a delta carries `timestamp_ms` and neither of those. A flush whose text equals the buffer
+   * is also caught by equality, so the discriminator survives a missing `model_call_id`.
+   */
+  function isFlush(msg: Json, text: string): boolean {
+    if (str(msg['model_call_id']) !== null) return true;
+    if (msg['timestamp_ms'] == null) return true;
+    return state.partialBuffer.length > 0 && text === state.partialBuffer;
+  }
+
   function assistant(msg: Json, ts: string): RuntimeEvent[] {
     const m = obj(msg['message']);
     const content = Array.isArray(m?.['content']) ? m['content'] : [];
-    const out: RuntimeEvent[] = [];
+    const blocks: string[] = [];
     for (const blockRaw of content) {
       const b = obj(blockRaw);
       if (!b) continue;
       const text = str(b['text']) ?? '';
-      if (!text) continue;
-      state.assistantText += (state.assistantText ? '\n' : '') + text;
-      out.push({ ts, type: 'assistant.text', payload: { text } });
+      if (text) blocks.push(text);
     }
-    return out.length > 0 ? out : [raw('assistant', msg, ts)];
+    if (blocks.length === 0) return [raw('assistant', msg, ts)];
+
+    if (!opts.streamPartial) {
+      const out: RuntimeEvent[] = [];
+      for (const text of blocks) {
+        state.assistantText += (state.assistantText ? '\n' : '') + text;
+        out.push({ ts, type: 'assistant.text', payload: { text } });
+      }
+      return out;
+    }
+
+    // One `assistant` event carries one text block in this mode; its text is the delta or the flush.
+    const text = blocks.join('\n');
+    if (isFlush(msg, text)) {
+      const partId = state.currentPartId ?? nextPartId();
+      state.currentPartId = null;
+      state.partialBuffer = '';
+      state.assistantText += (state.assistantText ? '\n' : '') + text;
+      return [{ ts, type: 'assistant.text', payload: { text, partId } }];
+    }
+    if (state.currentPartId === null) state.currentPartId = nextPartId();
+    state.partialBuffer += text;
+    opts.onPartial?.({ kind: 'text', partId: state.currentPartId, text });
+    return [];
   }
 
   function toolCall(msg: Json, ts: string): RuntimeEvent[] {
@@ -121,6 +174,13 @@ export function createCursorParser(opts: { resumed: boolean } = { resumed: false
   }
 
   function finish(): void {
+    // A stream cut off before its flush: keep the deltas' text in the fallback final text. The
+    // partial itself is discarded by the engine when the turn ends, as for every runtime.
+    if (opts.streamPartial && state.partialBuffer.length > 0) {
+      state.assistantText += (state.assistantText ? '\n' : '') + state.partialBuffer;
+      state.partialBuffer = '';
+      state.currentPartId = null;
+    }
     if (state.finalText == null && state.assistantText.length > 0) state.finalText = state.assistantText;
   }
 

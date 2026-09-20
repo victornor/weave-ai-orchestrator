@@ -40,6 +40,19 @@ describe('PartialBuffer (VS-595)', () => {
     expect(buf.snapshot().partials[0]!.text).toBe(shown);
   });
 
+  it('masks a secret split across the deltas a cursor or gemini adapter reports (VS-600)', () => {
+    for (const partId of ['cursor:msg:0', 'gemini:msg:0']) {
+      const { buf, frames } = setup([SECRET]);
+      buf.push({ kind: 'text', partId, text: SECRET.slice(0, 7) });
+      vi.advanceTimersByTime(60);
+      buf.push({ kind: 'text', partId, text: `${SECRET.slice(7)} tail` });
+      vi.advanceTimersByTime(60);
+      const shown = text(frames, partId);
+      expect(shown).toContain('[redacted]');
+      expect(shown).not.toContain(SECRET);
+    }
+  });
+
   it('drops a superseded part and keeps the snapshot to live parts', () => {
     const { buf } = setup();
     buf.push({ kind: 'thinking', partId: 'p1', text: 'hmm' });

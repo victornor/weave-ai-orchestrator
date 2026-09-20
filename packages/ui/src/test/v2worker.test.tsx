@@ -204,6 +204,18 @@ describe('V2 worker page', () => {
       expect(notice.closest('li')).toHaveClass('items-center');
       expect(screen.getByText('System')).toBeInTheDocument();
     });
+
+    it('renders a failed-turn notice as the same system notice (VS-598)', () => {
+      state.role = { id: 'r1', name: 'Full-stack Engineer' };
+      state.threadMessages = [
+        message({ id: 'm1', direction: 'inbound', authorKind: 'human', authorId: null, body: 'any update?' }),
+        message({ id: 'm2', direction: 'outbound', authorKind: 'system', authorId: null, body: 'The turn failed: the runtime crashed unexpectedly.' }),
+      ];
+      render(<WorkerBody workerId="a1" />);
+      const notice = screen.getByText('The turn failed: the runtime crashed unexpectedly.');
+      expect(notice.closest('li')).toHaveClass('items-center');
+      expect(screen.getByText('System')).toBeInTheDocument();
+    });
   });
 
   describe('sessionAuthorLabel (VS-553)', () => {

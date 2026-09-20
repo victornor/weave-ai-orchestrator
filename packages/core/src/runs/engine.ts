@@ -664,12 +664,23 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   return finished;
 }
 
+/** VS-598: how many recent thread messages are read when resolving a resumed turn's session thread. */
+const SESSION_PENDING_MESSAGES = 50;
+
 /**
  * VS-596: the conversation thread and the human message(s) a session turn answers. Normally they come
  * from the `human_message` wake; when a turn was retried, the retry wake carries them forward so a
  * retried-and-succeeded turn still knows where to deliver (and what to quote).
+ *
+ * VS-598: a resume whose wake carries no thread context — the watchdog's retry after a silence or a
+ * hard timeout — falls back to the session's own thread, but only for a retry, and only while that
+ * thread still holds an unanswered human message; an unrelated self-scheduled turn therefore never
+ * answers a stale message.
  */
-function sessionReplyContext(wakes: Wakeup[]): { threadId: string | null; messageIds: string[] } {
+function sessionReplyContext(
+  wakes: Wakeup[],
+  fallback?: { agentId: string; deps: () => CoreServices },
+): { threadId: string | null; messageIds: string[] } {
   const flat = flattenWakes(wakes);
   const isString = (v: unknown): v is string => typeof v === 'string';
   const human = flat.filter((w) => w.source === 'human_message');
@@ -679,7 +690,30 @@ function sessionReplyContext(wakes: Wakeup[]): { threadId: string | null; messag
   const messageIds = human.length > 0
     ? human.map((w) => w.payload['messageId']).filter(isString)
     : ((flat.map((w) => w.payload['messageIds']).find(Array.isArray) as unknown[] | undefined)?.filter(isString) ?? []);
-  return { threadId, messageIds };
+  if (threadId || !fallback) return { threadId, messageIds };
+  if (!flat.some((w) => w.source === 'retry')) return { threadId: null, messageIds: [] };
+  const own = fallback.deps().threads.list({ agentId: fallback.agentId })[0];
+  if (!own) return { threadId: null, messageIds: [] };
+  const pending = pendingHumanMessages(fallback.deps().threads.messages(own.id, { limit: SESSION_PENDING_MESSAGES }));
+  if (pending.length === 0) return { threadId: null, messageIds: [] };
+  return { threadId: own.id, messageIds: pending.map((m) => m.id) };
+}
+
+/**
+ * VS-598: the human messages a thread still owes a real answer — every inbound message after the last
+ * `agent`-authored outbound message, oldest-first. A `system` notice (the stopped attempt's own
+ * "interrupted" notice) is deliberately not an answer: the watchdog cuts a turn, that run posts its
+ * notice, and the retry-woken resume must still see the human's message and deliver the answer.
+ */
+function pendingHumanMessages(
+  msgs: Array<{ id: string; direction: string; authorKind: string }>,
+): Array<{ id: string; direction: string; authorKind: string }> {
+  let lastAnswer = -1;
+  for (let i = 0; i < msgs.length; i += 1) {
+    const m = msgs[i]!;
+    if (m.direction === 'outbound' && m.authorKind === 'agent') lastAnswer = i;
+  }
+  return msgs.slice(lastAnswer + 1).filter((m) => m.direction === 'inbound');
 }
 
 /**
@@ -689,7 +723,9 @@ function sessionReplyContext(wakes: Wakeup[]): { threadId: string | null; messag
  * wrote an outbound message to the thread (a reply tool) is left alone. A missing or whitespace-only
  * answer leaves a system notice instead of a blank thread, and a turn that ends without an answer —
  * failed, timed out, cancelled or interrupted — leaves a plain-reason system notice, unless the daemon
- * is going to retry or resume it, in which case it stays unannounced until the final outcome.
+ * is going to retry or resume it, in which case it stays unannounced until the final outcome. VS-598:
+ * when the wake carries no thread (the watchdog's retry), the session's own thread supplies both the
+ * target and the unanswered human message, so a resumed turn still delivers.
  */
 async function deliverSessionAnswer(
   ctx: WorkspaceContext,
@@ -698,7 +734,7 @@ async function deliverSessionAnswer(
 ): Promise<void> {
   const log = ctx.log('run').child({ runId: input.run.id });
   if (input.agent.kind !== 'session' || input.ticket) return;
-  const { threadId, messageIds: replyToMessageIds } = sessionReplyContext(input.wakes);
+  const { threadId, messageIds: replyToMessageIds } = sessionReplyContext(input.wakes, { agentId: input.agent.id, deps });
   if (!threadId) return;
   try {
     // The wake names the thread; never post into one another agent owns (a stale or forged payload).
@@ -730,7 +766,11 @@ async function deliverSessionAnswer(
     }
     const errorText = ctx.db.get<{ errorText: string | null }>('SELECT error_text FROM agents WHERE id = ?', [input.agent.id])?.errorText ?? null;
     const retryScheduled = !!ctx.db.get<{ scheduledRetryAt: string | null }>('SELECT scheduled_retry_at FROM runs WHERE id = ?', [input.run.id])?.scheduledRetryAt;
-    const notice = sessionOutcomeNotice(run, errorText, retryScheduled);
+    // VS-598: a runtime auth outage preserves this turn's wake so it resumes once the runtime is
+    // healthy, while an exhausted outage parks the work and raises a card. The notice says which, so
+    // the human knows whether to wait or to log in and act.
+    const resumesPending = input.wakes.some((w) => ctx.db.get<{ status: string }>('SELECT status FROM wakeups WHERE id = ?', [w.id])?.status === 'queued');
+    const notice = sessionOutcomeNotice(run, errorText, retryScheduled, resumesPending);
     if (notice === null) return;
     await deps().threads.outbound({ kind: 'system', id: null }, threadId, notice, { runId: input.run.id });
   } catch (e) {
@@ -743,24 +783,40 @@ async function deliverSessionAnswer(
  * will retry or resume the turn by itself — announcing it then would only add noise before the real
  * outcome. The wording is for the human: no run ids and no error internals.
  */
-function sessionOutcomeNotice(run: Run, errorText: string | null, retryScheduled: boolean): string | null {
+function sessionOutcomeNotice(run: Run, errorText: string | null, retryScheduled: boolean, resumesPending: boolean): string | null {
   if (retryScheduled) return null; // a retry is already scheduled
   // A daemon shutdown, or a live human message, resumes the turn: the next run carries the outcome.
   if (run.errorCode === 'interrupted_by_shutdown' || run.errorCode === 'interrupted_by_message') return null;
-  // A runtime authentication outage is resumed on the same wake once the runtime is healthy again.
-  if (run.errorFamily === 'auth') return null;
+  // VS-598: a runtime authentication outage is resumed on the same wake once the runtime is healthy
+  // again; an exhausted one parks the work and raises a card. Say which, so the human knows the next step.
+  if (run.status === 'failed' && run.errorFamily === 'auth') {
+    return resumesPending
+      ? 'The turn failed: the runtime needs you to log in again. This conversation resumes once the login is renewed.'
+      : 'The turn failed: the runtime needs you to log in again. Log in, then retry this conversation.';
+  }
   switch (run.status) {
     case 'timed_out': return 'This turn took too long and was stopped before it could answer.';
     case 'cancelled': return 'This turn was cancelled before it answered.';
     case 'interrupted': return 'This turn was interrupted before it answered.';
-    case 'failed': return `The turn failed: ${plainFailureReason(run, errorText)}.`;
+    case 'failed':
+      // VS-598: a usage limit is not retried, so the notice carries the reset (when the runtime named
+      // one) and the human's next step rather than just the family.
+      return run.errorFamily === 'provider_quota'
+        ? quotaNotice(errorText)
+        : `The turn failed: ${plainFailureReason(run, errorText)}.`;
     default: return null;
   }
 }
 
+/** VS-598: the human-facing usage-limit notice — the reset when the runtime reported one, and the fact that nothing retries it. */
+function quotaNotice(errorText: string | null): string {
+  const reset = parseResetTime(errorText ?? '');
+  const resetText = reset ? ` It resets at ${fmtUtc(reset)} UTC.` : '';
+  return `The turn failed: the usage limit was reached.${resetText} Nothing retries automatically — send another message to try again.`;
+}
+
 /** The human-readable half of a failed turn's notice, falling back to the family when there is no usable message. */
 function plainFailureReason(run: Run, errorText: string | null): string {
-  if (run.errorFamily === 'provider_quota') return 'the usage limit was reached';
   if (run.errorCode === 'model_unconfigured') return 'no model is configured for this session';
   if (run.errorCode === WORKER_MEMORY_ERROR_CODE) return 'it ran out of memory';
   const first = (errorText ?? '').split('\n')[0]!.replace(/\s+/g, ' ').trim();
@@ -996,7 +1052,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
       try {
         // VS-596: a retry wake is a fresh wake with no human message of its own, so carry the thread
         // and waking message(s) forward — otherwise a session's retried turn could not deliver its answer.
-        const reply = sessionReplyContext(f.wakes);
+        const reply = sessionReplyContext(f.wakes, f.agent.kind === 'session' ? { agentId: f.agent.id, deps } : undefined);
         deps().wake.enqueue(f.agent.id, {
           source: 'retry', reason: `retry after ${errorCode ?? errorFamily}`,
           payload: { retryOfRunId: runId, attempt: attempt + 1, ...(reply.threadId ? { threadId: reply.threadId, messageIds: reply.messageIds } : {}) }, notBefore,

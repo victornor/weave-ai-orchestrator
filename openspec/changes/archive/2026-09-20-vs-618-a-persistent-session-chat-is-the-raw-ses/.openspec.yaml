@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "A persistent session chat is the raw session: full transcript per turn,
+  and no ended-without-a-response rule"

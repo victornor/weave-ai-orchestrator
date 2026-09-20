@@ -542,12 +542,19 @@ export async function buildTurnPrompt(
 const WEAVER_NOW = 'Call `weave_inbox` if you need details. Handle human messages first, then ticket events. Reply to the human only through `weave_human_send`. Finish with the structured final report.';
 const PLANNER_NOW = 'Call `weave_inbox` if you need details. This is a conversation with captain about this plan: read, discuss, and add/edit/remove/reorder drafts as you go — read the plan back so you see any edit captain made directly. Reply only through `weave_plan_reply`. You never submit the plan yourself; only captain does, from the modal.';
 const WORKER_DELIVERY_NOW = 'Call `weave_inbox` if you need details, do the phase your ticket status asks for, leave durable progress on the ticket, and finish with the structured final report. Ask with `weave_ask` instead of guessing; report `blocked` with a routable path if you are stuck.';
+// VS-618: a ticketless persistent session is a standing conversation, not a worker turn — no ticket
+// phase, no structured report. Its final message is posted to the conversation on its behalf (VS-596),
+// so it writes its reply there; a bound channel still receives it.
+const SESSION_NOW = 'Call `weave_inbox` if you need details. This is a standing conversation: answer, investigate, read and explain in your own words. Write your reply as your final message; there is no report format to fill in.';
 const INTERACTIVE_FIRST_TURN_NOW = 'This is an interactive session: a human is about to work with you directly on this ticket. Read the ticket and its comments, then post exactly one `weave_ticket_comment` stating what you understand the ticket to be and what you are ready to do. Nothing else is available to you this turn: do not load a skill, do not read or search the repository, do not run a command, do not transition the ticket, and do not open a plan or a pull request. Stop after posting the comment and wait for the human\'s first message; the tools you need for the rest return on your next turn.';
 const INTERACTIVE_CONVERSATION_NOW = 'This is an interactive session: a conversation with the human on this ticket. Answer, investigate, read and explain. Do not write code, transition the ticket toward delivery, or create a plan or merge approval unless the human asked for changes in this conversation. If you think a change is warranted and they have not asked, say so in the conversation and wait — do not start planning while you ask. A conversation that ends with a good answer and nothing delivered is complete success; the ticket is a container, not a mandate. The ordinary plan-approval and merge-approval gates still apply if they ask you to make a change.';
 
 function whatToDoNow(agent: S.Agent, workerTicket: S.Ticket | null): string {
   if (agent.kind === 'weaver') return WEAVER_NOW;
   if (agent.kind === 'planner') return PLANNER_NOW;
+  // VS-618: a ticketless session is a conversation, not a worker turn. A session holding a ticket
+  // falls through to the worker instruction, exactly as it did before.
+  if (agent.kind === 'session' && !agent.ticketId) return SESSION_NOW;
   if (workerTicket && Boolean(workerTicket.interactiveSession)) {
     return agent.turnCount === 0 ? INTERACTIVE_FIRST_TURN_NOW : INTERACTIVE_CONVERSATION_NOW;
   }

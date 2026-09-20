@@ -1,0 +1,10 @@
+{
+  "description": "Mistral: tool ids are nine alphanumeric characters and a tool message may not be followed by a user message.",
+  "compat": {
+    "tools": {
+      "idFormat": "alnum9"
+    },
+    "strictAlternation": true
+  },
+  "verified": false
+}

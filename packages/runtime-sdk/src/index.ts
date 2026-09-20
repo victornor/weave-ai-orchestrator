@@ -191,6 +191,8 @@ export interface ResumeCommand { cmd: string; args: string[]; env: Record<string
 export interface RuntimeHost {
   /** Every model provider the workspaces configure, by provider id (the first workspace defining an id wins). */
   providers(): Record<string, ProviderProfile>;
+  /** The API key of a provider, read from the secrets of the workspace that defines it; undefined when there is none. Used for model discovery only: a run gets its key through its own environment. */
+  providerKey?(providerId: string): string | undefined;
 }
 
 export interface RuntimeAdapter {

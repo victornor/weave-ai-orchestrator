@@ -12,4 +12,4 @@ export type Message =
 export interface Usage { promptTokens: number; completionTokens: number; cachedTokens: number; reasoningTokens: number; estimated: boolean }
 
 export type ErrorFamily = 'transient_upstream' | 'provider_quota' | 'model_refusal' | 'auth' | 'tooling' | 'resource' | 'unknown';
-export interface AgentError { code: string; family: ErrorFamily; message: string; retryAfterMs?: number; status?: number }
+export interface AgentError { code: string; family: ErrorFamily; message: string; retryAfterMs?: number; status?: number; /** Cap on retries for this failure, below the loop's default. */ maxRetries?: number }

@@ -1,0 +1,11 @@
+{
+  "description": "Azure OpenAI. Key in the api-key header; the profile's baseUrl is the deployment path and `query` carries api-version.",
+  "compat": {
+    "maxTokensParam": "max_completion_tokens",
+    "reasoning": {
+      "field": "none",
+      "effortParam": "reasoning_effort"
+    }
+  },
+  "verified": false
+}

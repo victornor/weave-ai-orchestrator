@@ -1,0 +1,22 @@
+data: {"id":"chatcmpl_1789867378234","object":"chat.completion.chunk","created":1789867378,"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl_1789867378234","object":"chat.completion.chunk","created":1789867378,"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_0apGXhMPlFpIxx9CftUCctGl","type":"function","function":{"name":"get_time","arguments":""}}]},"finish_reason":null}]}
+
+:x-ci-model-ttft-ms=759
+
+data: {"id":"chatcmpl_1789867378234","object":"chat.completion.chunk","created":1789867378,"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\""},"id":"call_0apGXhMPlFpIxx9CftUCctGl"}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl_1789867378234","object":"chat.completion.chunk","created":1789867378,"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"city"},"id":"call_0apGXhMPlFpIxx9CftUCctGl"}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl_1789867378234","object":"chat.completion.chunk","created":1789867378,"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\":\""},"id":"call_0apGXhMPlFpIxx9CftUCctGl"}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl_1789867378234","object":"chat.completion.chunk","created":1789867378,"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"Paris"},"id":"call_0apGXhMPlFpIxx9CftUCctGl"}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl_1789867378234","object":"chat.completion.chunk","created":1789867378,"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"}"},"id":"call_0apGXhMPlFpIxx9CftUCctGl"}]},"finish_reason":null}]}
+
+data: {"id":"chatcmpl_1789867378234","object":"chat.completion.chunk","created":1789867378,"model":"gpt-5.6-luna","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}
+
+data: {"id":"chatcmpl_1789867378234","object":"chat.completion.chunk","created":1789867378,"model":"gpt-5.6-luna","choices":[],"usage":{"prompt_tokens":54,"completion_tokens":18,"total_tokens":72,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":0}}}
+
+data: [DONE]
+

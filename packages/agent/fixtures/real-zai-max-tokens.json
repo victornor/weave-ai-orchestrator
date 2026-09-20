@@ -1,0 +1,61 @@
+{
+  "note": "Z.ai coding plan, asked glm-4.5-air (served glm-5.3-flash), 2026-09-20, VS-605 probe 5.1: the same request with the output cap sent as max_completion_tokens=16 and as max_tokens=16. Responses byte-for-byte.",
+  "max_completion_tokens_16": {
+    "choices": [
+      {
+        "finish_reason": "stop",
+        "index": 0,
+        "message": {
+          "content": "OK",
+          "reasoning_content": "The user is asking me to say \"OK\". This is a simple request. I should just comply and say \"OK\". There's nothing harmful or problematic about this request. The simplest, most direct response is just to say \"OK\".",
+          "role": "assistant"
+        }
+      }
+    ],
+    "created": 1789867409,
+    "id": "20260920092327803e2a28288145ba",
+    "model": "glm-5.3-flash",
+    "object": "chat.completion",
+    "request_id": "20260920092327803e2a28288145ba",
+    "usage": {
+      "completion_tokens": 51,
+      "completion_tokens_details": {
+        "reasoning_tokens": 48
+      },
+      "prompt_tokens": 14,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "total_tokens": 65
+    }
+  },
+  "max_tokens_16": {
+    "choices": [
+      {
+        "finish_reason": "length",
+        "index": 0,
+        "message": {
+          "content": "",
+          "reasoning_content": "The user is asking me to say \"OK\". This is a very simple request",
+          "role": "assistant"
+        }
+      }
+    ],
+    "created": 1789867410,
+    "id": "202609200923292c365095ea0a4b6c",
+    "model": "glm-5.3-flash",
+    "object": "chat.completion",
+    "request_id": "202609200923292c365095ea0a4b6c",
+    "usage": {
+      "completion_tokens": 16,
+      "completion_tokens_details": {
+        "reasoning_tokens": 15
+      },
+      "prompt_tokens": 14,
+      "prompt_tokens_details": {
+        "cached_tokens": 0
+      },
+      "total_tokens": 30
+    }
+  }
+}

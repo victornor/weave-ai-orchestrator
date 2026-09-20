@@ -16,31 +16,33 @@ describe('byte-split property', () => {
 const run = (name: string) => assemble([new Uint8Array(readFixture(name))]);
 
 describe('stream quirks', () => {
-  it('assembles one call when the id repeats on every chunk, and reads reasoning_content and usage on the finish chunk', () => {
-    const r = run('gateway-deepseek-tool.sse');
-    expect(r.calls).toEqual([{ id: 'call_00_JAdkP4IsD8rE3vN0DbZE2474', name: 'get_time', argsText: '{"city":"Paris"}' }]);
-    expect(r.thinking).toBe('Theuser wantsthe time.');
+  it('assembles one call when the id repeats on every chunk, and reads reasoning_content and usage on the finish chunk (real cheaper-inference deepseek capture)', () => {
+    const r = run('real-cheaper-deepseek-tool.sse');
+    expect(r.calls).toEqual([{ id: 'call_00_JAdkP4IsD8rE3vN0DbZE2474', name: 'get_time', argsText: '{"city": "Paris"}' }]);
+    expect(r.thinking.startsWith('The user wants the current time in Paris.')).toBe(true);
     expect(r.finishReason).toBe('tool_calls');
-    expect(r.usage).toMatchObject({ promptTokens: 36, completionTokens: 47, cachedTokens: 0, reasoningTokens: 33 });
+    expect(r.usage).toMatchObject({ promptTokens: 299, completionTokens: 53, cachedTokens: 0, reasoningTokens: 15 });
     expect(r.model).toBe('deepseek-v4.1-flash');
   });
-  it('assembles a call whose id is sent once, with usage on a separate empty-choices chunk', () => {
-    const r = run('gateway-gpt-tool.sse');
+  it('assembles a call whose id is sent with the name, with usage on a separate empty-choices chunk (real cheaper-inference gpt capture)', () => {
+    const r = run('real-cheaper-gpt-tool.sse');
     expect(r.calls).toEqual([{ id: 'call_0apGXhMPlFpIxx9CftUCctGl', name: 'get_time', argsText: '{"city":"Paris"}' }]);
-    expect(r.usage).toMatchObject({ promptTokens: 12, completionTokens: 16 });
+    expect(r.usage).toMatchObject({ promptTokens: 54, completionTokens: 18 });
+    expect(run('real-cheaper-gpt-usage.sse')).toMatchObject({ text: '1, 2, 3, 4, 5', usage: { promptTokens: 12, completionTokens: 16 } });
   });
-  it('takes whole arguments in one delta and records the model the provider reports', () => {
-    const r = run('zai-tool-whole-args.sse');
-    expect(r.calls[0]).toMatchObject({ name: 'get_time', argsText: '{"city":"Paris"}' });
+  it('takes Z.ai whole arguments in one delta and records the model the provider reports (real capture)', () => {
+    const r = run('real-zai-tool.sse');
+    expect(r.calls).toEqual([{ id: 'call_eef1c6f93e204449869d731f', name: 'get_time', argsText: '{"city":"Paris"}' }]);
     expect(r.model).toBe('glm-5.3-flash');
-    expect(r.usage).toMatchObject({ promptTokens: 12, completionTokens: 30 });
+    expect(r.usage).toMatchObject({ promptTokens: 166, completionTokens: 30, reasoningTokens: 18 });
+    expect(run('real-zai-usage.sse').finishReason).toBe('length');
   });
-  it('reads reasoning once when both reasoning and reasoning_details are sent, and survives finish_reason on two chunks', () => {
-    const r = run('openrouter-tool-two-finish.sse');
-    expect(r.thinking).toBe('Let see');
-    expect(r.calls).toHaveLength(1);
-    expect(r.calls[0]!.argsText).toBe('{"city":"Paris"}');
-    expect(r.usage?.promptTokens).toBe(14);
+  it('reads reasoning once when both reasoning and reasoning_details are sent, and survives finish_reason on two chunks (real OpenRouter capture)', () => {
+    const r = run('real-openrouter-tool.sse');
+    expect(r.thinking.startsWith('The user wants to know the current time in Paris.')).toBe(true);
+    expect(r.calls).toEqual([{ id: 'call_5fd7333166dd48afbdbc2d7f', name: 'get_time', argsText: '{"city":"Paris"}' }]);
+    expect(r.usage).toMatchObject({ promptTokens: 166, completionTokens: 39, reasoningTokens: 27 });
+    expect(r.model).toBe('z-ai/glm-5.3-flashx');
   });
   it('decodes multi-byte text', () => {
     const r = run('mock-text.sse');
@@ -109,5 +111,14 @@ describe('classifyHttp', () => {
     expect(classifyHttp(503, 'down').family).toBe('transient_upstream');
     expect(classifyHttp(400, '{"error":{"message":"maximum context length exceeded"}}').code).toBe('context_overflow');
     expect(classifyHttp(404, '{}').code).toBe('model_not_found');
+  });
+  it('maps the recorded DeepSeek 402 body to quota', () => {
+    const body = readFixture('deepseek-402-insufficient-balance.json').toString('utf8');
+    expect(classifyHttp(402, body)).toMatchObject({ family: 'provider_quota', code: 'quota_exhausted', message: 'Insufficient Balance' });
+  });
+  it('caps retries on a gateway that already exhausted its own routes (recorded 502 body)', () => {
+    const body = '{"error":{"message":"All available provider routes failed after 6 attempts. If it keeps happening, contact support and quote the request id.","type":"api_error","param":null,"code":"upstream_error"}}';
+    expect(classifyHttp(502, body)).toMatchObject({ family: 'transient_upstream', code: 'gateway_routes_failed', maxRetries: 1 });
+    expect(classifyHttp(502, '{"error":{"message":"bad gateway"}}').maxRetries).toBeUndefined();
   });
 });

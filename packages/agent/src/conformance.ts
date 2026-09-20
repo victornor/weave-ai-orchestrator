@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 import { runAgentTurn, type LoopIO } from './loop.js';
 import type { ChildEvent, ChildPartial, InitMessage } from './protocol.js';
 import { SseParser } from './sse.js';
+import { loadPreset, resolveProvider } from './resolve.js';
+import { probeProvider } from './probe.js';
 
 /**
  * The live check: one real turn through the real agent loop against a real endpoint, from a scratch
@@ -15,6 +17,10 @@ import { SseParser } from './sse.js';
 export interface ConformanceOptions {
   baseUrl: string; model: string; keyEnv?: string; auth?: string; outDir: string;
   env?: Record<string, string | undefined>; fetch?: typeof fetch; log?: (line: string) => void;
+  /** A built-in preset to run under (`packages/agent/presets`); omit for the generic one. */
+  preset?: string;
+  /** Also run the cheap capability probes and add their checks to the report. */
+  probe?: boolean;
 }
 export interface Check { name: string; ok: boolean; detail: string }
 export interface ConformanceReport { ok: boolean; checks: Check[]; captures: string[]; elapsedMs: number; rssMb: number; finalText: string | null; error: string | null }
@@ -84,12 +90,15 @@ export async function runConformance(o: ConformanceOptions): Promise<Conformance
     return new Response(res.body.pipeThrough(t), { status: res.status, statusText: res.statusText, headers: res.headers });
   };
 
+  const preset = o.preset ? loadPreset(o.preset) : undefined;
+  if (o.preset && !preset) throw new Error(`unknown preset ${o.preset}`);
+  const resolved = resolveProvider({ preset, profile: {} });
   const events: ChildEvent[] = []; const partials: ChildPartial[] = [];
   const io: LoopIO = { emit: (e) => events.push(e), partial: (p) => partials.push(p), log: (l, m) => say(`  [${l}] ${m}`) };
   const init: InitMessage = {
     type: 'init', v: 1,
     run: { runId: 'conformance', turnEpoch: 1, cwd: scratch, worktree: { path: join(scratch, 'wt'), branch: 'conformance' }, limits: { timeoutMs: 300_000, maxTurns: 6 }, permission: { mode: 'auto' }, model: o.model, options: {}, spillDir: join(scratch, 'spill') },
-    provider: { id: 'conformance', baseUrl: o.baseUrl, auth: o.auth ?? 'bearer', headers: {}, ...(apiKey ? { apiKey } : {}) },
+    provider: { id: 'conformance', baseUrl: o.baseUrl, auth: o.auth ?? 'bearer', headers: {}, compat: resolved.compat, params: resolved.params, ...(apiKey ? { apiKey } : {}) },
     prompt: PROMPT, systemPrompt: { text: '', mode: 'skip' }, session: { path: join(scratch, 'session.jsonl'), id: 'conformance' }, mcpServers: {}, toolEnv: { PATH: env['PATH'] ?? '' },
   };
   const started = Date.now();
@@ -109,6 +118,11 @@ export async function runConformance(o: ConformanceOptions): Promise<Conformance
     { name: 'usage reported', ok: result.usage !== undefined && !events.some((e) => e.type === 'usage.delta' && e.payload['estimated'] === true), detail: `${facts.map((f) => f.usage).join(', ') || 'no responses'}; totals ${JSON.stringify(result.usage ?? {})}` },
     { name: 'model reported', ok: Boolean(result.model), detail: `requested ${o.model}, provider reported ${result.model ?? 'none'}${result.model && result.model !== o.model ? ' (different)' : ''}` },
   ];
+  if (o.probe) {
+    const probe = await probeProvider({ profile: { baseUrl: o.baseUrl, auth: o.auth ?? 'bearer', headers: {}, models: {}, ...(o.preset ? { preset: o.preset } : {}) }, model: o.model, apiKey, fetch: raw, onCapture: (name, body) => { const f = join(o.outDir, `probe-${name}.txt`); writeFileSync(f, body); captures.push(f); } });
+    for (const c of probe.checks) checks.push({ ...c, name: `probe: ${c.name}` });
+    if (Object.keys(probe.detected).length > 0) say(`  detected flags: ${JSON.stringify(probe.detected)}`);
+  }
   const report: ConformanceReport = {
     ok: checks.every((c) => c.ok), checks, captures, elapsedMs, rssMb: Math.round(process.memoryUsage().rss / 1048576), finalText: result.finalText,
     error: result.error ? `${result.error.code}: ${result.error.message}` : null,
@@ -127,11 +141,11 @@ function parseArgs(argv: string[]): Record<string, string> {
 async function main(): Promise<void> {
   const a = parseArgs(process.argv.slice(2));
   if (!a['base-url'] || !a['model'] || !a['out']) {
-    process.stderr.write('usage: conformance --base-url <https://host/v1> --model <id> --out <dir outside the repo> [--key-env <ENV_VAR>] [--auth bearer|none|header:<Name>]\n');
+    process.stderr.write('usage: conformance --base-url <https://host/v1> --model <id> --out <dir outside the repo> [--key-env <ENV_VAR>] [--auth bearer|none|header:<Name>] [--preset <name>] [--probe]\n');
     process.exit(2);
   }
   try {
-    const r = await runConformance({ baseUrl: a['base-url'], model: a['model'], outDir: resolve(a['out']), ...(a['key-env'] ? { keyEnv: a['key-env'] } : {}), ...(a['auth'] ? { auth: a['auth'] } : {}), log: (l) => process.stderr.write(`${l}\n`) });
+    const r = await runConformance({ baseUrl: a['base-url'], model: a['model'], outDir: resolve(a['out']), ...(a['key-env'] ? { keyEnv: a['key-env'] } : {}), ...(a['auth'] ? { auth: a['auth'] } : {}), ...(a['preset'] ? { preset: a['preset'] } : {}), ...(a['probe'] ? { probe: true } : {}), log: (l) => process.stderr.write(`${l}\n`) });
     for (const c of r.checks) process.stdout.write(`${c.ok ? 'PASS' : 'FAIL'}  ${c.name}: ${c.detail}\n`);
     process.stdout.write(`\n${r.ok ? 'OK' : 'FAILED'} in ${r.elapsedMs} ms, harness RSS ${r.rssMb} MB\ncaptures:\n${r.captures.map((f) => `  ${f}`).join('\n')}\nreport: ${join(resolve(a['out']), 'report.json')}\n`);
     process.exit(r.ok ? 0 : 1);

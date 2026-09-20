@@ -1,4 +1,4 @@
-import { agentEntryPath, type InitMessage } from '@weave-ai/agent';
+import { agentEntryPath, type InitMessage, type Resolved } from '@weave-ai/agent';
 import { AC_ENV, type ProviderProfile } from '@weave-ai/shared';
 import type { TurnInput } from '@weave-ai/runtime-sdk';
 import { join } from 'node:path';
@@ -37,7 +37,7 @@ export function childBaseEnv(base: Record<string, string>): Record<string, strin
   return env;
 }
 
-export function buildInit(input: TurnInput, p: { providerId: string; modelId: string; profile: ProviderProfile; apiKey: string | undefined; session: { id: string; path: string }; layout: ChildLayout; toolEnv: Record<string, string> }): InitMessage {
+export function buildInit(input: TurnInput, p: { providerId: string; modelId: string; profile: ProviderProfile; apiKey: string | undefined; session: { id: string; path: string }; layout: ChildLayout; toolEnv: Record<string, string>; resolved: Resolved; headers: Record<string, string> }): InitMessage {
   const mcpServers: InitMessage['mcpServers'] = {};
   for (const [name, cfg] of Object.entries(input.mcpServers)) if (cfg.type === 'http' && cfg.url) mcpServers[name] = { url: cfg.url, ...(cfg.headers ? { headers: cfg.headers } : {}) };
   return {
@@ -48,7 +48,12 @@ export function buildInit(input: TurnInput, p: { providerId: string; modelId: st
       permission: { mode: input.permission.mode, ...(input.permission.allowedTools ? { allowedTools: input.permission.allowedTools } : {}), ...(input.permission.deniedTools ? { deniedTools: input.permission.deniedTools } : {}), ...(input.permission.firstTurn ? { firstTurn: true } : {}) },
       model: p.modelId, effort: input.effort ?? null, options: input.options, spillDir: p.layout.spillDir,
     },
-    provider: { id: p.providerId, baseUrl: p.profile.baseUrl, auth: p.profile.auth, headers: p.profile.headers, ...(p.apiKey ? { apiKey: p.apiKey } : {}) },
+    provider: {
+      id: p.providerId, baseUrl: p.profile.baseUrl, auth: p.profile.auth, headers: p.headers, ...(p.profile.query ? { query: p.profile.query } : {}), ...(p.apiKey ? { apiKey: p.apiKey } : {}),
+      // Resolved here so the child never sees the layers; JSON round-trip drops the undefined fields.
+      compat: JSON.parse(JSON.stringify(p.resolved.compat)) as NonNullable<InitMessage['provider']['compat']>, params: JSON.parse(JSON.stringify(p.resolved.params)) as NonNullable<InitMessage['provider']['params']>,
+      ...(p.profile.timeouts?.idleMs ? { timeouts: { idleMs: p.profile.timeouts.idleMs } } : {}),
+    },
     prompt: input.prompt, systemPrompt: input.systemPrompt, session: p.session, mcpServers, toolEnv: p.toolEnv,
   };
 }

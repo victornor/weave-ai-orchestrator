@@ -1,7 +1,7 @@
 import type { InitMessage } from './protocol.js';
 import type { RequestOptions } from './codec/chatCompletions.js';
 
-/** The four option keys this slice honours. Anything else is ignored here and rejected by the adapter's configSchema. */
+/** The parameters a run's own options carry, for an init that arrives without resolved `params`. The adapter always resolves; this is the fallback. */
 export function requestOptions(options: Record<string, unknown>): RequestOptions {
   const out: RequestOptions = {};
   const n = (k: string): number | undefined => (typeof options[k] === 'number' && Number.isFinite(options[k]) ? (options[k] as number) : undefined);
@@ -22,7 +22,11 @@ export function requestHeaders(provider: InitMessage['provider']): Record<string
   return h;
 }
 
-export const chatCompletionsUrl = (baseUrl: string): string => `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+export function chatCompletionsUrl(baseUrl: string, query?: Record<string, string>): string {
+  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  const qs = new URLSearchParams(query ?? {}).toString();
+  return qs ? `${url}?${qs}` : url;
+}
 
 /** The environment a shell tool gets: the adapter's tool env plus a minimal base. A variable holding the key is dropped even if one slipped in. */
 export function shellEnv(toolEnv: Record<string, string>, apiKey: string | undefined): Record<string, string> {

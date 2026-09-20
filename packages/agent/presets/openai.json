@@ -1,0 +1,15 @@
+{
+  "description": "OpenAI first party. Newer models take developer instructions and max_completion_tokens; some may need the Responses API (not built).",
+  "compat": {
+    "maxTokensParam": "max_completion_tokens",
+    "systemRole": "developer",
+    "reasoning": {
+      "field": "none",
+      "effortParam": "reasoning_effort"
+    },
+    "tools": {
+      "strict": false
+    }
+  },
+  "verified": false
+}

@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AC_ENV, RUNTIME_PARTIAL_OUTPUT, validateRuntimeOptions, type ProviderProfile } from '@weave-ai/shared';
+import { parse as parseYaml } from 'yaml';
+import { AC_ENV, ProviderProfileSchema, RUNTIME_PARTIAL_OUTPUT, validateRuntimeOptions, type ProviderProfile } from '@weave-ai/shared';
 import type { RuntimeEvent, RuntimePartial, TurnHandle, TurnInput, TurnSink } from '@weave-ai/runtime-sdk';
 import { capabilities, createAdapter } from '../src/index.js';
 import { parseChildLine } from '../src/events.js';
@@ -11,7 +12,7 @@ import { parseChildLine } from '../src/events.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const FAKE = join(here, 'fake-agent.mjs');
 const KEY = 'sk-adapter-secret-789';
-const profile: ProviderProfile = { baseUrl: 'https://llm.example.test/v1', apiKeySecret: 'WEAVE_LLM_TEST_KEY', auth: 'bearer', headers: {}, models: { 'big-model': { contextWindow: 128000 } } };
+const profile: ProviderProfile = { baseUrl: 'https://llm.example.test/v1', apiKeySecret: 'WEAVE_LLM_TEST_KEY', auth: 'bearer', headers: {}, discover: false, models: { 'big-model': { contextWindow: 128000 } } };
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'wa-adapter-')); });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
@@ -46,11 +47,17 @@ describe('declaration', () => {
     expect(RUNTIME_PARTIAL_OUTPUT['weave']).toBe(capabilities.partialOutput);
     expect(adapterWith().capabilities).toBe(capabilities);
   });
-  it('validates only the four option keys', () => {
+  it('validates every parameter key and rejects out-of-range values by name', () => {
     const schema = adapterWith().configSchema();
-    expect(validateRuntimeOptions(schema, { temperature: 0.2, topP: 0.5, maxOutputTokens: 100, contextWindowTokens: 8000 }).valid).toBe(true);
-    expect(validateRuntimeOptions(schema, { temperature: 3 }).valid).toBe(false);
-    expect(validateRuntimeOptions(schema, { frequencyPenalty: 1 }).byKey).toEqual({ frequencyPenalty: 'not an option this runtime understands' });
+    const all = { temperature: 0.2, topP: 0.5, frequencyPenalty: 1, presencePenalty: -1, maxOutputTokens: 100, seed: 3, stop: ['x'], toolChoice: 'auto', parallelToolCalls: true, responseFormat: 'json_object', extraBody: '{"a":1}', extraHeaders: ['X-A: 1'], contextWindowTokens: 8000 };
+    expect(validateRuntimeOptions(schema, all)).toEqual({ valid: true, byKey: {} });
+    expect(validateRuntimeOptions(schema, { temperature: 3, topP: -0.1, frequencyPenalty: 2.5, presencePenalty: -3, maxOutputTokens: 0, seed: 1.5, contextWindowTokens: 0 }).byKey).toEqual({
+      temperature: 'must be at most 2', topP: 'must be at least 0', frequencyPenalty: 'must be at most 2', presencePenalty: 'must be at least -2', maxOutputTokens: 'must be at least 1', seed: 'must be an integer', contextWindowTokens: 'must be at least 1',
+    });
+    expect(validateRuntimeOptions(schema, { toolChoice: 'sometimes', responseFormat: 'xml', stop: [1], extraHeaders: 'X: 1', parallelToolCalls: 'yes' }).byKey).toEqual({
+      toolChoice: 'must be one of auto, required, none', responseFormat: 'must be one of text, json_object', stop: 'must be a list of text values', extraHeaders: 'must be a list', parallelToolCalls: 'must be true or false',
+    });
+    expect(validateRuntimeOptions(schema, { logitBias: 1 }).byKey).toEqual({ logitBias: 'not an option this runtime understands' });
   });
   it('detects unsupported without a provider and available with one; lists configured models with their windows', async () => {
     expect((await adapterWith({}).detect()).status).toBe('unsupported');

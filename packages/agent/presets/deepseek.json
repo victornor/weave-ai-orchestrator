@@ -1,0 +1,11 @@
+{
+  "description": "DeepSeek direct. Thinking models want reasoning_content passed back on the current turn's tool steps.",
+  "compat": {
+    "reasoning": {
+      "field": "reasoning_content",
+      "passBack": "reasoning_content"
+    },
+    "omitParams": []
+  },
+  "verified": false
+}

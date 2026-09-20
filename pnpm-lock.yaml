@@ -38,6 +38,10 @@ importers:
       '@weave-ai/shared':
         specifier: workspace:*
         version: link:../shared
+    devDependencies:
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
 
   packages/channel-sdk:
     dependencies:
@@ -317,6 +321,10 @@ importers:
       execa:
         specifier: ^9.6.0
         version: 9.6.1
+    devDependencies:
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
 
   packages/server:
     dependencies:

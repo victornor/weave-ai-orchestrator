@@ -1,0 +1,5 @@
+{
+  "description": "LiteLLM proxy: whatever it fronts; start from the generic flags and override per model.",
+  "compat": {},
+  "verified": false
+}

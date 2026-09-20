@@ -18,5 +18,7 @@
   "dependencies": {
     "@weave-ai/shared": "workspace:*"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "yaml": "^2.9.0"
+  }
 }

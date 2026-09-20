@@ -15,10 +15,12 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@weave-ai/shared": "workspace:*",
-    "@weave-ai/runtime-sdk": "workspace:*",
     "@weave-ai/agent": "workspace:*",
+    "@weave-ai/runtime-sdk": "workspace:*",
+    "@weave-ai/shared": "workspace:*",
     "execa": "^9.6.0"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "yaml": "^2.9.0"
+  }
 }

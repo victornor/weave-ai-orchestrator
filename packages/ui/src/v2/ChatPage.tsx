@@ -356,7 +356,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
     return map;
   }, [workers.data, weaver.data]);
   const runtimes = useRuntimes();
-  const conductorModels = useRuntimeModels(conductorRuntime);
+  const conductorModels = useRuntimeModels(conductorRuntime, ws);
   const accounts = useUsageAccounts({ refetchIntervalMs: ACCOUNTS_REFRESH_MS });
   const queuedCount = useQueueCount('thread');
   const compactNow = useCompactWeaver();

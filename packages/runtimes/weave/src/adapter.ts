@@ -55,7 +55,7 @@ interface Discovered { id: string; contextWindow?: number }
 export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
   let host: RuntimeHost | undefined = opts.host;
   const entry = (): string => opts.entry ?? agentEntryPath();
-  const providers = (): Record<string, ProviderProfile> => host?.providers() ?? {};
+  const providers = (workspaceId?: string): Record<string, ProviderProfile> => host?.providers(workspaceId) ?? {};
   const doFetch = opts.fetch ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const now = opts.now ?? Date.now;
   const presetOf = (p: ProviderProfile) => loadPreset(p.preset ?? 'openai-compatible');
@@ -63,15 +63,17 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
 
   /** `GET {baseUrl}{modelsPath}`, cached ten minutes per provider. A failure is remembered for a minute and yields nothing, so the static models still list. */
   const cache = new Map<string, { at: number; ok: boolean; models: Discovered[] }>();
-  async function discover(pid: string, profile: ProviderProfile): Promise<Discovered[]> {
+  async function discover(pid: string, profile: ProviderProfile, workspaceId?: string): Promise<Discovered[]> {
     if (profile.discover === false) return [];
-    const key = `${pid}|${profile.baseUrl}`;
+    // The workspace is part of the cache key: two workspaces defining the same provider id must not
+    // share one discovery result, or its key.
+    const key = `${workspaceId ?? ''}|${pid}|${profile.baseUrl}`;
     const hit = cache.get(key);
     if (hit && now() - hit.at < (hit.ok ? DISCOVERY_TTL_MS : DISCOVERY_FAILURE_TTL_MS)) return hit.models;
     let models: Discovered[] = []; let ok = false;
     try {
       const { compat, params } = resolveProvider({ preset: presetOf(profile), profile });
-      const apiKey = host?.providerKey?.(pid);
+      const apiKey = host?.providerKey?.(pid, workspaceId);
       const headers = requestHeaders({ id: pid, baseUrl: profile.baseUrl, auth: profile.auth, headers: headersWithExtras(profile.headers, params.extraHeaders).headers, ...(apiKey ? { apiKey } : {}) });
       const qs = new URLSearchParams(profile.query ?? {}).toString();
       const res = await doFetch(`${profile.baseUrl.replace(/\/+$/, '')}${compat.modelsPath}${qs ? `?${qs}` : ''}`, { headers: { ...headers, accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
@@ -109,9 +111,9 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
       return { status: 'available', path: entry() };
     },
 
-    async listModels(): Promise<RuntimeModel[]> {
+    async listModels(workspaceId?: string): Promise<RuntimeModel[]> {
       const out: RuntimeModel[] = [];
-      for (const [pid, profile] of Object.entries(providers())) {
+      for (const [pid, profile] of Object.entries(providers(workspaceId))) {
         const seen = new Set<string>();
         const add = (mid: string, contextWindow: number | undefined, source: RuntimeModel['source']): void => {
           if (seen.has(mid)) return;
@@ -120,7 +122,7 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
           out.push({ id: `${pid}/${mid}`, label: `${mid} (${pid})`, provider: pid, source, ...(contextWindow ? { contextWindowTokens: contextWindow } : {}), ...(efforts.length > 0 ? { efforts } : {}) });
         };
         // Configured models first: what the workspace wrote wins over what the endpoint reports.
-        const found = await discover(pid, profile);
+        const found = await discover(pid, profile, workspaceId);
         const byId = new Map(found.map((d) => [d.id, d]));
         for (const [mid, m] of Object.entries(profile.models)) add(mid, m.contextWindow ?? byId.get(mid)?.contextWindow, 'static');
         for (const d of found) add(d.id, d.contextWindow, 'detected');
@@ -128,12 +130,12 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
       return out;
     },
 
-    async modelContextWindow(model): Promise<number | undefined> {
+    async modelContextWindow(model, workspaceId?: string): Promise<number | undefined> {
       const parts = splitModel(model);
       if (!parts) return undefined;
-      const profile = providers()[parts.providerId];
+      const profile = providers(workspaceId)[parts.providerId];
       if (!profile) return undefined;
-      return profile.models[parts.modelId]?.contextWindow ?? (await discover(parts.providerId, profile)).find((d) => d.id === parts.modelId)?.contextWindow;
+      return profile.models[parts.modelId]?.contextWindow ?? (await discover(parts.providerId, profile, workspaceId)).find((d) => d.id === parts.modelId)?.contextWindow;
     },
 
     configSchema(): JsonSchema { return structuredClone(CONFIG_SCHEMA); },
@@ -152,11 +154,13 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
     async runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult> {
       const parts = splitModel(input.model);
       if (!parts) return failure(sink, 'model_not_configured', 'tooling', 'The weave runtime needs a model written as providerId/modelId.');
-      const profile = providers()[parts.providerId];
+      const profile = providers(input.workspaceId)[parts.providerId];
       if (!profile) return failure(sink, 'provider_not_configured', 'tooling', `No provider "${parts.providerId}" in the workspace config.`);
       const keyVar = profile.apiKeySecret;
-      const apiKey = keyVar ? input.env[keyVar] : undefined;
-      if (profile.auth !== 'none' && keyVar && !apiKey) return failure(sink, 'key_missing', 'auth', `The provider key ${keyVar} is not in this run's environment: attach the secret to the role.`);
+      // The run's own environment first (a role that carries the secret still wins, and the host
+      // environment keeps its VS-92 precedence), then the secret store of the run's own workspace.
+      const apiKey = (keyVar ? input.env[keyVar] : undefined) ?? (keyVar ? host?.providerKey?.(parts.providerId, input.workspaceId) : undefined);
+      if (profile.auth !== 'none' && keyVar && !apiKey) return failure(sink, 'key_missing', 'auth', `The provider key ${keyVar} is not set: add it under Settings > Providers, or attach the secret to the role.`);
 
       const preset = presetOf(profile);
       if (!preset) return failure(sink, 'preset_unknown', 'tooling', `Provider "${parts.providerId}" names preset "${profile.preset}", which does not exist.`);

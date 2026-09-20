@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react';
 import { DEFAULT_MODEL_SETTING, WorkerModelOptionSchema, WorkerOptionsArraySchema, runtimeOptionProperties, validateRuntimeOptions, type RuntimeOptionProperty } from '@weave-ai/shared';
 import { useDaemonModels, useModels, useRuntimeModels, useRuntimes, useSetDaemonModels, useSetModels } from '../../../api/hooks';
+import { useHookWs } from '../../../api/context';
 import type * as T from '../../../api/types';
 import { Button } from '../../../components/Button';
 import { SkeletonRows } from '../../../components/Skeleton';
@@ -116,11 +117,11 @@ function RuntimeOptionsEditor({ runtime, runtimes, options, onChange }: {
 }
 
 /** One agent's runtime / model / thinking, side by side in one row, with its runtime options beneath. */
-function ModelControls({ label, setting, runtimes, recessed, runtimeOptional, preserveEffortOnRuntimeChange, onChange }: {
+function ModelControls({ label, setting, runtimes, recessed, runtimeOptional, preserveEffortOnRuntimeChange, workspace, onChange }: {
   label: string; setting: T.ModelSetting; runtimes: T.RuntimeInfo[]; recessed?: boolean;
-  runtimeOptional?: boolean; preserveEffortOnRuntimeChange?: boolean; onChange: (next: T.ModelSetting) => void;
+  runtimeOptional?: boolean; preserveEffortOnRuntimeChange?: boolean; workspace?: string; onChange: (next: T.ModelSetting) => void;
 }): React.ReactElement {
-  const models = useRuntimeModels(setting.runtime);
+  const models = useRuntimeModels(setting.runtime, workspace);
   const known = models.data ?? [];
   const configured = setting.runtime.length > 0;
   const [freeText, setFreeText] = useState(false);
@@ -269,6 +270,7 @@ export function DaemonModelsSection(): React.ReactElement {
 /* --------------------------------------------------------------- workspace */
 
 export function WorkspaceModelsSection(): React.ReactElement {
+  const ws = useHookWs();
   const models = useModels();
   const daemon = useDaemonModels();
   const save = useSetModels();
@@ -309,7 +311,7 @@ export function WorkspaceModelsSection(): React.ReactElement {
                 <button type="button" className="v2-link text-micro" onClick={() => setAgent(k, null)}>Reset to daemon</button>
               ) : null}
             </div>
-            <ModelControls label={k} setting={setting} runtimes={list} recessed={state === 'inherited'}
+            <ModelControls label={k} setting={setting} runtimes={list} recessed={state === 'inherited'} workspace={ws}
               onChange={(next) => setAgent(k, next)} />
             <p className="text-micro text-text-3">{state === 'overridden' ? `Overrides ${diff.join(', ')}.` : 'Inherited from the daemon.'}</p>
           </div>

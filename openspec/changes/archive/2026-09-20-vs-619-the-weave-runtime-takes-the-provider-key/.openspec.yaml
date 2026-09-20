@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: The weave runtime takes the provider key from the workspace secret store,
+  so any agent (the weaver included) can run on a configured provider

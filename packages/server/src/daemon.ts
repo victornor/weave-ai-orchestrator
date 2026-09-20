@@ -115,20 +115,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const registries = createRegistries();
 
   const workspaces = new Map<string, WorkspaceRuntime>();
-  await registerBuiltins(registries, {
-    providers: () => {
-      const out: Record<string, ProviderProfile> = {};
-      for (const ws of workspaces.values()) for (const [id, profile] of Object.entries(ws.ctx.config.providers ?? {})) out[id] ??= profile;
-      return out;
-    },
-    providerKey: (providerId) => {
-      for (const ws of workspaces.values()) {
-        const profile = ws.ctx.config.providers?.[providerId];
-        if (profile) return profile.apiKeySecret ? ws.services.secrets.value(profile.apiKeySecret) ?? undefined : undefined;
-      }
-      return undefined;
-    },
-  });
+  await registerBuiltins(registries, createRuntimeHost(workspaces));
   const { publicUrl, host, port } = resolveUrls(daemonCfg);
 
   // The loopback listener must exist before workspaces load: its URL goes into every run's env.
@@ -389,6 +376,34 @@ function makeAdmin(
 }
 
 // ---------- plugins and built-in adapters ----------
+
+/**
+ * VS-619: the provider profiles and keys a runtime asks for. With a `workspaceId` the answer comes
+ * from that workspace alone, so a run never uses another workspace's profile or key — a named
+ * workspace that does not define the id resolves nothing. Without one it keeps the aggregate (first
+ * workspace defining an id wins) for the callers that have no run, such as the runtime catalog.
+ */
+export function createRuntimeHost(workspaces: Map<string, WorkspaceRuntime>): RuntimeHost {
+  const providers = (workspaceId?: string): Record<string, ProviderProfile> => {
+    if (workspaceId !== undefined) {
+      const out: Record<string, ProviderProfile> = {};
+      for (const [id, profile] of Object.entries(workspaces.get(workspaceId)?.ctx.config.providers ?? {})) out[id] = profile;
+      return out;
+    }
+    const out: Record<string, ProviderProfile> = {};
+    for (const ws of workspaces.values()) for (const [id, profile] of Object.entries(ws.ctx.config.providers ?? {})) out[id] ??= profile;
+    return out;
+  };
+  const providerKey = (providerId: string, workspaceId?: string): string | undefined => {
+    const candidates = workspaceId !== undefined ? [workspaces.get(workspaceId)] : [...workspaces.values()];
+    for (const ws of candidates) {
+      const profile = ws?.ctx.config.providers?.[providerId];
+      if (profile) return profile.apiKeySecret ? ws.services.secrets.value(profile.apiKeySecret) ?? undefined : undefined;
+    }
+    return undefined;
+  };
+  return { providers, providerKey };
+}
 
 /** Best-effort registration: a missing or half-built package logs and is skipped, never fatal. */
 async function registerBuiltins(registries: Registries, host: RuntimeHost): Promise<void> {

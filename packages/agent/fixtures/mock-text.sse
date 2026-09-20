@@ -1,0 +1,8 @@
+data: {"id":"x","object":"chat.completion.chunk","created":1789867314,"model":"mock-model","choices":[{"index":0,"delta":{"role":"assistant","content":"H\u00e9llo "},"finish_reason":null}]}
+
+data: {"id":"x","object":"chat.completion.chunk","created":1789867314,"model":"mock-model","choices":[{"index":0,"delta":{"content":"w\u00f6rld \u2014 \u65e5\u672c\u8a9e"},"finish_reason":null}]}
+
+data: {"id":"x","object":"chat.completion.chunk","created":1789867314,"model":"mock-model","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}
+
+data: [DONE]
+

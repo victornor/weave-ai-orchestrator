@@ -617,3 +617,23 @@ describe('worker memory limits (VS-579)', () => {
     expect(resolveWorkerMemoryMb({ ...base, roleMb: null, workspaceMb: null }).mb).toBe(deriveWorkerMemoryMb(60 * 1024, 6));
   });
 });
+
+describe('providers (VS-607)', () => {
+  const base = { version: 1, id: 'acme', name: 'Acme', ticketPrefix: 'ACME' } as const;
+  it('defaults to none, so an existing workspace file still parses', () => {
+    expect(WorkspaceConfigSchema.parse(base).providers).toEqual({});
+  });
+  it('parses a provider profile with its defaults, keeping the key a secret name and never a value', () => {
+    const cfg = WorkspaceConfigSchema.parse({ ...base, providers: { openrouter: { baseUrl: 'https://openrouter.ai/api/v1', apiKeySecret: 'WEAVE_LLM_OPENROUTER_KEY', models: { 'z-ai/glm': { contextWindow: 128000 } } } } });
+    expect(cfg.providers['openrouter']).toEqual({ baseUrl: 'https://openrouter.ai/api/v1', apiKeySecret: 'WEAVE_LLM_OPENROUTER_KEY', auth: 'bearer', headers: {}, models: { 'z-ai/glm': { contextWindow: 128000 } } });
+  });
+  it('rejects a lowercase secret name, a bad auth spelling and a non-URL base', () => {
+    for (const bad of [{ baseUrl: 'https://x.test', apiKeySecret: 'sk-abc' }, { baseUrl: 'https://x.test', auth: 'basic' }, { baseUrl: 'nope' }]) {
+      expect(WorkspaceConfigSchema.safeParse({ ...base, providers: { p: bad } }).success).toBe(false);
+    }
+  });
+  it('declares full partial output for the weave runtime', async () => {
+    const { RUNTIME_PARTIAL_OUTPUT } = await import('./events.js');
+    expect(RUNTIME_PARTIAL_OUTPUT['weave']).toBe('full');
+  });
+});

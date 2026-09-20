@@ -38,6 +38,12 @@
       "path": "./packages/tui"
     },
     {
+      "path": "./packages/agent"
+    },
+    {
+      "path": "./packages/runtimes/weave"
+    },
+    {
       "path": "./packages/runtimes/claude"
     },
     {

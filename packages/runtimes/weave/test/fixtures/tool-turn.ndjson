@@ -1,0 +1,11 @@
+{"t":"event","ev":{"ts":"2026-09-20T02:15:59.715Z","type":"turn.started","payload":{"messageId":"run-fixture:1"}}}
+{"t":"partial","p":{"kind":"tool_input","partId":"call_1","toolCallId":"call_1","messageId":"run-fixture:1","text":"{\"path\":\"a.txt\"}"}}
+{"t":"event","ev":{"ts":"2026-09-20T02:15:59.731Z","type":"usage.delta","payload":{"inputTokens":20,"outputTokens":8,"cachedInputTokens":0,"basis":"per_turn","reason":"tool_calls","estimated":false}}}
+{"t":"event","ev":{"ts":"2026-09-20T02:15:59.731Z","type":"tool.call","payload":{"id":"call_1","name":"read","input":{"path":"a.txt"},"partId":"call_1"}}}
+{"t":"event","ev":{"ts":"2026-09-20T02:15:59.731Z","type":"tool.result","payload":{"id":"call_1","name":"read","status":"completed","isError":false,"content":"1\talpha\n2\tbeta"}}}
+{"t":"event","ev":{"ts":"2026-09-20T02:15:59.731Z","type":"turn.started","payload":{"messageId":"run-fixture:2"}}}
+{"t":"partial","p":{"kind":"text","partId":"run-fixture:2:t","messageId":"run-fixture:2","text":"The file says alpha."}}
+{"t":"event","ev":{"ts":"2026-09-20T02:15:59.733Z","type":"assistant.text","payload":{"text":"The file says alpha.","messageId":"run-fixture:2","partId":"run-fixture:2:t"}}}
+{"t":"event","ev":{"ts":"2026-09-20T02:15:59.733Z","type":"usage.delta","payload":{"inputTokens":30,"outputTokens":11,"cachedInputTokens":0,"basis":"per_turn","reason":"stop","estimated":false}}}
+{"t":"event","ev":{"ts":"2026-09-20T02:15:59.733Z","type":"turn.completed","payload":{"sessionId":"fixture-session","failed":false}}}
+{"t":"result","result":{"exitCode":0,"signal":null,"timedOut":false,"session":{"v":1,"id":"fixture-session","path":"/sessions/fixture-session.jsonl","leafId":"bd40901c"},"finalText":"The file says alpha.","usage":{"inputTokens":30,"outputTokens":11,"cachedInputTokens":0,"contextTokens":10,"basis":"per_turn","firstRequest":{"freshTokens":20,"cachedTokens":0}},"model":"mock-model","provider":"mock"}}

@@ -73,6 +73,7 @@ export function Sheet({
   footer,
   labelledBy,
   swipeToClose,
+  bodyScroll = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -82,10 +83,29 @@ export function Sheet({
   labelledBy?: string;
   /** Phone affordance: a grab handle that dismisses the sheet when dragged down past the threshold. */
   swipeToClose?: boolean;
+  /**
+   * Whether the body is the panel's own scroller (default). A caller that pins its own header and
+   * scrolls one inner region — the ticket modal (VS-629) — passes `false`, so the body becomes a
+   * bounded, non-scrolling flex column and the panel itself takes the height cap.
+   */
+  bodyScroll?: boolean;
 }): React.ReactElement | null {
   useDismiss(open, onClose);
   const ref = useRef<HTMLDivElement>(null);
   useFocusTrap(open, ref);
+  // VS-629: the element focused when the sheet opened, refocused on close so the keyboard returns to
+  // the control that opened it rather than to `document.body`.
+  const restoreFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const active = document.activeElement;
+    restoreFocus.current = active instanceof HTMLElement ? active : null;
+    return () => {
+      const el = restoreFocus.current;
+      restoreFocus.current = null;
+      if (el && el.isConnected && typeof el.focus === 'function') el.focus();
+    };
+  }, [open]);
   // The dialog is portalled into `document.body`, outside `.v2-root`; mirror the app's theme onto
   // the portal so its tokens (including the backdrop's `--overlay`) follow light/dark, not the
   // document default (VS-623). `V1` has no `.v2-root`, so this is a no-op there.
@@ -121,6 +141,7 @@ export function Sheet({
         style={dragged ? { transform: `translateY(${dragged}px)` } : undefined}
         className={cx(
           'relative w-full max-w-lg overflow-hidden rounded-t-r8 border border-line-2 bg-bg-1 shadow-sheet outline-none sm:rounded-r8',
+          !bodyScroll && 'flex max-h-[calc(var(--ac-app-h)*0.8)] flex-col',
           'motion-safe:animate-[ac-sheet-in_var(--dur-panel)_var(--ease)]',
         )}
       >
@@ -159,7 +180,7 @@ export function Sheet({
             </button>
           </div>
         ) : null}
-        <div className="ac-scroll max-h-[calc(var(--ac-app-h)*0.7)] p-4">{children}</div>
+        <div className={bodyScroll ? 'ac-scroll max-h-[calc(var(--ac-app-h)*0.7)] p-4' : 'flex min-h-0 flex-1 flex-col overflow-hidden p-4'}>{children}</div>
         {footer ? <div className="flex gap-2 border-t border-line-1 p-4 ac-safe-bottom">{footer}</div> : null}
       </div>
     </div>,

@@ -386,6 +386,14 @@ the handler SHALL navigate to the ticket page, as before. The one surface that S
 navigation is the ticket page's own feed, where a modal over the ticket already shown would be
 redundant.
 
+The modal SHALL be a bounded column between its own maximum height and a floor that keeps a short
+feed from collapsing: its identity header — the identifier row, the title, the worker line and the
+live activity line — SHALL stay pinned at the top while the activity feed scrolls in the one region
+below it, and the document and the page behind the modal SHALL NOT scroll (no scroll chaining, and
+the backdrop does not scroll). The panel SHALL hold a stable size from its loading state to its
+loaded state, and focus SHALL land inside the modal on open and return to the control that opened it
+on close.
+
 #### Scenario: A click opens the modal instead of navigating
 
 - **WHEN** the human clicks a ticket tag in the weaver, planning or session chat on a desktop viewport
@@ -425,3 +433,63 @@ redundant.
 
 - **WHEN** the weaver, planning and session chats each render ticket references
 - **THEN** each activates them through the same shared link handler, so the modal-vs-navigation choice cannot diverge between them
+
+#### Scenario: The header stays while the feed scrolls
+
+- **WHEN** the human scrolls a long activity feed inside the modal
+- **THEN** the identifier row, title, worker line and live activity line stay visible at the top, and only the feed moves
+
+#### Scenario: Scrolling the feed does not move the page behind
+
+- **WHEN** the human scrolls the feed to its end and keeps scrolling, or scrolls the backdrop
+- **THEN** the page behind the modal does not scroll, because the feed contains its own overscroll and the open modal holds the page
+
+#### Scenario: A short feed does not leave a tall empty box
+
+- **WHEN** the ticket's activity feed holds one comment and no runs
+- **THEN** the modal is its content height up to a modest floor, not a full-height empty panel
+
+#### Scenario: Stable size from loading to loaded
+
+- **WHEN** the modal opens and the ticket detail and feed are still loading
+- **THEN** the feed area is already at its resting size with the skeleton filling it, and the panel does not jump taller when the content arrives
+
+#### Scenario: A long title wraps without unpinning the header
+
+- **WHEN** the ticket's title is long enough to wrap across several lines
+- **THEN** it wraps inside the pinned header, the header stays at the top, and the feed keeps its scrolling region
+
+#### Scenario: Focus enters and leaves sensibly
+
+- **WHEN** the modal opens, and later closes by any route
+- **THEN** focus lands inside the dialog on open and returns to the control that opened it on close, rather than falling back to the document body
+
+### Requirement: The modal's activity feed follows new output until the reader scrolls up
+
+The ticket modal's activity feed SHALL follow its newest content while the reader is at the bottom —
+a live turn streaming, or a new comment arriving, SHALL stay in view without the human scrolling —
+and SHALL pause the follow when the reader scrolls the feed up, marking new content instead of
+moving their position. A jump-to-latest control SHALL be offered while the follow is paused;
+activating it, or the reader scrolling back to the bottom, SHALL resume. This behaviour SHALL reuse
+the one follow implementation the chat and the persistent session page use, not a third copy, and
+SHALL measure the feed element rather than the document.
+
+#### Scenario: A live turn stays in view
+
+- **WHEN** a worker's turn streams new output into the modal while the human is at the bottom of the feed
+- **THEN** the feed follows the newest output and the newest line stays visible
+
+#### Scenario: Scrolling up pauses the follow
+
+- **WHEN** the human scrolls the feed up to read earlier activity while a turn is live
+- **THEN** the feed stops following, their reading position stays put as new output arrives, and a jump-to-latest control appears
+
+#### Scenario: Returning to the bottom resumes following
+
+- **WHEN** the human activates the jump-to-latest control, or scrolls back to the bottom themselves
+- **THEN** the feed returns to its newest item and follows new content again
+
+#### Scenario: One follow implementation
+
+- **WHEN** the modal's feed follows and pauses
+- **THEN** it does so through the shared element-scoped follow the weaver chat and the session page already use, and no separate scroll-measurement code is added for it

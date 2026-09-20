@@ -135,4 +135,34 @@ describe('the shared ticket link handler (VS-623)', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
     expect((screen.getByLabelText('draft') as HTMLInputElement).value).toBe('half-written message');
   });
+
+  // VS-629: the modal is a bounded column — the identity block is pinned and the activity feed is
+  // the only scrolling region, so the header cannot scroll away with a long feed.
+  it('pins the identity header outside the modal’s only scroller (VS-629)', () => {
+    media(true);
+    renderProvider();
+    fireEvent.click(screen.getByRole('button', { name: 'open' }));
+    const modal = document.querySelector('[data-ticket-modal]') as HTMLElement;
+    const scrollers = modal.querySelectorAll('.overflow-y-auto');
+    expect(scrollers).toHaveLength(1);
+    const scroller = scrollers[0] as HTMLElement;
+    expect(scroller).toHaveAttribute('data-ticket-modal-scroll');
+    // `ac-scroll` carries `overscroll-behavior: contain`, so the feed cannot chain to the page behind.
+    expect(scroller.className).toContain('ac-scroll');
+    // The identifier row and the title are pinned siblings of the scroller, not inside it.
+    expect(scroller.contains(screen.getByText('ACME-42'))).toBe(false);
+    expect(scroller.contains(screen.getByText('Dark mode for the dashboard'))).toBe(false);
+  });
+
+  it('returns focus to the control that opened it when it closes (VS-629)', () => {
+    media(true);
+    renderProvider();
+    const opener = screen.getByRole('button', { name: 'open' });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
 });

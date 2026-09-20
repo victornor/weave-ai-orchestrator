@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "Persistent session page: anchor the header to the top and scroll only the
+  chat, like the weaver chat"

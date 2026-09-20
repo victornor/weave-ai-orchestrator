@@ -8,6 +8,11 @@
  * `useTicket` for the detail, the ticket's `TicketActivityFeed` and `RunTranscript` for the live feed,
  * and `LiveActivityLine` for the live row. It carries a small **Open ticket** control that goes to the
  * full page, and it shows the existing not-found state for an unknown identifier.
+ *
+ * VS-629: the panel is a bounded column — the identity block (identifier row, title, worker line, live
+ * activity line) is pinned and the activity feed is the only scrolling region. The feed follows new
+ * output through the same shared `useStickToBottom` the chat and the session page use, and `Sheet` is
+ * told not to scroll its body (`bodyScroll={false}`) so the two scrollers cannot nest or chain.
  */
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
@@ -16,8 +21,9 @@ import { workerPauseDetail } from '@weave-ai/render';
 import { useGo } from '../../app/link';
 import { useWs } from '../../api/context';
 import { useWorkerActivity } from '../../api/workerActivity';
-import { useTicket, useTicketRuns, useWorkers } from '../../api/hooks';
+import { useTicket, useTicketComments, useTicketRuns, useWorkers } from '../../api/hooks';
 import { Button } from '../../components/Button';
+import { ScrollToBottomButton } from '../../components/ScrollToBottom';
 import { ErrorState } from '../../components/States';
 import { Sheet } from '../../components/Sheet';
 import { SkeletonRows } from '../../components/Skeleton';
@@ -25,6 +31,7 @@ import { StatusGlyph } from '../../components/StatusGlyph';
 import { LiveActivityLine, type LiveActivityLineModel } from '../../components/LiveActivityLine';
 import { liveWorkersByTicket } from '../../lib/board';
 import { lastLinesByAgent } from '../../lib/projectOverview';
+import { useStickToBottom } from '../../lib/stickToBottom';
 import { activityLine, mergeWorkerActivity } from '../../lib/workerActivity';
 import { TicketActivityFeed } from './TicketActivityFeed';
 
@@ -100,6 +107,14 @@ export function TicketModal({ identifier, onClose }: { identifier: string | null
   const detail = useTicket(identifier ?? '');
   const ticket = detail.data?.ticket;
   const liveLine = useTicketLiveLine(ticket);
+  // The feed's own size, so the follow knows when a comment or a turn arrives. Both queries are the
+  // ones `TicketActivityFeed` makes under the same key, so this is a cache hit, not a second request.
+  const comments = useTicketComments(ticket?.id ?? '');
+  const runs = useTicketRuns(ticket?.id ?? '');
+  const stick = useStickToBottom(
+    [ticket?.id ?? null, comments.data?.length ?? 0, runs.data?.length ?? 0],
+    { exact: true, ready: !detail.isLoading && !comments.isLoading && !runs.isLoading },
+  );
   // A modal is only opened on a desktop viewport by the handler; a resize below the breakpoint
   // closes it rather than stranding a modal where the phone behaviour should be navigation.
   useEffect(() => {
@@ -111,50 +126,79 @@ export function TicketModal({ identifier, onClose }: { identifier: string | null
 
   if (identifier === null) return null;
   const pauseReason = detail.data?.worker ? workerPauseDetail(detail.data.worker)?.summary ?? null : null;
+  const missing = detail.isError || !detail.data || !ticket;
 
   return (
-    <Sheet open onClose={onClose} labelledBy={headingId}>
-      <div data-ticket-modal className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="ac-mono text-micro text-accent-link">{identifier}</span>
-          {ticket ? (
+    <Sheet open onClose={onClose} labelledBy={headingId} bodyScroll={false}>
+      <div data-ticket-modal className="flex min-h-0 flex-col gap-3">
+        {/* The pinned identity block: it stays while the feed scrolls. */}
+        <div className="flex flex-none flex-col gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="ac-mono text-micro text-accent-link">{identifier}</span>
+            {ticket ? (
+              <>
+                <span className="v2-tag text-text-3">{ticket.kind}</span>
+                <StatusGlyph status={ticketUiStatus(ticket.status)} size="xs" pulse={ticket.status === 'in_progress'} />
+              </>
+            ) : null}
+            <div className="flex-1" />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } });
+                onClose();
+              }}
+            >
+              Open ticket
+            </Button>
+            <button
+              type="button"
+              data-autofocus
+              onClick={onClose}
+              aria-label="Close"
+              className="rounded-r4 px-2 py-1 text-text-3 hover:bg-bg-3 hover:text-text-1"
+            >
+              ✕
+            </button>
+          </div>
+          {missing ? null : (
             <>
-              <span className="v2-tag text-text-3">{ticket.kind}</span>
-              <StatusGlyph status={ticketUiStatus(ticket.status)} size="xs" pulse={ticket.status === 'in_progress'} />
+              <h2 id={headingId} className="text-head font-semibold tracking-head text-text-strong" data-ticket-modal-title>
+                {ticket.title}
+              </h2>
+              <div className="flex flex-wrap items-center gap-2 text-micro text-text-3">
+                <span>{detail.data?.worker?.name ?? 'unassigned'}</span>
+                {pauseReason ? <span className="ac-mono">paused · {pauseReason}</span> : null}
+              </div>
+              <LiveActivityLine line={liveLine} />
             </>
-          ) : null}
-          <div className="flex-1" />
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => {
-              go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: identifier } });
-              onClose();
-            }}
-          >
-            Open ticket
-          </Button>
-          <button type="button" onClick={onClose} aria-label="Close" className="rounded-r4 px-2 py-1 text-text-3 hover:bg-bg-3 hover:text-text-1">
-            ✕
-          </button>
+          )}
         </div>
-        {detail.isLoading ? (
-          <SkeletonRows rows={5} />
-        ) : detail.isError || !detail.data || !ticket ? (
-          <ErrorState code="TICKET_NOT_FOUND" message={`No ticket ${identifier} in this workspace.`} />
-        ) : (
-          <>
-            <h2 id={headingId} className="text-head font-semibold tracking-head text-text-strong" data-ticket-modal-title>
-              {ticket.title}
-            </h2>
-            <div className="flex flex-wrap items-center gap-2 text-micro text-text-3">
-              <span>{detail.data.worker?.name ?? 'unassigned'}</span>
-              {pauseReason ? <span className="ac-mono">paused · {pauseReason}</span> : null}
-            </div>
-            <LiveActivityLine line={liveLine} />
-            <TicketActivityFeed ticket={ticket} workerName={detail.data.worker?.name ?? null} onTicket={(id) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: id } })} />
-          </>
-        )}
+
+        {/* One scroller: the feed. The floor keeps the skeleton's box the size the loaded feed rests
+            at, and the cap makes a long feed scroll rather than grow the panel off the viewport. */}
+        <div className="relative flex min-h-[min(20rem,calc(var(--ac-app-h)*0.5))] flex-col">
+          <div
+            ref={stick.scrollRef}
+            data-ticket-modal-scroll
+            className="ac-scroll min-h-[min(20rem,calc(var(--ac-app-h)*0.5))] max-h-[calc(var(--ac-app-h)*0.6)] overflow-y-auto"
+          >
+            {detail.isLoading ? (
+              <SkeletonRows rows={5} />
+            ) : missing ? (
+              <ErrorState code="TICKET_NOT_FOUND" message={`No ticket ${identifier} in this workspace.`} />
+            ) : (
+              <TicketActivityFeed
+                ticket={ticket}
+                workerName={detail.data?.worker?.name ?? null}
+                onTicket={(id) => go('/w/$ws/tickets/$ticketId', { params: { ws, ticketId: id } })}
+              />
+            )}
+            <div ref={stick.bottomRef} />
+          </div>
+          {!stick.atBottom ? <ScrollToBottomButton unread={stick.unread} onClick={stick.toBottom} /> : null}
+        </div>
       </div>
     </Sheet>
   );

@@ -109,3 +109,25 @@ export function liveActivityLine(
   return liveTurnLine(liveTurn(events, partials, now, opts));
 }
 
+/** The fixed generic word for each state — never `label`, which for a running tool carries its command. */
+const PROGRESS_WORD: Record<LiveTurnState, string> = {
+  starting: 'Starting the turn',
+  streaming: 'Writing',
+  thinking: 'Thinking',
+  tool: 'Working',
+  waiting: 'Waiting for the model',
+};
+
+/**
+ * Generic progress text for an external channel (VS-604): the state word, the seconds in that state, the
+ * tool-call count and the whole-steps-only notice, and nothing else. Unlike `liveTurnLine` it reads the
+ * state, never `label`: a running tool's label is `Running <name> <target>` and the target is a command or
+ * a path, and an external channel publishes whatever it receives. Streamed text and tool details stay in
+ * the in-product run view.
+ */
+export function progressLine(t: Pick<LiveTurn, 'state' | 'stateMs' | 'toolCount' | 'wholeStepsOnly'>): string {
+  const parts = [PROGRESS_WORD[t.state], clock(t.stateMs)];
+  if (t.toolCount > 0) parts.push(`${t.toolCount} tool ${t.toolCount === 1 ? 'call' : 'calls'}`);
+  if (t.wholeStepsOnly) parts.push('whole steps only');
+  return parts.join(' · ');
+}

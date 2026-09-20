@@ -10,6 +10,12 @@ export interface CanonicalMessage { parts: CanonicalPart[]; text: string }
 export interface InboundMessage { externalThreadId: string; externalUserId: string; externalMessageId?: string; text: string; userLabel?: string; replyToExternalId?: string; action?: { decisionId: string; key: string } }
 export interface OutboundMessage { threadExternalId: string; message: CanonicalMessage; replyToExternalId?: string }
 export interface SendResult { externalMessageId?: string; delivered: boolean; error?: { code: string; retryable: boolean; message: string } }
+/**
+ * VS-604: how a channel shows that a turn is live. `start` once when the run begins, coalesced `update`s
+ * while it runs, `end` when it finishes. `text` is generic state only — the daemon guarantees a channel
+ * never receives a tool command, a file path or streamed model text.
+ */
+export interface ChannelProgress { threadExternalId: string; phase: 'start' | 'update' | 'end'; text?: string }
 /** A sender an adapter rejected before calling `inbound` (VS-135) — identity only, never the message that triggered the rejection. */
 export interface RejectedContact { externalUserId: string; username?: string; displayName?: string }
 export interface ChannelContext {
@@ -26,6 +32,11 @@ export interface ChannelAdapter {
   validateConfig(config: unknown): { ok: true } | { ok: false; errors: string[] };
   start(ctx: ChannelContext): Promise<RunningChannel>;
   send(msg: OutboundMessage): Promise<SendResult>;
+  /**
+   * Optional (VS-604): show that a turn is live. A channel without it stays valid — the daemon skips it
+   * rather than failing the run. Never throws into the run: a rejection is logged and swallowed.
+   */
+  progress?(p: ChannelProgress): void | Promise<void>;
 }
 export class RetryableChannelError extends Error { constructor(msg: string, public code = 'retryable') { super(msg); } }
 export class PermanentChannelError extends Error { constructor(msg: string, public code = 'permanent') { super(msg); } }

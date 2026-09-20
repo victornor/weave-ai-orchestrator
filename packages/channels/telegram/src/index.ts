@@ -1,6 +1,6 @@
 import {
   PermanentChannelError, RetryableChannelError,
-  type ChannelAdapter, type ChannelCapabilities, type ChannelContext, type JsonSchema,
+  type ChannelAdapter, type ChannelCapabilities, type ChannelContext, type ChannelProgress, type JsonSchema,
   type OutboundMessage, type RunningChannel, type SendResult,
 } from '@weave-ai/channel-sdk';
 import { TelegramClient, isParseError, mapTelegramError, type FetchLike, type MappedError } from './api.js';
@@ -37,7 +37,30 @@ interface RunningState {
   client: TelegramClient;
   abort: AbortController;
   stopped: boolean;
+  /** VS-604: one progress entry per chat while a turn is live. */
+  progress: Map<string, ProgressEntry>;
 }
+
+/** VS-604: the typing keep-alive, the one placeholder message, and its edit/delete timers, per chat. */
+interface ProgressEntry {
+  messageId: string | null;
+  typing: boolean;
+  typingTimer: ReturnType<typeof setTimeout> | null;
+  lastEditAt: number;
+  lastText: string | null;
+  pendingText: string | null;
+  /** A 429's `retry_after` puts edits on hold until this instant. */
+  notBefore: number;
+  ended: boolean;
+  deleteTimer: ReturnType<typeof setTimeout> | null;
+}
+
+/** Telegram's `typing` action expires in about 5 s; refresh comfortably inside that. */
+const TYPING_REFRESH_MS = 4000;
+/** Telegram tolerates roughly one `editMessageText` per second; the plan targets about one per 3 s. */
+const EDIT_MIN_MS = 3000;
+/** How long an unconsumed placeholder waits for an answer before it is deleted. */
+export const PROGRESS_DELETE_AFTER_MS = 30_000;
 
 const defaultSleep = (ms: number, signal: AbortSignal): Promise<void> =>
   new Promise((resolve) => {
@@ -69,7 +92,13 @@ export function createTelegramAdapter(options: TelegramAdapterOptions = {}): Cha
       encode: (ref) => codec.encode(ref),
       ...(replyTo != null && Number.isFinite(replyTo) ? { replyToMessageId: replyTo } : {}),
     });
-    if (!calls.length) return { delivered: true };
+    // VS-604: the answer is always a NEW message — Telegram raises no notification for an edit — so the
+    // placeholder is taken out of play now and removed after the answer lands. Late updates are ignored.
+    const placeholderId = takePlaceholder(state, msg.threadExternalId);
+    if (!calls.length) {
+      if (placeholderId) await deletePlaceholder(state, msg.threadExternalId, placeholderId);
+      return { delivered: true };
+    }
 
     let lastId: string | undefined;
     for (const call of calls) {
@@ -85,10 +114,60 @@ export function createTelegramAdapter(options: TelegramAdapterOptions = {}): Cha
             return failure(retryErr, state.ctx);
           }
         }
+        // Delivery failed: keep the placeholder so a retry's own send removes it.
         return failure(err, state.ctx);
       }
     }
+    if (placeholderId) await deletePlaceholder(state, msg.threadExternalId, placeholderId);
     return lastId != null ? { delivered: true, externalMessageId: lastId } : { delivered: true };
+  };
+
+  /**
+   * VS-604: show that a turn is live. `start` opens a placeholder and the typing keep-alive, `update`
+   * edits the placeholder within the rate limits, `end` removes it after the grace period. The final
+   * answer is never an edit — `send` delivers it as a new message and deletes the placeholder. Nothing
+   * here throws: a Bot API failure is logged and swallowed so it can never fail the turn.
+   */
+  const progress = async (p: ChannelProgress): Promise<void> => {
+    const running = state;
+    if (!running || running.stopped) return;
+    const chatId = p.threadExternalId;
+    let entry = running.progress.get(chatId);
+    if (p.phase === 'end') {
+      if (!entry) return;
+      stopProgressTimers(entry);
+      entry.ended = true;
+      if (entry.messageId) armPlaceholderDelete(running, chatId, entry);
+      else running.progress.delete(chatId);
+      return;
+    }
+    if (!entry) {
+      entry = { messageId: null, typing: false, typingTimer: null, lastEditAt: 0, lastText: null, pendingText: null, notBefore: 0, ended: false, deleteTimer: null };
+      running.progress.set(chatId, entry);
+    }
+    if (entry.ended) return;
+    if (!entry.typing) {
+      entry.typing = true;
+      startTyping(running, chatId, entry);
+    }
+    const text = p.text ?? '';
+    if (p.phase === 'start') {
+      if (entry.messageId == null) {
+        try {
+          const result = await running.client.call<{ message_id?: number }>('sendMessage', { chat_id: chatId, text, link_preview_options: { is_disabled: true } }, { signal: running.abort.signal });
+          entry.messageId = result?.message_id != null ? String(result.message_id) : null;
+          entry.lastText = text;
+        } catch (err) {
+          running.ctx.log('warn', 'telegram progress placeholder failed', { message: (err as Error)?.message });
+        }
+      }
+      return;
+    }
+    entry.pendingText = text;
+    if (entry.messageId == null || entry.pendingText === entry.lastText) return;
+    const nowMs = Date.now();
+    if (nowMs < entry.notBefore || nowMs - entry.lastEditAt < EDIT_MIN_MS) return;
+    await editProgress(running, chatId, entry, entry.pendingText);
   };
 
   const start = async (ctx: ChannelContext): Promise<RunningChannel> => {
@@ -102,7 +181,7 @@ export function createTelegramAdapter(options: TelegramAdapterOptions = {}): Cha
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     });
     const abort = new AbortController();
-    const running: RunningState = { ctx, cfg, client, abort, stopped: false };
+    const running: RunningState = { ctx, cfg, client, abort, stopped: false, progress: new Map() };
     state = running;
 
     const allowed = new Set(cfg.allowedUserIds);
@@ -147,6 +226,8 @@ export function createTelegramAdapter(options: TelegramAdapterOptions = {}): Cha
       async stop(): Promise<void> {
         running.stopped = true;
         abort.abort();
+        for (const entry of running.progress.values()) stopProgressTimers(entry);
+        running.progress.clear();
         await loop.catch(() => undefined);
         if (state === running) state = null;
       },
@@ -163,12 +244,93 @@ export function createTelegramAdapter(options: TelegramAdapterOptions = {}): Cha
     },
     start,
     send,
+    progress,
   };
 }
 
 async function dispatch(client: TelegramClient, call: TelegramCall, signal: AbortSignal): Promise<unknown> {
   if (call.file) return client.upload(call, { signal });
   return client.call(call.method, call.params, { signal });
+}
+
+/** VS-604: the typing keep-alive — a recursive, unref'd timer, cleared when the turn ends or the channel stops. */
+function startTyping(running: RunningState, chatId: string, entry: ProgressEntry): void {
+  const tick = (): void => {
+    if (!entry.typing || running.stopped) return;
+    void running.client.sendChatAction(chatId, 'typing', running.abort.signal).catch((e: unknown) =>
+      running.ctx.log('warn', 'telegram typing refresh failed', { message: (e as Error)?.message }));
+    entry.typingTimer = setTimeout(tick, TYPING_REFRESH_MS);
+    entry.typingTimer.unref?.();
+  };
+  tick();
+}
+
+function stopProgressTimers(entry: ProgressEntry): void {
+  entry.typing = false;
+  if (entry.typingTimer) { clearTimeout(entry.typingTimer); entry.typingTimer = null; }
+  if (entry.deleteTimer) { clearTimeout(entry.deleteTimer); entry.deleteTimer = null; }
+}
+
+/** Best-effort: a progress failure is logged and swallowed, never raised into the run. */
+async function editProgress(running: RunningState, chatId: string, entry: ProgressEntry, text: string): Promise<void> {
+  if (entry.messageId == null) return;
+  try {
+    await running.client.editMessageText(chatId, entry.messageId, text, { signal: running.abort.signal });
+    entry.lastEditAt = Date.now();
+    entry.lastText = text;
+  } catch (err) {
+    const mapped = err as MappedError;
+    if (mapped instanceof RetryableChannelError && mapped.retryAfterSec != null) {
+      entry.notBefore = Date.now() + mapped.retryAfterSec * 1000;
+      running.ctx.log('warn', 'telegram progress edit rate limited', { retryAfterSec: mapped.retryAfterSec });
+    } else {
+      running.ctx.log('warn', 'telegram progress edit failed', { message: (err as Error)?.message });
+    }
+  }
+}
+
+/** VS-604: with no answer following, the placeholder is removed after a bounded grace period. */
+function armPlaceholderDelete(running: RunningState, chatId: string, entry: ProgressEntry): void {
+  if (entry.messageId == null) return;
+  entry.deleteTimer = setTimeout(() => {
+    entry.deleteTimer = null;
+    if (running.stopped || running.progress.get(chatId) !== entry) return;
+    running.progress.delete(chatId);
+    void running.client.deleteMessage(chatId, entry.messageId!, running.abort.signal).catch((e: unknown) =>
+      running.ctx.log('warn', 'telegram progress placeholder delete failed', { message: (e as Error)?.message }));
+  }, PROGRESS_DELETE_AFTER_MS);
+  entry.deleteTimer.unref?.();
+}
+
+/**
+ * VS-604: once the answer is going out, the placeholder is out of play — its typing loop and timers stop,
+ * and it is marked ended so a late `update` cannot open a second placeholder before `end` clears it.
+ * Returns the placeholder's message id, or null when there is none.
+ */
+function takePlaceholder(running: RunningState, chatId: string): string | null {
+  const entry = running.progress.get(chatId);
+  if (!entry?.messageId) return null;
+  stopProgressTimers(entry);
+  entry.ended = true;
+  return entry.messageId;
+}
+
+/**
+ * VS-604: remove the placeholder after the answer has been sent (an edit would raise no Telegram
+ * notification, so the answer is always a new message). Best effort: a failure is logged, never raised.
+ * The emptied entry is kept briefly as a tombstone so a late `update` is ignored, then dropped.
+ */
+async function deletePlaceholder(running: RunningState, chatId: string, messageId: string): Promise<void> {
+  const entry = running.progress.get(chatId);
+  if (entry) {
+    entry.messageId = null;
+    entry.deleteTimer = setTimeout(() => {
+      if (running.progress.get(chatId) === entry) running.progress.delete(chatId);
+    }, PROGRESS_DELETE_AFTER_MS);
+    entry.deleteTimer.unref?.();
+  }
+  await running.client.deleteMessage(chatId, messageId, running.abort.signal).catch((e: unknown) =>
+    running.ctx.log('warn', 'telegram progress placeholder delete failed', { message: (e as Error)?.message }));
 }
 
 function failure(err: unknown, ctx: ChannelContext): SendResult {

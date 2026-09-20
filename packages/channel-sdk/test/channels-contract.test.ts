@@ -62,3 +62,30 @@ describe('channel import contract', () => {
     }
   });
 });
+
+/** VS-604: progress is optional, so a channel that cannot show it is still a complete adapter. */
+describe('channel progress contract', () => {
+  const minimal: ChannelAdapter = {
+    kind: 'minimal',
+    capabilities: { supportsButtons: false, supportsMarkdown: false, supportsEdit: false, supportsThreads: false, supportsFiles: false, maxTextBytes: 1024 },
+    configSchema: () => ({ type: 'object' }),
+    validateConfig: () => ({ ok: true }),
+    async start() { return { stop: async () => undefined }; },
+    async send() { return { delivered: true }; },
+  };
+
+  it('an adapter without progress is a valid adapter the daemon can use', async () => {
+    expect(minimal.progress).toBeUndefined();
+    const running = await minimal.start({ workspaceId: 'acme', config: {}, async inbound() { /* noop */ }, log() { /* noop */ } });
+    expect(await minimal.send({ threadExternalId: 't1', message: { text: 'hi', parts: [{ type: 'text', text: 'hi' }] } })).toEqual({ delivered: true });
+    await minimal.progress?.({ threadExternalId: 't1', phase: 'start' });
+    await running.stop();
+  });
+
+  it('the web and cli channels implement no progress', async () => {
+    for (const path of ['../../channels/web/src/index.js', '../../channels/cli/src/index.js']) {
+      const { adapter } = (await import(path)) as { adapter: ChannelAdapter };
+      expect(adapter.progress).toBeUndefined();
+    }
+  });
+});

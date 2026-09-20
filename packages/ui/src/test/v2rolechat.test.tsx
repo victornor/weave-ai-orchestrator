@@ -24,8 +24,11 @@ vi.mock('../app/link', () => ({
 }));
 
 vi.mock('../api/hooks', () => ({
-  usePersistentSession: () => ({
-    mutate: state.persistentSession,
+  usePersistentSession: (_ws?: string, options?: { onOpened?: (agent: { id: string }) => void }) => ({
+    mutate: (body: unknown) => {
+      state.persistentSession(body);
+      if (state.error === null) options?.onOpened?.({ id: 'a_new' });
+    },
     isPending: state.pending,
     isError: state.error !== null,
     error: state.error ? new Error(state.error) : null,
@@ -39,10 +42,7 @@ beforeEach(() => {
   state.pending = false;
   state.error = null;
   state.go.mockClear();
-  state.persistentSession.mockReset();
-  state.persistentSession.mockImplementation((_body: unknown, opts?: { onSuccess?: (r: { agent: { id: string } }) => void }) =>
-    opts?.onSuccess?.({ agent: { id: 'a_new' } }),
-  );
+  state.persistentSession.mockClear();
 });
 
 describe('the role-chat helpers', () => {
@@ -76,7 +76,7 @@ describe('the shared role-chat control', () => {
     const button = screen.getByRole('button', { name: 'Start chat' });
     expect(button).toHaveAttribute('title', 'No conversation yet');
     fireEvent.click(button);
-    expect(state.persistentSession).toHaveBeenCalledWith({ projectId: 'p1', roleId: 'r1' }, expect.objectContaining({ onSuccess: expect.any(Function) }));
+    expect(state.persistentSession).toHaveBeenCalledWith({ projectId: 'p1', roleId: 'r1' });
     expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'a_new' } });
   });
 
@@ -137,11 +137,27 @@ describe('the sidebar role row (VS-581)', () => {
     expect(row).toHaveAttribute('data-role-chat-row', 'r1');
     expect(row).toHaveAttribute('title', 'No conversation yet');
     fireEvent.click(row);
-    expect(state.persistentSession).toHaveBeenCalledWith(
-      { projectId: 'p1', roleId: 'r1' },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    );
+    expect(state.persistentSession).toHaveBeenCalledWith({ projectId: 'p1', roleId: 'r1' });
     expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'acme', workerId: 'a_new' } });
+  });
+
+  it('closes its surface only once the session has opened (VS-617)', () => {
+    const onNavigate = vi.fn();
+    render(<RoleChatRow role={role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'active' })} session={null} ws="acme" onNavigate={onNavigate} />);
+    expect(onNavigate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Backend Engineer' }));
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'acme', workerId: 'a_new' } });
+  });
+
+  it('does not close its surface and keeps the not-opened state when the open fails (VS-617)', () => {
+    state.error = 'nope';
+    const onNavigate = vi.fn();
+    render(<RoleChatRow role={role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer', status: 'active' })} session={null} ws="acme" onNavigate={onNavigate} />);
+    fireEvent.click(screen.getByRole('button', { name: /Backend Engineer/ }));
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(state.go).not.toHaveBeenCalled();
+    expect(screen.getByRole('status')).toHaveTextContent('not opened');
   });
 
   it('marks the role whose session is the page shown', () => {

@@ -1119,13 +1119,24 @@ export function useStartSession(): UseMutationResult<Agent, Error, { ticketId: s
  * VS-581: `wsOverride` names the session's own workspace. The V2 shell's rail sits above the
  * workspace provider and spans every workspace, so a role row under a non-current workspace must
  * pass it; a surface inside a provider omits it.
+ *
+ * VS-617: `options.onOpened` runs from the mutation's own `onSuccess`, which fires whether or not
+ * the calling component is still mounted. A caller that must navigate to the session has to use it
+ * (or `mutateAsync`) rather than a per-call callback passed to `mutate`, because TanStack drops
+ * those once the observer unmounts — which is what the phone More sheet does to a role row.
  */
-export function usePersistentSession(wsOverride?: string): UseMutationResult<{ agent: Agent; thread: ChannelThread }, Error, { projectId: string; roleId: string; workerModelId?: string | null }> {
+export function usePersistentSession(
+  wsOverride?: string,
+  options?: { onOpened?: (agent: Agent) => void },
+): UseMutationResult<{ agent: Agent; thread: ChannelThread }, Error, { projectId: string; roleId: string; workerModelId?: string | null }> {
   const ws = useHookWs(wsOverride);
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body) => api.ws<{ agent: Agent; thread: ChannelThread }>(ws, '/workers/persistent-session', { method: 'POST', body }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.workers(ws) }),
+    onSuccess: ({ agent }) => {
+      void qc.invalidateQueries({ queryKey: qk.workers(ws) });
+      options?.onOpened?.(agent);
+    },
   });
 }
 

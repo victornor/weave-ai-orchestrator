@@ -64,7 +64,15 @@ vi.mock('../api/hooks', () => ({
   useRolesMany: (ids: readonly string[]) => ids.map((id) => ({ data: state.rolesByWs[id] ?? [] })),
   useWorkersMany: (ids: readonly string[], params?: { kind?: string }) =>
     ids.map((id) => ({ data: (params?.kind === 'session' ? state.sessionsByWs[id] : state.workersByWs[id]) ?? [] })),
-  usePersistentSession: () => ({ mutate: state.persistentSession, isPending: false, isError: false, error: null }),
+  usePersistentSession: (_ws?: string, options?: { onOpened?: (agent: { id: string }) => void }) => ({
+    mutate: (body: unknown) => {
+      state.persistentSession(body);
+      options?.onOpened?.({ id: 'a_new' });
+    },
+    isPending: false,
+    isError: false,
+    error: null,
+  }),
   useDecisionsMany: (ids: readonly string[]) => ids.map((id) => (id in state.decisionsByWs ? { data: state.decisionsByWs[id] } : { data: undefined })),
   useIncidents: () => ({ data: { items: state.incidents, total: state.incidents.length } }),
   useMe: () => ({
@@ -102,10 +110,7 @@ beforeEach(() => {
   state.rolesByWs = {};
   state.sessionsByWs = {};
   state.go.mockClear();
-  state.persistentSession.mockReset();
-  state.persistentSession.mockImplementation(
-    (_body: unknown, opts?: { onSuccess?: (r: { agent: { id: string } }) => void }) => opts?.onSuccess?.({ agent: { id: 'a_new' } }),
-  );
+  state.persistentSession.mockClear();
   onTheme.mockClear();
   localStorage.clear();
 });
@@ -699,10 +704,7 @@ describe('role chats under each project in the rail and the phone More list (VS-
     expect(within(rail).getByTitle(/paused/i)).toHaveAttribute('data-role-chat-blocked', 'r3');
 
     fireEvent.click(within(rail).getByRole('button', { name: 'Backend Engineer' }));
-    expect(state.persistentSession).toHaveBeenCalledWith(
-      { projectId: 'p1', roleId: 'r1' },
-      expect.objectContaining({ onSuccess: expect.any(Function) }),
-    );
+    expect(state.persistentSession).toHaveBeenCalledWith({ projectId: 'p1', roleId: 'r1' });
     expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'acme', workerId: 'a_new' } });
   });
 

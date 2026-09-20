@@ -1,6 +1,12 @@
-import type { RuntimeEvent } from '@weave-ai/runtime-sdk';
+import type { RuntimeEvent, RuntimePartial } from '@weave-ai/runtime-sdk';
 import { truncate } from '@weave-ai/runtime-sdk';
 import { parseTestSummary } from '@weave-ai/shared';
+
+export interface GeminiParseOptions {
+  resumed?: boolean;
+  /** VS-600: called for each assistant text delta while a message is being generated. */
+  onPartial?: (p: RuntimePartial) => void;
+}
 
 export interface GeminiParseState {
   sessionId: string | null;
@@ -24,16 +30,40 @@ const EDIT_TOOLS = new Set(['replace', 'write_file', 'edit']);
  * Event shapes taken from the shipped gemini 0.58.0 bundle (`StreamJsonFormatter` emit sites):
  * `init`, `message` (role user|assistant, delta), `tool_use`, `tool_result`, `error`, `result`.
  */
-export function createGeminiParser(opts: { resumed: boolean } = { resumed: false }) {
+export function createGeminiParser(opts: GeminiParseOptions = {}) {
   const state: GeminiParseState = { sessionId: null, model: null, finalText: null, usage: null, isError: false, errorMessage: null };
   const toolNames = new Map<string, string>();
   let assistantText = '';
+  /**
+   * VS-600: the deltas of the assistant message being generated. The installed gemini CLI emits
+   * every assistant chunk as a `message` with `delta: true` and no completion message — the next
+   * non-text event (or the end of the process) is the message boundary — so chunks are coalesced
+   * here into one persisted `assistant.text` instead of one `run_events` row per chunk.
+   */
+  let pendingText = '';
+  let pendingPartId: string | null = null;
+  let partSeq = 0;
+
+  function flushPending(ts: string): RuntimeEvent[] {
+    if (!pendingText) return [];
+    const text = pendingText;
+    const partId = pendingPartId ?? `gemini:msg:${partSeq++}`;
+    pendingText = '';
+    pendingPartId = null;
+    return [{ ts, type: 'assistant.text', payload: { text, partId, delta: true } }];
+  }
 
   function handle(line: string): RuntimeEvent[] {
     let msg: Json | null;
     try { msg = obj(JSON.parse(line)); } catch { return [raw('unparseable', { line: truncate(line, 2000) })]; }
     if (!msg) return [];
     const ts = str(msg['timestamp']) ?? new Date().toISOString();
+    // A message is the only text event; anything else flushes the message being streamed first.
+    const pre = str(msg['type']) === 'message' ? [] : flushPending(ts);
+    return [...pre, ...dispatch(msg, ts)];
+  }
+
+  function dispatch(msg: Json, ts: string): RuntimeEvent[] {
     switch (str(msg['type'])) {
       case 'init':
         state.sessionId = str(msg['session_id']);
@@ -42,8 +72,22 @@ export function createGeminiParser(opts: { resumed: boolean } = { resumed: false
       case 'message': {
         const content = str(msg['content']) ?? '';
         if (str(msg['role']) !== 'assistant') return [raw('message.user', msg, ts)];
+        if (!content) return [];
+        if (msg['delta'] === true) {
+          if (pendingPartId === null) pendingPartId = `gemini:msg:${partSeq++}`;
+          pendingText += content;
+          assistantText += content;
+          opts.onPartial?.({ kind: 'text', partId: pendingPartId, text: content });
+          return [];
+        }
+        // A complete (non-delta) assistant message — not emitted by the installed CLI — supersedes
+        // any deltas that preceded it rather than being appended to them.
+        const partId = pendingPartId ?? `gemini:msg:${partSeq++}`;
+        if (pendingText) assistantText = assistantText.slice(0, -pendingText.length);
         assistantText += content;
-        return content ? [{ ts, type: 'assistant.text', payload: { text: content, delta: msg['delta'] === true } }] : [];
+        pendingText = '';
+        pendingPartId = null;
+        return [{ ts, type: 'assistant.text', payload: { text: content, partId, delta: false } }];
       }
       case 'tool_use': {
         const id = str(msg['tool_id']) ?? '';
@@ -96,7 +140,11 @@ export function createGeminiParser(opts: { resumed: boolean } = { resumed: false
     }
   }
 
-  /** Gemini can die before emitting `result`; call this once the process has exited. */
+  /**
+   * Gemini can die before emitting `result`; call this once the process has exited. The message
+   * still being streamed is a partial: it is discarded (the engine drops it too) and only the
+   * accumulated text survives in `finalText`, so the run's outcome is as without partials.
+   */
   function finish(): void {
     if (state.finalText == null && assistantText.length > 0) state.finalText = assistantText;
   }

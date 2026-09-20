@@ -18,13 +18,19 @@ describe('cursor buildArgs — argv print mode', () => {
   it('builds print-mode stream-json with the prompt after --', () => {
     const b = buildArgs(input());
     expect(b.cmd).toBe('cursor-agent');
-    expect(s(b.args)).toContain('-p --output-format stream-json --trust');
+    expect(s(b.args)).toContain('-p --output-format stream-json --stream-partial-output --trust');
     expect(s(b.args)).toContain('--force');
     expect(s(b.args)).toContain('--sandbox disabled');
     expect(b.args.slice(-2)).toEqual(['--', 'do the thing']);
     expect(b.stdin).toBeNull();
     expect(b.liveInput).toBe(false);
     expect(b.resumed).toBe(false);
+  });
+
+  it('streams partial output only alongside print stream-json (VS-600)', () => {
+    const b = buildArgs(input());
+    expect(b.args).toContain('--stream-partial-output');
+    expect(b.args.indexOf('--stream-partial-output')).toBeGreaterThan(b.args.indexOf('--output-format'));
   });
 
   it('ignores liveInput and never writes an NDJSON user frame', () => {

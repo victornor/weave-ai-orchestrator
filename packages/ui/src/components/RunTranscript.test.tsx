@@ -44,8 +44,27 @@ describe('RunTranscript live activity', () => {
   });
 
   it('a runtime that cannot stream says so in words', () => {
-    const { container } = render(<RunTranscript events={[]} live stream={noStream} runtimeId="gemini" label="t" />);
+    // Every integrated runtime now streams something (VS-600), so the runtime absent from the
+    // coverage table stands in for one that declares none.
+    const { container } = render(<RunTranscript events={[]} live stream={noStream} runtimeId="unknown" label="t" />);
     expect(container.querySelector('[data-live-whole-steps]')!.textContent).toContain('whole steps only');
+  });
+
+  it.each(['cursor', 'gemini'])('%s streams text: the row reads as writing, not whole steps only (VS-600)', (runtimeId) => {
+    const stream = { partials: [{ partId: 'p', kind: 'text' as const, text: 'Let me check' }], lastPartialAt: T0 + 6000, partialSince: T0 + 6000 };
+    const { container } = render(<RunTranscript events={[]} live stream={stream} runtimeId={runtimeId} label="t" />);
+    const row = container.querySelector('[data-live-activity]')!;
+    expect(row.getAttribute('data-live-state')).toBe('streaming');
+    expect(container.querySelector('[data-live-whole-steps]')).toBeNull();
+    expect(container.querySelector('[data-live-partials]')!.textContent).toContain('Let me check');
+  });
+
+  it('coalesced streamed text renders as one block, not one per chunk (VS-600)', () => {
+    const events = [ev('assistant.text', { text: 'Let me ' }, 1), ev('assistant.text', { text: 'check.' }, 2)];
+    const { container } = render(<RunTranscript events={events} live stream={noStream} runtimeId="gemini" label="t" />);
+    const blocks = container.querySelectorAll('.ac-prose');
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.textContent).toBe('Let me check.');
   });
 
   it('a finished run renders no live row', () => {

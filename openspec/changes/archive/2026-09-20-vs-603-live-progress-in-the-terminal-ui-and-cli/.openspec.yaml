@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "Live progress in the terminal UI and CLI: weave attach, chat, top and
+  runs tail show what the agent is doing"

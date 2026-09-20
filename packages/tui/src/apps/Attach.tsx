@@ -7,10 +7,12 @@
  * Keys (command mode): p pause/resume · o open ticket · r relaunch · c cancel run · q quit ·
  * i or Enter to type, Esc back to command mode.
  */
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text, useApp } from 'ink';
-import type { Agent, Run, RunEvent } from '@weave-ai/shared';
-import { runEventsToTranscript, workerToCard, type TranscriptBlock } from '@weave-ai/render';
+import type { Agent, Run, RunDeltaFrame, RunEvent, RunLiveSnapshot } from '@weave-ai/shared';
+import { isActiveRun } from '@weave-ai/shared';
+import { applyDelta, dropSuperseded, fromSnapshot, runEventFromFrame, runEventsToTranscript, workerToCard, type PartialMap, type TranscriptBlock } from '@weave-ai/render';
+import { ActivityLine } from '../components/ActivityLine.js';
 import { StatusBar } from '../components/StatusBar.js';
 import { TextInput } from '../components/TextInput.js';
 import { TranscriptView } from '../components/Transcript.js';
@@ -26,6 +28,16 @@ export interface LiveInputStatus { midTurn: boolean; reason?: string }
 /** The notice line for `POST /workers/:id/message`'s outcome (VS-99) — never invents "delivered". */
 export function deliveryNotice(outcome: { delivery?: 'mid_turn' | 'queued' } | null | undefined): string {
   return outcome?.delivery === 'mid_turn' ? 'delivered to the running turn' : 'queued for the next turn';
+}
+
+/**
+ * Fold one `run.delta` frame into the partial map (VS-603), but only for the run being followed.
+ * Pure, so the "a frame moves the row" rule is testable without rendering Ink.
+ */
+export function foldDelta(current: PartialMap, frame: RunDeltaFrame, runId: string | null): { map: PartialMap; gap: boolean; matched: boolean } {
+  if (!runId || frame.runId !== runId || !Array.isArray(frame.parts)) return { map: current, gap: false, matched: false };
+  const { map, gap } = applyDelta(current, frame.parts);
+  return { map, gap, matched: true };
 }
 
 /**
@@ -51,8 +63,24 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
   const [input, setInput] = useState('');
   const [history, setHistory] = useState<string[]>([]);
   const [nonce, setNonce] = useState(0);
+  /** VS-603: what the run is still generating, and whether a turn is live for the row. */
+  const [partials, setPartials] = useState<PartialMap>(() => new Map());
+  const [partialClock, setPartialClock] = useState<{ last: number | null; since: number | null }>({ last: null, since: null });
+  const [live, setLive] = useState(false);
 
   const isConductor = agentId === 'weaver';
+
+  /** A page that connects mid-step reads what has been shown so far once, then follows frames. */
+  const readLive = useCallback(async (id: string) => {
+    try {
+      const snap = await client.wget<RunLiveSnapshot>(`/runs/${encodeURIComponent(id)}/live`);
+      if (!snap?.partials?.length) return;
+      setPartials(fromSnapshot(snap));
+      setPartialClock((c) => ({ last: Date.now(), since: c.since ?? Date.now() }));
+    } catch {
+      /* the live row is an extra; the transcript still works without it */
+    }
+  }, [client]);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +98,7 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
           ?? null;
         if (cancelled) return;
         setRunId(resolvedRun ?? null);
+        if (record.lastRun?.status && isActiveRun(record.lastRun.status)) setLive(true);
         if (resolvedRun) {
           const loaded = items<RunEvent>(await client.wget(`/runs/${encodeURIComponent(resolvedRun)}/events`, { limit: 400 }), 'events');
           if (!cancelled) setEvents(loaded);
@@ -83,27 +112,64 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
 
   const lastSeq = events.length > 0 ? events[events.length - 1]!.seq : 0;
 
+  /** The current run id, readable from the stream handler without waiting for a re-render. */
+  const runIdRef = useRef<string | null>(null);
+  useEffect(() => { runIdRef.current = runId; }, [runId]);
+  const partialsRef = useRef<PartialMap>(partials);
+  useEffect(() => { partialsRef.current = partials; }, [partials]);
+
   // Run events for the current run, plus the workspace stream so a new run swaps us over to it.
   useStream(client, runId ? client.w(`/runs/${encodeURIComponent(runId)}/events/stream`) : null, (message) => {
-    const raw = message.json as RunEvent | { payload?: RunEvent } | null;
-    const event = (raw && typeof raw === 'object' && 'payload' in raw ? (raw as { payload?: RunEvent }).payload : raw) as RunEvent | null;
-    if (!event || typeof event.seq !== 'number') return;
+    const event = runEventFromFrame(message.json);
+    if (!event) return;
     setEvents((prev) => (prev.some((e) => e.id === event.id) ? prev : [...prev, event]));
   }, { after: lastSeq });
 
   const connection = useStream(client, client.workspace ? client.w('/events') : null, (message) => {
+    if (message.type === 'run.delta') {
+      const frame = (message.json as { payload?: RunDeltaFrame } | null)?.payload ?? null;
+      if (!frame) return;
+      const next = foldDelta(partialsRef.current, frame, runIdRef.current);
+      if (!next.matched) return;
+      partialsRef.current = next.map;
+      setPartials(next.map);
+      setPartialClock((c) => ({ last: Date.now(), since: c.since ?? Date.now() }));
+      if (next.gap) void readLive(frame.runId);
+      return;
+    }
     if (message.type === 'run.started') {
       const payload = (message.json as { payload?: Record<string, unknown> } | null)?.payload ?? {};
       if (String(payload['agentId'] ?? '') !== String(detail?.agent?.id ?? agentId)) return;
       const started = String(payload['id'] ?? payload['runId'] ?? '');
-      if (started) { setRunId(started); setEvents([]); }
+      if (started) { runIdRef.current = started; setRunId(started); setEvents([]); void readLive(started); }
+      setLive(true);
+      setPartials(new Map());
+      setPartialClock({ last: null, since: null });
       // A turn starting changes the pre-send label (VS-253); refetch the detail. A turn ending
       // already does via `run.finished`, and no interval exists, so the label only moves on events.
       setNonce((n) => n + 1);
       return;
     }
-    if (message.type === 'worker.status' || message.type === 'run.finished') setNonce((n) => n + 1);
+    if (message.type === 'run.finished') {
+      if (String((message.json as { entityId?: string } | null)?.entityId ?? '') !== String(runIdRef.current ?? '')) {
+        // Only clear the row for the run we are following; another run's finish just refreshes detail.
+        setNonce((n) => n + 1);
+        return;
+      }
+      setLive(false);
+      setPartials(new Map());
+      setPartialClock({ last: null, since: null });
+      setNonce((n) => n + 1);
+      return;
+    }
+    if (message.type === 'worker.status') setNonce((n) => n + 1);
   });
+
+  // A page opened mid-step, or one whose stream dropped and came back, reads the run's partials once.
+  useEffect(() => {
+    if (connection !== 'connected' || !runId) return;
+    void readLive(runId);
+  }, [connection, runId, readLive]);
 
   const card = useMemo(() => {
     const agent = detail?.agent;
@@ -124,6 +190,9 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
   }, [card]);
 
   const blocks: TranscriptBlock[] = useMemo(() => runEventsToTranscript(events), [events]);
+
+  /** The partials not yet superseded by a completed event, so the row says "Writing", not "Waiting". */
+  const livePartials = useMemo(() => dropSuperseded(partials, events), [partials, events]);
 
   // Before a message: whether it would reach the running turn or queue (VS-253); null until known.
   const preSend = isConductor ? null : preSendLabel(detail?.input);
@@ -194,7 +263,7 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
     if (key === 'R') setNonce((n) => n + 1);
   }, { isActive: true });
 
-  const maxLines = Math.max(6, rows - 8 - (preSend ? 1 : 0));
+  const maxLines = Math.max(6, rows - 8 - (preSend ? 1 : 0) - (live ? 1 : 0));
 
   return (
     <Box flexDirection="column">
@@ -202,6 +271,14 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
       <TranscriptView blocks={blocks} maxLines={maxLines} />
       {notice ? <Text color="yellow">{notice}</Text> : null}
       {preSend ? <Text dimColor>{preSend}</Text> : null}
+      <ActivityLine
+        events={events}
+        partials={livePartials}
+        runtimeId={detail?.agent?.runtimeId}
+        partialSince={partialClock.since}
+        lastPartialAt={partialClock.last}
+        live={live}
+      />
       {mode === 'insert' ? (
         <TextInput
           value={input}

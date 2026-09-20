@@ -94,3 +94,18 @@ export function liveTurnLine(t: LiveTurn): string {
   if (t.wholeStepsOnly) parts.push('whole steps only');
   return parts.join(' · ');
 }
+
+/**
+ * The live line for a terminal surface (VS-603): `liveTurn`'s state over the run's events and partial
+ * output, formatted once. The TUI's `ActivityLine` and the CLI's `runs tail` both call this, so no
+ * surface composes the model a second way.
+ */
+export function liveActivityLine(
+  events: readonly RunEvent[],
+  partials: readonly LiveTurnPartial[],
+  now: number,
+  opts: { partialOutput?: 'none' | 'text' | 'full'; lastPartialAt?: number | null; partialSince?: number | null } = {},
+): string {
+  return liveTurnLine(liveTurn(events, partials, now, opts));
+}
+

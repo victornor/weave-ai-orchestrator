@@ -45,6 +45,9 @@ export function workerRoutes(): Hono<AppEnv> {
         // VS-317: a worker waiting on its own scheduled wake is not idle.
         scheduledWake: scheduledWake(ws.services, w.id),
         activity: activity?.activity ?? null,
+        // VS-603: the live-turn state VS-602 computes, so `weave top` shows what the worker is doing
+        // on first paint rather than waiting for a `worker.activity` frame.
+        live: activity?.live ?? null,
         tests: activity?.tests ?? null,
         // VS-498: in an active stall/recovery cycle — distinct from `active`, so a board reading this
         // list can tell a stalled worker apart from one genuinely mid-turn.
@@ -75,6 +78,8 @@ export function workerRoutes(): Hono<AppEnv> {
       usage: safe(() => s.usage.series({ scope: `worker:${worker.id}`, window: '7d' })),
       // VS-328: the same live activity line and last test tally the worker list carries.
       activity: activity?.activity ?? null,
+      // VS-603: and the live-turn state, as the workers list now carries it.
+      live: activity?.live ?? null,
       tests: activity?.tests ?? null,
       // Whether the human's next message right now would reach a running turn (VS-99), so a
       // composer can say so before anyone types rather than guessing from the runtime's name.

@@ -14,4 +14,7 @@ export function agentEntryPath(): string {
 }
 export { resolveProvider, loadPreset, mergeCompat, mergeParams, paramsFromOptions, headersWithExtras, presetsDir, PRESET_NAMES, type Preset, type Resolved } from './resolve.js';
 export { completeCompat, DEFAULT_COMPAT, type Compat, type Params } from './codec/params.js';
+export { classifyHttp, classifyStreamError, classifyNetwork, classifyFinish, parseErrorBody, stopError, isRetryable } from './errors.js';
+export { planRetry, parseRetryAfter, backoffMs } from './retry.js';
+export { repairArgs } from './repair.js';
 export { probeProvider, type ProbeReport, type ProbeCheck, type ProbeOptions } from './probe.js';

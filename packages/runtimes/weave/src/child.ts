@@ -53,7 +53,7 @@ export function buildInit(input: TurnInput, p: { providerId: string; modelId: st
       id: p.providerId, baseUrl: p.profile.baseUrl, auth: p.profile.auth, headers: p.headers, ...(p.profile.query ? { query: p.profile.query } : {}), ...(p.apiKey ? { apiKey: p.apiKey } : {}),
       // Resolved here so the child never sees the layers; JSON round-trip drops the undefined fields.
       compat: JSON.parse(JSON.stringify(p.resolved.compat)) as NonNullable<InitMessage['provider']['compat']>, params: JSON.parse(JSON.stringify(p.resolved.params)) as NonNullable<InitMessage['provider']['params']>,
-      ...(p.profile.timeouts?.idleMs ? { timeouts: { idleMs: p.profile.timeouts.idleMs } } : {}),
+      ...(p.profile.timeouts && Object.keys(p.profile.timeouts).length > 0 ? { timeouts: { ...p.profile.timeouts } } : {}),
     },
     prompt: input.prompt, systemPrompt: input.systemPrompt, session: p.session, mcpServers, toolEnv: p.toolEnv,
   };

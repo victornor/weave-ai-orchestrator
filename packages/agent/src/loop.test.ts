@@ -120,12 +120,12 @@ describe('a turn', () => {
   });
 
   it('gives the model a corrective result for an unknown tool and for invalid arguments', async () => {
-    mock.script({ chunks: toolCallChunks([{ id: 'u1', name: 'nope', args: '{}' }, { id: 'u2', name: 'read', args: '{"path":' }]) }, { chunks: textChunks('sorry') });
+    mock.script({ chunks: toolCallChunks([{ id: 'u1', name: 'nope', args: '{}' }, { id: 'u2', name: 'read', args: '{"path": nope}' }]) }, { chunks: textChunks('sorry') });
     const h = harness();
     await runAgentTurn(makeInit(), h.io, new AbortController().signal, fast);
     const results = h.events.filter((e) => e.type === 'tool.result').map((e) => String(e.payload['content']));
     expect(results[0]).toMatch(/^Error: unknown tool "nope"\. Available: read, write, edit, bash, grep, glob/);
-    expect(results[1]).toMatch(/^Error: arguments for read are not valid JSON/);
+    expect(results[1]).toMatch(/^Error: the arguments for read are not valid JSON/);
     assertValidHistory(join(dir, 's.jsonl'));
   });
 
@@ -135,10 +135,10 @@ describe('a turn', () => {
     expect((mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name)).toEqual(['read', 'grep', 'glob']);
   });
 
-  it('stops at the step cap with resource/max_steps', async () => {
+  it('stops at the step cap with tooling/max_steps', async () => {
     mock.script(...Array.from({ length: 3 }, () => ({ chunks: toolCallChunks([{ id: 'c', name: 'read', args: '{"path":"."}' }]) })));
     const r = await runAgentTurn(makeInit({ maxTurns: 2 }), harness().io, new AbortController().signal, fast);
-    expect(r.error).toMatchObject({ code: 'max_steps', family: 'resource' });
+    expect(r.error).toMatchObject({ code: 'max_steps', family: 'tooling' });
     assertValidHistory(join(dir, 's.jsonl'));
   });
 
@@ -243,10 +243,10 @@ describe('provider failures', () => {
     expect(mock.requests).toHaveLength(1);
   });
   it('gives up on a 500 after the retries and reports the family', async () => {
-    mock.script(...Array.from({ length: 3 }, () => ({ status: 500, body: 'boom' })));
+    mock.script(...Array.from({ length: 5 }, () => ({ status: 500, body: 'boom' })));
     const r = await runAgentTurn(makeInit(), harness().io, new AbortController().signal, fast);
     expect(r.error).toMatchObject({ family: 'transient_upstream' });
-    expect(mock.requests).toHaveLength(3);
+    expect(mock.requests).toHaveLength(5);
   });
   it('redoes the request when the stream drops mid-way', async () => {
     const bytes = frame(textChunks('complete answer'));
@@ -256,7 +256,7 @@ describe('provider failures', () => {
     expect(mock.requests).toHaveLength(2);
   });
   it('fails the step on an error object inside a 200 stream', async () => {
-    mock.script({ raw: 'data: {"error":{"message":"upstream exploded","type":"server_error"}}\n\n' });
+    mock.script({ raw: 'data: {"error":{"message":"upstream exploded","type":"mystery_error"}}\n\n' });
     const r = await runAgentTurn(makeInit(), harness().io, new AbortController().signal, fast);
     expect(r.error).toMatchObject({ message: 'upstream exploded' });
     expect(r.exitCode).toBe(1);

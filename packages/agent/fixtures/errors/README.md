@@ -1,0 +1,1 @@
+Error-table fixtures for `errors.test.ts`. Rows whose `source` names a VS-605 probe are the real status and body bytes recorded on 2026-09-20 (`<redacted>` marks the account id the weaver removed); rows marked hand-written have no live sample yet and are the documented shape only.

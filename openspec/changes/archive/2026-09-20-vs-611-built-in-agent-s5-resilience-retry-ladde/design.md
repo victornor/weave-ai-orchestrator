@@ -1,0 +1,27 @@
+## Context
+
+`loop.ts` currently retries `transient_upstream` up to `MAX_RETRIES = 2` with `2 s * 2^n` backoff, classifies with `classifyHttp` in the codec, and has an idle timer only. `finalize` in `core/runs/engine.ts` derives `errorFamily` from `TurnResult.error.family` and re-queues families in `RETRYABLE` (`transient_upstream`, `resource`); every other failed worker run parks for a human; `provider_quota` parks on first occurrence; `auth` has its own gate.
+
+## Decisions
+
+**1. `max_steps` and `output_truncated` are family `tooling`.** The design table said `resource`; the engine retries `resource` (it exists so an OOM kill or context overflow gets another go). A step cap that retries just burns the cap again. `tooling` parks for the human on first occurrence. `context_overflow` stays `resource` (the agent compacts once itself in S6; until then one engine retry is acceptable and bounded by the engine's budget); `killed` stays `resource`.
+
+**2. One error table.** `errors.ts` exports `classify(input)` where input is `{status?, body?, headers?, networkCode?, streamError?, finishReason?}` and output is `AgentError` plus `retryable`. Ordering: quota wording and 402 first; auth; gateway-exhausted (5xx or 400 with "routes failed after N attempts", `maxRetries: 1`); rate limit; transient statuses; context overflow; unknown parameter; model not found; other 4xx as `invalid_request`. Body parsing accepts `{error:{message,code,type}}`, `{error:"..."}`, `{code,message}`, and unwraps OpenRouter's `metadata.raw` (a JSON string) and reads its inner code/message so `Provider returned error` classifies by the upstream body. Numeric-string codes (`"1211"`, `"1214"`) are matched through a small Z.ai table: `1211` model_not_found, `1214` invalid_request, `1113`/`1112`-class balance codes as quota, others fall back to status. The Spring parse error text is kept but truncated to 300 chars and not treated as transient.
+
+**3. Ladder.** `retry.ts` exports `backoffMs(attempt, {baseMs, capMs, jitter, random})`, `parseRetryAfter(value, now)` and a `withRetries` runner taking a `sleep` and a `random` so tests use fake timers. Defaults: 4 retries for `transient_upstream`, 3 for `endpoint_unreachable`, 1 for gateway-exhausted, 0 for the rest. Delay is `max(retryAfter, backoff)` capped at 60 s; a `Retry-After` above 120 s is not waited on (the failure surfaces with `retryAfterMs` so the engine ladder decides). Jitter is +0..25 %.
+
+**4. Timeouts.** Connect = time to response headers (default 30 s), idle = gap between bytes, comment lines included (default 120 s, existing), request = whole streamed step (default 600 s, below the 900 s silence window). All from `provider.timeouts` with the current `idleMs` extended to `{connectMs, idleMs, requestMs}`. A timeout is `transient_upstream` `network`/`timeout`.
+
+**5. Mid-stream drop.** If the connection ends or errors after content began but before a finish reason or `[DONE]`, the partial step is discarded (its deltas were already streamed as partials; the retried step reuses the same ids, so the UI replaces them) and the step is retried under the ladder. A stream that ends after `finish_reason` without `[DONE]` is a success.
+
+**6. Repair.** `repair.ts` `repairArgs(text)` tries in order: strict parse; strip a Markdown fence; strip trailing commas; close unterminated strings/braces/brackets (torn JSON); if the result is a JSON string containing an object, parse that. Returns `{ok, value, repaired: boolean}`. When repair fails, the loop returns a corrective `invalid` tool result (`The arguments for <name> are not valid JSON: <error>. Send exactly one JSON object.`) and counts it; three consecutive invalid calls in a turn stop it `tool_call_invalid` (family `tooling`). Unknown tool names go through the same `invalid` path.
+
+**7. Doom loop.** The last N (5) tool calls are hashed as `name + canonical args`; if the last 3 are identical and their results identical, the next identical call is refused with a corrective result once; a further repeat fails the turn `doom_loop`.
+
+**8. Stops.** Step cap (existing, code moves to `tooling`), deadline (existing; also passed to the ladder so a retry never sleeps past it), token budget (`limits.maxTokens` if present in the init `run.limits`, otherwise none) -> `budget_exhausted` `tooling`. `finish_reason: length` with text but no tool calls: append the text, send one continuation user message ("continue"), and after a second `length` in the same turn fail `output_truncated`. `length` with an incomplete tool call: the call is treated as invalid arguments (repair, else corrective result).
+
+**9. `debugWire`.** Option key `debugWire: boolean`. The loop opens `<dirname(spillDir)>/wire/<n>.jsonl` and writes `{dir:'request'|'response', ...}` lines; request headers are written with `authorization`, `x-api-key`, `api-key` and any header whose name matches `/key|token|secret|auth/i` replaced by `[redacted]`, and every occurrence of the provider key and any `toolEnv` value over 8 chars is replaced by `[redacted]` in every line. Response SSE lines are written raw, after the same scrub. Off by default; message content is kept, so the option description says it is sensitive.
+
+## Risks
+
+Repair could turn a genuinely broken call into a plausible wrong one; it only closes structure and never invents keys, and the tool schema validation in each tool still applies. The doom-loop threshold is a judgement call; it is constants in one place.

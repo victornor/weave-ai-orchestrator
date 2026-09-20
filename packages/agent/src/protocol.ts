@@ -17,7 +17,7 @@ export interface InitMessage {
     /** Per-run scratch directory outside the worktree: bash output spill goes here. */
     spillDir: string;
   };
-  provider: { id: string; baseUrl: string; auth: string; headers: Record<string, string>; query?: Record<string, string>; apiKey?: string; /** Resolved by the adapter (preset < profile < model < option); the child never sees the layers. */ compat?: ProviderCompat; params?: ProviderParams & { contextWindowTokens?: number }; timeouts?: { idleMs?: number } };
+  provider: { id: string; baseUrl: string; auth: string; headers: Record<string, string>; query?: Record<string, string>; apiKey?: string; /** Resolved by the adapter (preset < profile < model < option); the child never sees the layers. */ compat?: ProviderCompat; params?: ProviderParams & { contextWindowTokens?: number }; timeouts?: { connectMs?: number; idleMs?: number; requestMs?: number } };
   prompt: string;
   systemPrompt: { text: string; mode: 'inject' | 'skip' };
   session: { path: string; id: string };

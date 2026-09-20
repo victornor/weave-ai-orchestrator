@@ -1,5 +1,6 @@
 import type { InitMessage } from './protocol.js';
 import type { RequestOptions } from './codec/chatCompletions.js';
+import { agentUserAgent } from './version.js';
 
 /** The parameters a run's own options carry, for an init that arrives without resolved `params`. The adapter always resolves; this is the fallback. */
 export function requestOptions(options: Record<string, unknown>): RequestOptions {
@@ -12,9 +13,16 @@ export function requestOptions(options: Record<string, unknown>): RequestOptions
   return out;
 }
 
-/** Request headers for a provider. The key goes in the header its `auth` names, and nowhere else. */
+/**
+ * Request headers for a provider. A default `User-Agent` names this product so an endpoint behind a bot
+ * challenge does not answer an HTML page; a profile header naming `user-agent` in any case replaces it
+ * (headers are case-insensitive, so exactly one is ever sent). The key goes in the header its `auth`
+ * names, and nowhere else.
+ */
 export function requestHeaders(provider: InitMessage['provider']): Record<string, string> {
-  const h: Record<string, string> = { 'content-type': 'application/json', accept: 'text/event-stream', ...provider.headers };
+  const profileHeaders = provider.headers ?? {};
+  const hasUserAgent = Object.keys(profileHeaders).some((k) => /^user-agent$/i.test(k));
+  const h: Record<string, string> = { 'content-type': 'application/json', accept: 'text/event-stream', ...(hasUserAgent ? {} : { 'user-agent': agentUserAgent() }), ...profileHeaders };
   if (provider.apiKey) {
     if (provider.auth === 'bearer') h['authorization'] = `Bearer ${provider.apiKey}`;
     else if (provider.auth.startsWith('header:')) h[provider.auth.slice('header:'.length)] = provider.apiKey;

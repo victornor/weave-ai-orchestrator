@@ -3,6 +3,30 @@ import type { AgentError } from './types.js';
 type Json = Record<string, unknown>;
 const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+/** A page where the endpoint's own answer is JSON: a proxy or bot challenge, never a provider API error. */
+const HTML_BODY = /^\s*<(?:!doctype\s+html|html|head|body|meta|title|div|span|p|h1|center)\b/i;
+const HTML_TITLE = /<title[^>]*>([\s\S]*?)<\/title>/i;
+/** A plain-text error body longer than this is cut to `PLAIN_KEEP`; JSON error messages are treated the same. */
+export const PLAIN_REDUCE_AT = 300;
+export const PLAIN_KEEP = 200;
+
+/** Whether an error body is an HTML page rather than the endpoint's JSON. */
+export function isHtmlErrorBody(body: string): boolean {
+  return HTML_BODY.test(body.trimStart());
+}
+
+/** The page `<title>`, whitespace-collapsed and capped, or undefined. */
+export function htmlErrorTitle(body: string): string | undefined {
+  const title = HTML_TITLE.exec(body)?.[1]?.replace(/\s+/g, ' ').trim();
+  return title ? title.slice(0, 120) : undefined;
+}
+
+/** One line for an HTML error page: the status, the title when present, and the User-Agent hint. */
+export function htmlErrorMessage(status: number, body: string): string {
+  const title = htmlErrorTitle(body);
+  return `HTTP ${status}: the endpoint returned an HTML page${title ? ` titled "${title}"` : ''} (likely a bot challenge or a gateway error); try setting a User-Agent header on the provider`;
+}
+
 /** The message, code and type of an error body, in whichever of the recorded shapes it arrives. */
 export interface ParsedBody { message: string; code?: string; type?: string }
 
@@ -52,10 +76,14 @@ export const DEFAULT_MAX_RETRIES = 4;
  * the same body arrives as 502 (upstream error) and as 400 (bad request) for the same cause.
  */
 export function classifyHttp(status: number, body: string, retryAfterMs?: number): AgentError {
-  const parsed = parseErrorBody(body);
-  const { message } = parsed;
-  const lower = `${message} ${parsed.code ?? ''} ${parsed.type ?? ''}`.toLowerCase();
   const withRetry = retryAfterMs !== undefined ? { retryAfterMs } : {};
+  // An HTML page is a proxy/bot page, not the endpoint's answer: it never reaches the model API, so
+  // retrying the same request would return the same page. Shorten it and do not retry it.
+  if (isHtmlErrorBody(body)) return { code: 'html_error', family: 'tooling', message: htmlErrorMessage(status, body), status, maxRetries: 0 };
+  const parsed = parseErrorBody(body);
+  const full = parsed.message;
+  const message = full.length > PLAIN_KEEP ? `${full.slice(0, PLAIN_KEEP)}…` : full;
+  const lower = `${full} ${parsed.code ?? ''} ${parsed.type ?? ''}`.toLowerCase();
   const base = { message, status };
   if (status === 402 || (QUOTA.test(lower) && (status === 429 || status === 403))) return { code: 'quota_exhausted', family: 'provider_quota', ...base, ...withRetry };
   if (status === 401 || status === 403) return { code: 'auth_failed', family: 'auth', ...base };

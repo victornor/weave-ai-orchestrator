@@ -253,6 +253,8 @@ describe('-p, -c and --resume from the shell, with no daemon and no workspace', 
     const none = await runP(['-p', 'hi']);
     expect(none).toMatchObject({ code: 2, stdout: '' });
     expect(none.stderr).toMatch(/no provider is configured/);
+    expect(none.stderr).toContain('agent.yaml'); // VS-631: a first-run how-to, not just a refusal
+    expect(none.stderr).toContain('apiKey');
     // a provider from a config file needs its key (a bare --base-url with no key is sent unauthenticated, for local endpoints)
     mkdirSync(join(dir, 'home', '.config', 'weave'), { recursive: true });
     writeFileSync(join(dir, 'home', '.config', 'weave', 'agent.yaml'), `provider: mock\nmodel: m1\nproviders:\n  mock:\n    baseUrl: ${mock.baseUrl}\n    apiKeySecret: WEAVE_LLM_MOCK_KEY\n`);
@@ -276,12 +278,52 @@ describe('-p, -c and --resume from the shell, with no daemon and no workspace', 
     expect((await runP([...flags(), '--resume', 'nosuch', '-p', 'x'])).code).toBe(2);
   });
 
+  it('works from any directory with a literal apiKey in the user\'s agent.yaml and no workspace (VS-631)', async () => {
+    const literal = 'sk-literal-user-config-31337';
+    const cfgDir = join(dir, 'home', '.config', 'weave');
+    mkdirSync(cfgDir, { recursive: true });
+    writeFileSync(join(cfgDir, 'agent.yaml'), `provider: mock
+model: mock-model
+providers:
+  mock:
+    baseUrl: ${mock.baseUrl}
+    apiKey: ${literal}
+    models:
+      mock-model: {}
+`);
+    mock.script({ chunks: textChunks('global answer') });
+    const r = await runP(['-p', 'go', '--verbose'], { WEAVE_LLM_MOCK_KEY: '' });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toBe('global answer\n');
+    expect(mock.requests[0]!.headers['authorization']).toBe(`Bearer ${literal}`);
+    expect(r.stdout).not.toContain(literal);
+    expect(r.stderr).not.toContain(literal);
+    const files = sessionFiles();
+    expect(files).toHaveLength(1);
+    expect(readFileSync(join(agentHome(), 'sessions', files[0]!), 'utf8')).not.toContain(literal);
+  });
+
   it('--verbose shows the tool calls on stderr while stdout stays the final text alone', async () => {
     mock.script({ chunks: toolCallChunks([{ id: 'b1', name: 'bash', args: JSON.stringify({ command: 'echo verbose-out' }) }]) }, { chunks: textChunks('final words') });
     const r = await runP([...flags(), '-p', 'go', '--verbose']);
     expect(r.stdout).toBe('final words\n');
+    expect(r.stdout).not.toContain('▸'); // every event line, tool calls included, is on stderr only
     expect(r.stderr).toContain('▸ bash  echo verbose-out');
     expect(r.code).toBe(0);
+  });
+
+  it('--context-window sets the run window so the unknown-window warning is not logged', async () => {
+    mock.script({ chunks: textChunks('ok') });
+    const r = await runP([...flags(), '--context-window', '4096', '-p', 'go']);
+    expect(r.code).toBe(0);
+    expect(r.stderr).not.toContain('context window is unknown');
+  });
+
+  it('--context-window refuses a non-positive value and sends nothing', async () => {
+    const r = await runP([...flags(), '--context-window', '0', '-p', 'go']);
+    expect(r.code).toBe(2);
+    expect(r.stderr).toMatch(/positive whole number/);
+    expect(mock.requests).toHaveLength(0);
   });
 
   it('--help prints usage without needing anything', async () => {

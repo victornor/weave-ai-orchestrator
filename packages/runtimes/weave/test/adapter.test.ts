@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
+import { agentUserAgent } from '@weave-ai/agent';
 import { AC_ENV, ProviderProfileSchema, validateRuntimeOptions, type ProviderProfile } from '@weave-ai/shared';
 import type { RuntimeEvent, RuntimePartial, TurnHandle, TurnInput, TurnSink } from '@weave-ai/runtime-sdk';
 import { capabilities, createAdapter } from '../src/index.js';
@@ -299,9 +300,10 @@ describe('the provider key comes from the workspace secret store (VS-619)', () =
   });
 
   it('scopes model discovery to the workspace, using that workspace\'s profile and key', async () => {
-    const seen: Array<{ url: string; auth: string | null }> = [];
+    const seen: Array<{ url: string; auth: string | null; ua: string | null }> = [];
     const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
-      seen.push({ url: String(url), auth: new Headers(init?.headers).get('authorization') });
+      const headers = new Headers(init?.headers);
+      seen.push({ url: String(url), auth: headers.get('authorization'), ua: headers.get('user-agent') });
       return new Response(JSON.stringify({ data: [{ id: 'x' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
     }) as typeof fetch;
     const w1: ProviderProfile = { ...profile, baseUrl: 'https://w1.example.test/v1', discover: true };
@@ -311,7 +313,7 @@ describe('the provider key comes from the workspace secret store (VS-619)', () =
       providerKey: (_id, ws) => (ws === 'ws-2' ? 'sk-ws-2-000' : 'sk-ws-1-000'),
     } });
     expect((await a.listModels('ws-2')).map((m) => m.id)).toEqual(['test/big-model', 'test/x']);
-    expect(seen).toEqual([{ url: 'https://w2.example.test/v1/models', auth: 'Bearer sk-ws-2-000' }]);
+    expect(seen).toEqual([{ url: 'https://w2.example.test/v1/models', auth: 'Bearer sk-ws-2-000', ua: agentUserAgent() }]);
   });
 });
 

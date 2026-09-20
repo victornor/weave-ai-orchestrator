@@ -24,7 +24,7 @@ import {
   buildRelease, cliBinIn, commitSubjectsInRange, currentLink, findPortHolder, inOwnScope,
   isServerProcessCmdline, migrationsIn, parseListenPort, planRestart, pruneReleases, readLink,
   readUnitRuntimeState, realRunCommand, releaseSha, resolveInstalledLaunchdAgent, resolveInstalledUnit,
-  resolveWorkspaceStateDir, switchRelease, writeUserShims, type InstalledUnit,
+  resolveWorkspaceStateDir, switchRelease, writeShimsFromRelease, type InstalledUnit,
 } from '@weave-ai/release';
 import type { WorkspaceRuntime } from './types.js';
 import type { UpdateChecker } from './release-info.js';
@@ -84,8 +84,12 @@ export interface UpgradeDeps {
   backup?: () => string[];
   switchTo?: (path: string) => { previous: string | null };
   prune?: (keep: number) => string[];
-  /** VS-377: refresh the user's `weave` CLI shim after the switch. Defaults to the real writer. */
-  writeShims?: () => void;
+  /**
+   * VS-377/VS-631: refresh the user's CLI shims after the switch, using the **new** release's own
+   * writer so a shim that release introduces is written on the upgrade that introduces it. Defaults to
+   * the real writer, which runs the new release's CLI `daemon write-shims`.
+   */
+  writeShims?: (release: string) => void;
   spawnRunner?: (o: { upgradeId: string; release: string }) => void;
   now?: () => number;
   /**
@@ -117,7 +121,7 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
   const backup = deps.backup ?? (() => backupDatabases(deps.configDir));
   const switchTo = deps.switchTo ?? ((path: string) => switchRelease(path));
   const prune = deps.prune ?? ((keep: number) => pruneReleases(keep));
-  const writeShims = deps.writeShims ?? (() => { writeUserShims(); });
+  const writeShims = deps.writeShims ?? ((release: string) => { writeShimsFromRelease(release); });
   const spawnRunner = deps.spawnRunner ?? ((o) => launchRunner(o.release, o.upgradeId, deps.configDir));
   const armRestartWatchdog = deps.armRestartWatchdog ?? ((o) => { const t = setTimeout(o.check, RESTART_VERIFY_MS); t.unref?.(); });
   const restartPreflight = deps.restartPreflight ?? (() => defaultRestartPreflight(deps.configDir));
@@ -302,9 +306,10 @@ export function createUpgradeService(deps: UpgradeDeps): UpgradeService {
       resumeDispatch();
       return;
     }
-    // VS-377: the release moved, so the user's `weave` shim must follow it (and appear on a host that
-    // predates it). Best-effort: a shim that cannot be written must not fail an upgrade that switched.
-    try { writeShims(); } catch (e) { log.warn({ err: e, upgradeId: id }, 'could not write the CLI shim'); }
+    // VS-377: the release moved, so the user's CLIs shims must follow it (and appear on a host that
+    // predates them). VS-631: run the new release's own writer, so a shim it introduces is written now.
+    // Best-effort: a shim that cannot be written must not fail an upgrade that switched.
+    try { writeShims(built.path); } catch (e) { log.warn({ err: e, upgradeId: id }, 'could not write the CLI shim'); }
 
     // ---- restart: not ours to do ----
     set(id, { state: 'restarting', toRelease: built.path, toSha: releaseSha(built.path) ?? built.sha });

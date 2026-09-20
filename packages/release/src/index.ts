@@ -75,6 +75,32 @@ export function writeUserShims(): ShimWriteResult {
   return writeCliShims({ home: homedir(), dataHomeDir: dataHome(), node: process.execPath });
 }
 
+export interface WriteShimsFromReleaseOptions {
+  /** How to run the release's CLI; a test replaces it so nothing is spawned. Defaults to the guarded runner. */
+  run?: RunCommand;
+  /** The node to run it with. Defaults to the one running this process. */
+  node?: string;
+  /** The writer used when the release's CLI cannot be run. Defaults to this process's own (old-release) writer. */
+  fallback?: () => void;
+}
+
+/**
+ * VS-631: write this machine's shims using the given release's **own** code, because an upgrade runs
+ * from the release being replaced and so does not know the shims the new release adds. Runs
+ * `<release>/packages/cli/dist/bin.js daemon write-shims`; when that cannot run (no CLI build, spawn
+ * error or a non-zero exit) it falls back to `fallback`, preserving the pre-VS-631 behaviour for a
+ * target release that predates the command. Returns whether the release's own writer ran.
+ */
+export function writeShimsFromRelease(release: string, o: WriteShimsFromReleaseOptions = {}): boolean {
+  const bin = cliBinIn(release);
+  if (existsSync(bin)) {
+    const r = (o.run ?? realRunCommand)(o.node ?? process.execPath, [bin, 'daemon', 'write-shims']);
+    if (!r.error && r.status === 0) return true;
+  }
+  (o.fallback ?? writeUserShims)();
+  return false;
+}
+
 export function readLink(path: string): string | null {
   try { return lstatSync(path).isSymbolicLink() ? resolve(dirname(path), readlinkSync(path)) : null; } catch { return null; }
 }

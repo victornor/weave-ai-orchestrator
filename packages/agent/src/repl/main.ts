@@ -1,4 +1,4 @@
-import { loadReplConfig, type ReplConfig, type ReplFlags } from './config.js';
+import { agentConfigPath, loadReplConfig, type ReplConfig, type ReplFlags } from './config.js';
 import { runReplTurn, type ReplState } from './run.js';
 import { ensureHome, findSession, listSessions, newSessionId, replHome, sessionPath, type SessionInfo } from './sessions.js';
 import { renderEvent } from './events.js';
@@ -10,11 +10,34 @@ export interface ReplOptions extends ReplFlags {
   continue?: boolean;
   /** `--resume <id>`: resume a session by id, prefix or number. */
   resume?: string;
+  /** `--context-window <tokens>`: the model's context window when the endpoint does not report one. */
+  contextWindow?: string;
   verbose?: boolean;
 }
 export interface ReplIO { stdout: (s: string) => void; stderr: (s: string) => void; env: NodeJS.ProcessEnv; cwd: string; home?: string; userHome?: string }
 
 export type Startup = { ok: true; cfg: ReplConfig; state: ReplState; homeDir: string; resumed: SessionInfo | null } | { ok: false; message: string };
+
+/** VS-631: the first-run how-to — the exact minimal `agent.yaml`, at the real path, no new location. */
+function firstRunHelp(env: NodeJS.ProcessEnv, home: string | undefined): string {
+  const file = agentConfigPath(env, home);
+  return [
+    'no provider is configured.',
+    `Create ${file} — it is read from any directory, with no workspace above the cwd:`,
+    '',
+    '  provider: openai',
+    '  model: gpt-4o-mini',
+    '  providers:',
+    '    openai:',
+    '      baseUrl: https://api.openai.com/v1',
+    '      apiKey: sk-...            # a literal key, or "${OPENAI_API_KEY}" to read one from the environment',
+    '      models:',
+    '        gpt-4o-mini:',
+    '          contextWindow: 128000',
+    '',
+    'Then run `weave repl` again. The key stays on this machine and is never printed; a default User-Agent is sent for you.',
+  ].join('\n');
+}
 
 /**
  * Everything both modes need before the first turn: config, the provider and model, the session (new, the
@@ -38,10 +61,20 @@ export function startup(o: ReplOptions, io: ReplIO): Startup {
   let model = cfg.model;
   if (resumed?.provider && cfg.providers[resumed.provider] && !o.provider && !o.model) { providerId = resumed.provider; model = resumed.model ?? model; }
   if (!providerId || !cfg.providers[providerId]) {
-    return { ok: false, message: providerId ? `provider "${providerId}" is not configured` : 'no provider is configured: pass --provider <id> --base-url <url> (the key is read from WEAVE_LLM_<PROVIDER>_KEY), or run inside a workspace with providers' };
+    if (providerId) {
+      // VS-631: when the requested provider was skipped, say why (file and field, never the value).
+      return { ok: false, message: cfg.providerErrors[providerId] ?? `provider "${providerId}" is not configured` };
+    }
+    return { ok: false, message: firstRunHelp(io.env, io.userHome) };
+  }
+  let contextWindowTokens: number | undefined;
+  if (o.contextWindow !== undefined) {
+    const n = Number(o.contextWindow);
+    if (!Number.isInteger(n) || n <= 0) return { ok: false, message: `--context-window must be a positive whole number of tokens, not "${o.contextWindow}"` };
+    contextWindowTokens = n;
   }
   const id = resumed?.id ?? newSessionId();
-  const state: ReplState = { providerId, model: model ?? '', permission: cfg.permission, effort: null, params: {}, sessionId: id, sessionPath: resumed?.path ?? sessionPath(homeDir, id) };
+  const state: ReplState = { providerId, model: model ?? '', permission: cfg.permission, effort: null, params: contextWindowTokens !== undefined ? { contextWindowTokens } : {}, sessionId: id, sessionPath: resumed?.path ?? sessionPath(homeDir, id) };
   return { ok: true, cfg, state, homeDir, resumed };
 }
 
@@ -50,6 +83,7 @@ export async function runOneShot(o: ReplOptions, io: ReplIO, signal: AbortSignal
   const s = startup(o, io);
   if (!s.ok) { io.stderr(`weave repl: ${s.message}\n`); return 2; }
   for (const n of s.cfg.notes) io.stderr(`note: ${n}\n`);
+  for (const w of s.cfg.warnings) io.stderr(`${w}\n`);
   const verbose = o.verbose === true;
   const loopIO = {
     emit: (ev: { type: string; payload: Record<string, unknown> }) => { if (verbose) for (const l of renderEvent(ev, { color: false })) io.stderr(`${l}\n`); },

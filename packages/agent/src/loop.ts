@@ -283,7 +283,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       const messageId = `${run.runId}:${steps}`;
       emit('turn.started', { messageId });
       if (window === undefined) {
-        if (!warned.has('window')) { warned.add('window'); io.log('warn', 'the context window is unknown, so the session is only compacted when the provider reports an overflow; set contextWindowTokens on the model or the provider'); }
+        if (!warned.has('window')) { warned.add('window'); io.log('warn', 'the context window is unknown, so the session is only compacted when the provider reports an overflow; set contextWindowTokens on the model or the provider, or pass --context-window to weave repl'); }
       } else if (sizer.estimate({ system, tools: toolList, messages: session.context() }) > compactionThreshold(window, opts.maxOutputTokens)) {
         await runCompaction('proactive', toolList);
       }

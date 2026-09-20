@@ -13,6 +13,7 @@ export function register(program: Command): void {
     .option('--base-url <url>', 'an OpenAI-compatible endpoint; the key is read from WEAVE_LLM_<PROVIDER>_KEY')
     .option('--preset <name>', 'provider preset for --base-url (default openai-compatible)')
     .option('--model <id>', 'model id, or provider/model')
+    .option('--context-window <tokens>', "the model's context window in tokens, when the endpoint does not report one")
     .option('--permission <mode>', 'auto (default), restricted (read-only) or bypass')
     .option('--workspace-dir <dir>', 'read providers and MCP servers from this workspace instead of the nearest one')
     .option('--verbose', 'with -p, show tool calls and events on stderr', false)
@@ -25,6 +26,7 @@ export function register(program: Command): void {
         ...(typeof opts['baseUrl'] === 'string' ? { baseUrl: opts['baseUrl'] } : {}),
         ...(typeof opts['preset'] === 'string' ? { preset: opts['preset'] } : {}),
         ...(typeof opts['model'] === 'string' ? { model: opts['model'] } : {}),
+        ...(typeof opts['contextWindow'] === 'string' ? { contextWindow: opts['contextWindow'] } : {}),
         ...(typeof opts['permission'] === 'string' ? { permission: opts['permission'] } : {}),
         ...(typeof opts['workspaceDir'] === 'string' ? { workspaceDir: opts['workspaceDir'] } : {}),
         verbose: opts['verbose'] === true,

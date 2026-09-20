@@ -65,6 +65,7 @@ export async function runRepl(o: ReplOptions, io: ReplIO, streams?: TerminalStre
   const { cfg, homeDir } = s0;
   let state: ReplState = s0.state;
   for (const n of cfg.notes) io.stderr(`note: ${n}\n`);
+  for (const w of cfg.warnings) io.stderr(`${w}\n`);
   const turnEnv = { cwd: io.cwd, homeDir, env: io.env, ...(io.userHome ? { userHome: io.userHome } : {}) };
   const out = (s: string): void => { if (s) t.output.write(s); };
 

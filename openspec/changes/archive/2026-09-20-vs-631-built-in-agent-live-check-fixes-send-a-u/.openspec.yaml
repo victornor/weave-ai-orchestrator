@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "Live-check fixes: default User-Agent on provider requests, one-line HTML
+  error bodies, weave-agent shim on the first upgrade, --context-window flag,
+  --verbose stderr split"

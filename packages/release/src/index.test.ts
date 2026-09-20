@@ -7,7 +7,7 @@ import {
   LAUNCHD_LABEL, SERVICE_NAME, classifyRestart, commitSubjectsInRange, configDir, dataHome, findPortHolder,
   inOwnScope, isServerProcessCmdline, migrationsIn, parseListenPort, parseLsofHolder, parsePortHolder,
   parseUnitRuntimeState, planRestart, readUnitRuntimeState, releaseStamp, releaseVersion,
-  resolveInstalledLaunchdAgent, resolveInstalledUnit, stateHome, type CommandResult, type RunCommand,
+  resolveInstalledLaunchdAgent, resolveInstalledUnit, stateHome, writeShimsFromRelease, type CommandResult, type RunCommand,
 } from './index.js';
 
 /** A RunCommand built from a table of `cmd args → output`, for the seam-only host tests. */
@@ -323,5 +323,42 @@ describe('classifyRestart / isServerProcessCmdline (VS-407)', () => {
     expect(classifyRestart({ unit, holder: { pid: 77, command: 'node' }, unitMainPid: 42, trackedPids: [99] }).kind).toBe('other');
     expect(classifyRestart({ unit, holder: null, unitMainPid: 42, trackedPids: [] }).kind).toBe('none');
     expect(classifyRestart({ unit: null, holder: { pid: 1, command: 'node' }, unitMainPid: null, trackedPids: [] }).kind).toBe('none');
+  });
+});
+
+describe('writeShimsFromRelease (VS-631)', () => {
+  const releaseWithCli = (): string => {
+    const release = tmp('vs631-rel-');
+    mkdirSync(join(release, 'packages', 'cli', 'dist'), { recursive: true });
+    writeFileSync(join(release, 'packages', 'cli', 'dist', 'bin.js'), '// cli\n');
+    return release;
+  };
+
+  it('runs the release\'s own CLI `daemon write-shims`, so a shim it introduces is written on this upgrade', () => {
+    const release = releaseWithCli();
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const ran = writeShimsFromRelease(release, {
+      node: '/usr/local/bin/node',
+      run: (cmd, args) => { calls.push({ cmd, args }); return { status: 0, signal: null, stdout: '', stderr: '' }; },
+      fallback: () => { throw new Error('the fallback must not run when the release CLI succeeds'); },
+    });
+    expect(ran).toBe(true);
+    expect(calls).toEqual([{ cmd: '/usr/local/bin/node', args: [join(release, 'packages', 'cli', 'dist', 'bin.js'), 'daemon', 'write-shims'] }]);
+  });
+
+  it('falls back to this process\'s writer when the release has no CLI build', () => {
+    let fell = 0;
+    const ran = writeShimsFromRelease(tmp('vs631-rel-'), { run: () => ({ status: 0, signal: null, stdout: '', stderr: '' }), fallback: () => { fell += 1; } });
+    expect(ran).toBe(false);
+    expect(fell).toBe(1);
+  });
+
+  it('falls back when the release CLI exits non-zero or cannot start', () => {
+    let fell = 0;
+    for (const result of [{ status: 1, signal: null as NodeJS.Signals | null, stdout: '', stderr: 'boom' }, { status: null, signal: null, stdout: '', stderr: '', error: new Error('ENOENT') }]) {
+      const ran = writeShimsFromRelease(releaseWithCli(), { run: () => result, fallback: () => { fell += 1; } });
+      expect(ran).toBe(false);
+    }
+    expect(fell).toBe(2);
   });
 });

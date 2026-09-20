@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProviderProfile } from '@weave-ai/shared';
 import { probeProvider } from './probe.js';
+import { agentUserAgent } from './version.js';
 import { startMockProvider, textChunks, toolCallChunks, type MockProvider, type MockStep } from './testkit/mockProvider.js';
 
 let mock: MockProvider;
@@ -27,6 +28,7 @@ describe('probeProvider (mock endpoint only)', () => {
     expect(captured).toEqual(['models', 'chat', 'tools', 'cap-max_tokens', 'cap-max_completion_tokens']);
     expect(mock.requests.map((q) => `${q.method} ${q.url}`)).toEqual(['GET /v1/models', 'POST /v1/chat/completions', 'POST /v1/chat/completions', 'POST /v1/chat/completions', 'POST /v1/chat/completions']);
     expect(mock.requests[0]!.headers['authorization']).toBe('Bearer sk-probe-key');
+    expect(mock.requests[0]!.headers['user-agent']).toBe(agentUserAgent());
     expect(mock.requests[3]!.body).toMatchObject({ max_tokens: 16 });
     expect(mock.requests[4]!.body).toMatchObject({ max_completion_tokens: 16 });
   });

@@ -1,0 +1,1 @@
+Internal gateway failure: the upstream request could not be completed because the connection to the origin pool was reset while the response headers were being read. The proxy retried the origin twice before giving up. Request id 8f2c1a44-9d3e-4f0b-9a11-7d6c2b0e5f88; if this keeps happening, contact the operator and quote the request id.

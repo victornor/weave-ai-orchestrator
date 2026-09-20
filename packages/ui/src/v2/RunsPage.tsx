@@ -10,8 +10,9 @@
  * repeats the comparator, so the order covers the whole history, not only the loaded rows.
  */
 import { useMemo, useState } from 'react';
-import { RUN_SORT_KEYS, RUN_STATUSES, type Run, type RunSortDir, type RunSortKey, type RunStatus, type UiStatus } from '@weave-ai/shared';
+import { isActiveRun, RUN_SORT_KEYS, RUN_STATUSES, type Run, type RunSortDir, type RunSortKey, type RunStatus, type UiStatus } from '@weave-ai/shared';
 import { useRunPagesMany, useWeaverMany, useWorkersMany, useWorkspaces } from '../api/hooks';
+import { useWorkerActivity } from '../api/workerActivity';
 import { useGo, useSearchParams } from '../app/link';
 import { EmptyState, ErrorState } from '../components/States';
 import { SkeletonRows } from '../components/Skeleton';
@@ -47,6 +48,23 @@ export const LIVENESS_TEXT: Record<string, string> = {
 
 export function turnEnded(run: Pick<Run, 'liveness'>): string {
   return run.liveness ? (LIVENESS_TEXT[run.liveness] ?? run.liveness) : '—';
+}
+
+/**
+ * VS-602: what an active run is doing and how long, from the coalesced `worker.activity` frame when
+ * one has arrived for its agent, else the run's own status and elapsed time. Null for a finished run,
+ * which the `Turn ended` column already accounts for.
+ */
+export function activeRunLine(
+  run: Pick<Run, 'status' | 'startedAt'>,
+  live: { label: string; since: string } | null | undefined,
+  now = Date.now(),
+): string | null {
+  if (!isActiveRun(run.status)) return null;
+  if (live) return `${live.label} · ${ago(live.since, now)}`;
+  if (!run.startedAt) return run.status;
+  const ms = now - Date.parse(run.startedAt);
+  return Number.isFinite(ms) && ms >= 0 ? `${run.status} · ${duration(ms)}` : run.status;
 }
 
 export function runTokenTotal(run: Pick<Run, 'usage'>): string {
@@ -162,6 +180,8 @@ export function RunsBody(): React.ReactElement {
   const pages = useRunPagesMany(ids, params);
   const workers = useWorkersMany(ids, { includeRetired: true });
   const weavers = useWeaverMany(ids);
+  // VS-602: a running row shows what the agent is doing, from the same coalesced frame the board reads.
+  const activity = useWorkerActivity();
 
   // A run's agent is a worker or its workspace's weaver, so resolve both; an unresolved agent reads
   // as a neutral label rather than a sliced id (VS-403).
@@ -186,6 +206,7 @@ export function RunsBody(): React.ReactElement {
 
   const nameOf = (id: string): string => nameById.get(id) ?? 'Unknown agent';
   const open = (r: Run): void => go('/runs/$runId', { params: { runId: r.id } });
+  const liveOf = (r: Run): string | null => activeRunLine(r, activity.get(r.agentId)?.live);
 
   /** Keep the URL current without stacking history, so the choice survives reload and back/forward. */
   const commit = (patch: Record<string, string | undefined>): void => {
@@ -290,6 +311,7 @@ export function RunsBody(): React.ReactElement {
                       <span className="ac-mono block truncate text-micro text-text-3">
                         {r.model ?? '—'} · {runTokenTotal(r)} tok · {cents(r.costCents)}
                       </span>
+                      {liveOf(r) ? <span className="ac-mono block truncate text-micro text-text-2" data-v2-run-live>{liveOf(r)}</span> : null}
                     </span>
                     <span className="ac-mono text-nano text-text-3">{ago(r.startedAt ?? r.createdAt)}</span>
                   </button>
@@ -316,7 +338,7 @@ export function RunsBody(): React.ReactElement {
                   },
                   { key: 'agent', header: 'Agent', render: (r) => nameOf(r.agentId) },
                   { key: 'model', header: 'Model', mono: true, render: (r) => r.model ?? '—' },
-                  { key: 'ended', header: 'Turn ended', width: '11rem', mono: true, render: (r) => turnEnded(r) },
+                  { key: 'ended', header: 'Turn ended', width: '14rem', mono: true, render: (r) => liveOf(r) ?? turnEnded(r) },
                   { key: 'tokens', header: 'Tokens', width: '6rem', align: 'right', mono: true, render: (r) => runTokenTotal(r) },
                   { key: 'cost', header: 'Cost', width: '6rem', align: 'right', mono: true, render: (r) => cents(r.costCents) },
                   {

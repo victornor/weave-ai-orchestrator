@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "Every interface that talks to an agent shows live progress: chat,
+  planner, role sessions, board, TUI, CLI and Telegram"

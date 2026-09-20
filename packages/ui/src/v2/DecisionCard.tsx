@@ -38,6 +38,7 @@ import { usePrefersReducedMotion } from '../lib/streamReveal';
 import { cx } from '../lib/cx';
 import { DictationAlerts, DictationButton, DictationProgress, useFieldDictation } from './DictationControl';
 import { WorkerFeed, useWorkerRun } from './WorkerFeed';
+import { useWorkerActivity } from '../api/workerActivity';
 
 export interface V2Answer {
   key?: string;
@@ -152,12 +153,16 @@ export function heldRevisionRow(input: {
   ticket: Ticket | null | undefined;
   blockers?: readonly Ticket[] | null;
   run: Run | null | undefined;
+  /** VS-602: the live-turn state for the asking agent, when the daemon has one. */
+  live?: { label: string; since: string } | null;
   now?: number;
 }): HeldRevisionRow {
   const { worker, ticket, run } = input;
   if (!worker) return { pulse: false, text: 'Held — no worker' };
   const live = run ? isActiveRun(run.status) : worker.status === 'running';
   if (live) {
+    // VS-602: say what the worker is doing right now, not just that a revision is in progress.
+    if (input.live) return { pulse: true, text: `${input.live.label} · ${ago(input.live.since, input.now)}` };
     const started = run?.startedAt ?? run?.createdAt;
     return { pulse: true, text: started ? `Revision in progress · ${ago(started, input.now)}` : 'Revision in progress' };
   }
@@ -401,11 +406,14 @@ export function V2DecisionCard({
   const detail = useTicketFor(ws ?? undefined, decision.ticketId ?? '', (heldRowVisible || showsEvidence) && Boolean(decision.ticketId));
   const heldWorker = detail.data?.worker ?? null;
   const { run: heldRun } = useWorkerRun(heldWorker?.id ?? askedBy, ws ?? undefined);
+  // VS-602: the same coalesced live-turn frame the board reads, for the asking agent.
+  const activity = useWorkerActivity();
   const heldRow = heldRevisionRow({
     worker: heldWorker,
     ticket: detail.data?.ticket,
     blockers: detail.data?.blockers,
     run: heldRun,
+    live: (heldWorker?.id ?? askedBy) ? activity.get((heldWorker?.id ?? askedBy)!)?.live ?? null : null,
   });
   const artifact = useMemo(
     () => (products.data ?? []).find((p) => p.type === 'artifact' && p.externalId),

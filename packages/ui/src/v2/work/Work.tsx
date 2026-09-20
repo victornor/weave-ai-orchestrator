@@ -72,7 +72,7 @@ interface WorkRow {
   assigneeLabel: string;
   needsYou: boolean;
   live: boolean;
-  /** The line under the worker: the worker's current activity, its last run summary, or "Working". */
+  /** The line under the worker: the worker's live state, its last run summary, or "Starting the turn". */
   line: { label: string; since: string | null } | null;
   /** The most recent parsed test tally, when the daemon has one. */
   tests: { passed: number; total: number } | null;
@@ -188,7 +188,7 @@ export function V2WorkScreen(): React.ReactElement {
         const runLine = liveWorker ? runLines.get(liveWorker.id) ?? null : null;
         // A live worker always carries a line: its current activity, else its last run summary, else
         // a bare "Working" — so the amber working mark is never missing on a running ticket.
-        const line = liveWorker ? activityLine(summary, runLine) ?? { label: 'Working', since: null } : null;
+        const line = liveWorker ? activityLine(summary, runLine) ?? { label: 'Starting the turn', since: null } : null;
         const roleName = t.assigneeRoleId ? roleNameById.get(t.assigneeRoleId) ?? null : null;
         return {
           ticket: t,

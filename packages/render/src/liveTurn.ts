@@ -82,3 +82,15 @@ export function clock(ms: number): string {
   const m = Math.floor(s / 60);
   return `${m} m ${String(s % 60).padStart(2, '0')} s`;
 }
+
+/**
+ * One line for a terminal, a board card or a CLI follow output (VS-602): the state, the seconds it
+ * has lasted, the tool-call count when there is one to report, and the whole-steps-only notice. The
+ * same `liveTurn` a web row renders, so no surface spells a state a second way.
+ */
+export function liveTurnLine(t: LiveTurn): string {
+  const parts = [t.label, clock(t.stateMs)];
+  if (t.state !== 'tool' && t.toolCount > 0) parts.push(`${t.toolCount} tool ${t.toolCount === 1 ? 'call' : 'calls'}`);
+  if (t.wholeStepsOnly) parts.push('whole steps only');
+  return parts.join(' · ');
+}

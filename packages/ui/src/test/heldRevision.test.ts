@@ -20,6 +20,18 @@ describe('heldRevisionRow', () => {
     expect(row.text).toBe('Revision in progress · 1h');
   });
 
+  it('prefers the live-turn state when the daemon has one (VS-602)', () => {
+    const row = heldRevisionRow({
+      worker: agent({ status: 'running' }),
+      ticket: ticket(),
+      run: makeRun({ status: 'running', startedAt: '2026-09-14T17:00:00.000Z' }),
+      live: { label: 'Running bash pnpm test', since: '2026-09-14T17:59:55.000Z' },
+      now: NOW,
+    });
+    expect(row.pulse).toBe(true);
+    expect(row.text).toBe('Running bash pnpm test · now');
+  });
+
   it('does not pulse when the worker is between turns, and counts from the last run', () => {
     const row = heldRevisionRow({
       worker: agent({ status: 'active' }),

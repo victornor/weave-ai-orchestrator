@@ -62,6 +62,7 @@ vi.mock('../api/hooks', () => ({
   useSetMcpSecret: () => ({ mutate: (v: { name: string; value: string }) => { state.secretWrites.push(v); }, isPending: false }),
   useClearMcpSecret: () => ({ mutate: (name: string) => { state.clears.push(name); }, isPending: false }),
   useTestMcpServer: () => ({ mutate: (name: string, opts?: { onSuccess?: (r: unknown) => void }) => { state.testCalls.push(name); opts?.onSuccess?.(state.testReport); }, isPending: false, isError: false, error: null }),
+  useSetMcpDisabled: () => ({ mutate: () => undefined }),
 }));
 vi.mock('../settings/sections', () => ({
   UpdatesSection: () => null, SecuritySection: () => null, HostToolsSection: () => null, DictationSection: () => null,

@@ -5,7 +5,7 @@ import { V2_DAEMON_SECTIONS, V2_WORKSPACE_SECTIONS, firstSectionOf, scopeFromSea
 describe('the V2 settings section registry', () => {
   it('lists the daemon sections and the kept V1 ones, with no Budget tab', () => {
     const keys = V2_DAEMON_SECTIONS.map((s) => s.key);
-    expect(keys).toEqual(['updates', 'models', 'security', 'host-tools', 'dictation', 'device']);
+    expect(keys).toEqual(['updates', 'models', 'providers', 'mcp', 'security', 'host-tools', 'dictation', 'device']);
     expect(keys).not.toContain('budget');
   });
 

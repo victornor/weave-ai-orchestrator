@@ -667,6 +667,10 @@ export const WorkspaceConfigSchema = withKeyAlias(z.object({
   providers: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/), ProviderProfileSchema).default({}),
   /** User-configured MCP servers for the built-in `weave` runtime (VS-621), by server name. */
   mcpServers: McpServersSchema,
+  /** VS-633: daemon-level provider ids this workspace switches off (a workspace entry of the same id replaces instead). */
+  disabledProviders: z.array(z.string()).default([]),
+  /** VS-633: daemon-level MCP server names this workspace switches off. */
+  disabledMcpServers: z.array(z.string()).default([]),
   projects: z.array(ProjectConfigSchema).default([]),
   weaver: z.object({
     channels: z.array(z.string()).default(['web', 'cli']),
@@ -802,6 +806,12 @@ export const DaemonConfigSchema = z.object({
    * Empty (the default) leaves every workspace on its own `models` block.
    */
   models: DaemonModelsSchema.default({}),
+  /**
+   * VS-633: model providers and MCP servers for the built-in `weave` runtime, visible to every
+   * workspace. A workspace entry with the same id replaces one of these for that workspace only.
+   */
+  providers: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/), ProviderProfileSchema).default({}),
+  mcpServers: McpServersSchema,
   /**
    * Extra directories prepended to host tool resolution (`git`, `gh`, `openspec`, `wt`), for an
    * unusual layout the daemon user's login shell does not cover (VS-318). Empty is the normal case:

@@ -65,6 +65,7 @@ vi.mock('../api/hooks', () => ({
   useSetProviderSecret: () => ({ mutate: (v: { id: string; value: string }) => { state.secretWrites.push(v); }, isPending: false }),
   useClearProviderSecret: () => ({ mutate: (id: string) => { state.clears.push(id); }, isPending: false }),
   useTestProvider: () => ({ mutate: (vars: { id: string; model?: string }, opts?: { onSuccess?: (r: unknown) => void }) => { state.testCalls.push(vars); opts?.onSuccess?.(state.testReport); }, isPending: false, isError: false, error: null }),
+  useSetProviderDisabled: () => ({ mutate: () => undefined }),
 }));
 vi.mock('../settings/sections', () => ({
   UpdatesSection: () => null, SecuritySection: () => null, HostToolsSection: () => null, DictationSection: () => null,

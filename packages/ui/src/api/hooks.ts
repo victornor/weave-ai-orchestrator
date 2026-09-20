@@ -1263,109 +1263,150 @@ export function useSetModels(): UseMutationResult<T.WorkspaceModels, Error, T.Wo
   });
 }
 
-/* ------------------------------------------------------- providers (VS-610) */
+/* ------------------------------------------------------- providers (VS-610, VS-633) */
 
-/** This workspace's `weave`-runtime providers, with their secret state, plus the preset catalogue. */
-export function useProviders(): UseQueryResult<T.ProvidersPayload> {
-  const ws = useWs();
-  return useQuery({ queryKey: qk.providers(ws), queryFn: () => api.ws<T.ProvidersPayload>(ws, '/providers') });
+/**
+ * VS-633: providers and MCP servers are configured once in the daemon and may be overridden per
+ * workspace. Each hook takes the scope it acts on: `daemon` talks to `/api/daemon/…`, `workspace`
+ * (the default) to the selected workspace's merged, marked view.
+ */
+export type AgentConfigScope = 'daemon' | 'workspace';
+
+/** One call against a scope's provider/MCP routes: `kind` is `providers` or `mcp-servers` (daemon) / `mcp` (workspace). */
+function scopedCall<R>(scope: AgentConfigScope, ws: string, kind: 'providers' | 'mcp', path: string, init?: Parameters<typeof api.ws>[2]): Promise<R> {
+  return scope === 'daemon'
+    ? api.root<R>(`/daemon/${kind === 'mcp' ? 'mcp-servers' : 'providers'}${path}`, init)
+    : api.ws<R>(ws, `/${kind}${path}`, init);
+}
+/** A daemon-level edit changes what every workspace inherits, so a change in either scope refreshes both views. */
+const refreshAgentConfig = (qc: QueryClient, kind: 'providers' | 'mcp'): void => {
+  void qc.invalidateQueries({ predicate: (q) => { const k = q.queryKey; return (k[0] === 'daemon' && k[1] === kind) || (k[0] === 'w' && k[2] === kind); } });
+};
+const providersKey = (scope: AgentConfigScope, ws: string) => (scope === 'daemon' ? qk.daemonProviders() : qk.providers(ws));
+const mcpKey = (scope: AgentConfigScope, ws: string) => (scope === 'daemon' ? qk.daemonMcpServers() : qk.mcpServers(ws));
+
+/** The `weave`-runtime providers a scope resolves, with their secret state, plus the preset catalogue. */
+export function useProviders(scope: AgentConfigScope = 'workspace'): UseQueryResult<T.ProvidersPayload> {
+  const ws = useHookWs();
+  return useQuery({ queryKey: providersKey(scope, ws), queryFn: () => scopedCall<T.ProvidersPayload>(scope, ws, 'providers', ''), enabled: scope === 'daemon' || ws !== '' });
 }
 
 /** Create or replace a provider profile; the body is the profile, `id` names the config key. */
-export function useSaveProvider(): UseMutationResult<T.ProviderView, Error, { id: string; profile: T.ProviderProfile }> {
-  const ws = useWs();
+export function useSaveProvider(scope: AgentConfigScope = 'workspace'): UseMutationResult<T.ProviderView, Error, { id: string; profile: T.ProviderProfile }> {
+  const ws = useHookWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, profile }) => api.ws<T.ProviderView>(ws, `/providers/${encodeURIComponent(id)}`, { method: 'PUT', body: profile }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.providers(ws) }),
+    mutationFn: ({ id, profile }) => scopedCall<T.ProviderView>(scope, ws, 'providers', `/${encodeURIComponent(id)}`, { method: 'PUT', body: profile }),
+    onSuccess: () => refreshAgentConfig(qc, 'providers'),
   });
 }
 
-export function useDeleteProvider(): UseMutationResult<{ ok: boolean }, Error, string> {
-  const ws = useWs();
+/** Remove a provider entry from the scope (in a workspace: an override or an addition, restoring the daemon's). */
+export function useDeleteProvider(scope: AgentConfigScope = 'workspace'): UseMutationResult<{ ok: boolean }, Error, string> {
+  const ws = useHookWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id) => api.ws<{ ok: boolean }>(ws, `/providers/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.providers(ws) }),
+    mutationFn: (id) => scopedCall<{ ok: boolean }>(scope, ws, 'providers', `/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: () => refreshAgentConfig(qc, 'providers'),
+  });
+}
+
+/** Hide an inherited daemon provider from this workspace (`disabled: true`) or show it again. */
+export function useSetProviderDisabled(): UseMutationResult<{ ok: boolean }, Error, { id: string; disabled: boolean }> {
+  const ws = useHookWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, disabled }) => api.ws<{ ok: boolean }>(ws, `/providers/${encodeURIComponent(id)}/disable`, { method: disabled ? 'POST' : 'DELETE' }),
+    onSuccess: () => refreshAgentConfig(qc, 'providers'),
   });
 }
 
 /** Set or replace the provider's key; only a status comes back, never the value. */
-export function useSetProviderSecret(): UseMutationResult<{ ok: boolean; configured: boolean; secretName: string }, Error, { id: string; value: string }> {
-  const ws = useWs();
+export function useSetProviderSecret(scope: AgentConfigScope = 'workspace'): UseMutationResult<{ ok: boolean; configured: boolean; secretName: string }, Error, { id: string; value: string }> {
+  const ws = useHookWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, value }) => api.ws<{ ok: boolean; configured: boolean; secretName: string }>(ws, `/providers/${encodeURIComponent(id)}/secret`, { method: 'POST', body: { value } }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.providers(ws) }),
+    mutationFn: ({ id, value }) => scopedCall<{ ok: boolean; configured: boolean; secretName: string }>(scope, ws, 'providers', `/${encodeURIComponent(id)}/secret`, { method: 'POST', body: { value } }),
+    onSuccess: () => refreshAgentConfig(qc, 'providers'),
   });
 }
 
-export function useClearProviderSecret(): UseMutationResult<{ ok: boolean; configured: boolean; secretName: string | null }, Error, string> {
-  const ws = useWs();
+export function useClearProviderSecret(scope: AgentConfigScope = 'workspace'): UseMutationResult<{ ok: boolean; configured: boolean; secretName: string | null }, Error, string> {
+  const ws = useHookWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id) => api.ws<{ ok: boolean; configured: boolean; secretName: string | null }>(ws, `/providers/${encodeURIComponent(id)}/secret`, { method: 'DELETE' }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.providers(ws) }),
+    mutationFn: (id) => scopedCall<{ ok: boolean; configured: boolean; secretName: string | null }>(scope, ws, 'providers', `/${encodeURIComponent(id)}/secret`, { method: 'DELETE' }),
+    onSuccess: () => refreshAgentConfig(qc, 'providers'),
   });
 }
 
 /** Run the on-demand probe; the request itself is the side effect, so nothing is cached. */
-export function useTestProvider(): UseMutationResult<T.ProviderTestReport, Error, { id: string; model?: string }> {
-  const ws = useWs();
+export function useTestProvider(scope: AgentConfigScope = 'workspace'): UseMutationResult<T.ProviderTestReport, Error, { id: string; model?: string }> {
+  const ws = useHookWs();
   return useMutation({
-    mutationFn: ({ id, model }) => api.ws<T.ProviderTestReport>(ws, `/providers/${encodeURIComponent(id)}/test`, { method: 'POST', body: model ? { model } : {} }),
+    mutationFn: ({ id, model }) => scopedCall<T.ProviderTestReport>(scope, ws, 'providers', `/${encodeURIComponent(id)}/test`, { method: 'POST', body: model ? { model } : {} }),
   });
 }
 
-/* ------------------------------------------------------ MCP servers (VS-621) */
+/* ------------------------------------------------------ MCP servers (VS-621, VS-633) */
 
-/** This workspace's MCP servers, each with the names it references and whether those are set. */
-export function useMcpServers(): UseQueryResult<T.McpServersPayload> {
-  const ws = useWs();
-  return useQuery({ queryKey: qk.mcpServers(ws), queryFn: () => api.ws<T.McpServersPayload>(ws, '/mcp') });
+/** The MCP servers a scope resolves, each with the names it references and whether those are set. */
+export function useMcpServers(scope: AgentConfigScope = 'workspace'): UseQueryResult<T.McpServersPayload> {
+  const ws = useHookWs();
+  return useQuery({ queryKey: mcpKey(scope, ws), queryFn: () => scopedCall<T.McpServersPayload>(scope, ws, 'mcp', ''), enabled: scope === 'daemon' || ws !== '' });
 }
 
 /** Create or replace an MCP server definition; the body is the definition, `name` is the config key. */
-export function useSaveMcpServer(): UseMutationResult<T.McpServerView, Error, { name: string; config: Omit<T.McpServer, 'headers' | 'args' | 'env' | 'listTimeoutMs' | 'callTimeoutMs' | 'readOnly'> & Partial<T.McpServer> }> {
-  const ws = useWs();
+export function useSaveMcpServer(scope: AgentConfigScope = 'workspace'): UseMutationResult<T.McpServerView, Error, { name: string; config: Omit<T.McpServer, 'headers' | 'args' | 'env' | 'listTimeoutMs' | 'callTimeoutMs' | 'readOnly'> & Partial<T.McpServer> }> {
+  const ws = useHookWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ name, config }) => api.ws<T.McpServerView>(ws, `/mcp/${encodeURIComponent(name)}`, { method: 'PUT', body: config }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.mcpServers(ws) }),
+    mutationFn: ({ name, config }) => scopedCall<T.McpServerView>(scope, ws, 'mcp', `/${encodeURIComponent(name)}`, { method: 'PUT', body: config }),
+    onSuccess: () => refreshAgentConfig(qc, 'mcp'),
   });
 }
 
-export function useDeleteMcpServer(): UseMutationResult<{ ok: boolean }, Error, string> {
-  const ws = useWs();
+export function useDeleteMcpServer(scope: AgentConfigScope = 'workspace'): UseMutationResult<{ ok: boolean }, Error, string> {
+  const ws = useHookWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name) => api.ws<{ ok: boolean }>(ws, `/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.mcpServers(ws) }),
+    mutationFn: (name) => scopedCall<{ ok: boolean }>(scope, ws, 'mcp', `/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+    onSuccess: () => refreshAgentConfig(qc, 'mcp'),
+  });
+}
+
+/** Hide an inherited daemon MCP server from this workspace, or show it again. */
+export function useSetMcpDisabled(): UseMutationResult<{ ok: boolean }, Error, { name: string; disabled: boolean }> {
+  const ws = useHookWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, disabled }) => api.ws<{ ok: boolean }>(ws, `/mcp/${encodeURIComponent(name)}/disable`, { method: disabled ? 'POST' : 'DELETE' }),
+    onSuccess: () => refreshAgentConfig(qc, 'mcp'),
   });
 }
 
 /** Connect to a saved server and list its tools; the request is the side effect, so nothing is cached. */
-export function useTestMcpServer(): UseMutationResult<T.McpTestReport, Error, string> {
-  const ws = useWs();
-  return useMutation({ mutationFn: (name) => api.ws<T.McpTestReport>(ws, `/mcp/${encodeURIComponent(name)}/test`, { method: 'POST' }) });
+export function useTestMcpServer(scope: AgentConfigScope = 'workspace'): UseMutationResult<T.McpTestReport, Error, string> {
+  const ws = useHookWs();
+  return useMutation({ mutationFn: (name) => scopedCall<T.McpTestReport>(scope, ws, 'mcp', `/${encodeURIComponent(name)}/test`, { method: 'POST' }) });
 }
 
 /** Set or replace a secret a server references; only a status comes back, never the value. */
-export function useSetMcpSecret(): UseMutationResult<{ ok: boolean; name: string; configured: boolean }, Error, { name: string; value: string }> {
-  const ws = useWs();
+export function useSetMcpSecret(scope: AgentConfigScope = 'workspace'): UseMutationResult<{ ok: boolean; name: string; configured: boolean }, Error, { name: string; value: string }> {
+  const ws = useHookWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ name, value }) => api.ws<{ ok: boolean; name: string; configured: boolean }>(ws, `/mcp/secrets/${encodeURIComponent(name)}`, { method: 'POST', body: { value } }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.mcpServers(ws) }),
+    mutationFn: ({ name, value }) => scopedCall<{ ok: boolean; name: string; configured: boolean }>(scope, ws, 'mcp', `/secrets/${encodeURIComponent(name)}`, { method: 'POST', body: { value } }),
+    onSuccess: () => refreshAgentConfig(qc, 'mcp'),
   });
 }
 
-export function useClearMcpSecret(): UseMutationResult<{ ok: boolean; name: string; configured: boolean }, Error, string> {
-  const ws = useWs();
+export function useClearMcpSecret(scope: AgentConfigScope = 'workspace'): UseMutationResult<{ ok: boolean; name: string; configured: boolean }, Error, string> {
+  const ws = useHookWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (name) => api.ws<{ ok: boolean; name: string; configured: boolean }>(ws, `/mcp/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.mcpServers(ws) }),
+    mutationFn: (name) => scopedCall<{ ok: boolean; name: string; configured: boolean }>(scope, ws, 'mcp', `/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+    onSuccess: () => refreshAgentConfig(qc, 'mcp'),
   });
 }
 

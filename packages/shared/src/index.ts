@@ -23,3 +23,4 @@ export * from './artifactImages.js';
 export * from './test-summary.js';
 export * from './daemon-shutdown.js';
 export { estimateTokens, sliceToTokens } from './tokens.js';
+export * from './scoped-config.js';

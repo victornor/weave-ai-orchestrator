@@ -42,7 +42,7 @@ export function buildReplInit(state: ReplState, cfg: ReplConfig, prompt: string,
   if (!state.model) return { ok: false, error: 'no model is chosen: pass --model, or use /model <id>' };
   const preset = loadPreset(profile.preset ?? 'openai-compatible');
   if (!preset) return { ok: false, error: `provider "${state.providerId}" names preset "${profile.preset}", which does not exist` };
-  const key = keyOverride ? { key: keyOverride, source: 'env' as const, name: 'entered' } : resolveApiKey({ providerId: state.providerId, profile, env: t.env, workspace: cfg.workspace });
+  const key = keyOverride ? { key: keyOverride, source: 'env' as const, name: 'entered' } : resolveApiKey({ providerId: state.providerId, profile, env: t.env, workspace: cfg.workspace, daemonDir: cfg.daemonDir });
   if (profile.auth !== 'none' && !key.key) return { ok: false, error: `no API key for "${state.providerId}": set ${key.name} in the environment` };
   const resolved = resolveProvider({ preset, profile, model: profile.models[state.model], options: state.params });
   if (resolved.params.contextWindowTokens === undefined) { const w = profile.models[state.model]?.contextWindow; if (w) resolved.params.contextWindowTokens = w; }
@@ -52,7 +52,7 @@ export function buildReplInit(state: ReplState, cfg: ReplConfig, prompt: string,
 
   const mcpServers: InitMessage['mcpServers'] = {};
   for (const [name, raw] of Object.entries(cfg.mcpServers)) {
-    const { server: s } = resolveMcpRefs(raw, { env: t.env, workspace: cfg.workspace });
+    const { server: s } = resolveMcpRefs(raw, { env: t.env, workspace: cfg.workspace, daemonDir: cfg.daemonDir });
     const bounds = { listTimeoutMs: s.listTimeoutMs, callTimeoutMs: s.callTimeoutMs, readOnly: s.readOnly };
     if (s.type === 'stdio' && s.command) mcpServers[name] = { type: 'stdio', command: s.command, args: s.args, env: s.env, ...bounds };
     else if (s.url) mcpServers[name] = { type: 'http', url: s.url, headers: s.headers, ...bounds };

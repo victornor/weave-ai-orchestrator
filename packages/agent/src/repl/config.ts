@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, join, parse as parsePath, resolve } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { McpServersSchema, ProviderProfileSchema, type McpServer, type ProviderProfile } from '@weave-ai/shared';
-import { openWorkspaceSecret } from './secrets.js';
+import { openDaemonSecret, openWorkspaceSecret } from './secrets.js';
 
 /**
  * VS-631: a provider in the user's own `agent.yaml` may carry a literal `apiKey` (or a `${NAME}`/
@@ -28,6 +28,8 @@ export interface ReplConfig {
   model: string | null;
   permission: ReplPermission;
   workspace: WorkspaceRef | null;
+  /** VS-633: the daemon's config directory when it holds a `daemon.yaml`, whose providers and MCP servers sit under every other source; its secret store is read for keys. */
+  daemonDir: string | null;
   /** Where each thing was read from, for `--verbose` and the startup line. Never a secret. */
   sources: string[];
   /** Problems found while reading (a bad file is skipped, not fatal). */
@@ -48,6 +50,18 @@ export const keyVarFor = (providerId: string): string => `WEAVE_LLM_${providerId
 /** The user's config file: `$XDG_CONFIG_HOME/weave/agent.yaml`, else `~/.config/weave/agent.yaml`. */
 export function agentConfigPath(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
   return join(env['XDG_CONFIG_HOME'] || join(home, '.config'), 'weave', 'agent.yaml');
+}
+
+/**
+ * VS-633: the daemon's config directory, found the way the daemon and the CLI find it (`AC_CONFIG_HOME`, else
+ * `$XDG_CONFIG_HOME` or `~/.config` with `weave`, or `agent-conductor` on a host installed before the rename).
+ * The daemon need not be running: only its files are read.
+ */
+export function daemonConfigDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+  if (env['AC_CONFIG_HOME']) return env['AC_CONFIG_HOME'];
+  const base = env['XDG_CONFIG_HOME']?.trim() ? env['XDG_CONFIG_HOME'] : join(home, '.config');
+  const legacy = join(base, 'agent-conductor');
+  return existsSync(join(base, 'weave')) || !existsSync(legacy) ? join(base, 'weave') : legacy;
 }
 
 /** The nearest `workspace.yaml` at or above `from`, or null. */
@@ -79,6 +93,8 @@ function readYaml(path: string, notes: string[]): Record<string, unknown> | null
 
 /** The secret-name a key should live under, named in a skip reason without ever echoing a value. */
 const keyNameFor = (id: string): string => keyVarFor(id);
+
+const stringList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 /** A one-line reason for a skipped provider, built from the field path and never from a field's value. */
 function skipReason(issues: ReadonlyArray<{ path: ReadonlyArray<string | number> }>, id: string): string {
@@ -149,8 +165,10 @@ function mcpFrom(raw: unknown, from: string, notes: string[]): Record<string, Mc
 export interface LoadInput { flags: ReplFlags; env: NodeJS.ProcessEnv; cwd: string; home?: string }
 
 /**
- * Where things come from, lowest to highest: the user's `agent.yaml`, the nearest workspace's `providers`
- * and `mcpServers`, then the command line. Reading a workspace is reading its files: the daemon is never
+ * Where things come from, lowest to highest: the daemon's `daemon.yaml` (VS-633), the user's `agent.yaml`,
+ * the nearest workspace's `providers` and `mcpServers`, then the command line. A workspace entry with the
+ * same id replaces the whole entry; a daemon entry the workspace lists in `disabledProviders` /
+ * `disabledMcpServers` (and does not define itself) is dropped. Reading these is reading files: the daemon is never
  * contacted. A file that does not parse is a note, not a failure, so a broken config still lets `-p` run.
  */
 export function loadReplConfig(i: LoadInput): ReplConfig {
@@ -164,6 +182,23 @@ export function loadReplConfig(i: LoadInput): ReplConfig {
   let provider: string | null = null;
   let model: string | null = null;
   let permission: ReplPermission = DEFAULT_PERMISSION;
+
+  let daemonDir: string | null = null;
+  const daemonFile = join(daemonConfigDir(i.env, i.home), 'daemon.yaml');
+  let daemonProviders: Record<string, ReplProviderProfile> = {};
+  let daemonMcp: Record<string, McpServer> = {};
+  if (existsSync(daemonFile)) {
+    const doc = readYaml(daemonFile, notes);
+    if (doc) {
+      daemonDir = dirname(daemonFile);
+      sources.push(`daemon ${daemonFile}`);
+      // A daemon.yaml, like a workspace.yaml, is never the place for a literal key.
+      daemonProviders = providersFrom(doc['providers'], daemonFile, notes, { allowApiKey: false, errors: providerErrors });
+      daemonMcp = mcpFrom(doc['mcpServers'], daemonFile, notes);
+      providers = { ...daemonProviders };
+      mcpServers = { ...daemonMcp };
+    }
+  }
 
   const userFile = agentConfigPath(i.env, i.home);
   if (existsSync(userFile)) {
@@ -188,8 +223,12 @@ export function loadReplConfig(i: LoadInput): ReplConfig {
     if (doc) {
       workspace = workspaceRef(wsFile);
       sources.push(`workspace ${wsFile}`);
-      providers = { ...providers, ...providersFrom(doc['providers'], wsFile, notes, { allowApiKey: false, errors: providerErrors }) };
-      mcpServers = { ...mcpServers, ...mcpFrom(doc['mcpServers'], wsFile, notes) };
+      const wsProviders = providersFrom(doc['providers'], wsFile, notes, { allowApiKey: false, errors: providerErrors });
+      const wsMcp = mcpFrom(doc['mcpServers'], wsFile, notes);
+      for (const id of stringList(doc['disabledProviders'])) if (!(id in wsProviders) && id in daemonProviders && providers[id] === daemonProviders[id]) delete providers[id];
+      for (const name of stringList(doc['disabledMcpServers'])) if (!(name in wsMcp) && name in daemonMcp && mcpServers[name] === daemonMcp[name]) delete mcpServers[name];
+      providers = { ...providers, ...wsProviders };
+      mcpServers = { ...mcpServers, ...wsMcp };
     }
   } else if (i.flags.workspaceDir) notes.push(`no workspace.yaml in ${resolve(i.cwd, i.flags.workspaceDir)}`);
 
@@ -214,10 +253,10 @@ export function loadReplConfig(i: LoadInput): ReplConfig {
   if (i.flags.permission !== undefined) { if (isPermission(i.flags.permission)) permission = i.flags.permission; else notes.push(`--permission "${i.flags.permission}" is not one of ${REPL_PERMISSIONS.join(', ')}`); }
   if (provider && providers[provider] && !model) model = Object.keys(providers[provider]!.models)[0] ?? null;
 
-  return { providers, mcpServers, provider, model, permission, workspace, sources, notes, providerErrors, warnings, userConfigFile };
+  return { providers, mcpServers, provider, model, permission, workspace, daemonDir, sources, notes, providerErrors, warnings, userConfigFile };
 }
 
-export type KeySource = 'config' | 'env' | 'workspace' | 'none';
+export type KeySource = 'config' | 'env' | 'workspace' | 'daemon' | 'none';
 export interface ResolvedKey { key: string | undefined; source: KeySource; /** The variable or secret name that was looked up; safe to print. */ name: string }
 
 /** A `${NAME}` or `{env:NAME}` reference to an environment variable. */
@@ -234,9 +273,9 @@ export function resolveApiKeyRef(value: string, env: NodeJS.ProcessEnv): { key: 
 /**
  * The provider's key, first hit wins: the profile's own `apiKey` (a literal, or a `${NAME}` reference
  * read from the environment — VS-631, user `agent.yaml` only), then the environment under `apiKeySecret`
- * or `WEAVE_LLM_<PROVIDER>_KEY`, then the workspace secret store on disk.
+ * or `WEAVE_LLM_<PROVIDER>_KEY`, then the workspace secret store on disk, then the daemon's (VS-633).
  */
-export function resolveApiKey(o: { providerId: string; profile: ReplProviderProfile; env: NodeJS.ProcessEnv; workspace: WorkspaceRef | null }): ResolvedKey {
+export function resolveApiKey(o: { providerId: string; profile: ReplProviderProfile; env: NodeJS.ProcessEnv; workspace: WorkspaceRef | null; daemonDir?: string | null }): ResolvedKey {
   let unresolved: string | undefined;
   if (o.profile.apiKey) {
     const ref = resolveApiKeyRef(o.profile.apiKey, o.env);
@@ -246,15 +285,16 @@ export function resolveApiKey(o: { providerId: string; profile: ReplProviderProf
   const names = [...new Set([o.profile.apiKeySecret, keyVarFor(o.providerId)].filter((n): n is string => !!n))];
   for (const n of names) { const v = o.env[n]; if (v) return { key: v, source: 'env', name: n }; }
   if (o.workspace) for (const n of names) { const v = openWorkspaceSecret(o.workspace.stateDir, n); if (v) return { key: v, source: 'workspace', name: n }; }
+  if (o.daemonDir) for (const n of names) { const v = openDaemonSecret(o.daemonDir, n); if (v) return { key: v, source: 'daemon', name: n }; }
   return { key: undefined, source: 'none', name: unresolved ?? names[0] ?? keyVarFor(o.providerId) };
 }
 
 const REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g;
 /** A `${NAME}` reference in an MCP server's headers or env resolves from the environment, then the workspace store; an unresolved one is reported and left empty. */
-export function resolveMcpRefs(server: McpServer, o: { env: NodeJS.ProcessEnv; workspace: WorkspaceRef | null }): { server: McpServer; missing: string[] } {
+export function resolveMcpRefs(server: McpServer, o: { env: NodeJS.ProcessEnv; workspace: WorkspaceRef | null; daemonDir?: string | null }): { server: McpServer; missing: string[] } {
   const missing: string[] = [];
   const sub = (v: string): string => v.replace(REF, (_m, name: string) => {
-    const got = o.env[name] ?? (o.workspace ? openWorkspaceSecret(o.workspace.stateDir, name) : null);
+    const got = o.env[name] ?? (o.workspace ? openWorkspaceSecret(o.workspace.stateDir, name) : null) ?? (o.daemonDir ? openDaemonSecret(o.daemonDir, name) : null);
     if (got === null || got === undefined) { missing.push(name); return ''; }
     return got;
   });

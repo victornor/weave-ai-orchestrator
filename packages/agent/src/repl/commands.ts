@@ -70,7 +70,7 @@ export async function modelCatalogue(ctx: CommandCtx, deps: CommandDeps): Promis
   if (profile.discover === false) return { models };
   const preset = loadPreset(profile.preset ?? 'openai-compatible');
   const { compat, params } = resolveProvider({ preset, profile });
-  const key = resolveApiKey({ providerId: ctx.state.providerId, profile, env: ctx.env, workspace: ctx.cfg.workspace });
+  const key = resolveApiKey({ providerId: ctx.state.providerId, profile, env: ctx.env, workspace: ctx.cfg.workspace, daemonDir: ctx.cfg.daemonDir });
   const headers = requestHeaders({ id: ctx.state.providerId, baseUrl: profile.baseUrl, auth: profile.auth, headers: headersWithExtras(profile.headers, params.extraHeaders).headers, ...(key.key ? { apiKey: key.key } : {}) });
   const qs = new URLSearchParams(profile.query ?? {}).toString();
   try {
@@ -167,7 +167,7 @@ async function mcpCommand(args: string[], ctx: CommandCtx, deps: CommandDeps): P
   const base: Record<string, string> = { TERM: 'dumb' };
   for (const k of ['PATH', 'HOME', 'LANG', 'TMPDIR', 'USER']) { const v = ctx.env[k]; if (v !== undefined) base[k] = v; }
   const results = await Promise.all((wanted ? [wanted] : names).map(async (name) => {
-    const { server, missing } = resolveMcpRefs(ctx.cfg.mcpServers[name]!, { env: ctx.env, workspace: ctx.cfg.workspace });
+    const { server, missing } = resolveMcpRefs(ctx.cfg.mcpServers[name]!, { env: ctx.env, workspace: ctx.cfg.workspace, daemonDir: ctx.cfg.daemonDir });
     const r = await probe({ config: { type: server.type, ...(server.url ? { url: server.url } : {}), headers: server.headers, ...(server.command ? { command: server.command } : {}), args: server.args, env: server.env }, env: base, timeoutMs: Math.min(server.listTimeoutMs, 15_000) });
     return { name, r, missing, readOnly: server.readOnly };
   }));

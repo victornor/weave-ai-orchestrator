@@ -156,10 +156,13 @@ export interface ProviderProfile {
   params?: Record<string, unknown>;
   models: Record<string, ProviderModelEntry>;
 }
-export interface ProviderView { id: string; profile: ProviderProfile; secretConfigured: boolean; models: string[] }
+/** VS-633: where a workspace's view of an entry comes from. */
+export type ConfigSource = 'daemon' | 'workspace' | 'override';
+export interface ProviderView { id: string; profile: ProviderProfile; secretConfigured: boolean; models: string[]; source?: ConfigSource }
 /** One preset the add-a-provider flow can start from; the daemon owns the id and the description. */
 export interface PresetSummary { id: string; description: string }
-export interface ProvidersPayload { providers: ProviderView[]; presets: PresetSummary[] }
+/** `disabled` (workspace scope only): inherited daemon providers this workspace hides. */
+export interface ProvidersPayload { providers: ProviderView[]; disabled?: ProviderView[]; presets: PresetSummary[] }
 /** `POST /providers/:id/test` (VS-609): the per-capability probe verdict and the flags it measured. */
 export interface ProviderTestReport { ok?: boolean; provider: string; model: string; checks: Array<{ name: string; ok: boolean; detail: string }>; detected: Record<string, unknown> }
 
@@ -181,8 +184,8 @@ export interface McpServer {
   callTimeoutMs: number;
   readOnly: boolean;
 }
-export interface McpServerView { name: string; config: McpServer; secrets: Array<{ name: string; configured: boolean }> }
-export interface McpServersPayload { servers: McpServerView[] }
+export interface McpServerView { name: string; config: McpServer; secrets: Array<{ name: string; configured: boolean }>; source?: ConfigSource }
+export interface McpServersPayload { servers: McpServerView[]; disabled?: McpServerView[] }
 /** `POST /mcp/:name/test`: the server's tools, or why it could not be reached. */
 export interface McpTestReport { name: string; ok: boolean; tools: Array<{ name: string; description: string }>; error?: string }
 

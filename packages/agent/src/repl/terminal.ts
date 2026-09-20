@@ -74,7 +74,7 @@ export async function runRepl(o: ReplOptions, io: ReplIO, streams?: TerminalStre
   const ensureKey = async (): Promise<boolean> => {
     const profile = cfg.providers[state.providerId];
     if (!profile || profile.auth === 'none' || entered.has(state.providerId)) return true;
-    const k = resolveApiKey({ providerId: state.providerId, profile, env: io.env, workspace: cfg.workspace });
+    const k = resolveApiKey({ providerId: state.providerId, profile, env: io.env, workspace: cfg.workspace, daemonDir: cfg.daemonDir });
     if (k.key) return true;
     if (!tty) { io.stderr(`weave repl: no API key for "${state.providerId}": set ${k.name} in the environment\n`); return false; }
     const typed = await readHidden(t, `API key for ${state.providerId} (${k.name}; kept in memory only, never written): `);
@@ -83,7 +83,7 @@ export async function runRepl(o: ReplOptions, io: ReplIO, streams?: TerminalStre
     return true;
   };
   if (!(await ensureKey())) return 2;
-  const secrets = (): string[] => [resolveApiKey({ providerId: state.providerId, profile: cfg.providers[state.providerId]!, env: io.env, workspace: cfg.workspace }).key, entered.get(state.providerId)].filter((k): k is string => !!k);
+  const secrets = (): string[] => [resolveApiKey({ providerId: state.providerId, profile: cfg.providers[state.providerId]!, env: io.env, workspace: cfg.workspace, daemonDir: cfg.daemonDir }).key, entered.get(state.providerId)].filter((k): k is string => !!k);
 
   const banner = (extra = ''): string => `${dim(color, `weave-agent · ${state.providerId}/${state.model || '(no model: /model list)'} · ${state.permission} · session ${state.sessionId.slice(0, 8)}${extra}`)}\n${dim(color, `${io.cwd}  ·  /help for commands`)}\n`;
   out(banner(s0.resumed ? ` (resumed, ${s0.resumed.messages} messages)` : ''));

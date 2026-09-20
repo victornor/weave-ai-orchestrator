@@ -358,7 +358,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     db, events: bus, registries: createRegistries(), plugins: createPluginRegistry(),
     log: (domain: Parameters<typeof getLogger>[0]) => getLogger(domain),
     loopbackUrl: 'http://127.0.0.1:0', skillsDir: '/tmp/skills', templatesDir: '/tmp/templates',
-    isolated: false, daemonConfigDir: '/tmp/daemon-config',
+    isolated: false, daemonConfigDir: options.daemonConfigDir ?? '/tmp/daemon-config',
     saveConfig: async () => undefined,
   } as unknown as WorkspaceContext;
 

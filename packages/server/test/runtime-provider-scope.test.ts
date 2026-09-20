@@ -2,9 +2,13 @@
  * VS-619: the runtime host and the models route keep provider profiles and keys to the workspace
  * that names them, so a second workspace defining the same provider id never uses the first's key.
  */
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { daemonSecretStore } from '@weave-ai/core';
 import type { RuntimeAdapter } from '@weave-ai/runtime-sdk';
-import type { ProviderProfile } from '@weave-ai/shared';
+import type { DaemonConfig, ProviderProfile } from '@weave-ai/shared';
 import { createApp } from '../src/app.js';
 import { createRuntimeHost } from '../src/daemon.js';
 import type { WorkspaceRuntime } from '../src/types.js';
@@ -31,6 +35,36 @@ describe('createRuntimeHost', () => {
     expect(host.providerKey!('or', 'w2')).toBe('sk-w2-000000');
     expect(host.providers('ghost')).toEqual({});
     expect(host.providerKey!('or', 'ghost')).toBeUndefined();
+  });
+
+  // VS-633: the daemon's providers reach every workspace; a workspace's own entry replaces one.
+  it('gives every workspace the daemon providers, a workspace entry replacing the same id', () => {
+    const d = profile('https://daemon.example.test/v1');
+    const w = profile('https://w1.example.test/v1');
+    const daemon = { providers: { or: d, only: d } } as unknown as DaemonConfig;
+    const host = createRuntimeHost(new Map([
+      ['w1', workspace('w1', { or: w }, undefined)],
+      ['w2', workspace('w2', {}, undefined)],
+    ]), undefined, daemon);
+    expect(host.providers('w1')['or']).toBe(w);
+    expect(host.providers('w1')['only']).toBe(d);
+    expect(host.providers('w2')['or']).toBe(d);
+    expect(host.providers()['or']).toBe(d);
+  });
+
+  it('finds a provider key in the daemon store when the workspace holds none, and prefers the workspace one', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ws-host-'));
+    try {
+      daemonSecretStore(dir)!.put('PROVIDER_KEY', 'sk-daemon-000000');
+      const daemon = { providers: { or: profile('https://daemon.example.test/v1') } } as unknown as DaemonConfig;
+      const host = createRuntimeHost(new Map([
+        ['w1', workspace('w1', {}, undefined)],
+        ['w2', workspace('w2', {}, 'sk-w2-000000')],
+      ]), dir, daemon);
+      expect(host.providerKey!('or', 'w1')).toBe('sk-daemon-000000');
+      expect(host.providerKey!('or', 'w2')).toBe('sk-w2-000000');
+      expect(host.providerKey!('or')).toBe('sk-daemon-000000');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   it('exposes the daemon config directory to a runtime, and nothing when none is given (VS-615)', () => {

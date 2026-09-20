@@ -1,12 +1,16 @@
 /**
- * Settings → MCP servers (VS-621): the MCP servers the built-in `weave` agent may use.
+ * Settings → MCP servers (VS-621, VS-633): the MCP servers the built-in `weave` agent may use.
+ *
+ * Two scopes share these components: the daemon scope defines servers once for every workspace (their
+ * secrets live in the daemon secret store); a workspace scope shows the merged view, with inherited
+ * servers read-only ("from daemon") and Override / Hide here / Remove override actions.
  *
  * A definition never holds a secret: an `env` or `headers` value may carry a `${SECRET_NAME}`
  * reference, entered through the masked secret input and stored in the workspace secret store.
  * A stdio server is arbitrary code the human chose to run on the host, and the copy says so.
  */
 import { useEffect, useState } from 'react';
-import { useClearMcpSecret, useDeleteMcpServer, useMcpServers, useSaveMcpServer, useSetMcpSecret, useTestMcpServer } from '../../../api/hooks';
+import { useClearMcpSecret, useDeleteMcpServer, useMcpServers, useSaveMcpServer, useSetMcpDisabled, useSetMcpSecret, useTestMcpServer, type AgentConfigScope } from '../../../api/hooks';
 import type * as T from '../../../api/types';
 import { Button } from '../../../components/Button';
 import { SkeletonRows } from '../../../components/Skeleton';
@@ -101,16 +105,21 @@ function SecretRow({ name, configured, pending, onSet, onClear }: {
   );
 }
 
-function ServerRow({ view, onSave, onRemove }: { view: T.McpServerView; onSave: (config: T.McpServer) => Promise<void>; onRemove: () => void }): React.ReactElement {
+function ServerRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
+  view: T.McpServerView; scope: AgentConfigScope; onSave: (config: T.McpServer) => Promise<void>; onRemove: () => void;
+  onOverride?: () => void; onHide?: () => void;
+}): React.ReactElement {
   const { name, config, secrets } = view;
+  const inherited = scope === 'workspace' && view.source === 'daemon';
+  const tag = scope === 'workspace' ? (inherited ? 'from daemon' : view.source === 'override' ? 'overrides daemon' : 'this workspace') : null;
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => draftOf(name, config));
   const [report, setReport] = useState<T.McpTestReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const test = useTestMcpServer();
-  const setSecret = useSetMcpSecret();
-  const clearSecret = useClearMcpSecret();
+  const test = useTestMcpServer(scope);
+  const setSecret = useSetMcpSecret(scope);
+  const clearSecret = useClearMcpSecret(scope);
   useEffect(() => { setDraft(draftOf(name, config)); }, [name, config]);
 
   const save = (): void => {
@@ -127,13 +136,38 @@ function ServerRow({ view, onSave, onRemove }: { view: T.McpServerView; onSave: 
       <div className="flex items-baseline gap-2 px-3 py-2">
         <button type="button" className="flex min-w-0 flex-1 items-baseline gap-2 text-left" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
           <span className="ac-mono text-meta text-text-1">{name}</span>
+          {tag ? <span className="v2-tag text-text-2">{tag}</span> : null}
           <span className="v2-tag text-text-2">{config.type}</span>
           <span className="truncate text-micro text-text-3">{config.type === 'http' ? config.url : config.command}</span>
           <span className="text-nano text-text-3">{secrets.filter((s) => s.configured).length}/{secrets.length} secret{secrets.length === 1 ? '' : 's'}</span>
           <span className="ml-auto text-text-3" aria-hidden>{open ? '▾' : '▸'}</span>
         </button>
       </div>
-      {open ? (
+      {open && inherited ? (
+        <div className="v2-anim-fade flex flex-col gap-3 border-t border-line-1 p-3">
+          <p className="text-micro text-text-3">
+            Defined in the daemon settings and used as it is by this workspace. Override it to change it here only, or hide it from this workspace.
+          </p>
+          <div className="grid gap-1 text-micro text-text-2 sm:grid-cols-2">
+            <span>{config.type === 'http' ? 'url' : 'command'} <span className="ac-mono text-text-1">{config.type === 'http' ? config.url : config.command}</span></span>
+            <span>secrets <span className="text-text-1">{secrets.length === 0 ? 'none referenced' : `${secrets.filter((s) => s.configured).length} of ${secrets.length} set`}</span></span>
+          </div>
+          {test.isError ? <span role="alert" className="text-micro text-failed">{test.error.message}</span> : null}
+          {report ? (
+            <div className="v2-recessed flex flex-col gap-1 rounded-r4 border border-line-1 px-3 py-2">
+              {report.ok
+                ? report.tools.map((t) => <div key={t.name} className="flex items-baseline gap-2"><span className="ac-mono text-nano text-text-2">{t.name}</span><span className="min-w-0 flex-1 truncate text-micro text-text-3">{t.description}</span></div>)
+                : <span role="alert" className="text-micro text-failed">{report.error ?? 'The server could not be reached.'}</span>}
+            </div>
+          ) : null}
+          <div className="flex justify-end gap-2">
+            <Button size="sm" disabled={test.isPending} onClick={() => test.mutate(name, { onSuccess: (r) => setReport(r) })}>{test.isPending ? 'Testing…' : 'Test'}</Button>
+            <Button size="sm" variant="primary" onClick={onOverride}>Override</Button>
+            <Button size="sm" onClick={onHide}>Hide here</Button>
+          </div>
+        </div>
+      ) : null}
+      {open && !inherited ? (
         <div className="v2-anim-fade flex flex-col gap-3 border-t border-line-1 p-3">
           <div className="grid gap-2 sm:grid-cols-2">
             <Field label="type">
@@ -200,7 +234,7 @@ function ServerRow({ view, onSave, onRemove }: { view: T.McpServerView; onSave: 
                 <Button size="sm" variant="danger" onClick={onRemove}>Confirm remove</Button>
                 <Button size="sm" onClick={() => setConfirmRemove(false)}>Cancel</Button>
               </>
-            ) : <Button size="sm" variant="danger" onClick={() => setConfirmRemove(true)}>Remove</Button>}
+            ) : <Button size="sm" variant="danger" onClick={() => setConfirmRemove(true)}>{view.source === 'override' ? 'Remove override' : 'Remove'}</Button>}
           </div>
         </div>
       ) : null}
@@ -242,20 +276,24 @@ function AddServer({ onAdd, onCancel }: { onAdd: (name: string, config: T.McpSer
   );
 }
 
-export function McpServersSection(): React.ReactElement {
-  const servers = useMcpServers();
-  const save = useSaveMcpServer();
-  const remove = useDeleteMcpServer();
+export function McpServersSection({ scope = 'workspace' }: { scope?: AgentConfigScope }): React.ReactElement {
+  const servers = useMcpServers(scope);
+  const save = useSaveMcpServer(scope);
+  const remove = useDeleteMcpServer(scope);
+  const hide = useSetMcpDisabled();
   const [adding, setAdding] = useState(false);
   if (servers.isLoading) return <SkeletonRows rows={3} />;
-  if (servers.isError) return <p className="text-micro text-text-3">The workspace's MCP servers could not be read: {servers.error.message}</p>;
+  if (servers.isError) return <p className="text-micro text-text-3">The {scope === 'daemon' ? "daemon's" : "workspace's"} MCP servers could not be read: {servers.error.message}</p>;
   const list = servers.data?.servers ?? [];
+  const hidden = servers.data?.disabled ?? [];
   return (
     <div className="flex flex-col gap-3">
       <p className="text-micro leading-relaxed text-text-3">
         MCP servers for the built-in <span className="ac-mono">weave</span> runtime. A <span className="ac-mono">stdio</span> server
         is arbitrary code you chose to run on the host, launched with a minimal environment. Secrets are referenced as
-        <span className="ac-mono"> {'${SECRET_NAME}'}</span>, stored in the workspace secret store, and never written to this config.
+        <span className="ac-mono"> {'${SECRET_NAME}'}</span>, stored in the {scope === 'daemon' ? 'daemon' : 'workspace'} secret store
+        {scope === 'workspace' ? ' (which wins over a daemon secret of the same name)' : ' and used by every workspace with no secret of that name'}, and never written to this config.
+        {scope === 'daemon' ? ' Defined once here and visible to every workspace.' : ' Inherited daemon servers are read-only here; override or hide one for this workspace.'}
         Only Claude, OpenCode and Codex keep their own MCP config; these servers are Weave AI's own.
       </p>
       <div className="flex items-baseline gap-2">
@@ -265,10 +303,25 @@ export function McpServersSection(): React.ReactElement {
       </div>
       {list.length === 0 && !adding ? <p className="text-micro text-text-3">None configured.</p> : null}
       {list.map((s) => (
-        <ServerRow key={s.name} view={s}
+        <ServerRow key={s.name} view={s} scope={scope}
           onSave={async (config) => { await save.mutateAsync({ name: s.name, config: { ...config, readOnly: config.readOnly } }); }}
-          onRemove={() => remove.mutate(s.name)} />
+          onRemove={() => remove.mutate(s.name)}
+          onOverride={() => void save.mutateAsync({ name: s.name, config: s.config })}
+          onHide={() => hide.mutate({ name: s.name, disabled: true })} />
       ))}
+      {hidden.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <span className="ac-label">Hidden from this workspace</span>
+          {hidden.map((s) => (
+            <div key={s.name} className="v2-card flex items-baseline gap-2 px-3 py-2">
+              <span className="ac-mono text-meta text-text-1">{s.name}</span>
+              <span className="v2-tag text-text-2">from daemon</span>
+              <span className="min-w-0 flex-1 truncate text-micro text-text-3">{s.config.type === 'http' ? s.config.url : s.config.command}</span>
+              <Button size="sm" onClick={() => hide.mutate({ name: s.name, disabled: false })}>Show again</Button>
+            </div>
+          ))}
+        </div>
+      ) : null}
       {adding ? (
         <AddServer onCancel={() => setAdding(false)} onAdd={(name, config) => void save.mutateAsync({ name, config }).then(() => setAdding(false))} />
       ) : null}

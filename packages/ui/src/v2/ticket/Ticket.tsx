@@ -737,7 +737,8 @@ function RunTurn({ run }: { run: Run }): React.ReactElement {
     if (wasLive.current !== live) setOpen(live);
     wasLive.current = live;
   }, [live]);
-  const { events } = useRunEventStream(open ? run.id : null, { live });
+  const stream = useRunEventStream(open ? run.id : null, { live });
+  const { events } = stream;
   const at = run.finishedAt ?? run.startedAt ?? run.createdAt;
   const status = run.status === 'running' ? 'working' : run.status === 'succeeded' ? 'done' : run.status === 'interrupted' || run.status === 'cancelled' ? 'paused' : 'failed';
   return (
@@ -758,7 +759,7 @@ function RunTurn({ run }: { run: Run }): React.ReactElement {
         {run.summary ? <p className="mt-0.5 text-meta leading-relaxed text-text-body">{run.summary}</p> : null}
         {open ? (
           <div className="v2-anim-fade v2-card mt-2 overflow-hidden">
-            <RunTranscript events={events} live={live} label={`Transcript of turn ${run.turnEpoch}`} />
+            <RunTranscript events={events} live={live} stream={stream} runtimeId={run.runtimeId} label={`Transcript of turn ${run.turnEpoch}`} />
           </div>
         ) : null}
       </div>

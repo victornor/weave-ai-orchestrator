@@ -204,7 +204,8 @@ export function WorkerFeed({ agentId, runId, ws, global = false, compact = false
   const recent = useRuns({ limit: 200 }, ws);
   const id = resolved.run?.id ?? runId ?? null;
   const streaming = resolved.run ? resolved.live : false;
-  const { events, status, retryNow } = useRunEventStream(id, { live: streaming, newest: !streaming, ws, global });
+  const stream = useRunEventStream(id, { live: streaming, newest: !streaming, ws, global });
+  const { events, status, retryNow } = stream;
   const [paneHeight, setPaneHeight] = useState(TRACE_PANE_HEIGHT_DEFAULT);
 
   // The status line describes the run the feed actually renders — the worker's, else the passed
@@ -242,12 +243,14 @@ export function WorkerFeed({ agentId, runId, ws, global = false, compact = false
       >
         {id === null ? (
           <p className="px-2.5 py-3 text-micro text-text-3">Waiting for the next turn.</p>
-        ) : events.length === 0 ? (
+        ) : events.length === 0 && !streaming ? (
           <SkeletonRows rows={3} />
         ) : (
           <RunTranscript
             events={events}
             live={streaming}
+            stream={stream}
+            runtimeId={shown?.runtimeId}
             follow={streaming || resizable}
             label={label}
             height={fixedHeight}

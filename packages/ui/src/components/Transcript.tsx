@@ -216,7 +216,7 @@ export function TranscriptLine({ block }: { block: TranscriptBlock }): React.Rea
   const targetLabel = block.targetPath ? targetBaseName(block.targetPath) : block.target;
   const head = (
     <div className={cx('flex items-center gap-2.5 px-2.5 py-1.5', expandable ? 'bg-bg-2' : 'rounded-r4 border border-line-1 bg-bg-2')}>
-      <span className="ac-mono text-nano text-text-3">{block.pending ? '·' : expandable ? (open ? '▾' : '▸') : '▸'}</span>
+      <span className="ac-mono text-nano text-text-3">{block.pending ? <StatusGlyph status="working" size="xs" pulse className="inline-block" title="running" /> : expandable ? (open ? '▾' : '▸') : '▸'}</span>
       <span className={cx('ac-mono text-micro', block.denied ? 'text-needs-you' : block.error ? 'text-failed' : block.pending ? 'text-text-3' : 'text-text-2')}>{block.tool}</span>
       <span className="ac-mono ac-truncate flex-1 text-micro text-text-soft" title={block.targetPath ?? undefined}>{targetLabel}</span>
       {block.adds != null || block.dels != null ? (

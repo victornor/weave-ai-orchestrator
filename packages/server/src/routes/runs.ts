@@ -46,6 +46,8 @@ export function runRoutes(): Hono<AppEnv> {
     return c.json(runs.events(c.req.param('id'), q.after, q.limit));
   });
 
+  app.get('/:id/live', (c) => c.json(c.get('ws').services.runs.live(c.req.param('id'))));
+
   app.get('/:id/events/stream', (c) => {
     const s = c.get('ws').services;
     const runId = c.req.param('id');

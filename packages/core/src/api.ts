@@ -479,6 +479,8 @@ export interface RunsService {
   list(filter?: { agentId?: string; ticketId?: string; status?: S.RunStatus[]; sort?: RunsSort; dir?: RunsSortDir; limit?: number; offset?: number }): Page<S.Run>;
   get(id: string): S.Run;
   events(id: string, afterSeq?: number, limit?: number): S.RunEvent[];
+  /** VS-595: the partial output a live run has shown so far; empty once the run has finished. */
+  live(id: string): S.RunLiveSnapshot;
   /** The last `limit` events of a run, in ascending sequence order — the tail `events()` cannot page to. */
   tail(id: string, limit?: number): S.RunEvent[];
   /** Only the run's `run.phase.timing` events, in order. At most one per `RUN_PHASES` entry, wherever they fall in the run. */

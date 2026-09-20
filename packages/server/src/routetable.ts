@@ -130,6 +130,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: `${W}/runs`, tag: 'runs', summary: 'List runs', auth: 'session' },
   { method: 'GET', path: `${W}/runs/{id}`, tag: 'runs', summary: 'One run', auth: 'session' },
   { method: 'GET', path: `${W}/runs/{id}/events`, tag: 'runs', summary: 'Run events by sequence', auth: 'session' },
+  { method: 'GET', path: `${W}/runs/{id}/live`, tag: 'runs', summary: 'Partial output a live run has shown so far (VS-595)', auth: 'session' },
   { method: 'GET', path: `${W}/runs/{id}/events/stream`, tag: 'runs', summary: 'Run events as SSE', auth: 'session' },
   { method: 'POST', path: `${W}/runs/{id}/cancel`, tag: 'runs', summary: 'Interrupt or kill a run', auth: 'session', mutating: true },
   { method: 'GET', path: `${W}/runs/{id}/log`, tag: 'runs', summary: 'Raw jsonl run log', auth: 'session' },

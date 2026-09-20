@@ -1,5 +1,5 @@
 import { nowIso } from '@weave-ai/db';
-import { OcError, type Run, type RunEvent, type RunStatus, type RunTrace } from '@weave-ai/shared';
+import { OcError, type Run, type RunEvent, type RunLiveSnapshot, type RunStatus, type RunTrace } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Page, RunsService, RunsSort, RunsSortDir } from '../api.js';
 import { recordActivity } from '../events.js';
@@ -63,6 +63,10 @@ export function createRunsService(ctx: WorkspaceContext, _deps: () => CoreServic
       const r = ctx.db.get<Run>('SELECT * FROM runs WHERE id = ? AND workspace_id = ?', [id, ctx.workspaceId]);
       if (!r) throw new OcError('not_found', `run ${id} not found`);
       return r;
+    },
+
+    live(id: string): RunLiveSnapshot {
+      return state.partials.get(id)?.snapshot() ?? { partials: [] };
     },
 
     events(id: string, afterSeq = 0, limit = 500): RunEvent[] {

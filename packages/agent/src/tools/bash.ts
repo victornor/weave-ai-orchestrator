@@ -104,5 +104,8 @@ function format(full: string, dropped: boolean, code: number | null, timedOut: b
   }
   if (timedOut) footer += `\n[timed out after ${timeoutSec}s]`;
   const exit = timedOut ? null : code;
-  return { text: `${text}${footer}\nexit code: ${exit ?? 'none'}`, isError: timedOut || (code !== null && code !== 0), meta: { command, exitCode: exit } };
+  const body = `${text}${footer}\nexit code: ${exit ?? 'none'}`;
+  const isError = timedOut || (code !== null && code !== 0);
+  ctx.emit('command.executed', { command, exitCode: exit, output: body.slice(0, 20_000), isError });
+  return { text: body, isError, meta: { command, exitCode: exit } };
 }

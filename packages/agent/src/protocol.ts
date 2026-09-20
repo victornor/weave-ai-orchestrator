@@ -10,8 +10,10 @@ export interface InitMessage {
   run: {
     runId: string; turnEpoch: number; cwd: string; worktree: { path: string; branch: string } | null;
     limits: { timeoutMs: number; maxTurns?: number };
-    permission: { mode: 'auto' | 'restricted' | 'bypass'; allowedTools?: string[]; deniedTools?: string[]; firstTurn?: boolean };
+    permission: { mode: 'auto' | 'restricted' | 'bypass'; allowedTools?: string[]; deniedTools?: string[]; bashDeny?: string[]; firstTurn?: boolean };
     model: string; effort?: string | null; options: Record<string, unknown>;
+    /** The runtime's config home (`<workspace state>/runtimes/<runtime>`), the confinement's state-dir anchor. */
+    configHome?: string;
     /** Per-run scratch directory outside the worktree: bash output spill goes here. */
     spillDir: string;
   };

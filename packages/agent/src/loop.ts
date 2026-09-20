@@ -1,13 +1,19 @@
 import { completeCompat } from './codec/params.js';
 import { buildRequest, classifyHttp, parseArgs, StreamReducer, type StepResult } from './codec/chatCompletions.js';
 import { McpHttpClient } from './mcp/http.js';
+import { bashDenial, isAllowedByLists, modeToolNames, toolDenial, type PermissionConfig } from './permission.js';
 import { chatCompletionsUrl, requestHeaders, requestOptions, shellEnv } from './profile.js';
 import type { ChildEvent, ChildPartial, ChildResult, InitMessage } from './protocol.js';
 import { Session } from './session.js';
 import { SseParser } from './sse.js';
 import { bashTool } from './tools/bash.js';
-import { errorOutput, toolSpecs, type ToolDefinition } from './tools/index.js';
+import { editTool } from './tools/edit.js';
+import { rgAvailable, grepTool } from './tools/grep.js';
+import { globTool } from './tools/glob.js';
+import { errorOutput, toolSpecs, type ToolCtx, type ToolDefinition } from './tools/index.js';
+import { ReadLedger } from './tools/ledger.js';
 import { readTool } from './tools/read.js';
+import { writeTool } from './tools/write.js';
 import type { AgentError, ContentBlock, Message, Usage } from './types.js';
 
 export interface LoopIO {
@@ -72,6 +78,13 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
   const compat = completeCompat(provider.compat);
   const wtCwd = run.worktree?.path ?? run.cwd;
   const env = shellEnv(init.toolEnv, provider.apiKey);
+  const permissionCfg: PermissionConfig = {
+    mode: run.permission.mode,
+    ...(run.permission.allowedTools ? { allowedTools: run.permission.allowedTools } : {}),
+    ...(run.permission.deniedTools ? { deniedTools: run.permission.deniedTools } : {}),
+    ...(run.permission.firstTurn ? { firstTurn: true } : {}),
+    ...(run.permission.bashDeny ? { bashDeny: run.permission.bashDeny } : {}),
+  };
   const isFirst = session.messages.length === 0;
   const tokens = { prompt: 0, completion: 0, cached: 0 };
   let firstRequest: { freshTokens: number; cachedTokens: number } | undefined;
@@ -99,10 +112,13 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
   };
 
   try {
-    // Tools: core `read`/`bash` plus every MCP tool. A `restricted` turn gets no shell.
-    const tools = new Map<string, ToolDefinition>();
-    const core = run.permission.mode === 'restricted' ? [readTool] : [readTool, bashTool];
-    for (const t of core) tools.set(t.name, t);
+    // Tools: the six core tools plus every MCP tool. The mode removes the write-capable core tools
+    // from the request itself; `all` keeps every tool so a call the mode removed is answered with a
+    // permission denial rather than "unknown tool".
+    const coreByName: Record<string, ToolDefinition> = { read: readTool, write: writeTool, edit: editTool, bash: bashTool, grep: grepTool, glob: globTool };
+    const modeNames = new Set<string>(modeToolNames(run.permission.mode));
+    const coreNames = new Set(Object.keys(coreByName));
+    const all = new Map<string, ToolDefinition>(Object.entries(coreByName));
     try {
       for (const [server, cfg] of Object.entries(init.mcpServers)) {
         const client = new McpHttpClient({ url: cfg.url, ...(cfg.headers ? { headers: cfg.headers } : {}), ...(deps.fetch ? { fetch: deps.fetch } : {}) });
@@ -110,7 +126,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
           await client.initialize(signal);
           for (const t of await client.listTools(signal)) {
             const name = server === WEAVE_MCP_SERVER ? t.name : `mcp__${server}__${t.name}`.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64);
-            tools.set(name, { name, description: t.description, parameters: t.inputSchema, readOnly: t.readOnly, run: async (args, ctx) => { const r = await client.callTool(t.name, args, ctx.signal); return { text: r.text, isError: r.isError }; } });
+            all.set(name, { name, description: t.description, parameters: t.inputSchema, readOnly: t.readOnly, run: async (args, ctx) => { const r = await client.callTool(t.name, args, ctx.signal); return { text: r.text, isError: r.isError }; } });
           }
           mcpClients.push(client);
         } catch (e) {
@@ -120,7 +136,16 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
         }
       }
     } catch (e) { if (e instanceof StepFailure) { emit('error', { code: e.err.code, family: e.err.family, message: e.err.message }); return finish(result({ exitCode: 1, error: e.err }), true); } throw e; }
-    applyPermissionFilter(tools, run.permission);
+    const tools = new Map<string, ToolDefinition>();
+    for (const [name, tool] of all) {
+      if (coreNames.has(name) && !modeNames.has(name)) continue;
+      if (!isAllowedByLists(name, permissionCfg)) continue;
+      tools.set(name, tool);
+    }
+    const modeAllows = (name: string): boolean => !coreNames.has(name) || modeNames.has(name);
+    const ledger = new ReadLedger();
+    const rg = rgAvailable();
+    if (!rg) io.log('info', 'ripgrep is not on PATH; using the built-in search');
 
     const system = [PREAMBLE, init.systemPrompt.mode === 'inject' ? init.systemPrompt.text : ''].filter(Boolean).join('\n\n');
     session.append({ role: 'user', text: isFirst ? `${envBlock(run.cwd, wtCwd, run.worktree?.branch)}\n\n${init.prompt}` : init.prompt });
@@ -165,14 +190,26 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
           if (signal.aborted) throw new Cancelled();
           emit('tool.call', { id: c.id, name: c.name, input: args.ok ? args.value : c.argsText, partId: c.id });
           const tool = tools.get(c.name);
-          let out = tool === undefined ? errorOutput(`unknown tool "${c.name}". Available: ${[...tools.keys()].join(', ')}`)
-            : !args.ok ? errorOutput(`arguments for ${c.name} are not valid JSON (${args.error}); send one JSON object`)
-            : await tool.run(args.value as Record<string, unknown>, { cwd: wtCwd, env, signal, callId: c.id, spillDir: run.spillDir }).catch((e: unknown) => errorOutput((e as Error).message));
+          const toolCtx: ToolCtx = { cwd: wtCwd, home: run.cwd, configHome: run.configHome, mode: run.permission.mode, env, signal, callId: c.id, spillDir: run.spillDir, ledger, rg, emit: (type, payload) => emit(type, { id: c.id, ...payload }) };
+          let out: Awaited<ReturnType<ToolDefinition['run']>>;
+          let denied = false;
+          if (tool === undefined) {
+            const d = all.has(c.name) ? toolDenial(c.name, permissionCfg, modeAllows) : null;
+            if (d) { denied = true; emit('tool.denied', { id: c.id, name: c.name, reason: d.reason }); out = { text: d.text, isError: true }; }
+            else out = errorOutput(`unknown tool "${c.name}". Available: ${[...tools.keys()].join(', ')}`);
+          } else if (!args.ok) {
+            out = errorOutput(`arguments for ${c.name} are not valid JSON (${args.error}); send one JSON object`);
+          } else if (c.name === 'bash' && typeof (args.value as Record<string, unknown>)['command'] === 'string') {
+            const d = bashDenial((args.value as Record<string, unknown>)['command'] as string, permissionCfg);
+            if (d) { denied = true; emit('tool.denied', { id: c.id, name: c.name, reason: d.reason }); out = { text: d.text, isError: true }; }
+            else out = await tool.run(args.value as Record<string, unknown>, toolCtx).catch((e: unknown) => errorOutput((e as Error).message));
+          } else {
+            out = await tool.run(args.value as Record<string, unknown>, toolCtx).catch((e: unknown) => errorOutput((e as Error).message));
+          }
           if (out.text.length === 0) out = { ...out, text: '(no output)' };
           session.append({ role: 'toolResult', toolCallId: c.id, name: c.name, text: out.text, isError: out.isError === true });
           done.add(c.id);
-          emit('tool.result', { id: c.id, name: c.name, status: out.isError ? 'error' : 'completed', isError: out.isError === true, content: out.text.slice(0, 20_000) });
-          if (c.name === 'bash') emit('command.executed', { id: c.id, command: out.meta?.command, exitCode: out.meta?.exitCode ?? null, output: out.text.slice(0, 20_000), isError: out.isError === true });
+          if (!denied) emit('tool.result', { id: c.id, name: c.name, status: out.isError ? 'error' : 'completed', isError: out.isError === true, content: out.text.slice(0, 20_000) });
         }
       } finally {
         // Whatever ended the loop early, the persisted history keeps every call paired with a result.
@@ -280,11 +317,4 @@ async function estimateUsage(body: Record<string, unknown>, step: StepResult): P
 
 function envBlock(home: string, cwd: string, branch: string | undefined): string {
   return `<env>\ndate: ${new Date().toISOString().slice(0, 10)}\nworktree: ${cwd}\nagent home: ${home}\nplatform: ${process.platform}${branch ? `\nbranch: ${branch}` : ''}\n</env>`;
-}
-
-/** `allowedTools` is exhaustive when set on an interactive first turn; `deniedTools` always removes. Names match case-insensitively. */
-function applyPermissionFilter(tools: Map<string, ToolDefinition>, p: InitMessage['run']['permission']): void {
-  const lower = (l: string[]): Set<string> => new Set(l.map((s) => s.toLowerCase()));
-  if (p.deniedTools?.length) { const d = lower(p.deniedTools); for (const n of [...tools.keys()]) if (d.has(n.toLowerCase())) tools.delete(n); }
-  if (p.firstTurn && p.allowedTools?.length) { const a = lower(p.allowedTools); for (const n of [...tools.keys()]) if (!a.has(n.toLowerCase())) tools.delete(n); }
 }

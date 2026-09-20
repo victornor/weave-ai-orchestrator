@@ -1,6 +1,6 @@
 import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
 import { errorOutput, type ToolDefinition } from './index.js';
+import { confinePath } from './confine.js';
 
 export const READ_MAX_LINES = 2000;
 export const READ_MAX_BYTES = 50 * 1024;
@@ -22,7 +22,9 @@ export const readTool: ToolDefinition = {
   },
   async run(args, ctx) {
     if (typeof args['path'] !== 'string' || !args['path']) return errorOutput('path is required');
-    const path = isAbsolute(args['path']) ? args['path'] : resolve(ctx.cwd, args['path']);
+    const confined = confinePath(args['path'], 'read', ctx);
+    if (!confined.ok) return errorOutput(confined.error);
+    const path = confined.path;
     let st;
     try { st = statSync(path); } catch { return errorOutput(`no such file or directory: ${path}`); }
     if (st.isDirectory()) {
@@ -32,6 +34,7 @@ export const readTool: ToolDefinition = {
     }
     if (st.size > FILE_MAX_BYTES) return errorOutput(`file is ${st.size} bytes; too large to read, use bash`);
     if (isBinary(path, st.size)) return errorOutput('binary file');
+    ctx.ledger.record(path);
     const offset = typeof args['offset'] === 'number' ? Math.max(1, Math.floor(args['offset'])) : 1;
     const limit = typeof args['limit'] === 'number' ? Math.min(READ_MAX_LINES, Math.max(1, Math.floor(args['limit']))) : READ_MAX_LINES;
     const lines = readFileSync(path, 'utf8').split('\n');

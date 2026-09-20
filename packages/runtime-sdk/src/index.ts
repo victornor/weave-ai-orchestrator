@@ -45,7 +45,7 @@ export interface TurnInput {
    * and, where a runtime exposes its own tool switch (opencode's `tools` config), disable everything
    * outside it. The MCP server enforces the same list off the run token, so it holds on any runtime.
    */
-  permission: { mode: PermissionMode; allowedTools?: string[]; deniedTools?: string[]; firstTurn?: boolean };
+  permission: { mode: PermissionMode; allowedTools?: string[]; deniedTools?: string[]; bashDeny?: string[]; firstTurn?: boolean };
   model?: string | null; effort?: string | null; configHome?: string;
   /**
    * VS-579: when set, the adapter spawns this turn inside a memory-limited systemd scope. Absent

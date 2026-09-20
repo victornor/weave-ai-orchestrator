@@ -495,7 +495,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       );
     }
 
-    const permission = (role?.permission ?? {}) as { mode?: PermissionMode; allowed?: string[]; denied?: string[] };
+    const permission = (role?.permission ?? {}) as { mode?: PermissionMode; allowed?: string[]; denied?: string[]; bashDeny?: string[] };
     // VS-317: a worker's turn denies the runtime's own scheduling tools, whose timer dies with the
     // turn, so it must use `weave_schedule_wakeup` instead. Declared by the adapter; the role's own
     // denials and the weaver's turn are untouched.
@@ -561,6 +561,8 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
         mode: agent.kind === 'weaver' ? 'bypass' : agent.kind === 'planner' ? 'restricted' : (permission.mode ?? ctx.config.defaults.permissionMode ?? 'auto'),
         allowedTools,
         deniedTools,
+        // VS-608: the built-in agent's `auto` mode appends the role's own bash deny patterns.
+        ...(permission.bashDeny?.length ? { bashDeny: permission.bashDeny } : {}),
         // VS-462: a runtime with its own tool switch (opencode) disables everything outside this
         // list on the opening turn; a runtime with none still cannot reach past it via MCP.
         ...(isFirstInteractiveTurn ? { firstTurn: true } : {}),

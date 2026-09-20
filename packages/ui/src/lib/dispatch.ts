@@ -15,6 +15,7 @@
 import type { Agent, AgentStatus, Decision, RunTrace, Ticket, ThreadMessage, UiStatus } from '@weave-ai/shared';
 import { agentUiStatus, isActiveRun, ticketUiStatus } from '@weave-ai/shared';
 import { decisionCardPartsOf } from '@weave-ai/render';
+import { ticketIdentifiersIn } from './ticketLinks';
 
 /** A worker in one of these has stopped; the ticket is then the honest record of how the work ended. */
 const FINISHED: readonly AgentStatus[] = ['done', 'retired'];
@@ -30,6 +31,12 @@ export interface ChatEntry {
   message: ThreadMessage;
   /** Dispatches anchored to this message, in the order their tickets were filed. */
   dispatches: Dispatch[];
+  /**
+   * VS-634: every ticket the message references, de-duplicated and in the order the message first
+   * mentions them — the identifiers in its body, then the dispatches it filed but did not name.
+   * Empty for a message that names no ticket.
+   */
+  references: Dispatch[];
   /** Decisions the run behind this message raised, in the order they were raised. */
   decisions: Decision[];
 }
@@ -76,6 +83,37 @@ function isDispatched(t: Ticket): boolean {
 }
 
 /**
+ * VS-634: the tickets one message references, for the strip under it. The identifiers in the message
+ * body come first, in the order they are first mentioned; a ticket a dispatch filed but the message
+ * did not name follows, in the order its dispatch was recorded. An identifier with no ticket in the
+ * workspace is silently skipped, and each ticket appears once.
+ */
+function referencesFor(
+  message: ThreadMessage,
+  dispatches: Dispatch[],
+  byIdentifier: Map<string, Ticket>,
+  workers: Agent[],
+): Dispatch[] {
+  const references: Dispatch[] = [];
+  const seen = new Set<string>();
+  if (message.direction === 'outbound') {
+    for (const identifier of ticketIdentifiersIn(message.body)) {
+      const ticket = byIdentifier.get(identifier);
+      if (!ticket || seen.has(ticket.id)) continue;
+      seen.add(ticket.id);
+      const worker = workerFor(ticket.id, workers);
+      references.push({ ticket, worker, status: dispatchStatus(ticket, worker) });
+    }
+  }
+  for (const dispatch of dispatches) {
+    if (seen.has(dispatch.ticket.id)) continue;
+    seen.add(dispatch.ticket.id);
+    references.push(dispatch);
+  }
+  return references;
+}
+
+/**
  * The chat's ordered entries: every message, each followed by the dispatches anchored to it, plus the
  * live work no message accounts for. Everything is derived from persisted fields, so a reload rebuilds
  * the same entries in the same order.
@@ -83,7 +121,6 @@ function isDispatched(t: Ticket): boolean {
 export function chatEntries(messages: ThreadMessage[], tickets: Ticket[], workers: Agent[], decisions: Decision[] = []): ChatEntries {
   const byRun = anchors(messages);
   const byMessage = new Map<string, Dispatch[]>();
-  const anchored = new Set<string>();
 
   const dispatched = tickets
     .filter((t) => t.createdRunId && isDispatched(t) && byRun.has(t.createdRunId))
@@ -95,7 +132,6 @@ export function chatEntries(messages: ThreadMessage[], tickets: Ticket[], worker
     const list = byMessage.get(messageId) ?? [];
     list.push({ ticket, worker, status: dispatchStatus(ticket, worker) });
     byMessage.set(messageId, list);
-    anchored.add(ticket.id);
   }
 
   // A decision's own message is the one whose card names it, by `ref.id`; the run that raised it is
@@ -121,13 +157,25 @@ export function chatEntries(messages: ThreadMessage[], tickets: Ticket[], worker
     decisionsByMessage.set(messageId, list);
   }
 
-  return {
-    entries: messages.map((message) => ({
+  const byIdentifier = new Map(tickets.map((t) => [t.identifier, t] as const));
+  const entries: ChatEntry[] = messages.map((message) => {
+    const dispatches = byMessage.get(message.id) ?? [];
+    return {
       message,
-      dispatches: byMessage.get(message.id) ?? [],
+      dispatches,
+      references: referencesFor(message, dispatches, byIdentifier, workers),
       decisions: decisionsByMessage.get(message.id) ?? [],
-    })),
-    unattributed: workers.filter((w) => !FINISHED.includes(w.status) && !(w.ticketId && anchored.has(w.ticketId))),
+    };
+  });
+
+  // VS-634: a worker is unaccounted for only when no message in the thread chips its ticket —
+  // whether that ticket was dispatched by a turn or merely named in a reply.
+  const chipped = new Set<string>();
+  for (const entry of entries) for (const reference of entry.references) chipped.add(reference.ticket.id);
+
+  return {
+    entries,
+    unattributed: workers.filter((w) => !FINISHED.includes(w.status) && !(w.ticketId && chipped.has(w.ticketId))),
   };
 }
 

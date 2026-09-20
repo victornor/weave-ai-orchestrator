@@ -690,7 +690,7 @@ describe('the V2 Chat screen', () => {
     expect(await screen.findByText('Jumped to a message in the conversation')).toBeInTheDocument();
   });
 
-  it('renders a turn’s dispatched tickets as chips and the live workers with no message as a row (VS-412)', async () => {
+  it('renders a turn’s dispatched tickets as chips and the live workers with no message as a row (VS-412, VS-634)', async () => {
     state.messages = [message({ id: 'm1', runId: 'r1', body: 'Filed two tickets.' })];
     state.traces = [trace('r1')];
     state.tickets = [
@@ -714,9 +714,10 @@ describe('the V2 Chat screen', () => {
     expect(chips[1]!.textContent).toContain('Follow-up');
     expect(chips[1]!.textContent).toContain('done');
 
-    // A chip with a worker opens the worker; one filed before a worker exists opens the ticket.
+    // Every chip opens its ticket through the chat's one shared link handler (VS-634), the same
+    // handler an identifier in the message text uses — a chip with a worker no longer opens the worker.
     fireEvent.click(chips[0]!);
-    expect(state.go).toHaveBeenCalledWith('/w/$ws/workers/$workerId', { params: { ws: 'ws1', workerId: 'w1' } });
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'VS-1' } });
     fireEvent.click(chips[1]!);
     expect(state.go).toHaveBeenCalledWith('/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'VS-2' } });
 
@@ -735,6 +736,55 @@ describe('the V2 Chat screen', () => {
     ];
     utils.rerender(<V2ChatPage />);
     await waitFor(() => expect(document.querySelectorAll('[data-v2-dispatch-chip]')[0]!.textContent).toContain('idle'));
+  });
+
+  it('carries its own strip under each message that references tickets, and none under one that does not (VS-634)', async () => {
+    state.messages = [
+      message({ id: 'm1', body: 'Moved VS-633 to review and re-queued VS-621.' }),
+      message({ id: 'm2', body: 'Nothing to reference here.' }),
+    ];
+    state.tickets = [
+      ticket({ id: 'tk1', identifier: 'VS-633', title: 'The first' }),
+      ticket({ id: 'tk2', identifier: 'VS-621', title: 'The second' }),
+    ];
+    render(<V2ChatPage />);
+    await waitFor(() => expect(document.querySelectorAll('[data-v2-ticket-strip]')).toHaveLength(1));
+    const chips = document.querySelectorAll('[data-v2-ticket-strip] [data-v2-dispatch-chip]');
+    expect(chips).toHaveLength(2);
+    expect(chips[0]!.textContent).toContain('VS-633');
+    expect(chips[0]!.textContent).toContain('The first');
+    expect(chips[1]!.textContent).toContain('VS-621');
+  });
+
+  it('opens a ticket from a chip through the same handler an identifier uses (VS-634)', async () => {
+    state.messages = [message({ id: 'm1', body: 'See VS-7 for the detail.' })];
+    state.tickets = [ticket({ id: 'tk7', identifier: 'VS-7', title: 'The detail' })];
+    render(<V2ChatPage />);
+    await waitFor(() => expect(document.querySelector('[data-v2-ticket-strip]')).not.toBeNull());
+    fireEvent.click(document.querySelector('[data-v2-ticket-strip] [data-v2-dispatch-chip]')!);
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'VS-7' } });
+  });
+
+  it('keeps a worker whose ticket a message merely names out of the bottom row (VS-634)', async () => {
+    state.messages = [message({ id: 'm1', body: 'Watching VS-5 while it runs.' })];
+    state.tickets = [ticket({ id: 'tk5', identifier: 'VS-5', title: 'Running thing' })];
+    state.workers = [agent({ id: 'w5', name: 'Platform Engineer #9', status: 'running', ticketId: 'tk5' })];
+    render(<V2ChatPage />);
+    await waitFor(() => expect(document.querySelector('[data-v2-ticket-strip]')).not.toBeNull());
+    expect(document.querySelector('[data-v2-live-worker-row]')).toBeNull();
+  });
+
+  it('caps a strip at six chips and expands the rest in place (VS-634)', async () => {
+    const identifiers = ['VS-1', 'VS-2', 'VS-3', 'VS-4', 'VS-5', 'VS-6', 'VS-7'];
+    state.messages = [message({ id: 'm1', body: `Touching ${identifiers.join(', ')}.` })];
+    state.tickets = identifiers.map((identifier, i) => ticket({ id: `tk${i}`, identifier, title: `Ticket ${i}` }));
+    render(<V2ChatPage />);
+    await waitFor(() => expect(document.querySelector('[data-v2-ticket-strip]')).not.toBeNull());
+    expect(document.querySelectorAll('[data-v2-ticket-strip] [data-v2-dispatch-chip]')).toHaveLength(6);
+    expect(document.querySelector('[data-v2-ticket-strip-more]')?.textContent).toContain('+1 more');
+    fireEvent.click(document.querySelector('[data-v2-ticket-strip-more]')!);
+    await waitFor(() => expect(document.querySelectorAll('[data-v2-ticket-strip] [data-v2-dispatch-chip]')).toHaveLength(7));
+    expect(document.querySelector('[data-v2-ticket-strip-more]')).toBeNull();
   });
 
   it('returns to the bottom and follows the reply when a message is sent from a scrolled-up view (VS-451)', async () => {

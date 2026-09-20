@@ -111,6 +111,68 @@ describe('chatEntries', () => {
   });
 });
 
+describe('chatEntries — ticket references (VS-634)', () => {
+  it('chips every ticket a message names, in first-mention order and without a dispatch', () => {
+    const messages = [message({ id: 'm1', body: 'Moved VS-633 to review; re-queued VS-621.' })];
+    const tickets = [ticket({ id: 'tk_a', identifier: 'VS-633' }), ticket({ id: 'tk_b', identifier: 'VS-621' })];
+    const { entries } = chatEntries(messages, tickets, []);
+    expect(entries[0]!.references.map((r) => r.ticket.identifier)).toEqual(['VS-633', 'VS-621']);
+    expect(entries[0]!.dispatches).toEqual([]);
+  });
+
+  it('shows a ticket mentioned several times once', () => {
+    const messages = [message({ id: 'm1', body: 'VS-633, then VS-633 again, and VS-633 once more.' })];
+    const { entries } = chatEntries(messages, [ticket({ id: 'tk_a', identifier: 'VS-633' })], []);
+    expect(entries[0]!.references.map((r) => r.ticket.identifier)).toEqual(['VS-633']);
+  });
+
+  it('skips an identifier that resolves to no ticket', () => {
+    const messages = [message({ id: 'm1', body: 'VS-633 and the unknown VS-999.' })];
+    const { entries } = chatEntries(messages, [ticket({ id: 'tk_a', identifier: 'VS-633' })], []);
+    expect(entries[0]!.references.map((r) => r.ticket.identifier)).toEqual(['VS-633']);
+  });
+
+  it('does not double-count a ticket that is both named and dispatched', () => {
+    const messages = [message({ id: 'm1', body: 'Filed VS-633 for the fix.' })];
+    const tickets = [dispatched({ id: 'tk_a', identifier: 'VS-633' })];
+    const { entries } = chatEntries(messages, tickets, []);
+    expect(entries[0]!.references.map((r) => r.ticket.identifier)).toEqual(['VS-633']);
+    expect(entries[0]!.dispatches.map((d) => d.ticket.identifier)).toEqual(['VS-633']);
+  });
+
+  it('includes a dispatch the message did not name, after the named tickets', () => {
+    const messages = [message({ id: 'm1', body: 'Also see VS-99.' })];
+    const tickets = [
+      dispatched({ id: 'tk_dis', identifier: 'VS-1', createdAt: '2026-09-01T09:00:01.000Z' }),
+      ticket({ id: 'tk_ref', identifier: 'VS-99' }),
+    ];
+    const { entries } = chatEntries(messages, tickets, []);
+    expect(entries[0]!.references.map((r) => r.ticket.identifier)).toEqual(['VS-99', 'VS-1']);
+  });
+
+  it('does not chip a ticket that only appears inside a code span', () => {
+    const messages = [message({ id: 'm1', body: 'The literal `VS-633` is not a reference.' })];
+    const { entries } = chatEntries(messages, [ticket({ id: 'tk_a', identifier: 'VS-633' })], []);
+    expect(entries[0]!.references).toEqual([]);
+  });
+
+  it('omits a running worker whose ticket a message merely names', () => {
+    const messages = [message({ id: 'm1', body: 'Tracking VS-5 while it runs.' })];
+    const tickets = [ticket({ id: 'tk_5', identifier: 'VS-5' })];
+    const workers = [agent({ id: 'w5', ticketId: 'tk_5', status: 'running' })];
+    expect(chatEntries(messages, tickets, workers).unattributed).toEqual([]);
+  });
+
+  it('carries the worker and its live status on a referenced ticket', () => {
+    const messages = [message({ id: 'm1', body: 'Waiting on VS-5.' })];
+    const tickets = [ticket({ id: 'tk_5', identifier: 'VS-5', title: 'Something' })];
+    const workers = [agent({ id: 'w5', ticketId: 'tk_5', name: 'Platform Engineer #552', status: 'running' })];
+    const [reference] = chatEntries(messages, tickets, workers).entries[0]!.references;
+    expect(reference!.worker?.name).toBe('Platform Engineer #552');
+    expect(reference!.status).toBe('working');
+  });
+});
+
 describe('chatEntries — decisions', () => {
   const asked = (over = {}) => decision({ kind: 'question', askedInRunId: 'run_1', ...over });
 

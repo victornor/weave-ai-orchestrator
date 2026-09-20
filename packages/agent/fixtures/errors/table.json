@@ -1,0 +1,275 @@
+[
+ {
+  "name": "cheaper: bad key",
+  "source": "cheaper-inference (VS-605 probe 5.12)",
+  "status": 401,
+  "body": "{\"error\":{\"message\":\"Invalid API key.\",\"type\":\"authentication_error\",\"param\":null,\"code\":\"invalid_api_key\"}}",
+  "expect": {
+   "code": "auth_failed",
+   "family": "auth"
+  }
+ },
+ {
+  "name": "cheaper: unknown model",
+  "source": "cheaper-inference (VS-605 probe 5.12)",
+  "status": 400,
+  "body": "{\"error\":{\"message\":\"Model 'no-such-model-xyz' is not listed on the marketplace. Any model from GET /v1/models works; check the id for typos.\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"invalid_request\"}}",
+  "expect": {
+   "code": "model_not_found",
+   "family": "tooling"
+  }
+ },
+ {
+  "name": "cheaper: malformed json",
+  "source": "cheaper-inference (VS-605 probe 5.12)",
+  "status": 400,
+  "body": "{\"error\":{\"message\":\"Request body must be valid JSON.\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"invalid_request\"}}",
+  "expect": {
+   "code": "invalid_request",
+   "family": "tooling"
+  }
+ },
+ {
+  "name": "cheaper: bad role, deepseek, 502 routes failed after 6",
+  "source": "cheaper-inference (VS-605 probe 5.12)",
+  "status": 502,
+  "body": "{\"error\":{\"message\":\"All available provider routes failed after 6 attempts. If it keeps happening, contact support and quote the request id.\",\"type\":\"api_error\",\"param\":null,\"code\":\"upstream_error\"}}",
+  "expect": {
+   "code": "gateway_routes_failed",
+   "family": "transient_upstream",
+   "maxRetries": 1
+  }
+ },
+ {
+  "name": "cheaper: bad role, gpt, 400 routes failed after 4",
+  "source": "cheaper-inference (VS-605 probe 5.12)",
+  "status": 400,
+  "body": "{\"error\":{\"message\":\"All available provider routes failed after 4 attempts. If it keeps happening, contact support and quote the request id.\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"invalid_request\"}}",
+  "expect": {
+   "code": "gateway_routes_failed",
+   "family": "transient_upstream",
+   "maxRetries": 1
+  }
+ },
+ {
+  "name": "deepseek: insufficient balance",
+  "source": "deepseek direct (VS-605 probe 5.12)",
+  "status": 402,
+  "body": "{\"error\":{\"message\":\"Insufficient Balance\",\"type\":\"unknown_error\",\"param\":null,\"code\":\"invalid_request_error\"}}",
+  "expect": {
+   "code": "quota_exhausted",
+   "family": "provider_quota"
+  }
+ },
+ {
+  "name": "deepseek: bad key",
+  "source": "deepseek direct (VS-605 probe 5.12)",
+  "status": 401,
+  "body": "{\"error\":{\"message\":\"Authentication Fails, Your api key: ****robe is invalid\",\"type\":\"authentication_error\",\"param\":null,\"code\":\"invalid_request_error\"}}",
+  "expect": {
+   "code": "auth_failed",
+   "family": "auth"
+  }
+ },
+ {
+  "name": "deepseek: bad role 422",
+  "source": "deepseek direct (VS-605 probe 5.12)",
+  "status": 422,
+  "body": "{\"error\":{\"message\":\"Failed to deserialize the JSON body into the target type: messages[0].role: unknown variant `wizard`, expected one of `system`, `user`, `assistant`, `tool`, `latest_reminder` at line 1 column 54\",\"type\":\"invalid_request_error\",\"param\":null,\"code\":\"invalid_request_error\"}}",
+  "expect": {
+   "code": "invalid_request",
+   "family": "tooling"
+  }
+ },
+ {
+  "name": "zai: bad key",
+  "source": "Z.ai coding plan (VS-605 probe 5.12)",
+  "status": 401,
+  "body": "{\"error\":{\"code\":\"401\",\"message\":\"token expired or incorrect\"}}",
+  "expect": {
+   "code": "auth_failed",
+   "family": "auth"
+  }
+ },
+ {
+  "name": "zai: unknown model 1211",
+  "source": "Z.ai coding plan (VS-605 probe 5.12)",
+  "status": 400,
+  "body": "{\"error\":{\"code\":\"1211\",\"message\":\"Unknown Model, please check the model code.\"}}",
+  "expect": {
+   "code": "model_not_found",
+   "family": "tooling"
+  }
+ },
+ {
+  "name": "zai: leaked Spring parse error",
+  "source": "Z.ai coding plan (VS-605 probe 5.12)",
+  "status": 400,
+  "body": "{\"error\":{\"message\":\"JSON parse error: Unexpected end-of-input within/between Object entries; nested exception is com.fasterxml.jackson.core.io.JsonEOFException: Unexpected end-of-input within/between Object entries\\n at [Source: (org.springframework.util.StreamUtils$NonClosingInputStream); line: 1, column: 10]\",\"code\":\"400\"}}",
+  "expect": {
+   "code": "invalid_request",
+   "family": "tooling"
+  }
+ },
+ {
+  "name": "zai: incorrect role 1214",
+  "source": "Z.ai coding plan (VS-605 probe 5.12)",
+  "status": 400,
+  "body": "{\"error\":{\"code\":\"1214\",\"message\":\"Incorrect role information\"}}",
+  "expect": {
+   "code": "invalid_request",
+   "family": "tooling"
+  }
+ },
+ {
+  "name": "openrouter: missing authentication",
+  "source": "OpenRouter (VS-605 probe 5.12)",
+  "status": 401,
+  "body": "{\"error\":{\"message\":\"Missing Authentication header\",\"code\":401}}",
+  "expect": {
+   "code": "auth_failed",
+   "family": "auth"
+  }
+ },
+ {
+  "name": "openrouter: unknown model",
+  "source": "OpenRouter (VS-605 probe 5.12)",
+  "status": 400,
+  "body": "{\"error\":{\"message\":\"no-such-model-xyz is not a valid model ID\",\"code\":400},\"user_id\":\"<redacted>\"}",
+  "expect": {
+   "code": "model_not_found",
+   "family": "tooling"
+  }
+ },
+ {
+  "name": "openrouter: empty input",
+  "source": "OpenRouter (VS-605 probe 5.12)",
+  "status": 400,
+  "body": "{\"error\":{\"message\":\"Input required: specify \\\"prompt\\\" or \\\"messages\\\"\",\"code\":400},\"user_id\":\"<redacted>\"}",
+  "expect": {
+   "code": "invalid_request",
+   "family": "tooling"
+  }
+ },
+ {
+  "name": "openrouter: wrapped provider error (Z.ai 1214 inside metadata.raw)",
+  "source": "OpenRouter (VS-605 probe 5.12)",
+  "status": 400,
+  "body": "{\"error\":{\"message\":\"Provider returned error\",\"code\":400,\"metadata\":{\"raw\":\"{\\\"error\\\":{\\\"code\\\":\\\"1214\\\",\\\"message\\\":\\\"Incorrect role information\\\"}}\",\"provider_name\":\"Z.AI\",\"is_byok\":false,\"provider_error_code\":\"1214\"}},\"user_id\":\"<redacted>\"}",
+  "expect": {
+   "code": "invalid_request",
+   "family": "tooling",
+   "message": "Incorrect role information"
+  }
+ },
+ {
+  "name": "openai-style 429 rate limit",
+  "source": "hand-written from runtime-details section 9 (no live sample)",
+  "status": 429,
+  "body": "{\"error\":{\"message\":\"Rate limit reached for requests\",\"type\":\"requests\",\"code\":\"rate_limit_exceeded\"}}",
+  "expect": {
+   "code": "rate_limited",
+   "family": "transient_upstream"
+  }
+ },
+ {
+  "name": "openai-style 429 insufficient_quota",
+  "source": "hand-written from runtime-details section 9 (no live sample)",
+  "status": 429,
+  "body": "{\"error\":{\"message\":\"You exceeded your current quota, please check your plan and billing details.\",\"type\":\"insufficient_quota\",\"code\":\"insufficient_quota\"}}",
+  "expect": {
+   "code": "quota_exhausted",
+   "family": "provider_quota"
+  }
+ },
+ {
+  "name": "403 with billing wording",
+  "source": "hand-written from runtime-details section 9 (no live sample)",
+  "status": 403,
+  "body": "{\"error\":{\"message\":\"Your account has a billing problem\",\"code\":\"billing_hard_limit_reached\"}}",
+  "expect": {
+   "code": "quota_exhausted",
+   "family": "provider_quota"
+  }
+ },
+ {
+  "name": "503 unavailable",
+  "source": "hand-written from runtime-details section 9 (no live sample)",
+  "status": 503,
+  "body": "{\"error\":{\"message\":\"The server is overloaded\"}}",
+  "expect": {
+   "code": "upstream_error",
+   "family": "transient_upstream"
+  }
+ },
+ {
+  "name": "529 overloaded",
+  "source": "hand-written from runtime-details section 9 (no live sample)",
+  "status": 529,
+  "body": "{\"error\":{\"message\":\"Overloaded\"}}",
+  "expect": {
+   "code": "upstream_error",
+   "family": "transient_upstream"
+  }
+ },
+ {
+  "name": "408 timeout",
+  "source": "hand-written from runtime-details section 9 (no live sample)",
+  "status": 408,
+  "body": "{\"error\":{\"message\":\"Request timeout\"}}",
+  "expect": {
+   "code": "upstream_error",
+   "family": "transient_upstream"
+  }
+ },
+ {
+  "name": "409 conflict",
+  "source": "hand-written from runtime-details section 9 (no live sample)",
+  "status": 409,
+  "body": "{\"error\":{\"message\":\"Conflict\"}}",
+  "expect": {
+   "code": "upstream_error",
+   "family": "transient_upstream"
+  }
+ },
+ {
+  "name": "400 context overflow",
+  "source": "hand-written from runtime-details section 9 (no live sample)",
+  "status": 400,
+  "body": "{\"error\":{\"message\":\"This model's maximum context length is 8192 tokens. However, your messages resulted in 9000 tokens.\",\"code\":\"context_length_exceeded\"}}",
+  "expect": {
+   "code": "context_overflow",
+   "family": "resource"
+  }
+ },
+ {
+  "name": "400 unknown parameter",
+  "source": "hand-written from runtime-details section 9 (no live sample)",
+  "status": 400,
+  "body": "{\"error\":{\"message\":\"Unknown parameter: 'reasoning_effort'.\",\"type\":\"invalid_request_error\",\"param\":\"reasoning_effort\"}}",
+  "expect": {
+   "code": "invalid_request",
+   "family": "tooling"
+  }
+ },
+ {
+  "name": "404 model",
+  "source": "hand-written from runtime-details section 9 (no live sample)",
+  "status": 404,
+  "body": "{\"error\":{\"message\":\"The model `gpt-x` does not exist\",\"type\":\"invalid_request_error\",\"code\":\"model_not_found\"}}",
+  "expect": {
+   "code": "model_not_found",
+   "family": "tooling"
+  }
+ },
+ {
+  "name": "500 with a plain-text body",
+  "source": "hand-written from runtime-details section 9 (no live sample)",
+  "status": 500,
+  "body": "boom",
+  "expect": {
+   "code": "upstream_error",
+   "family": "transient_upstream"
+  }
+ }
+]

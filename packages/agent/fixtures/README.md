@@ -1,5 +1,7 @@
 Stream fixtures for the codec tests.
 
+`errors/` holds the error-table rows (see its README).
+
 `real-*` are raw captures the weaver recorded against live endpoints on 2026-09-20 (VS-605 probes), byte for byte, with no account ids in them:
 
 | File | Endpoint | Model asked / served | Probe |

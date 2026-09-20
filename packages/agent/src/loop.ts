@@ -1,7 +1,13 @@
 import { completeCompat } from './codec/params.js';
-import { buildRequest, classifyHttp, parseArgs, StreamReducer, type StepResult } from './codec/chatCompletions.js';
+import { buildRequest, StreamReducer, type StepResult } from './codec/chatCompletions.js';
+import { DoomGuard } from './doom.js';
+import { classifyFinish, classifyHttp, classifyNetwork, classifyStreamError, stopError } from './errors.js';
+import { invalidToolMessage, repairArgs } from './repair.js';
+import { parseRetryAfter, planRetry } from './retry.js';
+import { WireLog } from './wire.js';
 import { McpHttpClient } from './mcp/http.js';
 import { bashDenial, isAllowedByLists, modeToolNames, toolDenial, type PermissionConfig } from './permission.js';
+import { dirname, join } from 'node:path';
 import { chatCompletionsUrl, requestHeaders, requestOptions, shellEnv } from './profile.js';
 import type { ChildEvent, ChildPartial, ChildResult, InitMessage } from './protocol.js';
 import { Session } from './session.js';
@@ -21,12 +27,17 @@ export interface LoopIO {
   partial(p: ChildPartial): void;
   log(level: 'debug' | 'info' | 'warn' | 'error', msg: string, fields?: Record<string, unknown>): void;
 }
-export interface LoopDeps { fetch?: typeof fetch; sleep?: (ms: number, signal: AbortSignal) => Promise<void>; idleTimeoutMs?: number; partialFlushMs?: number }
+export interface LoopDeps { fetch?: typeof fetch; sleep?: (ms: number, signal: AbortSignal) => Promise<void>; idleTimeoutMs?: number; connectTimeoutMs?: number; requestTimeoutMs?: number; partialFlushMs?: number; now?: () => number; random?: () => number }
 
 export const INTERRUPTED = '[Tool execution was interrupted]';
 export const WEAVE_MCP_SERVER = 'weave-ai';
 const DEFAULT_STEP_CAP = 200;
-const MAX_RETRIES = 2;
+const DEFAULT_CONNECT_MS = 30_000;
+const DEFAULT_IDLE_MS = 120_000;
+/** Below the supervisor's 15 minute silence window, so one long request cannot look like a hang. */
+const DEFAULT_REQUEST_MS = 600_000;
+const MAX_INVALID_CALLS = 3;
+const CONTINUE_PROMPT = 'Your previous reply was cut off by the output limit. Continue exactly where you stopped.';
 const DEADLINE_MARGIN_MS = 30_000;
 const PREAMBLE = [
   'You are Weave Agent, a coding agent working in a git worktree through tools.',
@@ -37,6 +48,7 @@ const PREAMBLE = [
 
 class StepFailure extends Error { constructor(readonly err: AgentError) { super(err.message); } }
 class Cancelled extends Error {}
+class TimeoutFailure extends Error {}
 /** A 400 naming `stream_options`: the endpoint rejects the usage option, so the request is re-sent without it. */
 class DropStreamOptions extends Error {}
 
@@ -69,7 +81,8 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
   const f = deps.fetch ?? fetch;
   const sleep = deps.sleep ?? defaultSleep;
   const { run, provider } = init;
-  const started = Date.now();
+  const nowMs = deps.now ?? Date.now;
+  const started = nowMs();
   const now = (): string => new Date().toISOString();
   const emit = (type: string, payload: Record<string, unknown>): void => io.emit({ ts: now(), type, payload });
   const batch = new PartialBatcher((p) => io.partial(p), deps.partialFlushMs ?? 25);
@@ -98,6 +111,11 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
   /** The step being streamed, so a cancel can persist the text seen so far. */
   let inFlightReducer: StreamReducer | null = null;
   const warned = new Set<string>();
+  const doom = new DoomGuard();
+  let invalidStreak = 0;
+  let lengthHits = 0;
+  const maxTurnTokens = typeof run.options['maxTurnTokens'] === 'number' && run.options['maxTurnTokens'] > 0 ? Math.floor(run.options['maxTurnTokens']) : undefined;
+  const wire = run.options['debugWire'] === true ? new WireLog(join(dirname(run.spillDir), 'wire'), [provider.apiKey, ...Object.values(init.toolEnv)]) : null;
 
   const result = (over: Partial<ChildResult>): ChildResult => ({
     exitCode: 0, signal: null, timedOut: false, session: session.ref(), finalText,
@@ -154,10 +172,15 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     const deadline = started + Math.max(0, run.limits.timeoutMs - DEADLINE_MARGIN_MS);
     for (;;) {
       if (signal.aborted) throw new Cancelled();
-      if (run.limits.timeoutMs > 0 && Date.now() >= deadline) return finish(result({ exitCode: 1, timedOut: true }), true);
+      if (run.limits.timeoutMs > 0 && nowMs() >= deadline) return finish(result({ exitCode: 1, timedOut: true }), true);
       if (steps >= stepCap) {
-        const err: AgentError = { code: 'max_steps', family: 'resource', message: `Stopped after ${stepCap} steps.` };
-        emit('error', { ...err });
+        const err = stopError.maxSteps(stepCap);
+        emit('error', { code: err.code, family: err.family, message: err.message });
+        return finish(result({ exitCode: 1, error: err }), true);
+      }
+      if (maxTurnTokens !== undefined && tokens.prompt + tokens.completion >= maxTurnTokens) {
+        const err = stopError.budget(tokens.prompt + tokens.completion, maxTurnTokens);
+        emit('error', { code: err.code, family: err.family, message: err.message });
         return finish(result({ exitCode: 1, error: err }), true);
       }
       steps++;
@@ -177,36 +200,58 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       const content: ContentBlock[] = [];
       if (step.thinking) { content.push({ type: 'thinking', text: step.thinking }); emit('assistant.thinking', { text: step.thinking.slice(0, 2000), redacted: step.thinking.length > 2000, partId: `${messageId}:k` }); }
       if (step.text) { content.push({ type: 'text', text: step.text }); emit('assistant.text', { text: step.text, messageId, partId: `${messageId}:t` }); }
-      const parsed = step.calls.map((c) => ({ c, args: parseArgs(c.argsText) }));
+      // A reply cut off by the output limit is never repaired by closing it: half a `content` would run as if complete.
+      const parsed = step.calls.map((c) => ({ c, args: repairArgs(c.argsText, { closeTorn: step.finishReason !== 'length' }) }));
       for (const { c, args } of parsed) content.push({ type: 'toolCall', id: c.id, name: c.name, args: args.ok ? args.value : {}, raw: c.argsText });
       session.append({ role: 'assistant', content, ...(step.model ? { model: step.model } : {}) });
       emit('usage.delta', { inputTokens: tokens.prompt - tokens.cached, outputTokens: tokens.completion, cachedInputTokens: tokens.cached, basis: 'per_turn', reason: step.finishReason, estimated: usage.estimated });
-      if (step.error) throw new StepFailure(classifyStreamError(step.error));
-      if (parsed.length === 0) { finalText = step.text || null; return finish(result({}), false); }
+      const stopped = classifyFinish(step.finishReason, step.refusal);
+      if (stopped) throw new StepFailure(stopped);
+      if (parsed.length === 0) {
+        if (step.finishReason === 'length') {
+          // The cap was spent: one continuation, and a second truncation (or nothing but reasoning) fails the turn.
+          if (++lengthHits >= 2 || !step.text) throw new StepFailure(stopError.truncated());
+          io.log('warn', 'reply hit the output limit; asking the model to continue');
+          session.append({ role: 'user', text: CONTINUE_PROMPT });
+          continue;
+        }
+        finalText = step.text || null; return finish(result({}), false);
+      }
 
       const done = new Set<string>();
+      let stopFailure: AgentError | null = null;
       try {
         for (const { c, args } of parsed) {
           if (signal.aborted) throw new Cancelled();
           emit('tool.call', { id: c.id, name: c.name, input: args.ok ? args.value : c.argsText, partId: c.id });
           const tool = tools.get(c.name);
           const toolCtx: ToolCtx = { cwd: wtCwd, home: run.cwd, configHome: run.configHome, mode: run.permission.mode, env, signal, callId: c.id, spillDir: run.spillDir, ledger, rg, emit: (type, payload) => emit(type, { id: c.id, ...payload }) };
+          const key = args.ok ? DoomGuard.key(c.name, args.value) : '';
+          const verdict = args.ok && tool ? doom.check(key) : 'ok';
+          if (verdict === 'stop') stopFailure = stopError.doom(c.name);
           let out: Awaited<ReturnType<ToolDefinition['run']>>;
           let denied = false;
-          if (tool === undefined) {
+          if (stopFailure) {
+            out = errorOutput(`stopped: repeating ${c.name}`);
+          } else if (tool === undefined) {
             const d = all.has(c.name) ? toolDenial(c.name, permissionCfg, modeAllows) : null;
             if (d) { denied = true; emit('tool.denied', { id: c.id, name: c.name, reason: d.reason }); out = { text: d.text, isError: true }; }
             else out = errorOutput(`unknown tool "${c.name}". Available: ${[...tools.keys()].join(', ')}`);
           } else if (!args.ok) {
-            out = errorOutput(`arguments for ${c.name} are not valid JSON (${args.error}); send one JSON object`);
-          } else if (c.name === 'bash' && typeof (args.value as Record<string, unknown>)['command'] === 'string') {
-            const d = bashDenial((args.value as Record<string, unknown>)['command'] as string, permissionCfg);
+            out = errorOutput(invalidToolMessage(c.name, args.error));
+          } else if (verdict === 'warn') {
+            out = errorOutput(`you have made this exact ${c.name} call three times with the same result. Change the arguments or take a different approach`);
+          } else if (c.name === 'bash' && typeof args.value['command'] === 'string') {
+            const d = bashDenial(args.value['command'], permissionCfg);
             if (d) { denied = true; emit('tool.denied', { id: c.id, name: c.name, reason: d.reason }); out = { text: d.text, isError: true }; }
-            else out = await tool.run(args.value as Record<string, unknown>, toolCtx).catch((e: unknown) => errorOutput((e as Error).message));
+            else out = await tool.run(args.value, toolCtx).catch((e: unknown) => errorOutput((e as Error).message));
           } else {
-            out = await tool.run(args.value as Record<string, unknown>, toolCtx).catch((e: unknown) => errorOutput((e as Error).message));
+            out = await tool.run(args.value, toolCtx).catch((e: unknown) => errorOutput((e as Error).message));
           }
+          // A denied call is a permission answer, not a malformed one; only unknown tools and bad arguments count as invalid.
+          invalidStreak = (tool === undefined && !denied) || !args.ok ? invalidStreak + 1 : 0;
           if (out.text.length === 0) out = { ...out, text: '(no output)' };
+          if (tool && args.ok && verdict === 'ok' && !stopFailure) doom.record(key, out.text);
           session.append({ role: 'toolResult', toolCallId: c.id, name: c.name, text: out.text, isError: out.isError === true });
           done.add(c.id);
           if (!denied) emit('tool.result', { id: c.id, name: c.name, status: out.isError ? 'error' : 'completed', isError: out.isError === true, content: out.text.slice(0, 20_000) });
@@ -215,20 +260,23 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
         // Whatever ended the loop early, the persisted history keeps every call paired with a result.
         for (const { c } of parsed) if (!done.has(c.id)) session.append({ role: 'toolResult', toolCallId: c.id, name: c.name, text: INTERRUPTED, isError: true });
       }
+      if (stopFailure) throw new StepFailure(stopFailure);
+      if (invalidStreak >= MAX_INVALID_CALLS) throw new StepFailure(stopError.invalidCalls(invalidStreak));
     }
 
-    // ---- one model request, with retry before any content is committed ----
+    // ---- one model request, retried on the ladder before any result is committed ----
     async function streamStep(body: Record<string, unknown>): Promise<StepResult> {
       for (let attempt = 0; ; attempt++) {
         if (!sendStreamOptions) delete body['stream_options'];
         try { return await requestOnce(body); } catch (e) {
           if (signal.aborted || e instanceof Cancelled) throw new Cancelled();
           if (e instanceof DropStreamOptions) { io.log('info', 'endpoint rejected stream_options; retrying without it'); attempt--; continue; }
-          const err = e instanceof StepFailure ? e.err : { code: 'network', family: 'transient_upstream' as const, message: (e as Error).message };
-          if (err.family !== 'transient_upstream' || attempt >= Math.min(MAX_RETRIES, err.maxRetries ?? MAX_RETRIES)) throw new StepFailure(err);
-          const delay = err.retryAfterMs ?? Math.min(30_000, 2000 * 2 ** attempt) * (1 + Math.random() * 0.25);
-          io.log('warn', 'provider request failed; retrying', { attempt: attempt + 1, code: err.code, delayMs: Math.round(delay) });
-          await sleep(delay, signal);
+          const err = e instanceof StepFailure ? e.err : classifyNetwork(e);
+          const plan = planRetry(err, attempt, { deadlineAt: run.limits.timeoutMs > 0 ? deadline : undefined, nowMs: nowMs(), ...(deps.random ? { random: deps.random } : {}) });
+          if (!plan.retry) throw new StepFailure(err);
+          io.log('warn', 'provider request failed; retrying', { attempt: attempt + 1, code: err.code, delayMs: plan.delayMs });
+          wire?.error(`${err.code}: ${err.message}`);
+          await sleep(plan.delayMs, signal);
         }
       }
     }
@@ -236,9 +284,14 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       const stepCtl = new AbortController();
       const onAbort = (): void => stepCtl.abort();
       signal.addEventListener('abort', onAbort, { once: true });
-      const idleMs = deps.idleTimeoutMs ?? provider.timeouts?.idleMs ?? 120_000;
-      let idle: NodeJS.Timeout | undefined;
-      const armIdle = (): void => { if (idle) clearTimeout(idle); idle = setTimeout(() => stepCtl.abort(new Error(`no data from the provider for ${Math.round(idleMs / 1000)}s`)), idleMs); };
+      const idleMs = deps.idleTimeoutMs ?? provider.timeouts?.idleMs ?? DEFAULT_IDLE_MS;
+      const connectMs = deps.connectTimeoutMs ?? provider.timeouts?.connectMs ?? DEFAULT_CONNECT_MS;
+      const requestMs = deps.requestTimeoutMs ?? provider.timeouts?.requestMs ?? DEFAULT_REQUEST_MS;
+      const cutoff = (what: string, ms: number): void => stepCtl.abort(new TimeoutFailure(`${what}: no ${what === 'connect timeout' ? 'response' : 'data'} from the provider for ${Math.round(ms / 1000)}s`));
+      let phase: NodeJS.Timeout | undefined;
+      // Connect covers the wait for headers; idle covers every gap after, so any bytes at all, an SSE comment included, reset it.
+      const arm = (what: string, ms: number): void => { if (phase) clearTimeout(phase); phase = setTimeout(() => cutoff(what, ms), ms); };
+      const whole = setTimeout(() => cutoff('request timeout', requestMs), requestMs);
       const messageId = `${run.runId}:${steps}`;
       const reducer = new StreamReducer({
         onText: (d) => batch.add({ kind: 'text', partId: `${messageId}:t`, messageId, text: d }),
@@ -247,32 +300,52 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       }, `call_${run.runId.slice(-6)}_${steps}`, { reasoningField: compat.reasoning.field });
       inFlightReducer = reducer;
       try {
-        armIdle();
-        const res = await f(chatCompletionsUrl(provider.baseUrl, provider.query), { method: 'POST', headers: requestHeaders(provider), body: JSON.stringify(body), signal: stepCtl.signal });
+        const url = chatCompletionsUrl(provider.baseUrl, provider.query);
+        const headers = requestHeaders(provider);
+        wire?.request(url, headers, body);
+        arm('connect timeout', connectMs);
+        const res = await f(url, { method: 'POST', headers, body: JSON.stringify(body), signal: stepCtl.signal });
+        wire?.head(res.status, res.headers);
+        arm('idle timeout', idleMs);
         if (!res.ok) {
-          const retryAfter = parseRetryAfter(res.headers.get('retry-after'));
+          const retryAfter = parseRetryAfter(res.headers.get('retry-after'), nowMs());
           const errBody = await res.text();
+          wire?.chunk(new TextEncoder().encode(errBody));
           if (res.status === 400 && sendStreamOptions && /stream_options/i.test(errBody)) { sendStreamOptions = false; throw new DropStreamOptions(); }
           throw new StepFailure(classifyHttp(res.status, errBody, retryAfter));
         }
         if (!res.body) throw new StepFailure({ code: 'upstream_error', family: 'transient_upstream', message: 'provider returned no body' });
         const parser = new SseParser();
         const reader = res.body.getReader();
-        const handle = (events: Array<{ data: string }>): void => { for (const e of events) { if (e.data === '[DONE]') continue; try { reducer.push(JSON.parse(e.data)); } catch { io.log('debug', 'unparseable SSE data ignored'); } } };
+        let sawDone = false;
+        const handle = (events: Array<{ event?: string; data: string }>): void => {
+          for (const e of events) {
+            if (e.data.trim() === '[DONE]') { sawDone = true; continue; }
+            let json: unknown;
+            try { json = JSON.parse(e.data); } catch { io.log('debug', 'unparseable SSE data ignored'); continue; }
+            // An `event: error` frame carries the error object bare or wrapped.
+            if (e.event === 'error' && typeof json === 'object' && json !== null && !('error' in json)) json = { error: json };
+            reducer.push(json);
+          }
+        };
         for (;;) {
-          armIdle();
           const { done, value } = await reader.read();
-          if (value) handle(parser.feed(value));
+          arm('idle timeout', idleMs);
+          if (value) { wire?.chunk(value); handle(parser.feed(value)); }
           if (done) { handle(parser.end()); break; }
         }
         const r = reducer.result();
-        if (!r.finishReason && r.calls.length === 0 && !r.text && !r.error) throw new StepFailure({ code: 'network', family: 'transient_upstream', message: 'stream ended before any content' });
+        if (r.error) throw new StepFailure(classifyStreamError(r.error));
+        // A stream that ended with no finish reason and no [DONE] was cut, whatever it had sent so far.
+        if (!r.finishReason && !sawDone) throw new StepFailure({ code: 'network', family: 'transient_upstream', message: r.text || r.calls.length > 0 ? 'stream ended before the reply was finished' : 'stream ended before any content' });
         return r;
       } catch (e) {
         if (signal.aborted) throw new Cancelled();
         if (e instanceof StepFailure || e instanceof DropStreamOptions) throw e;
-        throw new StepFailure({ code: 'network', family: 'transient_upstream', message: stepCtl.signal.reason instanceof Error ? stepCtl.signal.reason.message : (e as Error).message });
-      } finally { if (idle) clearTimeout(idle); signal.removeEventListener('abort', onAbort); }
+        const reason: unknown = stepCtl.signal.reason;
+        if (reason instanceof TimeoutFailure) throw new StepFailure({ code: 'timeout', family: 'transient_upstream', message: reason.message });
+        throw new StepFailure(classifyNetwork(e));
+      } finally { if (phase) clearTimeout(phase); clearTimeout(whole); signal.removeEventListener('abort', onAbort); }
     }
   } catch (e) {
     if (e instanceof Cancelled || signal.aborted) {
@@ -290,22 +363,6 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     emit('error', { ...err });
     return finish(result({ exitCode: 1, error: err }), true);
   }
-}
-
-function classifyStreamError(e: NonNullable<StepResult['error']>): AgentError {
-  const s = `${e.message} ${e.code ?? ''} ${e.type ?? ''}`.toLowerCase();
-  if (/insufficient|quota|balance|billing/.test(s)) return { code: 'quota_exhausted', family: 'provider_quota', message: e.message };
-  if (/rate.?limit|overload|timeout|unavailable|server_error|5\d\d/.test(s)) return { code: 'upstream_error', family: 'transient_upstream', message: e.message };
-  if (/auth|api key|unauthor/.test(s)) return { code: 'auth_failed', family: 'auth', message: e.message };
-  return { code: 'provider_error', family: 'unknown', message: e.message };
-}
-
-function parseRetryAfter(v: string | null): number | undefined {
-  if (!v) return undefined;
-  const secs = Number(v);
-  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
-  const at = Date.parse(v);
-  return Number.isNaN(at) ? undefined : Math.max(0, at - Date.now());
 }
 
 /** The tokenizer is loaded only when a provider reports no usage, so a normal turn never pays for it. */

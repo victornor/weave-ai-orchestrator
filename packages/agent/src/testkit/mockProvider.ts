@@ -79,6 +79,8 @@ async function reply(res: ServerResponse, step: MockStep | undefined): Promise<v
   if (step.delayMs) await sleep(step.delayMs);
   if (step.status && step.status !== 200) { res.writeHead(step.status, { 'content-type': 'application/json', ...step.headers }); res.end(step.body ?? '{}'); return; }
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', ...step.headers });
+  // Headers go out now: a stalled stream is one that answered and then went quiet, unlike `delayMs`, which holds the headers back.
+  res.flushHeaders();
   if (step.stall && step.raw === undefined && step.chunks === undefined) return;
   let bytes = Buffer.from(step.raw ?? frame(step.chunks ?? [], !step.noDone));
   if (step.dropAfterBytes !== undefined) bytes = bytes.subarray(0, step.dropAfterBytes);

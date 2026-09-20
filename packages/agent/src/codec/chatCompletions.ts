@@ -1,4 +1,4 @@
-import type { AgentError, Message, Usage } from '../types.js';
+import type { Message, Usage } from '../types.js';
 import { applyParams, DEFAULT_COMPAT, ThinkTagSplitter, toWireMessages, type Compat, type Params } from './params.js';
 
 export { toWireMessages };
@@ -27,7 +27,7 @@ export function buildRequest(input: { model: string; system: string; messages: M
 
 export interface AssembledCall { id: string; name: string; argsText: string }
 export interface StepResult {
-  text: string; thinking: string; calls: AssembledCall[]; finishReason: string | null; usage: Usage | null; model: string | null;
+  text: string; thinking: string; calls: AssembledCall[]; finishReason: string | null; refusal?: string; usage: Usage | null; model: string | null;
   error: { message: string; code?: string; type?: string } | null;
 }
 export interface ReducerOptions { reasoningField?: Compat['reasoning']['field'] }
@@ -58,6 +58,7 @@ export class StreamReducer {
   private usage: Usage | null = null;
   private model: string | null = null;
   private error: StepResult['error'] = null;
+  private refusal = '';
   private seq = 0;
 
   private splitter: ThinkTagSplitter | null;
@@ -82,6 +83,7 @@ export class StreamReducer {
     if (typeof delta['content'] === 'string' && delta['content']) {
       if (this.splitter) { const r = this.splitter.push(delta['content']); this.addText(r.text); this.addThinking(r.thinking); } else this.addText(delta['content']);
     }
+    if (typeof delta['refusal'] === 'string') this.refusal += delta['refusal'];
     this.addThinking(reasoningOf(delta, this.opts.reasoningField ?? 'auto'));
     if (Array.isArray(delta['tool_calls'])) for (const tc of delta['tool_calls']) if (isObj(tc)) this.toolDelta(tc);
   }
@@ -92,6 +94,9 @@ export class StreamReducer {
     let slot = this.byIndex.get(index);
     // A different non-empty id at an index already holding one opens a new call: some proxies send index 0 for parallel calls.
     if (slot && id && slot.providerId && slot.id !== id) slot = undefined;
+    // A different function name at an index that already has one is a second call that reused the index without an id.
+    const newName = isObj(tc['function']) && typeof tc['function']['name'] === 'string' ? tc['function']['name'] : '';
+    if (slot && newName && slot.name && newName !== slot.name) slot = undefined;
     if (!slot) {
       slot = { id: id ?? `${this.idPrefix}_${++this.seq}`, providerId: id !== null, name: '', args: '' };
       this.slots.push(slot);
@@ -106,7 +111,7 @@ export class StreamReducer {
 
   result(): StepResult {
     if (this.splitter) { const r = this.splitter.flush(); this.addText(r.text); this.addThinking(r.thinking); }
-    return { text: this.text, thinking: this.thinking, calls: this.slots.filter((s) => s.name).map((s) => ({ id: s.id, name: s.name, argsText: s.args.trim() === '' ? '{}' : s.args })), finishReason: this.finish, usage: this.usage, model: this.model, error: this.error };
+    return { text: this.text, thinking: this.thinking, calls: this.slots.filter((s) => s.name).map((s) => ({ id: s.id, name: s.name, argsText: s.args.trim() === '' ? '{}' : s.args })), finishReason: this.finish, ...(this.refusal ? { refusal: this.refusal } : {}), usage: this.usage, model: this.model, error: this.error };
   }
 }
 
@@ -128,28 +133,4 @@ function readUsage(u: Json): Usage {
   };
 }
 
-/** Parse tool-call arguments; a failure is a value, not an exception, so the loop can hand the model a corrective result. */
-export function parseArgs(text: string): { ok: true; value: unknown } | { ok: false; error: string } {
-  try { return { ok: true, value: JSON.parse(text) }; } catch (e) { return { ok: false, error: (e as Error).message }; }
-}
-
-const GATEWAY_EXHAUSTED = /routes failed after \d+ attempts?/i;
-
-/** Classify an HTTP failure. A 402 is quota, not a bad request. */
-export function classifyHttp(status: number, body: string, retryAfterMs?: number): AgentError {
-  let message = body.slice(0, 500);
-  let code: string | undefined;
-  try { const j = JSON.parse(body) as Json; const e = isObj(j['error']) ? j['error'] : j; message = String(e['message'] ?? message); code = e['code'] != null ? String(e['code']) : undefined; } catch { /* not JSON */ }
-  const lower = `${message} ${code ?? ''}`.toLowerCase();
-  const withRetry = retryAfterMs !== undefined ? { retryAfterMs } : {};
-  if (status === 402 || /insufficient[_ ](quota|balance)|billing|quota/.test(lower) && (status === 429 || status === 403)) return { code: 'quota_exhausted', family: 'provider_quota', message, status, ...withRetry };
-  if (status === 401 || status === 403) return { code: 'auth_failed', family: 'auth', message, status };
-  if (status === 429) return { code: 'rate_limited', family: 'transient_upstream', message, status, ...withRetry };
-  // A gateway that already tried its own routes says so: another try from us multiplies that, so cap it at one.
-  if (status >= 500 && GATEWAY_EXHAUSTED.test(message)) return { code: 'gateway_routes_failed', family: 'transient_upstream', message, status, maxRetries: 1, ...withRetry };
-  if (status === 408 || status === 409 || status >= 500) return { code: 'upstream_error', family: 'transient_upstream', message, status, ...withRetry };
-  if (status === 400 && /context|maximum.*length|too many tokens|token limit/.test(lower)) return { code: 'context_overflow', family: 'resource', message, status };
-  if (status === 404) return { code: 'model_not_found', family: 'tooling', message, status };
-  if (status === 400 || status === 422) return { code: 'invalid_request', family: 'tooling', message, status };
-  return { code: 'unknown', family: 'unknown', message, status };
-}
+export { classifyHttp } from '../errors.js';

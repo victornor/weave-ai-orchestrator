@@ -91,16 +91,16 @@ describe('endpoint failures', () => {
   });
   it('retries a gateway that already exhausted its routes once, not the usual number of times', async () => {
     const body = '{"error":{"message":"All available provider routes failed after 6 attempts. If it keeps happening, contact support and quote the request id.","type":"api_error","param":null,"code":"upstream_error"}}';
-    mock.script(...Array.from({ length: 4 }, () => ({ status: 502, body })));
+    mock.script(...Array.from({ length: 5 }, () => ({ status: 502, body })));
     const r = await run(init('baseUrl: BASE\nmodels: { m: {} }\n'));
     expect(r.result.error).toMatchObject({ code: 'gateway_routes_failed', family: 'transient_upstream' });
     expect(mock.requests).toHaveLength(2);
   });
   it('an ordinary 502 still gets the default retries', async () => {
-    mock.script(...Array.from({ length: 4 }, () => ({ status: 502, body: '{"error":{"message":"bad gateway"}}' })));
+    mock.script(...Array.from({ length: 5 }, () => ({ status: 502, body: '{"error":{"message":"bad gateway"}}' })));
     const r = await run(init('baseUrl: BASE\nmodels: { m: {} }\n'));
     expect(r.result.error?.family).toBe('transient_upstream');
-    expect(mock.requests).toHaveLength(3);
+    expect(mock.requests).toHaveLength(5);
   });
 });
 

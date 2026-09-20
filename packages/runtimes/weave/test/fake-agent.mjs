@@ -20,6 +20,7 @@ rl.on('line', (line) => {
     process.exit(0);
   }
   if (scenario === 'crash') { process.stderr.write('boom: something broke\n'); process.exit(1); }
+  if (scenario === 'quota') { out({ t: 'event', ev: { ts: new Date().toISOString(), type: 'error', payload: { code: 'quota_exhausted', family: 'provider_quota', message: 'Insufficient Balance' } } }); out({ t: 'result', result: { exitCode: 1, signal: null, timedOut: false, session: null, finalText: null, error: { code: 'rate_limited', family: 'transient_upstream', message: 'slow down', retryAfterMs: 90000, status: 429 } } }); process.exit(1); }
   if (scenario === 'sigkill') process.kill(process.pid, 'SIGKILL');
   if (scenario === 'hang') { out({ t: 'event', ev: { ts: new Date().toISOString(), type: 'turn.started', payload: {} } }); return; }
   if (scenario === 'noise') { process.stdout.write('not json at all\n'); out({ t: 'log', level: 'warn', msg: 'careful', fields: { a: 1 } }); out({ t: 'event', ev: { ts: new Date().toISOString(), type: 'mystery.thing', payload: { x: 1 } } }); out({ t: 'result', result: { exitCode: 0, signal: null, timedOut: false, session: null, finalText: 'ok' } }); process.exit(0); }

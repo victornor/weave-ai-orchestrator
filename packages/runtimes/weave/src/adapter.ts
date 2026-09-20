@@ -32,6 +32,8 @@ const CONFIG_SCHEMA: JsonSchema = {
     extraBody: { type: 'string', description: 'A JSON object merged last into the request body (a string, because an option cannot hold an object)' },
     extraHeaders: { type: 'array', items: { type: 'string' }, description: 'Extra request headers, one "Name: value" per entry' },
     contextWindowTokens: { type: 'integer', minimum: 1, description: 'The model\'s context window when the endpoint does not say' },
+    maxTurnTokens: { type: 'integer', minimum: 1, description: 'Stop the turn (as tooling/budget_exhausted) once it has used this many tokens; unset means no cap' },
+    debugWire: { type: 'boolean', description: 'Record each request and response, redacted, under the run\'s wire directory. Sensitive: message content is kept' },
   },
 };
 

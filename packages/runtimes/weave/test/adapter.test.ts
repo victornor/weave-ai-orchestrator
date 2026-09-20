@@ -49,7 +49,7 @@ describe('declaration', () => {
   });
   it('validates every parameter key and rejects out-of-range values by name', () => {
     const schema = adapterWith().configSchema();
-    const all = { temperature: 0.2, topP: 0.5, frequencyPenalty: 1, presencePenalty: -1, maxOutputTokens: 100, seed: 3, stop: ['x'], toolChoice: 'auto', parallelToolCalls: true, responseFormat: 'json_object', extraBody: '{"a":1}', extraHeaders: ['X-A: 1'], contextWindowTokens: 8000 };
+    const all = { temperature: 0.2, topP: 0.5, frequencyPenalty: 1, presencePenalty: -1, maxOutputTokens: 100, seed: 3, stop: ['x'], toolChoice: 'auto', parallelToolCalls: true, responseFormat: 'json_object', extraBody: '{"a":1}', extraHeaders: ['X-A: 1'], contextWindowTokens: 8000, maxTurnTokens: 50_000, debugWire: true };
     expect(validateRuntimeOptions(schema, all)).toEqual({ valid: true, byKey: {} });
     expect(validateRuntimeOptions(schema, { temperature: 3, topP: -0.1, frequencyPenalty: 2.5, presencePenalty: -3, maxOutputTokens: 0, seed: 1.5, contextWindowTokens: 0 }).byKey).toEqual({
       temperature: 'must be at most 2', topP: 'must be at least 0', frequencyPenalty: 'must be at most 2', presencePenalty: 'must be at least -2', maxOutputTokens: 'must be at least 1', seed: 'must be an integer', contextWindowTokens: 'must be at least 1',
@@ -162,6 +162,17 @@ describe('a turn through a fake child', () => {
     expect(killed.result).toMatchObject({ exitCode: 137, error: { code: 'killed', family: 'resource' } });
   });
 
+  it('carries the child\'s error family, code and retryAfterMs through to the engine', async () => {
+    const { result, events } = await runFake('quota');
+    expect(result.error).toEqual({ code: 'rate_limited', family: 'transient_upstream', message: 'slow down', retryAfterMs: 90000, status: 429 });
+    expect(events.find((e) => e.type === 'error')!.payload).toMatchObject({ code: 'quota_exhausted', family: 'provider_quota' });
+  });
+  it('passes debugWire and the timeouts to the child in init', async () => {
+    const timed = { ...profile, timeouts: { connectMs: 5000, idleMs: 7000, requestMs: 9000 } };
+    await runFake('replay', { options: { debugWire: true, maxTurnTokens: 1000 } }, adapterWith({ test: timed }));
+    expect(record().init.run.options).toMatchObject({ debugWire: true, maxTurnTokens: 1000 });
+    expect(record().init.provider.timeouts).toEqual({ connectMs: 5000, idleMs: 7000, requestMs: 9000 });
+  });
   it('forwards log lines and stray output to the raw sink and unknown events as runtime.raw', async () => {
     const r = await runFake('noise');
     expect(r.raw).toEqual(expect.arrayContaining(['not json at all', '[warn] careful {"a":1}']));

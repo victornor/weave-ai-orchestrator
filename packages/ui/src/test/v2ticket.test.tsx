@@ -362,6 +362,36 @@ describe('V2 ticket held decisions and action errors', () => {
   });
 });
 
+describe('the ticket Plan view shows the plan artifact (VS-624)', () => {
+  it('shows a control that opens the plan artifact in the sandboxed viewer', () => {
+    state.ticket = ticket({ id: 'tk_42', identifier: 'ACME-42', title: 'Dark mode', status: 'proposed' });
+    state.products = [
+      workProduct({ id: 'wp-plan', type: 'artifact', externalId: 'plan', title: 'Plan diagram', url: '/api/w/ws1/tickets/tk_42/artifacts/plan/raw' }),
+      workProduct({ id: 'wp-other', type: 'artifact', externalId: 'overview', title: 'Overview', url: '/api/w/ws1/tickets/tk_42/artifacts/overview/raw' }),
+    ];
+    state.documents = [
+      { key: 'artifact:plan', revision: 1, updatedAt: '2026-09-01T00:00:00.000Z' },
+      { key: 'artifact:overview', revision: 1, updatedAt: '2026-09-01T00:00:00.000Z' },
+    ];
+    state.decisions = [decision({ id: 'd_plan', ticketId: 'tk_42', kind: 'plan_approval', status: 'open', owner: 'human' })];
+    renderScreen();
+    fireEvent.click(screen.getByRole('tab', { name: 'Plan' }));
+    expect(screen.getByText('Plan artifact')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Plan diagram' });
+    expect(link.getAttribute('href')).toContain('artifacts/');
+  });
+
+  it('adds no artifact control when the ticket has no plan artifact', () => {
+    state.ticket = ticket({ id: 'tk_42', identifier: 'ACME-42', title: 'Dark mode', status: 'proposed' });
+    state.products = [];
+    state.documents = [];
+    state.decisions = [decision({ id: 'd_plan', ticketId: 'tk_42', kind: 'plan_approval', status: 'open', owner: 'human' })];
+    renderScreen();
+    fireEvent.click(screen.getByRole('tab', { name: 'Plan' }));
+    expect(screen.queryByText('Plan artifact')).toBeNull();
+  });
+});
+
 describe('V2 ticket page waiting on the weaver (VS-469)', () => {
   const reviewTag = (): HTMLElement | null => document.querySelector('[data-v2-awaits-review]');
   const unseenMerge = (over: Partial<Decision> = {}): Decision =>

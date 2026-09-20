@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "Optional per-project setting (default off): every worker plan comes with
+  a visual artifact on its plan approval card"

@@ -28,6 +28,9 @@ Kind `{{ticket.kind}}` · priority `{{ticket.priority}}`
 {{#if fastPath}}
 **OpenSpec is off for this project.** No proposal, design, spec delta or tasks file. Record a short plan — a few sentences of approach — as the ticket document `approach` with `weave_ticket_document_put(id, "approach", body)`, then request `proposed`. The Plan tab and the plan-approval card show it.
 {{/if}}
+{{#if planArtifact}}
+**This project requires a visual plan artifact.** Before you request `proposed`, publish one with `weave_ticket_artifact_put` under the key `plan` — a diagram of the change, a comparison of options, a sequence or dependency view, or a mock of the intended result, whichever fits (see `weave-ai-artifacts` and `weave_artifact_kit`). It supports the written plan and does not replace it; the daemon refuses `proposed` until it is published.
+{{/if}}
 
 ## Setup
 

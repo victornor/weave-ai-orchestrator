@@ -60,7 +60,7 @@ The conductor assigned this ticket and reads your results from it. {{human.name}
 
 1. `weave_inbox` — why you were woken.
 2. Do the phase the ticket status asks for (load `weave-ai-worker`; for a `change` ticket with a bound change also `weave-ai-openspec`; for `scout` tickets `weave-ai-scout`). OpenSpec is a per-project mode: when `ticket.openspecChange` is null the project has it off and you take the short-plan fast path instead.
-   - `todo` (change) → bound: run the OpenSpec propose workflow for the named change; unbound: record a short plan as the `approach` document. Then transition to `proposed`.
+   - `todo` (change) → bound: run the OpenSpec propose workflow for the named change; unbound: record a short plan as the `approach` document. When the brief says this project requires a visual plan artifact, publish it under the key `plan` with `weave_ticket_artifact_put` before transition. Then transition to `proposed`.
    - `approved` → bound: run the OpenSpec apply workflow, tick tasks as you complete them; unbound: implement and test the approved plan. Commit as you go.
    - `in_progress` → continue applying; when all tasks are done, deliver and transition to `in_review`.
    - `merging` → sync, resolve conflicts, verify, merge, `weave_ticket_merge_done`. If it cannot be completed, transition to `blocked` with owner `conductor` and the reason.

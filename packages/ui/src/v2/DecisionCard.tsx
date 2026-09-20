@@ -416,10 +416,13 @@ export function V2DecisionCard({
     run: heldRun,
     live: (heldWorker?.id ?? askedBy) ? activity.get((heldWorker?.id ?? askedBy)!)?.live ?? null : null,
   });
-  const artifact = useMemo(
-    () => (products.data ?? []).find((p) => p.type === 'artifact' && p.externalId),
-    [products.data],
-  );
+  // VS-624: a plan approval shows the plan artifact (`artifact:plan`) even when the ticket carries
+  // other artifacts; every other card keeps the first artifact it finds.
+  const artifact = useMemo(() => {
+    const artifacts = (products.data ?? []).filter((p) => p.type === 'artifact' && p.externalId);
+    if (decision.kind === 'plan_approval') return artifacts.find((p) => p.externalId === 'plan') ?? artifacts[0];
+    return artifacts[0];
+  }, [products.data, decision.kind]);
   const artifactHref =
     artifact && ws && decision.ticketId
       ? `/w/${encodeURIComponent(ws)}/tickets/${encodeURIComponent(decision.ticketId)}/artifacts/${encodeURIComponent(artifact.externalId!)}`

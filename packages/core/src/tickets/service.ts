@@ -1,6 +1,6 @@
 import { newId, nowIso, ticketRow, type Db } from '@weave-ai/db';
 import {
-  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, landingBranchOf, yoloEnabled,
+  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, landingBranchOf, yoloEnabled, visualPlanArtifactEnabled,
   type CommentKind, type Decision, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
 } from '@weave-ai/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
@@ -268,6 +268,23 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     return name;
   }
 
+  /**
+   * VS-624: fix whether this ticket must publish a plan artifact (`artifact:plan`) before `proposed`,
+   * from the project's `visualPlanArtifact` policy at the moment the ticket is assigned and begins
+   * planning. Stamped once — like the OpenSpec binding, the ticket keeps the rule it started with, so
+   * flipping the policy never traps a ticket in flight. Only `change` tickets produce a plan.
+   */
+  function applyPlanArtifactRule(t: Ticket): boolean {
+    if (t.kind !== 'change') return false;
+    // Stamp only the first time: a re-assign must not re-read a policy that has since flipped, or the
+    // ticket would lose the rule it began planning with.
+    const raw = db.get<{ v: number | null }>('SELECT plan_artifact_required AS v FROM tickets WHERE id = ?', [t.id])?.v;
+    if (raw !== null && raw !== undefined) return raw === 1;
+    const required = visualPlanArtifactEnabled(project(t.projectId)?.policies ?? null);
+    db.update('tickets', t.id, { planArtifactRequired: required ? 1 : 0, updatedAt: nowIso() });
+    return required;
+  }
+
   // `proposalApproval` is `APPROVAL_OWNERS`, not `DECISION_OWNERS` ('human'|'weaver'), so this
   // function's callers hand its result straight to `decisions.create({ owner, ... })` only after this
   // translation. `fromProject` (a project's `policies_json`) can still be the legacy `'conductor'`
@@ -405,6 +422,23 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
    * worker writes this key; the daemon publishes it as the `plan` document on `proposed`.
    */
   const FAST_PATH_PLAN_KEY = 'approach';
+
+  /**
+   * VS-624: the artifact key a worker publishes its plan artifact under. Stored as the ticket document
+   * `artifact:plan` by `weave_ticket_artifact_put`, so the gate is a presence check and the plan card
+   * can select it deterministically. Distinct from the fast path's `approach` and the daemon-owned
+   * `plan` document.
+   */
+  const PLAN_ARTIFACT_KEY = 'plan';
+
+  /** VS-624: whether the ticket has a published plan artifact (a stored `artifact:plan` revision). */
+  function planArtifactPublished(ticketId: string): boolean {
+    const row = db.get<{ n: number }>(
+      'SELECT COUNT(*) n FROM ticket_documents WHERE ticket_id = ? AND key = ? AND current_revision > 0',
+      [ticketId, `artifact:${PLAN_ARTIFACT_KEY}`],
+    );
+    return (row?.n ?? 0) > 0;
+  }
 
   /** The latest revision of a ticket document's non-empty body, or null. */
   function latestDocumentBody(ticketId: string, key: string): string | null {
@@ -754,6 +788,11 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       } else {
         planBody = fastPathPlan(t);
       }
+      // VS-624: the project's rule is checked after the path's own plan, so the artifact supports a
+      // plan rather than standing in for one. Applies on both the OpenSpec and fast paths.
+      if (t.planArtifactRequired && !planArtifactPublished(t.id)) {
+        throw new OcError('validation', `${t.identifier}'s project requires a visual artifact with every plan: publish one with \`weave_ticket_artifact_put\` under the key \`plan\` before \`proposed\` (a diagram, comparison, sequence/dependency view or mock; see the weave-ai-artifacts skill). It supports the written plan, it does not replace it`, { ticketId: t.id, key: PLAN_ARTIFACT_KEY });
+      }
     }
 
     const now = nowIso();
@@ -1007,7 +1046,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           db.insert('ticket_relations', { ticketId: id, relatedTicketId: b, kind: 'blocks' });
         }
         const t = get(id);
-        if (input.assigneeRoleId) bindOpenspec(t);
+        if (input.assigneeRoleId) { bindOpenspec(t); applyPlanArtifactRule(t); }
         const created = get(id);
         recordActivity(db, ws, actor, 'ticket.create', 'ticket', id, { kind: input.kind, identifier, status }, id);
         ctx.events.emit('ticket.created', 'ticket', id, created);
@@ -1075,7 +1114,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         if (!roleId) patch.workerId = null;
         if (resolvedModelId !== undefined) patch.workerModelId = resolvedModelId;
         const next = touch(t.id, patch);
-        if (roleId) bindOpenspec(next);
+        if (roleId) { bindOpenspec(next); applyPlanArtifactRule(next); }
         const out = get(t.id);
         recordActivity(db, ws, actor, 'ticket.assign', 'ticket', t.id, { roleId, status: out.status }, t.id);
         ctx.events.emit('ticket.assigned', 'ticket', t.id, out);

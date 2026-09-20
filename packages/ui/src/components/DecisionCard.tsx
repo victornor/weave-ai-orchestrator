@@ -35,6 +35,11 @@ export interface DecisionCardProps {
   /** The plan under approval, rendered above the buttons on a `plan_approval` card. */
   plan?: React.ReactNode;
   /**
+   * VS-624: the ticket's plan artifact (`artifact:plan`), shown on a `plan_approval` card as a control
+   * that opens it in the sandboxed viewer. Absent when the ticket has no plan artifact.
+   */
+  planArtifact?: { key: string; title?: string | null } | null;
+  /**
    * YOLO mode will grant this decision, so it is not the human's to approve: the card says so and
    * offers no approve action. Only ever true for a plan or merge approval (see lib/yolo.ts).
    */
@@ -300,7 +305,7 @@ const CONTEXT_PREVIEW_CHARS = 500;
  * primary action sits bottom-left inside a 44 px thumb band. A decision that has
  * been answered renders the same card as an inert record of what was decided.
  */
-export function DecisionCard({ decision, ticketIdentifier, projectLabel, projectSlug, ws, askedBy, live, asker, busy, queued, plan, autoApproving, onHide, ticketFiledByConductor, ticketSummary, compact, delivery, onAnswer, className }: DecisionCardProps): React.ReactElement {
+export function DecisionCard({ decision, ticketIdentifier, projectLabel, projectSlug, ws, askedBy, live, asker, busy, queued, plan, planArtifact, autoApproving, onHide, ticketFiledByConductor, ticketSummary, compact, delivery, onAnswer, className }: DecisionCardProps): React.ReactElement {
   const [revising, setRevising] = useState(false);
   const [overriding, setOverriding] = useState(false);
   const [confirm, setConfirm] = useState('');
@@ -443,6 +448,20 @@ export function DecisionCard({ decision, ticketIdentifier, projectLabel, project
               </li>
             ))}
           </ul>
+        ) : null}
+
+        {/* VS-624: the plan artifact, opened in the same sandboxed viewer ticket artifacts use. */}
+        {decision.kind === 'plan_approval' && !inert && planArtifact && decision.ticketId && ws ? (
+          <div className={cx(section, 'flex flex-wrap items-center gap-2 rounded-r6 border border-line-1 bg-bg-2 px-3 py-2')}>
+            <span className="ac-label">Plan artifact</span>
+            <A
+              to="/w/$ws/tickets/$ticketId/artifacts/$key"
+              params={{ ws, ticketId: decision.ticketId, key: planArtifact.key }}
+              className="ac-truncate text-meta text-accent-link"
+            >
+              {planArtifact.title ?? planArtifact.key}
+            </A>
+          </div>
         ) : null}
 
         {/* plan approval — the plan itself, so nothing is approved unread */}

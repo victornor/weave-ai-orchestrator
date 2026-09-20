@@ -503,6 +503,11 @@ function ActiveProjectRow({
     patch.mutate({ id: p.id, patch: { openspec: { enabled: next === 'on' } } });
   };
 
+  /** VS-624: the experimental per-project visual plan artifact opt-in; applies to tickets created afterwards. */
+  const changeVisualPlanArtifact = (next: 'on' | 'off'): void => {
+    patch.mutate({ id: p.id, patch: { policies: withPolicy(p.policies, 'visualPlanArtifact', next === 'on') } });
+  };
+
   return (
     <div className="px-3.5 py-3">
       <div className="flex flex-wrap items-center gap-3">
@@ -563,6 +568,24 @@ function ActiveProjectRow({
         >
           {yoloOn ? 'YOLO on' : 'YOLO off'}
         </button>
+        {/* VS-624: always visible in the row header, never behind "Delivery & setup". Compact by
+            design at phone width: the label wraps, and the full cost note is the tooltip. */}
+        <label
+          className="flex flex-wrap items-center gap-1.5"
+          title="Experimental: every change ticket's plan also carries a visual artifact on its approval card. Costs the worker tokens on every plan."
+        >
+          <span className="ac-label">visual plan artifact</span>
+          <span className="rounded-r4 border border-line-2 px-1 py-0.5 text-nano text-text-3">experimental</span>
+          <select
+            aria-label={`visual plan artifact for ${p.slug}`}
+            className="ac-mono h-7 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+            value={policyOf(p.policies, 'visualPlanArtifact') === true ? 'on' : 'off'}
+            onChange={(e) => changeVisualPlanArtifact(e.target.value === 'on' ? 'on' : 'off')}
+          >
+            <option value="off">off</option>
+            <option value="on">on</option>
+          </select>
+        </label>
         <div className="flex flex-wrap items-center gap-2">
           {blockReason ? <span className="text-micro text-text-3">{blockReason}</span> : null}
           <Button
@@ -705,6 +728,7 @@ function ActiveProjectRow({
               <option value="off">off</option>
             </select>
           </label>
+
           <Field label="Merge concurrency" hint="How many of this project's tickets may be in the active merge step at once.">
             <div className="flex items-center gap-2">
               <input
@@ -789,6 +813,8 @@ export function ProjectsSection(): React.ReactElement {
   const [knowledgeRepoEnabled, setKnowledgeRepoEnabled] = useState(false);
   // VS-578: OpenSpec defaults on for a new project.
   const [openspecEnabled, setOpenspecEnabled] = useState(true);
+  // VS-624: the visual plan artifact opt-in defaults off.
+  const [visualPlanArtifact, setVisualPlanArtifact] = useState(false);
   const [createPublicWarning, setCreatePublicWarning] = useState(false);
   const repoInfo = useRepoInfo();
   const config = useWorkspaceSummary().data?.config ?? {};
@@ -865,6 +891,19 @@ export function ProjectsSection(): React.ReactElement {
           />
           Use OpenSpec for this project&apos;s change tickets (proposal, specs, tasks, archive). Turn it off for internal projects that want the fast path.
         </label>
+        <label className="mt-1 flex items-start gap-2 text-micro text-text-2">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            aria-label="Visual plan artifact"
+            checked={visualPlanArtifact}
+            onChange={(e) => setVisualPlanArtifact(e.target.checked)}
+          />
+          <span>
+            <span className="mr-1.5 rounded-r4 border border-line-2 px-1 py-0.5 text-nano text-text-3">experimental</span>
+            Require a visual artifact (diagram, comparison, mock) with every plan, shown on its approval card. Costs the worker tokens on every plan.
+          </span>
+        </label>
         {createPublicWarning ? (
           <div className="mt-1 text-micro text-stalled" role="status" aria-label="public repository warning">
             This repository is public — its knowledge would be committed where anyone can read it.
@@ -875,7 +914,7 @@ export function ProjectsSection(): React.ReactElement {
           disabled={!url || !maxWorkersValid || add.isPending}
           onClick={() =>
             add.mutate(
-              { url, maxWorkers, ...(setupCommand ? { setupCommand } : {}), policies: { autoMergeDefault }, knowledgeRepo: { enabled: knowledgeRepoEnabled }, openspec: { enabled: openspecEnabled } },
+              { url, maxWorkers, ...(setupCommand ? { setupCommand } : {}), policies: { autoMergeDefault, visualPlanArtifact }, knowledgeRepo: { enabled: knowledgeRepoEnabled }, openspec: { enabled: openspecEnabled } },
               {
                 onSuccess: () => {
                   toast.push({ title: 'Cloning…', detail: url, status: 'working' });

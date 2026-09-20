@@ -830,6 +830,71 @@ describe('tickets', () => {
       });
     });
 
+    describe('the visual plan artifact rule (VS-624)', () => {
+      const publish = (id: string) => tickets.putDocument(AGENT, id, 'artifact:plan', '<html><body>plan</body></html>', { system: true });
+      /** A bound change ticket whose project had the policy on when it was assigned. */
+      const onTicket = () => {
+        h.db.update('projects', h.projectId, { policiesJson: { visualPlanArtifact: true } });
+        const t = make();
+        h.db.update('tickets', t.id, { status: 'proposing' });
+        return tickets.get(t.id);
+      };
+
+      it('stamps a change ticket from the project policy at assign, and nothing else', () => {
+        h.db.update('projects', h.projectId, { policiesJson: { visualPlanArtifact: true } });
+        expect(tickets.get(make().id).planArtifactRequired).toBe(true);
+        h.db.update('projects', h.projectId, { policiesJson: { visualPlanArtifact: false } });
+        expect(tickets.get(make({ title: 'Off' }).id).planArtifactRequired).toBe(false);
+        const task = make({ kind: 'task', title: 'Chore' });
+        expect(Boolean(tickets.get(task.id).planArtifactRequired)).toBe(false);
+      });
+
+      it('refuses proposed without an artifact on the OpenSpec path, and accepts once published', async () => {
+        const t = onTicket();
+        await expect(tickets.transition(AGENT, t.id, { to: 'proposed' })).rejects.toMatchObject({ code: 'validation' });
+        expect(tickets.get(t.id).status).toBe('proposing');
+        publish(t.id);
+        expect((await tickets.transition(AGENT, t.id, { to: 'proposed' })).status).toBe('proposed');
+      });
+
+      it('refuses proposed without one on the fast path, and accepts once published', async () => {
+        h.db.update('projects', h.projectId, { policiesJson: { visualPlanArtifact: true }, openspecEnabled: 0 });
+        const t = make();
+        h.db.update('tickets', t.id, { openspecChangeName: null, status: 'proposing' });
+        tickets.putDocument(AGENT, t.id, 'approach', 'Short plan.');
+        await expect(tickets.transition(AGENT, t.id, { to: 'proposed' })).rejects.toMatchObject({ code: 'validation' });
+        publish(t.id);
+        expect((await tickets.transition(AGENT, t.id, { to: 'proposed' })).status).toBe('proposed');
+      });
+
+      it('a link-only artifact work product does not satisfy the rule', async () => {
+        const t = onTicket();
+        tickets.putArtifactWorkProduct(AGENT, t.id, 'plan', { url: '/raw' });
+        await expect(tickets.transition(AGENT, t.id, { to: 'proposed' })).rejects.toMatchObject({ code: 'validation' });
+      });
+
+      it('a ticket created while off is not gated after the policy turns on', async () => {
+        h.db.update('projects', h.projectId, { policiesJson: { visualPlanArtifact: false } });
+        const t = make();
+        h.db.update('tickets', t.id, { status: 'proposing' });
+        h.db.update('projects', h.projectId, { policiesJson: { visualPlanArtifact: true } });
+        expect((await tickets.transition(AGENT, t.id, { to: 'proposed' })).status).toBe('proposed');
+      });
+
+      it('a ticket created while on keeps the rule after the policy turns off', async () => {
+        const t = onTicket();
+        h.db.update('projects', h.projectId, { policiesJson: { visualPlanArtifact: false } });
+        await expect(tickets.transition(AGENT, t.id, { to: 'proposed' })).rejects.toMatchObject({ code: 'validation' });
+      });
+
+      it('leaves a ticket with the policy off unchanged', async () => {
+        h.db.update('projects', h.projectId, { policiesJson: { visualPlanArtifact: false } });
+        const t = make();
+        h.db.update('tickets', t.id, { status: 'proposing' });
+        expect((await tickets.transition(AGENT, t.id, { to: 'proposed' })).status).toBe('proposed');
+      });
+    });
+
     it('supersedes an open plan approval when the daemon writes a newer plan revision', () => {
       // `{ system: true }` simulates transition()'s own internal write — the one legitimate writer.
       const t = make();

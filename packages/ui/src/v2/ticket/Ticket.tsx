@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { deliveryBadgeOf, openspecArchive, projectLabel, ticketUiStatus, carriesWeaverReview, type Project, type Ticket, type TicketAttachment } from '@weave-ai/shared';
+import type { WorkProduct } from '../../api/types';
 import { workerPauseDetail } from '@weave-ai/render';
 import { A, useGo, useSearchParams } from '../../app/link';
 import { useWs } from '../../api/context';
@@ -81,6 +82,8 @@ export function V2TicketScreen(): React.ReactElement {
   const activity = useWorkerActivity();
   const runs = useTicketRuns(detail.data?.ticket.id ?? '');
   const hasArtifacts = (products.data ?? []).some((p) => p.type === 'artifact');
+  // VS-624: the plan artifact (`artifact:plan`) the plan approval card and Plan view show.
+  const planArtifact = (products.data ?? []).find((p) => p.type === 'artifact' && p.externalId === 'plan');
   const visibleTabs = useMemo(() => TABS.filter((t) => t.key !== 'artifacts' || hasArtifacts), [hasArtifacts]);
 
   const ticketRow = detail.data?.ticket;
@@ -150,7 +153,7 @@ export function V2TicketScreen(): React.ReactElement {
         {active === 'artifacts' ? (
           <ArtifactInline ws={ws} ticketId={ticket.id} detail={detail.data} products={products.data} />
         ) : active === 'plan' ? (
-          <PlanTab ticket={ticket} project={project} />
+          <PlanTab ticket={ticket} project={project} planArtifact={planArtifact} />
         ) : (
           <OverviewPage ticket={ticket} worker={worker} project={project} attachments={detail.data.attachments ?? []} />
         )}
@@ -551,7 +554,7 @@ function AttachmentsSection({ attachments }: { attachments: TicketAttachment[] }
   );
 }
 
-function PlanTab({ ticket, project }: { ticket: Ticket; project: Project | null }): React.ReactElement {
+function PlanTab({ ticket, project, planArtifact }: { ticket: Ticket; project: Project | null; planArtifact?: WorkProduct | null }): React.ReactElement {
   const ws = useWs();
   // VS-602: the live state of the agent that asked, for the plan card.
   const activity = useWorkerActivity();
@@ -584,6 +587,7 @@ function PlanTab({ ticket, project }: { ticket: Ticket; project: Project | null 
             live={planDecision.askedByAgentId ? activity.get(planDecision.askedByAgentId)?.live ?? null : null}
             busy={answer.isPending}
             plan={missing ? undefined : <Markdown source={body} />}
+            planArtifact={planArtifact ? { key: planArtifact.externalId ?? 'plan', title: planArtifact.title } : null}
             onAnswer={(a) => answer.mutate({ id: planDecision.id, ...a })}
           />
           <AnswerError error={answer.error} />

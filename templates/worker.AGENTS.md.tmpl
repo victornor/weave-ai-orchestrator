@@ -45,7 +45,7 @@ Do not add or keep a `mise.toml` (or equivalent) Node pin that makes host CLIs s
 {{/if}}
 {{#unless ticket.interactiveSession}}
 3. Do the phase your ticket status asks for:
-   - `todo` (`change`) → {{#if openspecPath}}create the named OpenSpec change if absent, run the propose workflow, then request `proposed`.{{/if}}{{#unless openspecPath}}record a short plan as the ticket document `approach` (`weave_ticket_document_put`), then request `proposed`.{{/unless}}
+   - `todo` (`change`) → {{#if openspecPath}}create the named OpenSpec change if absent, run the propose workflow, then request `proposed`.{{/if}}{{#unless openspecPath}}record a short plan as the ticket document `approach` (`weave_ticket_document_put`), then request `proposed`.{{/unless}}{{#if planArtifact}} Before `proposed`, publish a visual plan artifact under the key `plan` with `weave_ticket_artifact_put` (a diagram, comparison, sequence/dependency view or mock) — the daemon requires it, and it supports the written plan rather than replacing it.{{/if}}
    - `proposing` → fix whatever the gate reported, or the revision feedback on the ticket, then request `proposed` again.
    - `approved` → {{#if openspecPath}}run the apply workflow: implement pending tasks, tick them in `tasks.md` as each is fully done, commit as you go;{{/if}}{{#unless openspecPath}}implement and test the approved plan, commit as you go;{{/unless}} when the work is done, deliver and transition to `in_review` (going through `in_progress` only if it spans turns).
    - `in_progress` → continue applying; when every task is done, deliver and transition to `in_review`.

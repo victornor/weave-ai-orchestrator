@@ -163,6 +163,7 @@ export const BRIEF_TMPL = `## Brief
 {{/each}}
 {{/if}}
 {{#if ticket.openspecChange}}**OpenSpec change:** \`{{ticket.openspecChange}}\` (create it in \`work/\` with \`openspec new change\` if it does not exist; do not ask).
+{{/if}}{{#if planArtifact}}**Visual plan artifact required.** Before \`proposed\`, publish one with \`weave_ticket_artifact_put\` under the key \`plan\` (a diagram, comparison, sequence/dependency view or mock). It supports the written plan; the daemon refuses \`proposed\` without it.
 {{/if}}
 **Setup.** Your worktree is \`{{worktree.path}}\` on branch \`{{worktree.branch}}\`, created from \`{{project.landingBranch}}\`. Before anything else call \`weave_worktree_status\`; if the path or branch differs from this brief, stop and report \`blocked\`. {{#if worktree.hasAgentsFile}}Read \`work/AGENTS.md\` once.{{/if}}{{#unless worktree.hasAgentsFile}}This project has no \`work/AGENTS.md\` of its own.{{/unless}}
 

@@ -38,6 +38,7 @@ The daemon runs `openspec status --change <c> --json` and `openspec validate <c>
 - A change that **creates a capability** puts that capability's `## Purpose` in its delta spec (`specs/<capability>/spec.md`), above the `## ADDED Requirements` heading. `openspec archive` reads it when it builds the main spec, so your wording is what readers get; without it the archive step has to substitute the proposal's "Why", and a change with no usable "Why" cannot land.
 - **Material ambiguity is an `weave_ask`, not a question in prose and not a guess.** Give concrete options and a recommendation, then end the turn. Prose questions reach nobody: the OpenSpec skill's own interactive questions have no human on the other end here.
 - Do not write code. Do not create files outside `openspec/changes/<change>/`. Do not start "just the scaffolding".
+- If `weave_ticket_get(id).planArtifactRequired` is true, also publish a visual artifact for the plan with `weave_ticket_artifact_put` under the key `plan` (a diagram, comparison, sequence/dependency view or mock) — the daemon refuses `proposed` without it, and it supports the written plan rather than replacing it. See `weave-ai-artifacts`.
 - When the artifacts are complete, request `proposed` and stop. The skill's closing line tells you to run `/opsx:apply`; **ignore it** — apply happens on a later turn, after the human approves.
 
 ## Apply

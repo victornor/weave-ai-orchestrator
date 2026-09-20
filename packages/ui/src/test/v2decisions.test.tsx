@@ -370,6 +370,15 @@ describe('artifacts and the narrow variant', () => {
     renderCard({ narrow: true, ticketIdentifier: 'ACME-42' });
     expect(screen.getByRole('link', { name: 'Ask the worker' })).toHaveAttribute('href', '/w/ws1/tickets/tk_1');
   });
+
+  it('a plan approval prefers the plan artifact over another one (VS-624)', () => {
+    state.products = [
+      workProduct({ type: 'artifact', externalId: 'overview', title: 'Overview', url: '/api/w/ws1/tickets/tk_1/artifacts/overview/raw' }),
+      workProduct({ type: 'artifact', externalId: 'plan', title: 'Plan diagram', url: '/api/w/ws1/tickets/tk_1/artifacts/plan/raw' }),
+    ];
+    renderCard({ decision: makeDecision({ kind: 'plan_approval' }), ticketIdentifier: 'ACME-42' });
+    expect(screen.getByRole('link', { name: 'Plan diagram' })).toHaveAttribute('href', '/w/ws1/tickets/tk_1/artifacts/plan');
+  });
 });
 
 describe('the merge card CI chip (VS-481)', () => {

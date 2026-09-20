@@ -1326,6 +1326,7 @@ weave project retry <id> [--no-follow]              re-run a failed add against 
 weave project list|show|remove|fetch|set-policy <key>=<value>...
 weave project set-landing-branch <id> [branch] [--clear]        set/change/clear the landing branch after creation (VS-122); applies to the next ticket action, no restart needed
 weave project set-openspec <id> on|off                         turn a project's OpenSpec mode on/off after creation (VS-578); applies to tickets created afterwards, tickets already bound to a change keep their flow
+weave project set-policy <id> visualPlanArtifact=true|false   experimental, off by default (VS-624): require a visual artifact (`artifact:plan`) with every change ticket's plan; a ticket keeps the rule it began planning with
 weave runtime list|detect|login <id>              runtime availability and auth per workspace
 weave role list|show|activate|pause|resume|retire|charter show|charter rollback|memory show
 weave worker list|show|pause|resume|relaunch|cancel|purge|handover|handback --note <note>   handover/handback (VS-249): take a worker's session for your own terminal, or give it back

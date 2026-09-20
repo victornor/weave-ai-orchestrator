@@ -6,6 +6,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps, ReactNode } from 'react';
 import type { Run, TicketAttachment } from '@weave-ai/shared';
+import { PROMOTION_REVIEW_STALE_LINE } from '@weave-ai/shared';
 import { agent, decision as makeDecision, run as makeRun, ticket, workProduct } from './factories';
 
 const state = vi.hoisted(() => ({
@@ -578,5 +579,60 @@ describe('the approval card evidence (VS-555)', () => {
     state.detail = { ticket: ticket(), worker: null, blockers: [], attachments: [attachment({ id: 'x', label: 'x.png' })] };
     renderCard({ decision: makeDecision({ kind: 'question', ticketId: 'tk_1' }) });
     expect(document.querySelector('[data-v2-section="evidence"]')).toBeNull();
+  });
+});
+
+describe('the stale promotion card (VS-632)', () => {
+  const stalePromotion = makeDecision({
+    kind: 'promotion_approval',
+    status: 'open',
+    title: 'Promote edge to main for fernwood',
+    options: [
+      { key: 'approve', label: 'Promote edge to main', recommended: true },
+      { key: 'decline', label: 'Not now' },
+    ],
+    weaverReviewStatus: 'looked',
+    weaverReviewedAt: '2026-09-19T20:00:00.000Z',
+    weaverReviewNote: 'read the diff',
+    weaverReviewedHeadSha: '8d2051f1',
+    target: { promotion: { state: 'open', landingHead: 'c17384f9', reviewStale: true } },
+  });
+
+  it('states why Approve is held and withholds it, leaving Dismiss available', () => {
+    renderCard({ decision: stalePromotion, projectLabel: 'fernwood' });
+    expect(screen.getByText(PROMOTION_REVIEW_STALE_LINE)).toBeInTheDocument();
+    expect(screen.queryByText('Weaver reviewed — no concerns')).toBeNull();
+    expect(screen.getByRole('radio', { name: /Promote edge to main/ })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: /Not now/ })).not.toBeDisabled();
+  });
+
+  it('still lets the human dismiss the card', () => {
+    const { onAnswer } = renderCard({ decision: stalePromotion });
+    fireEvent.click(screen.getByRole('radio', { name: /Not now/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    expect(onAnswer).toHaveBeenCalledWith({ key: 'decline' });
+  });
+
+  it('shows the ordinary review line when the review is current', () => {
+    const current = makeDecision({
+      ...stalePromotion,
+      target: { promotion: { state: 'open', landingHead: '8d2051f1', reviewStale: false } },
+    });
+    renderCard({ decision: current });
+    expect(screen.queryByText(PROMOTION_REVIEW_STALE_LINE)).toBeNull();
+    expect(screen.getByText('Weaver reviewed — no concerns')).toBeInTheDocument();
+  });
+
+  it('renders the held state in both themes', () => {
+    for (const theme of ['dark', 'light']) {
+      const { unmount } = render(
+        <div data-theme={theme}>
+          <V2DecisionCard decision={stalePromotion} ws="ws1" onAnswer={() => undefined} />
+        </div>,
+      );
+      expect(screen.getByText(PROMOTION_REVIEW_STALE_LINE)).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /Promote edge to main/ })).toBeDisabled();
+      unmount();
+    }
   });
 });

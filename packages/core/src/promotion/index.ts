@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { nowIso } from '@weave-ai/db';
+import { decisionRow, nowIso } from '@weave-ai/db';
 import {
   OcError, landingBranchOf, NAMED_CARD_OPTION_KEYS, promotionPrTitleOf, promotionStrategyOf,
   type Decision, type Project,
@@ -23,6 +23,14 @@ const RANGE_LIMIT = 200;
  * says has CI is held rather than merged without a run.
  */
 const NO_CI_GRACE_MS = 10 * 60_000;
+
+/** Two SHAs name the same object when one is a prefix of the other (mirrors the service helper of the same name). */
+function sameGitSha(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (x.length < 7 || y.length < 7) return x === y;
+  return x === y || x.startsWith(y) || y.startsWith(x);
+}
 
 /**
  * Land-then-promote (VS-568, VS-584): the second half. The daemon's only path that lands a project's
@@ -57,6 +65,22 @@ export function createPromotionService(ctx: WorkspaceContext, deps: () => CoreSe
     return r.ok && r.stdout.trim() ? r.stdout.trim() : null;
   }
 
+  /**
+   * VS-632: whether a commit's content is already on the default branch. Ancestry proves it directly;
+   * a squash promotion rewrites the commit, so fall back to the tree diff over just the paths the
+   * commit touched — `git diff --quiet <default> <landing> -- <paths>` reports no difference when that
+   * content is already there, independent of history.
+   */
+  async function contentAlreadyOnDefault(clone: string, defaultRef: string, landingRef: string, sha: string): Promise<boolean> {
+    if ((await git(['merge-base', '--is-ancestor', sha, defaultRef], clone, 15_000)).ok) return true;
+    const names = await git(['diff-tree', '--root', '--no-commit-id', '--name-only', '-r', '-m', '--first-parent', sha], clone, 15_000);
+    const paths = names.stdout.split('\n').map((p) => p.trim()).filter(Boolean);
+    // An empty commit carries no content, so there is nothing missing from the default branch.
+    if (paths.length === 0) return true;
+    const diff = await git(['diff', '--quiet', defaultRef, landingRef, '--', ...paths], clone, 30_000);
+    return diff.ok;
+  }
+
   /** Done tickets of the project whose landed work is on landing, not yet in the default branch. */
   async function waitingTickets(project: Project, clone: string, landingRef: string, defaultRef: string): Promise<PromotionTicket[]> {
     const rows = db.all<{ id: string; identifier: string; title: string; delivery: Record<string, unknown> | null; landingBranch: string | null }>(
@@ -72,7 +96,9 @@ export function createPromotionService(ctx: WorkspaceContext, deps: () => CoreSe
       if (typeof d.landedOn === 'string' && d.landedOn !== landingBranchOf(project)) continue;
       const onLanding = (await git(['merge-base', '--is-ancestor', d.landedSha, landingRef], clone, 15_000)).ok;
       if (!onLanding) continue;
-      if ((await git(['merge-base', '--is-ancestor', d.landedSha, defaultRef], clone, 15_000)).ok) continue;
+      // VS-632: a ticket is waiting only when its landed content is absent from the default branch — a
+      // squash promotion ships it without leaving an ancestor commit behind.
+      if (await contentAlreadyOnDefault(clone, defaultRef, landingRef, d.landedSha)) continue;
       out.push({ id: r.id, identifier: r.identifier, title: r.title });
       if (out.length >= RANGE_LIMIT) break;
     }
@@ -144,10 +170,20 @@ export function createPromotionService(ctx: WorkspaceContext, deps: () => CoreSe
     const list = async (range: string) => (await git(['log', '--format=%H%x1f%s', `-n${RANGE_LIMIT}`, range], clone, 30_000)).stdout
       .split('\n').filter(Boolean).map((l) => { const [sha, subject] = l.split('\x1f'); return { sha: sha!, subject: subject ?? '' }; });
     const content = await contentDiff(clone, defaultRef, landingRef);
-    const ahead = await count(`${defaultRef}..${landingRef}`);
     const behind = await count(`${landingRef}..${defaultRef}`);
-    const commits = ahead ? await list(`${defaultRef}..${landingRef}`) : [];
     const behindCommits = behind ? await list(`${landingRef}..${defaultRef}`) : [];
+    // VS-632: a raw commit count is not honest after a squash promotion — keep only commits whose
+    // content the default branch lacks, and let that list define `ahead`. Nothing to promote means no
+    // commit scan at all.
+    const commits: Array<{ sha: string; subject: string }> = [];
+    if (content.changedFiles) {
+      for (const c of await list(`${defaultRef}..${landingRef}`)) {
+        if (commits.length >= RANGE_LIMIT) break;
+        if (await contentAlreadyOnDefault(clone, defaultRef, landingRef, c.sha)) continue;
+        commits.push(c);
+      }
+    }
+    const ahead = commits.length;
     // VS-584: the honest content decides "there is something to promote", not the commit count.
     const tickets = content.changedFiles ? await waitingTickets(project, clone, landingRef, defaultRef) : [];
     let heldReason: string | null = null;
@@ -181,6 +217,40 @@ export function createPromotionService(ctx: WorkspaceContext, deps: () => CoreSe
     if (!f?.createPullRequest) return null;
     const settings = f.repoMergeSettings ? await f.repoMergeSettings(project.clonePath).catch(() => null) : null;
     return resolveMergeMethod(mergeMethodOf(project), settings)?.method ?? null;
+  }
+
+  /** The card's promotion record at the heads and content `s` reports (VS-568/VS-584/VS-632). */
+  function promotionSnapshot(s: PromotionStatus, method: string | null, patch: Partial<PromotionRecord> = {}): PromotionRecord {
+    return {
+      state: 'open', strategy: s.strategy, prUrl: null, mergeMethod: method,
+      landing: s.landing, defaultBranch: s.defaultBranch, landingHead: s.landingHead, defaultHead: s.defaultHead,
+      changedFiles: s.changedFiles, additions: s.additions, deletions: s.deletions,
+      ahead: s.ahead, behind: s.behind, tickets: s.tickets, notes: s.notes, heldReason: s.heldReason,
+      updatedAt: nowIso(), ...patch,
+    };
+  }
+
+  /** The options a card offers for the content `s` reports — Promote only when there is content to move. */
+  function promotionOptions(s: PromotionStatus): Array<{ key: string; label: string; recommended?: boolean }> {
+    return s.canPromote
+      ? [
+        { key: NAMED_CARD_OPTION_KEYS.promotion_approval.approve, label: `Promote ${s.landing} to ${s.defaultBranch}`, recommended: true },
+        { key: NAMED_CARD_OPTION_KEYS.promotion_approval.decline, label: 'Not now' },
+      ]
+      : [{ key: NAMED_CARD_OPTION_KEYS.promotion_approval.decline, label: 'Dismiss' }];
+  }
+
+  /**
+   * VS-632: replace an open card's context, options and promotion record in place. The decision id,
+   * correlation key and any weaver review mark are preserved, so a stale-review refusal keeps its card
+   * and a `concerns` mark keeps holding.
+   */
+  function rewriteCard(decisionId: string, context: string, options: Array<{ key: string; label: string; recommended?: boolean }>, promotion: PromotionRecord): void {
+    const row = db.get<{ target: Record<string, unknown> | null }>('SELECT target_json FROM decisions WHERE id = ?', [decisionId]);
+    const target = row?.target ?? {};
+    db.update('decisions', decisionId, { context, optionsJson: options, targetJson: { ...target, promotion } });
+    const updated = db.get<Record<string, unknown>>('SELECT * FROM decisions WHERE id = ?', [decisionId]);
+    if (updated) ctx.events.emit('decision.updated', 'decision', decisionId, decisionRow(updated));
   }
 
   /** Stamp every included ticket promoted (VS-568/VS-584) and record the promotion. */
@@ -250,22 +320,10 @@ export function createPromotionService(ctx: WorkspaceContext, deps: () => CoreSe
         projectId, kind: 'promotion_approval', owner: 'human',
         title: `Promote ${s.landing} to ${s.defaultBranch} for ${project.slug}`,
         context: render(s, method),
-        options: s.canPromote
-          ? [
-            { key: NAMED_CARD_OPTION_KEYS.promotion_approval.approve, label: `Promote ${s.landing} to ${s.defaultBranch}`, recommended: true },
-            { key: NAMED_CARD_OPTION_KEYS.promotion_approval.decline, label: 'Not now' },
-          ]
-          : [{ key: NAMED_CARD_OPTION_KEYS.promotion_approval.decline, label: 'Dismiss' }],
+        options: promotionOptions(s),
         allowFreeText: true,
         correlationKey: key,
-        target: {
-          promotion: {
-            state: 'open', strategy: s.strategy, prUrl: null, mergeMethod: method,
-            landing: s.landing, defaultBranch: s.defaultBranch, landingHead: s.landingHead, defaultHead: s.defaultHead,
-            changedFiles: s.changedFiles, additions: s.additions, deletions: s.deletions,
-            ahead: s.ahead, behind: s.behind, tickets: s.tickets, notes: s.notes, heldReason: s.heldReason, updatedAt: nowIso(),
-          },
-        },
+        target: { promotion: promotionSnapshot(s, method, { reviewStale: false }) },
       });
     },
 
@@ -287,7 +345,7 @@ export function createPromotionService(ctx: WorkspaceContext, deps: () => CoreSe
         if (s.behind > 0 && s.strategy === 'direct-push') throw new OcError('conflict', s.heldReason ?? `${s.landing} cannot fast-forward ${s.defaultBranch}`, { behind: s.behind, commits: s.behindCommits });
         const reviewed = d.weaverReviewedHeadSha;
         if (!reviewed || !(s.landingHead.startsWith(reviewed) || reviewed.startsWith(s.landingHead))) {
-          throw new OcError('revision_pending', `decision ${d.id} is held: ${s.landing} moved since the weaver reviewed it; review and re-raise the card`, { weaverReviewedHeadSha: reviewed, landingHead: s.landingHead });
+          throw new OcError('revision_pending', `decision ${d.id} is held: ${s.landing} moved since the weaver reviewed it; review and re-raise the card`, { weaverReviewedHeadSha: reviewed, landingHead: s.landingHead, weaverReviewHeadMismatch: true });
         }
         if (s.strategy === 'direct-push') {
           const push = await git(['push', 'origin', `${s.landingHead}:refs/heads/${s.defaultBranch}`], project.clonePath, 300_000);
@@ -372,6 +430,59 @@ export function createPromotionService(ctx: WorkspaceContext, deps: () => CoreSe
         }
       }
       return advanced;
+    },
+
+    /**
+     * VS-632: an open card is a snapshot, and the landing branch moves under it. Recompute every card
+     * whose head has moved — its context, options and target, including the honest content and the
+     * review-stale flag — and wake the weaver to review the new head, so a stale card is never the
+     * reason a promotion sits unapprovable. Called from the supervisor's existing liveness cadence; a
+     * card whose head has not moved is left untouched, so repeated ticks enqueue nothing further.
+     */
+    async refresh(): Promise<number> {
+      const rows = db.all<{ id: string; projectId: string; weaverReviewStatus: string | null; weaverReviewedHeadSha: string | null; target: Record<string, unknown> | null }>(
+        "SELECT id, project_id, weaver_review_status, weaver_reviewed_head_sha, target_json FROM decisions WHERE workspace_id = ? AND kind = 'promotion_approval' AND status = 'open'",
+        [ws],
+      );
+      let refreshed = 0;
+      let conductorId: string | null = null;
+      for (const row of rows) {
+        const p = (row.target?.['promotion'] ?? null) as PromotionRecord | null;
+        if (!p || p.state !== 'open') continue;
+        let project: Project;
+        try { project = projectOf(row.projectId); } catch { continue; }
+        if (landingBranchOf(project) === project.defaultBranch) continue;
+        const s = await status(row.projectId).catch(() => null);
+        if (!s?.applicable || !s.landingHead || !s.defaultHead) continue;
+        const headMoved = !(p.landingHead && sameGitSha(p.landingHead, s.landingHead));
+        // The mark itself is kept — a `concerns` mark must keep holding and its note stays on the
+        // card — but a `looked` mark no longer applies to a head the branch has moved past, so the
+        // next refresh recomputes this to false once the weaver has marked the new head.
+        const reviewStale = row.weaverReviewStatus !== 'concerns' && row.weaverReviewedHeadSha != null && !sameGitSha(row.weaverReviewedHeadSha, s.landingHead);
+        // Nothing changed: the card already describes this head and review state.
+        if (!headMoved && (p.reviewStale === true) === reviewStale) continue;
+        const method = s.strategy === 'pull-request' ? await mergeMethodFor(project) : null;
+        rewriteCard(row.id, render(s, method), promotionOptions(s), promotionSnapshot(s, method, { reviewStale }));
+        refreshed += 1;
+        // Only a moved head needs the weaver: clearing the stale flag is the review that just landed.
+        if (!headMoved) continue;
+        if (conductorId === null) {
+          try { conductorId = deps().workers.conductor().id; } catch { conductorId = ''; }
+        }
+        if (conductorId) {
+          try {
+            deps().wake.enqueue(conductorId, {
+              source: 'system',
+              reason: `promotion card refreshed: ${s.landing} moved to ${s.landingHead.slice(0, 8)}; re-review "${p.landing ? `Promote ${p.landing} to ${s.defaultBranch}` : 'the promotion'}"`,
+              payload: { kind: 'promotion_refresh', decisionId: row.id, projectId: row.projectId, landingHead: s.landingHead },
+              idempotencyKey: `promotion-refresh:${row.id}:${s.landingHead}`,
+              requestedBy: { kind: 'system', id: null },
+            });
+          } catch (e) { log.warn({ decisionId: row.id, err: String(e) }, 'promotion refresh wake failed'); }
+        }
+        log.info({ decisionId: row.id, projectId: row.projectId, landingHead: s.landingHead, reviewStale }, 'refreshed an open promotion card');
+      }
+      return refreshed;
     },
   };
 }

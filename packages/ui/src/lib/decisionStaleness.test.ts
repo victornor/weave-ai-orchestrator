@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { PROMOTION_REVIEW_STALE_LINE } from '@weave-ai/shared';
 import { ApiError } from '../api/client';
 import { staleAnswerCopy } from './decisionStaleness';
 
@@ -36,6 +37,25 @@ describe('staleAnswerCopy', () => {
     const revisionPending = new ApiError(409, { code: 'revision_pending', message: 'held', details: {} });
     const wrongStatus = new ApiError(409, { code: 'wrong_status', message: 'stale', details: { status: 'answered' } });
     expect(staleAnswerCopy(revisionPending, null)?.title).not.toBe(staleAnswerCopy(wrongStatus, null)?.title);
+  });
+
+  it('names a moved promotion head with the card\'s own line (VS-632)', () => {
+    const e = new ApiError(409, {
+      code: 'revision_pending',
+      message: 'held',
+      details: { weaverReviewHeadMismatch: true, weaverReviewedHeadSha: '8d2051f1', landingHead: 'c17384f9' },
+    });
+    expect(staleAnswerCopy(e, null)).toEqual({
+      title: 'Approval is held',
+      detail: PROMOTION_REVIEW_STALE_LINE,
+      ticketId: null,
+    });
+  });
+
+  it('does not read the moved-head refusal as a concern', () => {
+    const moved = new ApiError(409, { code: 'revision_pending', message: 'held', details: { weaverReviewHeadMismatch: true } });
+    const concerns = new ApiError(409, { code: 'revision_pending', message: 'held', details: { weaverReviewStatus: 'concerns', weaverReviewNote: 'x' } });
+    expect(staleAnswerCopy(moved, null)?.detail).not.toBe(staleAnswerCopy(concerns, null)?.detail);
   });
 
   it('returns null for anything else', () => {

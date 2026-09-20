@@ -16,6 +16,7 @@ import {
   NAMED_CARD_OPTION_KEYS,
   documentTarget,
   isActiveRun,
+  promotionCardReview,
   weaverReviewCopy,
   type Agent,
   type Decision,
@@ -364,6 +365,11 @@ export function V2DecisionCard({
   const concerns = review?.held === true;
   const awaitsReview = review?.awaitsReview === true;
   const blocked = concerns || awaitsReview;
+  // VS-632: a promotion card whose landing head moved past the weaver's review states that and holds
+  // Approve, so the refusal is visible before the human taps rather than arriving as a toast. It is
+  // not the generic hold: overriding it cannot help, because the daemon's head guard is absolute.
+  const promotionReview = decision.kind === 'promotion_approval' ? promotionCardReview(decision) : null;
+  const promotionStale = promotionReview?.stale === true;
   const inert = decision.status !== 'open';
   const answered = decision.status === 'answered';
   const named = (NAMED as string[]).includes(decision.kind);
@@ -487,7 +493,7 @@ export function V2DecisionCard({
           <CiChip delivery={delivery} className="mb-1.5" />
         ) : null}
 
-        {review ? (
+        {review && !promotionStale ? (
           <div className="mb-1.5" data-weaver-review={reviewTone}>
             {reviewTone === 'concerns' ? (
               <p className="text-micro font-medium text-blocked">{review.line}</p>
@@ -502,6 +508,12 @@ export function V2DecisionCard({
             {objection ? <p className="mt-1 whitespace-pre-wrap text-meta text-text-1">{objection}</p> : null}
             {review.waitingOn ? <p className="mt-1 text-micro text-text-3">Weaver: {review.waitingOn}</p> : null}
           </div>
+        ) : null}
+
+        {promotionStale ? (
+          <p className="mb-1.5 text-micro font-medium text-blocked" data-promotion-stale>
+            {promotionReview!.line}
+          </p>
         ) : null}
 
         {artifact ? (
@@ -542,9 +554,13 @@ export function V2DecisionCard({
             {decision.options.map((o) => {
               const picked = o.recommended || o.key === decision.recommendation;
               const chosen = selected === o.key;
+              // VS-632: the approving option is withheld while the review is stale; the line above says
+              // why, and Dismiss stays available.
+              const heldByStale = promotionStale && o.key === approveKey;
               return (
                 <button
-                  key={o.key} type="button" role="radio" aria-checked={chosen} disabled={busy}
+                  key={o.key} type="button" role="radio" aria-checked={chosen} disabled={busy || heldByStale}
+                  title={heldByStale ? (promotionReview!.line ?? undefined) : undefined}
                   onClick={() => { setSelected(o.key); setFreeText(false); }}
                   className={cx('rounded-r4 border p-2 text-left', chosen ? 'border-accent-edge bg-accent-tint' : 'border-line-2 hover:bg-bg-2')}
                 >
@@ -780,7 +796,7 @@ export function V2DecisionCard({
           ) : optionList ? (
             <button
               type="button"
-              disabled={busy || missing.length > 0 || (freeText ? text.trim() === '' : selected === null)}
+              disabled={busy || missing.length > 0 || (freeText ? text.trim() === '' : selected === null) || (promotionStale && selected === approveKey)}
               onClick={() => (freeText ? onAnswer(withInputs({ text })) : answer(selected!))}
               className="h-9 flex-1 rounded-r4 border-0 bg-accent px-3 text-meta font-medium text-white disabled:cursor-not-allowed disabled:opacity-55"
             >

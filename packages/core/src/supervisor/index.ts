@@ -1476,6 +1476,10 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
           try { stallRecoveryScan(); } catch (e) { log.error({ err: String(e) }, 'stall recovery scan failed'); }
           // VS-469: re-wake the weaver for an approval it left unreviewed past the first threshold.
           try { reviewReminderScan(); } catch (e) { log.error({ err: String(e) }, 'review reminder scan failed'); }
+          // VS-632: an open card whose landing head moved is recomputed in place and the weaver is
+          // woken to review the new head, so a stale review cannot leave it unapprovable. On the
+          // liveness cadence, not the faster merge-CI one, because each refresh fetches the remote.
+          await deps().promotion.refresh().catch((e) => log.error({ err: String(e) }, 'promotion refresh failed'));
         }
         try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }
         try { deps().routines.fireDue(); } catch { /* routines service unavailable */ }

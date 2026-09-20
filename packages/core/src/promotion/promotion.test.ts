@@ -107,6 +107,21 @@ describe('promotion', () => {
     });
     return 'd1';
   };
+  /** VS-632: an open card row, the shape `refresh` reads and rewrites. */
+  const openCardRow = (promotion: Record<string, unknown>, over: Record<string, unknown> = {}): string => {
+    h.db.insert('decisions', {
+      id: 'd1', workspaceId: h.workspaceId, ticketId: null, projectId: h.projectId, kind: 'promotion_approval',
+      owner: 'human', title: 'Promote edge to main', context: '', optionsJson: [{ key: 'approve', label: 'Promote edge to main' }, { key: 'decline', label: 'Not now' }],
+      inputsJson: [], allowFreeText: true, status: 'open', answerKey: null,
+      answeredByKind: null, answeredById: null, answeredAt: null,
+      targetJson: { promotion }, correlationKey: `promotion_approval:${h.projectId}`, createdAt: '2026-09-19T00:00:00.000Z',
+      weaverReviewStatus: 'looked', weaverReviewedAt: '2026-09-19T00:00:00.000Z', weaverReviewNote: 'clean', weaverReviewedByAgentId: h.conductorId,
+      weaverReviewWaitingOn: null, weaverReviewedHeadSha: null,
+      ...over,
+    });
+    return 'd1';
+  };
+  const cardRecordOf = (): Record<string, unknown> => h.db.get<{ target: Record<string, unknown> }>('SELECT target_json FROM decisions WHERE id = ?', ['d1'])!.target['promotion'] as Record<string, unknown>;
   const recordOf = (): Record<string, unknown> | null => {
     const row = h.db.get<{ target: Record<string, unknown> | null }>('SELECT target_json FROM decisions WHERE id = ?', ['d1']);
     return (row?.target?.['promotion'] as Record<string, unknown>) ?? null;
@@ -120,6 +135,8 @@ describe('promotion', () => {
     h = makeHarness();
     created = [];
     h.services.wake = fakeWake() as never;
+    // VS-632: `refresh` wakes the weaver through the workers service; the harness does not build one.
+    h.services.workers = { conductor: () => ({ id: h.conductorId }) } as never;
     h.services.decisions = { create: vi.fn((_a: Actor, input: Record<string, unknown>) => { created.push(input); return { id: 'd1', ...input }; }) } as never;
     dir = mkdtempSync(join(tmpdir(), 'ac-promotion-'));
     remote = join(dir, 'remote');
@@ -331,5 +348,79 @@ describe('promotion', () => {
     expect(calls.merged).toHaveLength(0);
     expect(recordOf()).toMatchObject({ state: 'held' });
     expect(String(recordOf()!['heldReason'])).toMatch(/moved/);
+  });
+
+  it('lists only content the default branch lacks after a squash, and counts only those commits (VS-632)', async () => {
+    const shippedSha = await landOn('edge', 'a.txt');
+    const shipped = doneTicket('Add a', shippedSha);
+    // A squash promotion ships the first commit's content to main without leaving its history behind.
+    await squashPromote();
+    const pendingSha = await landOn('edge', 'b.txt');
+    const pending = doneTicket('Add b', pendingSha);
+    const s = await promotion.status(h.projectId);
+    expect(s.changedFiles).toBeGreaterThan(0);
+    expect(s.tickets.map((t) => t.id)).toContain(pending);
+    expect(s.tickets.map((t) => t.id)).not.toContain(shipped);
+    expect(s.ahead).toBe(1);
+    expect(s.commits.map((c) => c.sha)).toContain(pendingSha);
+    expect(s.commits.map((c) => c.sha)).not.toContain(shippedSha);
+  });
+
+  it('refreshes an open card at the moved head, wakes the weaver, and holds then allows Approve (VS-632)', async () => {
+    const A = await landOn('edge', 'a.txt');
+    const ticketA = doneTicket('Add a', A);
+    fakeForge({ ciState: 'success' });
+    const wake = h.services.wake as unknown as ReturnType<typeof fakeWake>;
+    openCardRow(
+      { state: 'open', strategy: 'pull-request', prUrl: null, mergeMethod: 'squash', landing: 'edge', defaultBranch: 'main', landingHead: A, defaultHead: null, changedFiles: 1, additions: 1, deletions: 0, ahead: 1, behind: 0, tickets: [{ id: ticketA, identifier: 'TST-1', title: 'Add a' }], notes: [], heldReason: null, reviewStale: false, updatedAt: '2026-09-19T00:00:00.000Z' },
+      { weaverReviewedHeadSha: A },
+    );
+
+    const B = await landOn('edge', 'b.txt');
+    const ticketB = doneTicket('Add b', B);
+    expect(await promotion.refresh()).toBe(1);
+    const row = h.db.get<{ context: string; target: Record<string, unknown> }>('SELECT context, target_json FROM decisions WHERE id = ?', ['d1'])!;
+    expect(cardRecordOf()).toMatchObject({ landingHead: B, reviewStale: true });
+    expect(row.context).toContain('land b.txt');
+    const waiting = (cardRecordOf()['tickets'] as Array<{ id: string }>).map((t) => t.id).sort();
+    expect(waiting).toEqual([ticketA, ticketB].sort());
+
+    // The weaver is asked to re-review at the new head, exactly once.
+    expect(wake.calls).toHaveLength(1);
+    expect(wake.calls[0]!.agentId).toBe(h.conductorId);
+    expect(wake.calls[0]!.input).toMatchObject({ payload: { kind: 'promotion_refresh', decisionId: 'd1', landingHead: B } });
+    expect(await promotion.refresh()).toBe(0);
+    expect(wake.calls).toHaveLength(1);
+
+    // Approve before the re-review is refused, carrying the detail the card reads.
+    await expect(promotion.execute(HUMAN, card({ weaverReviewedHeadSha: A }))).rejects.toMatchObject({
+      code: 'revision_pending',
+      details: { weaverReviewHeadMismatch: true, landingHead: B },
+    });
+
+    // The weaver marks the card at B; the next refresh clears the stale flag without a second wake.
+    h.db.update('decisions', 'd1', { weaverReviewedHeadSha: B, weaverReviewedAt: '2026-09-20T00:00:00.000Z' });
+    expect(await promotion.refresh()).toBe(1);
+    expect(cardRecordOf()['reviewStale']).toBe(false);
+    expect(wake.calls).toHaveLength(1);
+
+    // Approve now succeeds at the reviewed head.
+    const res = await promotion.execute(HUMAN, card({ weaverReviewedHeadSha: B }));
+    expect(res.promotedHead).toBe(B);
+    expect(typeof h.db.get<{ delivery: Record<string, unknown> }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketB])!.delivery['promotedAt']).toBe('string');
+  });
+
+  it('keeps a concerns mark holding while refreshing a moved card (VS-632)', async () => {
+    const A = await landOn('edge', 'a.txt');
+    const B = await landOn('edge', 'b.txt');
+    openCardRow(
+      { state: 'open', strategy: 'pull-request', prUrl: null, mergeMethod: 'squash', landing: 'edge', defaultBranch: 'main', landingHead: A, defaultHead: null, changedFiles: 1, additions: 1, deletions: 0, ahead: 1, behind: 0, tickets: [], notes: [], heldReason: null, reviewStale: false, updatedAt: '2026-09-19T00:00:00.000Z' },
+      { weaverReviewStatus: 'concerns', weaverReviewNote: 'split the migration', weaverReviewedHeadSha: A },
+    );
+    expect(await promotion.refresh()).toBe(1);
+    const row = h.db.get<{ weaverReviewStatus: string; weaverReviewNote: string }>('SELECT weaver_review_status, weaver_review_note FROM decisions WHERE id = ?', ['d1'])!;
+    expect(row.weaverReviewStatus).toBe('concerns');
+    expect(row.weaverReviewNote).toBe('split the migration');
+    expect(cardRecordOf()).toMatchObject({ landingHead: B, reviewStale: false });
   });
 });

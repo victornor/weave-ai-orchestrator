@@ -80,6 +80,8 @@ vi.mock('../api/runStream', () => ({
 }));
 
 vi.mock('../api/hooks', () => ({
+  // What the daemon's runtime list declares for each runtime (VS-615).
+  usePartialOutput: (id?: string | null) => (({ opencode: 'full', claude: 'full', codex: 'full', cursor: 'text', gemini: 'text', weave: 'full' }) as Record<string, string>)[id ?? ''] ?? 'none',
   usePlan: (_projectId: string | null, planId: string | null) => ({
     data: planId ? { plan: { id: planId, status: state.planStatus, threadId: 'th_plan', agentId: 'planner_1' }, drafts: state.drafts } : undefined,
   }),

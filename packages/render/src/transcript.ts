@@ -83,7 +83,7 @@ export function toolTarget(name: string, input: Payload | null): string | null {
   if (pattern) return oneLine(pattern, 60);
   const url = str(input, 'url', 'uri');
   if (url) return oneLine(url, 80);
-  const prompt = str(input, 'prompt', 'description');
+  const prompt = name === 'task' ? str(input, 'description', 'prompt') : str(input, 'prompt', 'description');
   if (prompt) return oneLine(prompt, 60);
   if (/^weave_/.test(name)) {
     const id = str(input, 'ticketId', 'id', 'workerId', 'roleId', 'decisionId');
@@ -133,6 +133,18 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
 
   list.sort((a, b) => (a?.seq ?? 0) - (b?.seq ?? 0));
 
+  // A subagent's events (VS-615) name the `task` call that started them as `parentId`. They render
+  // inside that call, not beside it; one whose parent is not in view stays where it is.
+  const callIds = new Set<string>();
+  for (const ev of list) if (ev?.type === 'tool.call') { const id = str((ev.payload ?? {}) as Payload, 'callId', 'id', 'toolCallId', 'toolUseId'); if (id) callIds.add(id); }
+  const nestedEvents = new Map<string, RunEvent[]>();
+  const top: RunEvent[] = [];
+  for (const ev of list) {
+    const parent = ev ? str((ev.payload ?? {}) as Payload, 'parentId') : null;
+    if (parent && callIds.has(parent)) nestedEvents.set(parent, [...(nestedEvents.get(parent) ?? []), ev]);
+    else top.push(ev);
+  }
+
   const blocks: TranscriptBlock[] = [];
   /** call id → index in `blocks`, so a late tool.result folds back into its call. */
   const pendingTools = new Map<string, number>();
@@ -152,7 +164,7 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
   const status = (ev: RunEvent, text: string, tone: StatusBlock['tone'] = 'info', detail: string | null = null): StatusBlock =>
     ({ ...base(ev), kind: 'status', text, tone, detail });
 
-  for (const ev of list) {
+  for (const ev of top) {
     if (!ev || typeof ev !== 'object') continue;
     const p: Payload = (ev.payload ?? {}) as Payload;
 
@@ -418,6 +430,12 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
       default:
         break;
     }
+  }
+
+  for (const [parent, events] of nestedEvents) {
+    const idx = pendingTools.get(parent) ?? completedTools.get(parent);
+    const owner = idx !== undefined ? blocks[idx] : undefined;
+    if (owner?.kind === 'tool') owner.children = runEventsToTranscript(events, options);
   }
 
   // A tool that never got a result still reads correctly: it is simply still pending.

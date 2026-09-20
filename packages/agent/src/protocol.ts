@@ -16,6 +16,8 @@ export interface InitMessage {
     model: string; effort?: string | null; options: Record<string, unknown>;
     /** The runtime's config home (`<workspace state>/runtimes/<runtime>`), the confinement's state-dir anchor. */
     configHome?: string;
+    /** Directories the file tools refuse to read or write in every mode (the daemon's config directory). Ignored when one contains the worktree or home. */
+    protectedPaths?: string[];
     /** Per-run scratch directory outside the worktree: bash output spill goes here. */
     spillDir: string;
   };
@@ -31,7 +33,7 @@ export interface InitMessage {
 export type ParentMessage = InitMessage | { type: 'send'; text: string } | { type: 'cancel'; mode: 'interrupt' | 'kill' };
 
 export interface ChildEvent { ts: string; type: string; payload: Record<string, unknown> }
-export interface ChildPartial { kind: 'text' | 'thinking' | 'tool_input'; partId: string; messageId?: string; toolCallId?: string; text: string }
+export interface ChildPartial { kind: 'text' | 'thinking' | 'tool_input' | 'tool_output'; partId: string; messageId?: string; toolCallId?: string; text: string }
 export interface ChildResult {
   exitCode: number | null; signal: string | null; timedOut: boolean;
   session: { v: 1; id: string; path: string; leafId: string | null } | null;

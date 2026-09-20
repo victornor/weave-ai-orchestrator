@@ -26,6 +26,8 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 vi.mock('../app/link', () => ({ useSearchParams: () => state.search, useGo: () => state.go }));
 vi.mock('../api/hooks', () => ({
+  // What the daemon's runtime list declares for each runtime (VS-615).
+  usePartialOutput: (id?: string | null) => (({ opencode: 'full', claude: 'full', codex: 'full', cursor: 'text', gemini: 'text', weave: 'full' }) as Record<string, string>)[id ?? ''] ?? 'none',
   useWorkspaces: () => ({ data: state.workspaces, isError: false, refetch: vi.fn() }),
   useWorkersMany: (ids: string[]) => ids.map((id) => ({ data: state.workers[id] ?? [] })),
   useTicketsMany: (ids: string[]) => ids.map((id) => ({ data: state.tickets[id] ?? [] })),

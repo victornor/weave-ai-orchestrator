@@ -116,6 +116,8 @@ describe('workers', () => {
       expect(seen).toHaveLength(1);
       expect((seen[0] as { ref: unknown; configHome: string }).ref).toEqual({ sessionId: 'sess-1' });
       expect((seen[0] as { configHome: string }).configHome).toContain('claude');
+      // VS-615: the session's own workspace scopes the runtime's provider and key.
+      expect((seen[0] as { workspaceId: string }).workspaceId).toBe(h.workspaceId);
       const row = h.db.get<{ compactingAt: string | null; compactingError: string | null; lastContextTokens: number | null }>(
         'SELECT compacting_at AS compactingAt, compacting_error AS compactingError, last_context_tokens AS lastContextTokens FROM agent_sessions WHERE agent_id = ?', [worker.id],
       )!;

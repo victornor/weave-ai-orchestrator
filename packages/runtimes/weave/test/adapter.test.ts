@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
-import { AC_ENV, ProviderProfileSchema, RUNTIME_PARTIAL_OUTPUT, validateRuntimeOptions, type ProviderProfile } from '@weave-ai/shared';
+import { AC_ENV, ProviderProfileSchema, validateRuntimeOptions, type ProviderProfile } from '@weave-ai/shared';
 import type { RuntimeEvent, RuntimePartial, TurnHandle, TurnInput, TurnSink } from '@weave-ai/runtime-sdk';
 import { capabilities, createAdapter } from '../src/index.js';
 import { parseChildLine } from '../src/events.js';
@@ -43,9 +43,8 @@ async function runFake(prompt: string, over: Partial<TurnInput> = {}, adapter = 
 }
 
 describe('declaration', () => {
-  it('declares what S1 delivers and matches the shared partial-output table', () => {
+  it('declares what S1 delivers, partial output included', () => {
     expect(capabilities).toMatchObject({ resumableSessions: true, streamingInput: true, mcp: true, usageReporting: 'per_turn', costReporting: false, partialOutput: 'full', structuredOutput: true });
-    expect(RUNTIME_PARTIAL_OUTPUT['weave']).toBe(capabilities.partialOutput);
     expect(adapterWith().capabilities).toBe(capabilities);
   });
   it('offers the webFetch option in its config schema', () => {
@@ -279,6 +278,24 @@ describe('the provider key comes from the workspace secret store (VS-619)', () =
     expect(result.error).toMatchObject({ code: 'key_missing', family: 'auth' });
     expect(result.error!.message).toContain('Settings > Providers');
     expect(result.error!.message).toContain('role');
+  });
+
+  it("compacts a session with the key of the session's own workspace, never another's (VS-615)", async () => {
+    const path = join(dir, 'ws.jsonl'); writeFileSync(path, '{"type":"session","v":1,"id":"c"}\n');
+    const other: ProviderProfile = { ...profile, baseUrl: 'https://other.example.test/v1' };
+    const a = createAdapter({ entry: FAKE, host: {
+      providers: (ws) => (ws === 'ws-2' ? { test: other } : { test: profile }),
+      providerKey: (_id, ws) => (ws === 'ws-2' ? 'sk-ws-2-000' : 'sk-ws-1-000'),
+    } });
+    const r = await a.compactSession!({ ref: { v: 1, id: 'c', path, leafId: null }, cwd: dir, model: 'test/big-model', workspaceId: 'ws-2' });
+    expect(r.ok).toBe(true);
+    expect(record().init['provider']).toMatchObject({ baseUrl: other.baseUrl, apiKey: 'sk-ws-2-000' });
+  });
+
+  it('sends the daemon config directory to the child as a protected path (VS-615)', async () => {
+    const a = createAdapter({ entry: FAKE, host: { providers: () => ({ test: profile }), providerKey: () => STORE_KEY, configDir: '/srv/weave-config' } });
+    await a.runTurn(input('replay', { env: { [AC_ENV.RUN_ID]: 'run-1' }, workspaceId: 'ws-1' }), sink().s);
+    expect(record().init['run']).toMatchObject({ protectedPaths: ['/srv/weave-config'] });
   });
 
   it('scopes model discovery to the workspace, using that workspace\'s profile and key', async () => {

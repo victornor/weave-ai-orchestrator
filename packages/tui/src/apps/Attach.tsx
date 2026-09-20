@@ -11,7 +11,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Text, useApp } from 'ink';
 import type { Agent, Run, RunDeltaFrame, RunEvent, RunLiveSnapshot } from '@weave-ai/shared';
 import { isActiveRun } from '@weave-ai/shared';
-import { applyDelta, dropSuperseded, fromSnapshot, runEventFromFrame, runEventsToTranscript, workerToCard, type PartialMap, type TranscriptBlock } from '@weave-ai/render';
+import { applyDelta, dropSuperseded, fromSnapshot, runEventFromFrame, runtimePartialOutput, runEventsToTranscript, workerToCard, type PartialMap, type TranscriptBlock } from '@weave-ai/render';
 import { ActivityLine } from '../components/ActivityLine.js';
 import { StatusBar } from '../components/StatusBar.js';
 import { TextInput } from '../components/TextInput.js';
@@ -63,6 +63,9 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
   const [input, setInput] = useState('');
   const [history, setHistory] = useState<string[]>([]);
   const [nonce, setNonce] = useState(0);
+  /** The daemon's runtimes, for what this run's runtime can stream. */
+  const [runtimes, setRuntimes] = useState<Array<{ id: string; capabilities?: unknown }> | null>(null);
+  useEffect(() => { void client.get<Array<{ id: string; capabilities?: unknown }>>('/runtimes').then(setRuntimes).catch(() => undefined); }, [client]);
   /** VS-603: what the run is still generating, and whether a turn is live for the row. */
   const [partials, setPartials] = useState<PartialMap>(() => new Map());
   const [partialClock, setPartialClock] = useState<{ last: number | null; since: number | null }>({ last: null, since: null });
@@ -274,7 +277,7 @@ export function Attach({ client, agentId }: { client: TuiClient; agentId: string
       <ActivityLine
         events={events}
         partials={livePartials}
-        runtimeId={detail?.agent?.runtimeId}
+        partialOutput={runtimePartialOutput(runtimes, detail?.agent?.runtimeId)}
         partialSince={partialClock.since}
         lastPartialAt={partialClock.last}
         live={live}

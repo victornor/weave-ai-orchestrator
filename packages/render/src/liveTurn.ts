@@ -12,7 +12,23 @@ import { toolTarget } from './transcript.js';
 
 export type LiveTurnState = 'starting' | 'streaming' | 'thinking' | 'tool' | 'waiting';
 
-export interface LiveTurnPartial { partId: string; kind: 'text' | 'thinking' | 'tool_input'; text: string }
+/**
+ * What a runtime declares it can stream (VS-615): its `capabilities.partialOutput`. A runtime that
+ * declares nothing, and a run whose runtime is unknown, report whole steps only. Every surface reads
+ * this instead of keeping a table of runtime ids.
+ */
+export function partialOutputOf(capabilities: unknown): 'none' | 'text' | 'full' {
+  const v = typeof capabilities === 'object' && capabilities !== null ? (capabilities as { partialOutput?: unknown }).partialOutput : undefined;
+  return v === 'text' || v === 'full' ? v : 'none';
+}
+
+/** `partialOutputOf` for one run's runtime, looked up in the daemon's runtime list (`GET /api/runtimes`). */
+export function runtimePartialOutput(runtimes: readonly { id: string; capabilities?: unknown }[] | null | undefined, runtimeId: string | null | undefined): 'none' | 'text' | 'full' {
+  if (!runtimeId) return 'none';
+  return partialOutputOf(runtimes?.find((r) => r.id === runtimeId)?.capabilities);
+}
+
+export interface LiveTurnPartial { partId: string; kind: 'text' | 'thinking' | 'tool_input' | 'tool_output'; text: string }
 
 export interface LiveTurn {
   state: LiveTurnState;

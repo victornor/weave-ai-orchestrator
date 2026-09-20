@@ -34,15 +34,11 @@ export type EphemeralEventType = (typeof EPHEMERAL_EVENT_TYPES)[number];
 export interface WorkspaceEvent<T = unknown> { seq: number; workspaceId: string; type: EventType; entityType: string; entityId: string; payload: T; createdAt: string }
 
 /** VS-595: one part's partial output in a `run.delta` frame; `offset` is how many characters precede `text`. */
-export interface RunDeltaPart { partId: string; kind: 'text' | 'thinking' | 'tool_input'; offset: number; text: string }
+export interface RunDeltaPart { partId: string; kind: 'text' | 'thinking' | 'tool_input' | 'tool_output'; offset: number; text: string }
 /** Payload of a `run.delta` frame: everything that changed since the run's previous frame. */
 export interface RunDeltaFrame { runId: string; parts: RunDeltaPart[] }
 /** `GET /runs/:id/live`: the partial output a live run has shown so far, for a page that just connected. */
 export interface RunLiveSnapshot { partials: Array<{ partId: string; kind: RunDeltaPart['kind']; text: string }> }
 
-/**
- * VS-595: what partial output each runtime reports while a step is generated (its adapter's
- * `capabilities.partialOutput`), for a page that must say whether it can stream. A runtime absent
- * here reports whole steps only. Each adapter's own test pins its declaration to this table.
- */
-export const RUNTIME_PARTIAL_OUTPUT: Readonly<Record<string, 'text' | 'full'>> = { opencode: 'full', claude: 'full', codex: 'full', cursor: 'text', gemini: 'text', weave: 'full' };
+/** How much of a step a runtime reports while it is generated: its adapter's `capabilities.partialOutput` (VS-615). */
+export type PartialOutputMode = 'none' | 'text' | 'full';

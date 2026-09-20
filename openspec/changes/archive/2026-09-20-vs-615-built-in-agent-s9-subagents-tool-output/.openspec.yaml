@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "Built-in agent S9: subagents, tool-output streaming and a
+  capability-driven live UI"

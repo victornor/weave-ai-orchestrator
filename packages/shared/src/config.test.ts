@@ -653,10 +653,6 @@ describe('providers (VS-607)', () => {
       expect(WorkspaceConfigSchema.safeParse({ ...base, providers: { p: bad } }).success).toBe(false);
     }
   });
-  it('declares full partial output for the weave runtime', async () => {
-    const { RUNTIME_PARTIAL_OUTPUT } = await import('./events.js');
-    expect(RUNTIME_PARTIAL_OUTPUT['weave']).toBe('full');
-  });
 });
 
 describe('MCP servers (VS-621)', () => {

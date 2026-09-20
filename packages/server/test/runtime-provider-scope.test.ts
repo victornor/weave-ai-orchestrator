@@ -33,6 +33,11 @@ describe('createRuntimeHost', () => {
     expect(host.providerKey!('or', 'ghost')).toBeUndefined();
   });
 
+  it('exposes the daemon config directory to a runtime, and nothing when none is given (VS-615)', () => {
+    expect(createRuntimeHost(new Map(), '/srv/weave-config').configDir).toBe('/srv/weave-config');
+    expect(createRuntimeHost(new Map())).not.toHaveProperty('configDir');
+  });
+
   it('keeps the aggregate, first workspace defining an id winning, for a caller with no workspace', () => {
     const w1 = profile('https://w1.example.test/v1');
     const w2 = profile('https://w2.example.test/v1');

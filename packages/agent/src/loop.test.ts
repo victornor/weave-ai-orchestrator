@@ -132,7 +132,7 @@ describe('a turn', () => {
   it('gives a restricted turn only the read-only core tools', async () => {
     mock.script({ chunks: textChunks('x') });
     await runAgentTurn(makeInit({ mode: 'restricted' }), harness().io, new AbortController().signal, fast);
-    expect((mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name)).toEqual(['read', 'grep', 'glob', 'todo_write']);
+    expect((mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name)).toEqual(['read', 'grep', 'glob', 'todo_write', 'task']);
   });
 
   it('stops at the step cap with tooling/max_steps', async () => {
@@ -196,7 +196,7 @@ describe('tools, permissions and events', () => {
     mcp = await startMockMcp([{ name: 'weave_ticket_get' }], () => 'ok');
     mock.script({ chunks: textChunks('x') });
     await runAgentTurn(makeInit({ mode: 'restricted', mcpServers: { 'weave-ai': { url: mcp.url } } }), harness().io, new AbortController().signal, fast);
-    expect((mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name)).toEqual(['read', 'grep', 'glob', 'todo_write', 'weave_ticket_get']);
+    expect((mock.requests[0]!.body['tools'] as Array<{ function: { name: string } }>).map((t) => t.function.name)).toEqual(['read', 'grep', 'glob', 'todo_write', 'task', 'weave_ticket_get']);
   });
 
   it('matches the Claude alias in a deny list', async () => {

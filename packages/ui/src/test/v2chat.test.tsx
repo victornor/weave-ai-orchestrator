@@ -83,6 +83,8 @@ vi.mock('../v2/chatSplit', async (importOriginal) => {
   return { ...actual, useElementWidth: () => ({ ref: () => undefined, width: state.width }) };
 });
 vi.mock('../api/hooks', () => ({
+  // What the daemon's runtime list declares for each runtime (VS-615).
+  usePartialOutput: (id?: string | null) => (({ opencode: 'full', claude: 'full', codex: 'full', cursor: 'text', gemini: 'text', weave: 'full' }) as Record<string, string>)[id ?? ''] ?? 'none',
   ACCOUNTS_REFRESH_MS: 300_000,
   useThreads: () => ({ data: [{ id: 't1' }], isSuccess: true }),
   useCreateThread: () => ({ data: { id: 't1' }, mutate: vi.fn(), isPending: false }),

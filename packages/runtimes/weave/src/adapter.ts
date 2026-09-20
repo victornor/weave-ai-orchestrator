@@ -151,7 +151,8 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
       installBundleFiles(home, bundle, { instructions: { 'AGENTS.md': bundle.instructions }, skillsDir: '.agents/skills' });
     },
 
-    async forkSession(base: SessionRef): Promise<SessionRef> {
+    // The fork copies a file and resolves no provider, so the workspace id is accepted and unused.
+    async forkSession(base: SessionRef, _cwd?: string, _workspaceId?: string): Promise<SessionRef> {
       const from = typeof base['path'] === 'string' ? base['path'] : '';
       if (!from || !existsSync(from)) throw new Error('the session file to fork does not exist');
       const id = randomUUID();
@@ -167,16 +168,16 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
         if (!path || !existsSync(path)) return fail('session_missing', 'The session file does not exist.');
         const parts = splitModel(input.model);
         if (!parts) return fail('model_not_configured', 'The weave runtime needs a model written as providerId/modelId.');
-        const profile = providers()[parts.providerId];
+        const profile = providers(input.workspaceId)[parts.providerId];
         if (!profile) return fail('provider_not_configured', `No provider "${parts.providerId}" in the workspace config.`);
         const preset = presetOf(profile);
         if (!preset) return fail('preset_unknown', `Provider "${parts.providerId}" names preset "${profile.preset}", which does not exist.`);
         const keyVar = profile.apiKeySecret;
-        const apiKey = (keyVar ? input.env?.[keyVar] : undefined) ?? host?.providerKey?.(parts.providerId);
+        const apiKey = (keyVar ? input.env?.[keyVar] : undefined) ?? host?.providerKey?.(parts.providerId, input.workspaceId);
         if (profile.auth !== 'none' && keyVar && !apiKey) return fail('key_missing', `The provider key ${keyVar} is not available.`);
         const resolved = resolveProvider({ preset, profile, model: profile.models[parts.modelId] });
         if (resolved.params.contextWindowTokens === undefined) {
-          const w = profile.models[parts.modelId]?.contextWindow ?? (await discover(parts.providerId, profile)).find((d) => d.id === parts.modelId)?.contextWindow;
+          const w = profile.models[parts.modelId]?.contextWindow ?? (await discover(parts.providerId, profile, input.workspaceId)).find((d) => d.id === parts.modelId)?.contextWindow;
           if (w) resolved.params.contextWindowTokens = w;
         }
         const extra = headersWithExtras(profile.headers, resolved.params.extraHeaders);
@@ -229,7 +230,7 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
       const prior = input.session.ref && typeof input.session.ref['id'] === 'string' && typeof input.session.ref['path'] === 'string' ? input.session.ref : null;
       const session = prior ? { id: String(prior['id']), path: String(prior['path']) } : (() => { const id = randomUUID(); return { id, path: join(layout.sessionsDir, `${id}.jsonl`) }; })();
       const base = childEnv();
-      const init = buildInit(input, { ...parts, profile, apiKey, session, layout, toolEnv: toolEnvFor(input, base, keyVar), resolved, headers: extra.headers });
+      const init = buildInit(input, { ...parts, profile, apiKey, session, layout, toolEnv: toolEnvFor(input, base, keyVar), resolved, headers: extra.headers, protectedPaths: host?.configDir ? [host.configDir] : [] });
 
       // At most `maxConcurrentRuns` children per provider; a run cancelled while it waits never takes a slot.
       const wait = new AbortController();

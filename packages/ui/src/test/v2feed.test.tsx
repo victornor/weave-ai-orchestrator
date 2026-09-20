@@ -18,6 +18,8 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock('../api/hooks', () => ({
+  // What the daemon's runtime list declares for each runtime (VS-615).
+  usePartialOutput: (id?: string | null) => (({ opencode: 'full', claude: 'full', codex: 'full', cursor: 'text', gemini: 'text', weave: 'full' }) as Record<string, string>)[id ?? ''] ?? 'none',
   useRuns: (params: { status?: string } = {}) => ({
     data: state.runs.filter((r) => !params.status || r.status === params.status),
   }),

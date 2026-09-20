@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
 import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, TicketStatus, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, RoadmapBlock, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanOrigin, PlanSummary, ChannelThread } from '@weave-ai/shared';
-import { dayKey } from '@weave-ai/render';
+import { dayKey, runtimePartialOutput } from '@weave-ai/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
 import { useHookWs, useWs } from './context';
@@ -558,6 +558,12 @@ export function useIncidents(reporter?: IncidentReporterKind): UseQueryResult<{ 
     queryFn: () => api.root<{ items: Incident[]; total: number }>(`/incidents${qs({ reporter })}`),
     refetchOnWindowFocus: true,
   });
+}
+
+/** What a run's runtime can stream, read from the daemon's runtime list rather than a table of ids (VS-615). */
+export function usePartialOutput(runtimeId: string | null | undefined): 'none' | 'text' | 'full' {
+  const runtimes = useRuntimes();
+  return runtimePartialOutput(runtimes.data, runtimeId);
 }
 
 export function useRuntimes(): UseQueryResult<T.RuntimeInfo[]> {

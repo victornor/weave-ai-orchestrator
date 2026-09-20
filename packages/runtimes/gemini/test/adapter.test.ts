@@ -2,7 +2,6 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { RUNTIME_PARTIAL_OUTPUT } from '@weave-ai/shared';
 import { adapter } from '../src/adapter.js';
 
 const dirs: string[] = [];
@@ -20,7 +19,6 @@ describe('gemini adapter', () => {
 
   it('declares text partial output and pins it to the page coverage table (VS-600)', () => {
     expect(adapter.capabilities.partialOutput).toBe('text');
-    expect(adapter.capabilities.partialOutput).toBe(RUNTIME_PARTIAL_OUTPUT['gemini']);
   });
 
   it('lists static google models with no thinking levels', async () => {

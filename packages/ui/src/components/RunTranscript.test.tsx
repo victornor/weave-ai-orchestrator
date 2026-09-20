@@ -4,6 +4,10 @@ import { act, render } from '@testing-library/react';
 import type { RunEvent } from '@weave-ai/shared';
 import { RunTranscript } from './RunTranscript';
 
+// The daemon's runtime list is what says whether a runtime streams (VS-615); the page holds no table of ids.
+const DECLARED: Record<string, 'text' | 'full'> = { opencode: 'full', cursor: 'text', gemini: 'text' };
+vi.mock('../api/hooks', () => ({ usePartialOutput: (runtimeId?: string | null) => (runtimeId ? DECLARED[runtimeId] ?? 'none' : 'none') }));
+
 const T0 = Date.parse('2026-09-19T12:00:00.000Z');
 let seq = 0;
 const ev = (type: RunEvent['type'], payload: Record<string, unknown>, sec: number): RunEvent => ({ id: String(++seq), runId: 'r', seq, ts: new Date(T0 + sec * 1000).toISOString(), type, stream: 'runtime', level: 'info', payload });
@@ -44,8 +48,7 @@ describe('RunTranscript live activity', () => {
   });
 
   it('a runtime that cannot stream says so in words', () => {
-    // Every integrated runtime now streams something (VS-600), so the runtime absent from the
-    // coverage table stands in for one that declares none.
+    // A runtime whose capabilities declare no partial output.
     const { container } = render(<RunTranscript events={[]} live stream={noStream} runtimeId="unknown" label="t" />);
     expect(container.querySelector('[data-live-whole-steps]')!.textContent).toContain('whole steps only');
   });

@@ -3,7 +3,7 @@ import { ALL_CORE_TOOLS, RESTRICTED_CORE_TOOLS, bashDenial, isAllowedByLists, mo
 
 describe('permission modes', () => {
   it('offers only the read-only core tools in restricted', () => {
-    expect([...modeToolNames('restricted')]).toEqual(['read', 'grep', 'glob', 'todo_write']);
+    expect([...modeToolNames('restricted')]).toEqual(['read', 'grep', 'glob', 'todo_write', 'task']);
     expect([...modeToolNames('auto')]).toEqual([...ALL_CORE_TOOLS]);
     expect([...modeToolNames('bypass')]).toEqual([...ALL_CORE_TOOLS]);
     expect([...RESTRICTED_CORE_TOOLS]).not.toContain('write');

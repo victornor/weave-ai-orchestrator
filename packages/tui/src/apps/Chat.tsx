@@ -7,7 +7,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Text, useApp } from 'ink';
 import type { Agent, ChannelThread, Decision, Run, RunDeltaFrame, RunEvent, RunLiveSnapshot, ThreadMessage } from '@weave-ai/shared';
 import { isActiveRun } from '@weave-ai/shared';
-import { applyDelta, chatTranscript, decisionToCard, dropSuperseded, formatRelative, fromSnapshot, runEventFromFrame, type CardModel, type PartialMap, type TranscriptBlock } from '@weave-ai/render';
+import { applyDelta, chatTranscript, decisionToCard, dropSuperseded, formatRelative, fromSnapshot, runEventFromFrame, runtimePartialOutput, type CardModel, type PartialMap, type TranscriptBlock } from '@weave-ai/render';
 import { ActivityLine } from '../components/ActivityLine.js';
 import { DecisionCardView } from '../components/DecisionCard.js';
 import { StatusBar } from '../components/StatusBar.js';
@@ -39,7 +39,8 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
   const [pending, setPending] = useState(false);
   const [boundTicket, setBoundTicket] = useState<string | null>(options.ticketId ?? null);
   const [conductorId, setConductorId] = useState<string | null>(null);
-  const [conductorRuntimeId, setConductorRuntimeId] = useState<string | null>(null);
+  /** What the conductor's runtime can stream, from the daemon's runtime list. */
+  const [conductorPartialOutput, setConductorPartialOutput] = useState<'none' | 'text' | 'full'>('none');
   /** The conductor run being streamed, or null when it is idle. */
   const [runId, setRunId] = useState<string | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
@@ -104,7 +105,7 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
         if (cancelled) return;
         const agent = unwrap<Agent>(payload, 'agent', 'worker');
         setConductorId(agent?.id ?? null);
-        setConductorRuntimeId(agent?.runtimeId ?? null);
+        setConductorPartialOutput(runtimePartialOutput(await client.get<Array<{ id: string; capabilities?: unknown }>>('/runtimes').catch(() => null), agent?.runtimeId));
         const last = (payload as { lastRun?: Run } | null)?.lastRun ?? null;
         if (last?.id && isActiveRun(last.status)) setRunId((cur) => cur ?? last.id);
       } catch {
@@ -296,7 +297,7 @@ export function Chat({ client, options }: { client: TuiClient; options: ChatOpti
           <ActivityLine
             events={events}
             partials={livePartials}
-            runtimeId={conductorRuntimeId}
+            partialOutput={conductorPartialOutput}
             partialSince={partialClock.since}
             lastPartialAt={partialClock.last}
             live={working}

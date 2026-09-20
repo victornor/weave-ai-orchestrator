@@ -9,8 +9,7 @@
  */
 import type { RunEvent, WorkerActivitySummary } from '@weave-ai/shared';
 import type { TestTally } from '@weave-ai/shared';
-import { RUNTIME_PARTIAL_OUTPUT } from '@weave-ai/shared';
-import { liveTurn, workerActivity } from '@weave-ai/render';
+import { liveTurn, partialOutputOf, workerActivity } from '@weave-ai/render';
 import type { WorkspaceContext } from '../context.js';
 
 /** At most one pushed update per worker per window, however busy the turn is. */
@@ -86,7 +85,7 @@ export function createWorkerActivityService(ctx: WorkspaceContext): WorkerActivi
   const liveOf = (e: Entry): WorkerActivitySummary['live'] => {
     if (e.events.length === 0) return null;
     const now = Date.now();
-    const partialOutput = e.runtimeId ? RUNTIME_PARTIAL_OUTPUT[e.runtimeId] ?? 'none' : 'none';
+    const partialOutput = partialOutputOf(e.runtimeId ? ctx.registries.runtimes.get(e.runtimeId)?.capabilities : undefined);
     const t = liveTurn(e.events, [], now, { partialOutput });
     return {
       state: t.state,

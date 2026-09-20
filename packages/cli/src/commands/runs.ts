@@ -1,14 +1,12 @@
 /** `weave runs list|show|tail|cancel` (PLAN §16.1, §20). */
 import type { Command } from 'commander';
 import type { Run, RunDeltaFrame, RunEvent, RunLiveSnapshot } from '@weave-ai/shared';
-import { RUNTIME_PARTIAL_OUTPUT } from '@weave-ai/shared';
-import { applyDelta, dropSuperseded, formatCost, formatDuration, formatTokens, fromSnapshot, liveTurn, liveTurnLine, runEventFromFrame, runEventsToTranscript, type LiveTurn, type PartialMap, type TranscriptBlock } from '@weave-ai/render';
+import { applyDelta, dropSuperseded, formatCost, formatDuration, formatTokens, fromSnapshot, liveTurn, runtimePartialOutput, liveTurnLine, runEventFromFrame, runEventsToTranscript, type LiveTurn, type PartialMap, type TranscriptBlock } from '@weave-ai/render';
 import { emit, fields, heading, style, table, write } from '../output.js';
 import { items, run as guard, session, unwrap } from './util.js';
 
 /** The live `liveTurn` for a followed run, over its events and partial output (VS-603). */
-export function runsTailTurn(events: readonly RunEvent[], partials: readonly { partId: string; kind: 'text' | 'thinking' | 'tool_input'; text: string }[], now: number, runtimeId: string | null): LiveTurn {
-  const partialOutput = runtimeId ? RUNTIME_PARTIAL_OUTPUT[runtimeId] ?? 'none' : 'none';
+export function runsTailTurn(events: readonly RunEvent[], partials: readonly { partId: string; kind: 'text' | 'thinking' | 'tool_input' | 'tool_output'; text: string }[], now: number, partialOutput: 'none' | 'text' | 'full'): LiveTurn {
   return liveTurn(events, partials, now, { partialOutput });
 }
 
@@ -17,7 +15,7 @@ export function renderBlock(block: TranscriptBlock): string[] {
   switch (block.kind) {
     case 'text': return [String(block.text)];
     case 'thinking': return [style.dim(String(block.text))];
-    case 'tool': return [`${style.dim(block.status === 'pending' ? '·' : '▸')} ${block.collapsed}`];
+    case 'tool': return [`${style.dim(block.status === 'pending' ? '·' : '▸')} ${block.collapsed}`, ...(block.children ?? []).flatMap(renderBlock).map((line) => `  ${line}`)];
     case 'file': return [`${style.dim('▸')} ${block.collapsed}`];
     case 'phase': return [style.dim(block.text)];
     case 'status': return [block.tone === 'error' ? style.bad(block.text) : block.tone === 'warn' ? style.warn(block.text) : style.dim(block.text)];
@@ -100,6 +98,8 @@ export function register(program: Command): void {
     .action(async (id: string, _opts: unknown, command: Command) => guard(async () => {
       const { client } = await session(command);
       const runtimeId = unwrap<Run>(await client.wget<unknown>(`/runs/${encodeURIComponent(id)}`), 'run')?.runtimeId ?? null;
+      // What this run's runtime can stream comes from the daemon's runtime list, not a table here.
+      const partialOutput = runtimePartialOutput(await client.get<Array<{ id: string; capabilities?: unknown }>>('/runtimes').catch(() => null), runtimeId);
       const events = items<RunEvent>(await client.wget(`/runs/${encodeURIComponent(id)}/events`, { limit: 200 }), 'events');
       for (const block of runEventsToTranscript(events)) for (const line of renderBlock(block)) write(line);
       const lastSeq = events.length ? events[events.length - 1]!.seq : 0;
@@ -109,7 +109,7 @@ export function register(program: Command): void {
       let partials: PartialMap = new Map();
       let lastLabel: string | null = null;
       const printLive = (): void => {
-        const turn = runsTailTurn(events, dropSuperseded(partials, events), Date.now(), runtimeId);
+        const turn = runsTailTurn(events, dropSuperseded(partials, events), Date.now(), partialOutput);
         if (turn.label === lastLabel) return;
         lastLabel = turn.label;
         write(style.dim(liveTurnLine(turn)));

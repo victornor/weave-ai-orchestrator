@@ -49,6 +49,8 @@ vi.mock('../api/runStream', () => ({
   }),
 }));
 vi.mock('../api/hooks', () => ({
+  // What the daemon's runtime list declares for each runtime (VS-615).
+  usePartialOutput: (id?: string | null) => (({ opencode: 'full', claude: 'full', codex: 'full', cursor: 'text', gemini: 'text', weave: 'full' }) as Record<string, string>)[id ?? ''] ?? 'none',
   useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: state.noTicket ? null : ticket({ id: 'tk1', identifier: 'ACME-1' }), thread: state.thread, role: state.role, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, sessionTurns: state.sessionTurns, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
   useWorkerBrief: () => ({ data: { brief: '# The brief' } }),
   useWorkerAction: () => ({ mutate: state.action, error: state.actionError }),

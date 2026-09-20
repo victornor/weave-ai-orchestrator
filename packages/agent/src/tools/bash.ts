@@ -62,6 +62,7 @@ function runShell(command: string, timeoutSec: number, ctx: ToolCtx): Promise<To
       const s = b.toString('utf8');
       size += s.length;
       chunks.push(s);
+      ctx.onOutput?.(s);
     };
     child.stdout.on('data', take);
     child.stderr.on('data', take);

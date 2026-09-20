@@ -66,7 +66,7 @@ export interface RuntimeEvent { seq?: number; ts: string; type: RunEventType; pa
  * broadcasts these but never stores them; the completed event for the same `partId` supersedes them.
  */
 export interface RuntimePartial {
-  kind: 'text' | 'thinking' | 'tool_input';
+  kind: 'text' | 'thinking' | 'tool_input' | 'tool_output';
   /** Stable per part; the completed `assistant.text` / `assistant.thinking` / `tool.call` carries the same id. */
   partId: string;
   messageId?: string;
@@ -158,6 +158,8 @@ export interface CompactSessionInput {
   model?: string | null;
   env?: Record<string, string>;
   timeoutMs?: number;
+  /** The session's workspace, so a runtime resolves provider profile and key there and not in another workspace (VS-615). */
+  workspaceId?: string;
 }
 
 /** The outcome of an external compaction request. Branch on `ok`; `via` names the mechanism used. */
@@ -207,6 +209,11 @@ export interface RuntimeHost {
    * workspace is named — the first workspace defining the id (VS-619). Undefined when there is none.
    */
   providerKey?(providerId: string, workspaceId?: string): string | undefined;
+  /**
+   * The daemon's own config directory (`daemon.yaml`, the daemon database, `credentials/`). A runtime
+   * with file tools of its own keeps them out of it (VS-615); a wrapped CLI has no use for it.
+   */
+  configDir?: string;
 }
 
 export interface RuntimeAdapter {
@@ -222,7 +229,7 @@ export interface RuntimeAdapter {
   configSchema(): JsonSchema;
   installInstructions(home: AgentHome, bundle: InstructionBundle): Promise<void>;
   runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult>;
-  forkSession?(base: SessionRef, cwd: string): Promise<SessionRef>;
+  forkSession?(base: SessionRef, cwd: string, workspaceId?: string): Promise<SessionRef>;
   describeSession?(ref: SessionRef): Promise<{ displayId: string; exists: boolean }>;
   /**
    * Ask this runtime's CLI to compact the session now, out of band of a turn — the same summarise

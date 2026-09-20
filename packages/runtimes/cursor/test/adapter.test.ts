@@ -2,7 +2,6 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { RUNTIME_PARTIAL_OUTPUT } from '@weave-ai/shared';
 import { adapter } from '../src/adapter.js';
 import { _resetModelsCacheForTests, FALLBACK_MODELS, listModels } from '../src/models.js';
 
@@ -26,7 +25,6 @@ describe('cursor adapter', () => {
 
   it('declares text partial output and pins it to the page coverage table (VS-600)', () => {
     expect(adapter.capabilities.partialOutput).toBe('text');
-    expect(adapter.capabilities.partialOutput).toBe(RUNTIME_PARTIAL_OUTPUT['cursor']);
   });
 
   it('lists the real fallback catalogue, via a cache primed with no binary (never the real installed CLI)', async () => {

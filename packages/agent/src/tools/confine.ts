@@ -6,11 +6,11 @@
  * not a security boundary — `bash` runs unconfined as it does for the three CLIs — but it stops a
  * file tool from reaching the daemon's state by accident.
  *
- * Named gap: the daemon's own config directory (`daemon.yaml`, the daemon database, `credentials/`)
- * is not an ancestor of any path the child receives, so it cannot be derived here. It stays reachable
- * through `bash` until `RuntimeHost` exposes host paths (S3 widens it).
+ * The daemon's own config directory (`daemon.yaml`, the daemon database, `credentials/`) is not an
+ * ancestor of any path the child receives, so the adapter passes it in as `protectedPaths` from
+ * `RuntimeHost.configDir`. The file tools refuse it in every mode; it stays reachable through `bash`.
  */
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 export type ConfineOp = 'read' | 'write';
@@ -23,6 +23,8 @@ export interface ConfineCtx {
   home: string;
   /** The runtime's config home (`<workspace state>/runtimes/<runtime>`), used to derive the state dir. */
   configHome?: string | undefined;
+  /** Directories refused for every operation and mode, the daemon's config directory. */
+  protectedPaths?: string[] | undefined;
   /** Where a truncated tool output is spilled; readable in `auto`/`bypass`. */
   spillDir: string;
   mode: ConfineMode;
@@ -61,6 +63,20 @@ const HOME_WRITE_PROTECTED = ['AGENTS.md', 'CLAUDE.md', '.claude', '.agents', '.
 const WORKTREE_WRITE_PROTECTED = ['.git/hooks', '.git/config'];
 
 /**
+ * In a linked worktree `.git` is a one-line pointer file (`gitdir: <path>`), and rewriting it
+ * redirects git to another repository, so a write to the entry itself is refused, and so is a write
+ * into the gitdir it names.
+ */
+function gitdirOf(worktree: string): string | null {
+  try {
+    const entry = join(worktree, '.git');
+    if (!statSync(entry).isFile()) return null;
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(entry, 'utf8'));
+    return m?.[1] ? realpathLenient(resolve(worktree, m[1])) : null;
+  } catch { return null; }
+}
+
+/**
  * Resolve a tool `path` for `op` and decide whether it is allowed. Refusals are ordinary errors
  * (`Error: …`), never a permission denial — the mode decides the tool set, not each path.
  */
@@ -74,8 +90,18 @@ export function confinePath(rawPath: string, op: ConfineOp, ctx: ConfineCtx): Co
   const spill = realpathLenient(ctx.spillDir);
   const inAuto = ctx.mode !== 'restricted';
 
+  // A protected directory holding the worktree or home cannot be honoured without refusing the work itself.
+  for (const dir of ctx.protectedPaths ?? []) {
+    const guarded = realpathLenient(dir);
+    if (isInside(worktree, guarded) || isInside(home, guarded)) continue;
+    if (isInside(real, guarded)) return { ok: false, error: `path is protected: ${real}` };
+  }
+
   if (isInside(real, worktree) || isInside(real, home)) {
     if (op === 'write') {
+      if (real === join(worktree, '.git')) return { ok: false, error: `path is protected: ${real}` };
+      const gitdir = gitdirOf(worktree);
+      if (gitdir && isInside(real, gitdir)) return { ok: false, error: `path is protected: ${real}` };
       for (const rel of HOME_WRITE_PROTECTED) if (isInside(real, join(home, rel))) return { ok: false, error: `path is protected: ${real}` };
       for (const rel of WORKTREE_WRITE_PROTECTED) if (isInside(real, join(worktree, rel))) return { ok: false, error: `path is protected: ${real}` };
     } else {

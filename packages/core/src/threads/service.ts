@@ -21,6 +21,15 @@ interface ThreadRow extends ChannelThread { isPrimary: boolean; channelKind?: st
 /** Channels that reach a human directly; anything else is delivered by the server's channel manager. */
 const HUMAN_CHANNELS = ['web', 'telegram'];
 
+/** VS-622: the one card shape `setMessageParts` will rewrite a message with — a plan-artifact card. */
+function isPlanArtifactCardPart(p: unknown): boolean {
+  if (typeof p !== 'object' || p === null) return false;
+  const part = p as Record<string, unknown>;
+  if (part.type !== 'card') return false;
+  const ref = part.ref;
+  return typeof ref === 'object' && ref !== null && (ref as Record<string, unknown>).kind === 'plan-artifact';
+}
+
 /**
  * How much of a replied-to message travels with the reply, both on a read and in the wake payload.
  * The excerpt is a locator, not a transcript: the conductor also gets the referenced message's id, and
@@ -427,6 +436,18 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
         "SELECT 1 FROM thread_messages WHERE thread_id = ? AND run_id = ? AND direction = 'outbound' LIMIT 1",
         [threadId, runId],
       );
+    },
+
+    setMessageParts(messageId, parts) {
+      // VS-622: a card-only replacement, so a republished plan artifact refreshes its one card instead
+      // of appending a second — and so this can never become a general message editor.
+      if (!Array.isArray(parts) || parts.length === 0 || !parts.every(isPlanArtifactCardPart)) {
+        throw new OcError('validation', 'only plan-artifact card parts may replace a message\'s parts');
+      }
+      const existing = db.get<{ id: string }>('SELECT id FROM thread_messages WHERE id = ?', [messageId]);
+      if (!existing) throw new OcError('not_found', `message ${messageId} not found`);
+      db.update('thread_messages', messageId, { partsJson: parts });
+      return true;
     },
 
     messages(threadId, opts = {}) {

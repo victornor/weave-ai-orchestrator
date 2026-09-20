@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decisionCardPartsOf } from './parts.js';
+import { decisionCardPartsOf, planArtifactCardPartsOf } from './parts.js';
 
 const card = {
   type: 'card',
@@ -35,5 +35,36 @@ describe('decisionCardPartsOf', () => {
       card,
     ];
     expect(decisionCardPartsOf(parts)).toEqual([card]);
+  });
+});
+
+const planArtifact = {
+  type: 'card',
+  title: 'Ticket graph',
+  body: 'How the drafts depend on one another.',
+  actions: [{ key: 'open', label: 'Open artifact', style: 'primary' }],
+  ref: { kind: 'plan-artifact', planId: 'p1', key: 'ticket-graph', revision: 2 },
+};
+
+describe('planArtifactCardPartsOf', () => {
+  it('picks a plan-artifact card out of a mixed parts array', () => {
+    const parts = [{ type: 'text', text: 'here' }, planArtifact, card];
+    expect(planArtifactCardPartsOf(parts)).toEqual([planArtifact]);
+  });
+
+  it('returns an empty array for null, undefined or a non-array', () => {
+    expect(planArtifactCardPartsOf(null)).toEqual([]);
+    expect(planArtifactCardPartsOf(undefined)).toEqual([]);
+    expect(planArtifactCardPartsOf('nope' as unknown as unknown[])).toEqual([]);
+  });
+
+  it('drops a decision card and malformed plan-artifact cards', () => {
+    const parts = [
+      card,
+      { type: 'card', title: 't', body: 'b', actions: [], ref: { kind: 'plan-artifact', planId: 'p1', key: 'k' } },
+      { type: 'card', title: 't', body: 'b', actions: [], ref: { kind: 'plan-artifact', planId: 'p1', key: 'k', revision: '1' } },
+      planArtifact,
+    ];
+    expect(planArtifactCardPartsOf(parts)).toEqual([planArtifact]);
   });
 });

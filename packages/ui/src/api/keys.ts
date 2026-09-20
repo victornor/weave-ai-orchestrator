@@ -142,6 +142,9 @@ export const qk = {
   plans: (ws: string, projectId: string) => ['w', ws, 'plans', 'project', projectId] as const,
   /** VS-550: every ticket created from a plan draft, keyed by ticket id — one workspace read for the Work board. */
   planOrigins: (ws: string) => ['w', ws, 'plans', 'origins'] as const,
+  /** VS-622: a plan's own artifacts and one artifact's revisions. Nested under `planRoot` so a `plan.*` event refreshes them with the plan. */
+  planArtifacts: (ws: string, planId: string) => ['w', ws, 'plans', planId, 'artifacts'] as const,
+  planArtifactRevisions: (ws: string, planId: string, key: string) => ['w', ws, 'plans', planId, 'artifacts', key, 'revisions'] as const,
 
   presentation: (ws: string) => ['w', ws, 'presentation'] as const,
   presentationSurfaces: (ws: string) => ['w', ws, 'presentation', 'surfaces'] as const,

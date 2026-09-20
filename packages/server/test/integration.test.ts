@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createCore, initLogger } from '@weave-ai/core';
+import { createCore, initLogger, type CoreServices } from '@weave-ai/core';
 import { DaemonConfigSchema } from '@weave-ai/shared';
 import { FakeRuntime } from '@weave-ai/runtime-sdk';
 import { makeHarness } from '../../core/src/testing/context.js';
@@ -1213,4 +1213,123 @@ describe('real core services over HTTP', () => {
       expect(wsRaw).toBe('<html><body>workspace</body></html>');
     });
   });
+
+  describe('plan artifacts (VS-622)', () => {
+    const SAMPLE_HTML = '<!doctype html><html><head><title>Plan</title></head><body><h1>Graph</h1></body></html>';
+
+    function bootWithPlanner() {
+      const { deps, harness } = boot();
+      const app = createApp(deps);
+      const services = deps.workspaces.get(harness.workspaceId)!.services;
+      const thread = services.threads.createOwned('ag_planner');
+      const plan = services.planning.create({ kind: 'human', id: 'victor' }, harness.projectId, { threadId: thread.id, title: 'Dark mode rollout' });
+      return { deps, harness, app, services, plan, thread };
+    }
+
+    async function plannerToken(harness: ReturnType<typeof makeHarness>, planId: string): Promise<string> {
+      return signRunToken(runTokenSecret(harness.ctx.db), {
+        workspaceId: harness.workspaceId, runId: 'run_plan', agentId: 'ag_planner', agentKind: 'planner', projectId: null, ticketId: null, planId, roleId: null,
+      });
+    }
+
+    async function callTool(app: ReturnType<typeof createApp>, ws: string, token: string, tool: string, input: Record<string, unknown>) {
+      const res = await app.fetch(new Request(`http://127.0.0.1/api/w/${ws}/agent/tools/${tool}`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input }),
+      }));
+      return res.json();
+    }
+
+    const planCards = (services: CoreServices, threadId: string): Array<{ ref: { kind: string; revision: number } }> =>
+      services.threads.messages(threadId).flatMap((m) => (Array.isArray(m.parts) ? m.parts : []))
+        .filter((p): p is { ref: { kind: string; revision: number } } =>
+          typeof p === 'object' && p !== null && (p as { ref?: { kind?: string } }).ref?.kind === 'plan-artifact');
+
+    it('lets the planner publish a plan artifact, posts one card, and republishing updates it in place', async () => {
+      const { harness, app, services, plan, thread } = bootWithPlanner();
+      const token = await plannerToken(harness, plan.id);
+
+      const first = await callTool(app, harness.workspaceId, token, 'weave_plan_artifact_put', { key: 'ticket-graph', html: SAMPLE_HTML, title: 'Ticket graph', kind: 'diagram' });
+      expect(first.ok).toBe(true);
+      expect(first.data.revision).toBe(1);
+      expect(first.data.url).toBe(`/w/${harness.workspaceId}/plans/${plan.id}/artifacts/ticket-graph`);
+      expect(services.planArtifacts.list(plan.id)).toHaveLength(1);
+      expect(services.threads.messages(thread.id)).toHaveLength(1);
+      expect(planCards(services, thread.id)).toHaveLength(1);
+
+      const second = await callTool(app, harness.workspaceId, token, 'weave_plan_artifact_put', { key: 'ticket-graph', html: SAMPLE_HTML, title: 'Ticket graph v2', kind: 'diagram' });
+      expect(second.ok).toBe(true);
+      expect(second.data.revision).toBe(2);
+      // One artifact, one card: the republish updated the existing card rather than adding a second.
+      expect(services.planArtifacts.list(plan.id)).toHaveLength(1);
+      expect(services.threads.messages(thread.id)).toHaveLength(1);
+      expect(planCards(services, thread.id)).toHaveLength(1);
+      expect((planCards(services, thread.id)[0] as { ref: { revision: number } }).ref.revision).toBe(2);
+
+      // The plan artifact is never a repository or ticket write.
+      expect(harness.db.all('SELECT id FROM tickets')).toHaveLength(0);
+    });
+
+    it('serves a plan artifact verbatim with the sandbox CSP, to a human session only', async () => {
+      const { harness, app, services, plan, thread } = bootWithPlanner();
+      const token = await plannerToken(harness, plan.id);
+      const published = await callTool(app, harness.workspaceId, token, 'weave_plan_artifact_put', { key: 'view', html: SAMPLE_HTML });
+      expect(published.ok).toBe(true);
+
+      const rawUrl = `http://127.0.0.1/api/w/${harness.workspaceId}/plans/${plan.id}/artifacts/view/raw`;
+      const res = await app.fetch(new Request(rawUrl, { headers: H }));
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe(SAMPLE_HTML);
+      expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(res.headers.get('content-security-policy')).toContain('sandbox');
+
+      // A run token (an agent) cannot reach the raw route at all.
+      const rejected = await app.fetch(new Request(rawUrl, { headers: { authorization: `Bearer ${token}` } }));
+      expect(rejected.status).toBe(403);
+
+      // A key that belongs to another plan is not found.
+      const otherThread = services.threads.createOwned('ag_planner2');
+      const otherPlan = services.planning.create({ kind: 'human', id: 'victor' }, harness.projectId, { threadId: otherThread.id });
+      const crossPlan = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/plans/${otherPlan.id}/artifacts/view/raw`, { headers: H }));
+      expect(crossPlan.status).toBe(404);
+
+      // An explicit earlier revision still serves, and an oversized body is refused with a clear error.
+      await callTool(app, harness.workspaceId, token, 'weave_plan_artifact_put', { key: 'view', html: '<!doctype html><html><body>v2</body></html>' });
+      const earlier = await app.fetch(new Request(`${rawUrl}?revision=1`, { headers: H }));
+      expect(await earlier.text()).toBe(SAMPLE_HTML);
+      const oversized = await callTool(app, harness.workspaceId, token, 'weave_plan_artifact_put', { key: 'big', html: `<html>${'x'.repeat(2_000_001)}</html>` });
+      expect(oversized.ok).toBe(false);
+      expect(oversized.error.message).toMatch(/cap/);
+      expect(thread.id).toBeTruthy();
+
+      // Submitting the plan does not invalidate the viewer URL: its address needs only the plan id.
+      services.planning.submit({ kind: 'human', id: 'victor' }, plan.id);
+      const afterSubmit = await app.fetch(new Request(rawUrl, { headers: H }));
+      expect(afterSubmit.status).toBe(200);
+      expect(await afterSubmit.text()).toBe('<!doctype html><html><body>v2</body></html>');
+    });
+
+    it('publishes always to the caller\'s own plan, and refuses a worker every path to publish', async () => {
+      const { harness, app, services, plan } = bootWithPlanner();
+      const token = await plannerToken(harness, plan.id);
+      // The tool has no plan-id argument: a plan id smuggled into the input is ignored, and the
+      // artifact lands on the caller's own plan.
+      const res = await callTool(app, harness.workspaceId, token, 'weave_plan_artifact_put', { key: 'own', html: SAMPLE_HTML, planId: 'some-other-plan' });
+      expect(res.ok).toBe(true);
+      expect(res.data.url).toContain(plan.id);
+      expect((res.data.url as string)).not.toContain('some-other-plan');
+
+      const workerToken = await signRunToken(runTokenSecret(harness.ctx.db), {
+        workspaceId: harness.workspaceId, runId: 'run_w', agentId: harness.addWorker(null), agentKind: 'worker', projectId: harness.projectId, ticketId: null, roleId: harness.roleId,
+      });
+      const asWorker = await app.fetch(new Request(`http://127.0.0.1/api/w/${harness.workspaceId}/agent/tools/weave_plan_artifact_put`, {
+        method: 'POST', headers: { authorization: `Bearer ${workerToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ input: { key: 'nope', html: SAMPLE_HTML } }),
+      }));
+      expect(asWorker.status).toBe(403);
+      expect((await asWorker.json()).error.message).toMatch(/not available to a worker/);
+    });
+  });
 });
+

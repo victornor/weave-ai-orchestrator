@@ -64,10 +64,10 @@ describe('skillsFor (VS-189)', () => {
     expect(skillsFor(h.ctx, { kind: 'session', ticketId: 'tkt-1' }).map((s) => s.name).sort()).toEqual(expected);
   });
 
-  it('returns only the planning skill for a planner', () => {
+  it('returns the planning and artifact skills for a planner (VS-622)', () => {
     h = makeHarness();
     seedSkills(h.ctx);
-    expect(skillsFor(h.ctx, { kind: 'planner', ticketId: null }).map((s) => s.name)).toEqual(['weave-ai-planning']);
+    expect(skillsFor(h.ctx, { kind: 'planner', ticketId: null }).map((s) => s.name).sort()).toEqual(['weave-ai-artifacts', 'weave-ai-planning']);
   });
 });
 

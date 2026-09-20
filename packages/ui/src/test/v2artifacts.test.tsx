@@ -48,9 +48,14 @@ vi.mock('../api/hooks', () => ({
     isLoading: false,
   }),
   useWorkspaceArtifactRevisions: () => ({ data: [] }),
+  usePlanArtifacts: () => ({
+    data: state.notFound ? [] : [{ key: 'overview', title: 'Plan overview', kind: 'diagram', revision: 1, updatedAt: '2026-09-01T00:00:00.000Z' }],
+    isLoading: false,
+  }),
+  usePlanArtifactRevisions: () => ({ data: [] }),
 }));
 
-const { ArtifactInline, V2TicketArtifactReader, V2WorkspaceArtifactReader, splitArtifacts } = await import('../v2/artifact/Artifact');
+const { ArtifactInline, V2TicketArtifactReader, V2WorkspaceArtifactReader, V2PlanArtifactReader, splitArtifacts } = await import('../v2/artifact/Artifact');
 
 beforeEach(() => {
   state.params = { ws: 'ws1', ticketId: 'ACME-42', key: 'overview' };
@@ -103,6 +108,25 @@ describe('the V2 workspace artifact reader', () => {
     state.notFound = true;
     render(<V2WorkspaceArtifactReader />);
     expect(screen.getByText('Artifact not found.')).toBeInTheDocument();
+  });
+});
+
+describe('the V2 plan artifact reader (VS-622)', () => {
+  it('renders a planner-published plan artifact through the sandboxed plan raw route', () => {
+    state.params = { ws: 'ws1', planId: 'plan_1', key: 'overview' };
+    render(<V2PlanArtifactReader />);
+    expect(screen.getByText('Plan overview')).toBeInTheDocument();
+    const frame = document.querySelector('iframe') as HTMLIFrameElement;
+    expect(frame.getAttribute('sandbox')).toContain('allow-scripts');
+    expect(frame.getAttribute('src')).toContain('/api/w/ws1/plans/plan_1/artifacts/overview/raw');
+  });
+
+  it('says not found for a key that belongs to no artifact of this plan', () => {
+    state.params = { ws: 'ws1', planId: 'plan_1', key: 'missing' };
+    state.notFound = true;
+    render(<V2PlanArtifactReader />);
+    expect(screen.getByText('Artifact not found.')).toBeInTheDocument();
+    expect(document.querySelector('iframe')).toBeNull();
   });
 });
 

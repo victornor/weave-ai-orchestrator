@@ -11,7 +11,7 @@ import { KnowledgeGraphPage } from './knowledge/KnowledgeGraphPage';
 import { KnowledgeExplorerPage } from './knowledge/KnowledgeExplorerPage';
 import { V2WorkScreen } from './work/Work';
 import { V2TicketScreen } from './ticket/Ticket';
-import { V2TicketArtifactReader, V2WorkspaceArtifactReader } from './artifact/Artifact';
+import { V2TicketArtifactReader, V2WorkspaceArtifactReader, V2PlanArtifactReader } from './artifact/Artifact';
 import { V2Settings } from './settings/V2Settings';
 import { V2Scheduled } from './scheduled/V2Scheduled';
 
@@ -90,6 +90,8 @@ export function V2ArtifactPage(): React.ReactElement {
   return <V2WorkspaceArtifactReader />;
 }
 export { V2TicketArtifactReader };
+// VS-622: the plan-scoped artifact reader a planner-published artifact's card opens.
+export { V2PlanArtifactReader };
 // VS-350: the worker page is a real screen.
 export { V2WorkerPage } from './WorkerPage';
 export { V2PluginPage } from './PluginPage';

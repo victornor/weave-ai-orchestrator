@@ -11,6 +11,8 @@ export const EVENT_TYPES = [
   'roadmap.created', 'roadmap.updated', 'roadmap.removed',
   'roadmap.block.created', 'roadmap.block.updated', 'roadmap.block.removed',
   'plan.created', 'plan.draft_added', 'plan.draft_updated', 'plan.draft_removed', 'plan.draft_reordered', 'plan.titled', 'plan.submitted', 'plan.discarded', 'plan.draft_linked',
+  /** VS-622: a planner published or revised a plan-scoped artifact; `plan.*` so the tab strip's existing invalidation refreshes an open plan. */
+  'plan.artifact_published',
   'thread.message', 'knowledge.updated', 'knowledge.curated', 'spec.indexed', 'usage.recorded', 'knowledge_usage.recorded', 'auth.login', 'auth.logout', 'auth.revoked', 'presentation.updated',
   'weaver_artifact.published',
   /** VS-334: a plugin's own event, `entityType` is `plugin:<pluginId>`; payload is `{ pluginId, kind, payload }`. */

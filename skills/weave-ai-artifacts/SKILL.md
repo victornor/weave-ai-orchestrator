@@ -55,6 +55,15 @@ attachment.
   ticketless sibling, scoped to the workspace rather than any ticket. It returns a URL that opens the
   artifact rendered inside the web app; put that URL straight into your chat reply. Same rule: no
   read-back, republish under the same `key` to revise.
+- **A planning agent, drafting a plan:** call `weave_plan_artifact_put(key, html, { title?, kind? })` —
+  the artifact belongs to the plan you are drafting, not to any repository or ticket, and publishing
+  one is **not** a repository write. It appears as a card in the plan's conversation at the point you
+  publish it, which is where a ticket-graph diagram, an options comparison, a dependency view or a
+  mock of the intended change does more than prose. Publishing does **not** replace your answer: you
+  must still reply through `weave_plan_reply`; the artifact supports the reply. Same rule: no
+  read-back, republish under the same `key` to revise. The returned URL keeps working after the plan
+  is submitted — put it in a draft's description when the ticket created from that draft should point
+  at the artifact.
 
 Either way, the returned URL is the thing that reaches the human — an attached HTML file is not a
 substitute and should never be sent alongside or instead of it.

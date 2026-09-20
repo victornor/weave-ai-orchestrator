@@ -24,6 +24,7 @@ import { createRoutinesService } from './routines/index.js';
 import { createRoadmapService } from './roadmap/index.js';
 import { createPlanningService } from './planning/index.js';
 import { createWeaverArtifactsService } from './artifacts/service.js';
+import { createPlanArtifactsService } from './artifacts/plan.js';
 import { createWorkerActivityService } from './activity/index.js';
 
 /** Assemble all services for one workspace. Services receive a lazy accessor to the full set to avoid construction-order cycles. */
@@ -44,6 +45,7 @@ export function createCore(ctx: WorkspaceContext): CoreServices {
     roadmap: createRoadmapService(ctx, deps),
     planning: createPlanningService(ctx, deps),
     weaverArtifacts: createWeaverArtifactsService(ctx),
+    planArtifacts: createPlanArtifactsService(ctx),
     activity: createWorkerActivityService(ctx),
   };
   return services;

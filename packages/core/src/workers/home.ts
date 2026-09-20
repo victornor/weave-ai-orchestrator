@@ -10,8 +10,8 @@ const MARKER = '.ac-render.json';
 
 const WEAVER_SKILLS = ['weave-ai-weaver', 'weave-ai-hire', 'weave-ai-planning', 'weave-ai-briefing', 'weave-ai-knowledge', 'weave-ai-artifacts'];
 const WORKER_SKILLS = ['weave-ai-worker', 'weave-ai-openspec', 'weave-ai-scout', 'weave-ai-knowledge', 'weave-ai-artifacts'];
-/** VS-398: the planner reuses the weaver's own ticket-decomposition heuristics; it has no tickets/knowledge-write/artifact tools, so none of the other skills apply. */
-const PLANNER_SKILLS = ['weave-ai-planning'];
+/** VS-398: the planner reuses the weaver's own ticket-decomposition heuristics and, since VS-622, the artifact skill (it has `weave_artifact_kit` and the plan-scoped `weave_plan_artifact_put`); it has no tickets or knowledge-write tools, so none of the other skills apply. */
+const PLANNER_SKILLS = ['weave-ai-planning', 'weave-ai-artifacts'];
 /**
  * VS-620: a ticketless persistent session is a raw conversation the daemon only relays, not a worker
  * with a ticket, so it loads only the skills whose `skills/manifest.json` audience is `all` — never

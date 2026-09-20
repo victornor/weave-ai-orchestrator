@@ -5,7 +5,7 @@
  * the header actions, the session-handover band and a steer composer that shares its draft with the
  * ticket reply box. The transcript is VS-345's shared `WorkerFeed`, not a private run stream.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { agentUiStatus, heldByHuman, projectLabel, type ThreadMessage } from '@weave-ai/shared';
 import { workerPauseReason } from '@weave-ai/render';
@@ -30,6 +30,7 @@ import { Button } from '../components/Button';
 import { Composer } from '../components/Composer';
 import { HandoverCommand } from '../components/HandoverCommand';
 import { Markdown } from '../components/Markdown';
+import { ScrollToBottomButton } from '../components/ScrollToBottom';
 import { SkeletonRows } from '../components/Skeleton';
 import { ErrorState } from '../components/States';
 import { StatusBadge } from '../components/StatusGlyph';
@@ -37,6 +38,7 @@ import { Tabs } from '../components/Tabs';
 import { draftKey, useDraft } from '../lib/drafts';
 import { cents, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
+import { useStickToBottom } from '../lib/stickToBottom';
 import { sessionConversationRows } from '../lib/sessionConversation';
 import { V2Page } from './V2Page';
 import { WorkerFeed } from './WorkerFeed';
@@ -102,42 +104,62 @@ export function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }:
     () => sessionConversationRows(messages, runs, sessionAgentId),
     [messages, runs, sessionAgentId],
   );
-  if (history.isLoading) return <SkeletonRows rows={4} />;
-  if (history.isError) return <ErrorState code="THREAD_UNREADABLE" message={history.error?.message ?? 'Could not load this conversation.'} />;
-  if (!rows.length) return <p className="text-meta text-text-3">Nothing said yet — say something below.</p>;
+  // VS-629: the conversation is the surface's one scroller, and it follows with the shared hook the
+  // weaver chat uses — a streaming turn stays in view, a reader scrolling up is left where they are.
+  // The signal is the row count; growth inside a row (a live turn's stream, a delivered answer) is
+  // caught by the hook's own ResizeObserver pin, which is also what re-pins for the on-screen keyboard.
+  const stick = useStickToBottom([rows.length], { exact: true, ready: !history.isLoading });
   return (
-    <ol aria-label={label} className="flex flex-col gap-3">
-      {rows.map((row) =>
-        row.kind === 'turn' ? (
-          <li key={row.key}>
-            <SessionTurn run={row.run} deliveredText={answersByRun.get(row.run.id) ?? null} onTicket={onTicket} />
-          </li>
-        ) : row.message.authorKind === 'system' ? (
-          // VS-596: a system notice (a real failure reason) is a state, not a message from either
-          // party — centred and muted, never attributed to the session or the human.
-          <li key={row.key} className="flex flex-col items-center gap-1">
-            <div className="max-w-[85%] rounded-r6 border border-line-1 px-3 py-2 text-center text-meta text-text-3">
-              <Markdown source={row.message.body} />
-            </div>
-            <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(row.message, sessionAgentId, roleName)}</span>
-          </li>
-        ) : (
-          <li key={row.key} className={cx('flex flex-col gap-1', row.message.direction === 'outbound' ? 'items-start' : 'items-end')}>
-            <div className={cx('max-w-[85%] rounded-r6 px-3 py-2 text-meta', row.message.direction === 'outbound' ? 'bg-bg-2 text-text-1' : 'bg-accent-tint text-text-1')}>
-              <Markdown source={row.message.body} />
-            </div>
-            <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(row.message, sessionAgentId, roleName)}</span>
-          </li>
-        ),
-      )}
-    </ol>
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      <div ref={stick.scrollRef} data-v2-session-scroll className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl p-4 md:p-5">
+          {history.isLoading ? (
+            <SkeletonRows rows={4} />
+          ) : history.isError ? (
+            <ErrorState code="THREAD_UNREADABLE" message={history.error?.message ?? 'Could not load this conversation.'} />
+          ) : !rows.length ? (
+            <p className="text-meta text-text-3">Nothing said yet — say something below.</p>
+          ) : (
+            <ol aria-label={label} className="flex flex-col gap-3">
+              {rows.map((row) =>
+                row.kind === 'turn' ? (
+                  <li key={row.key}>
+                    <SessionTurn run={row.run} deliveredText={answersByRun.get(row.run.id) ?? null} onTicket={onTicket} />
+                  </li>
+                ) : row.message.authorKind === 'system' ? (
+                  // VS-596: a system notice (a real failure reason) is a state, not a message from either
+                  // party — centred and muted, never attributed to the session or the human.
+                  <li key={row.key} className="flex flex-col items-center gap-1">
+                    <div className="max-w-[85%] rounded-r6 border border-line-1 px-3 py-2 text-center text-meta text-text-3">
+                      <Markdown source={row.message.body} />
+                    </div>
+                    <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(row.message, sessionAgentId, roleName)}</span>
+                  </li>
+                ) : (
+                  <li key={row.key} className={cx('flex flex-col gap-1', row.message.direction === 'outbound' ? 'items-start' : 'items-end')}>
+                    <div className={cx('max-w-[85%] rounded-r6 px-3 py-2 text-meta', row.message.direction === 'outbound' ? 'bg-bg-2 text-text-1' : 'bg-accent-tint text-text-1')}>
+                      <Markdown source={row.message.body} />
+                    </div>
+                    <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(row.message, sessionAgentId, roleName)}</span>
+                  </li>
+                ),
+              )}
+            </ol>
+          )}
+          <div ref={stick.bottomRef} />
+        </div>
+      </div>
+      {!stick.atBottom ? <ScrollToBottomButton unread={stick.unread} onClick={stick.toBottom} /> : null}
+    </div>
   );
 }
 
 export function V2WorkerPage(): React.ReactElement {
   const { workerId } = useParams({ strict: false }) as { workerId?: string };
+  // VS-629: the page owns its scroller, so it takes `V2Page`'s bounded fill frame instead of the
+  // default scrolling body. Otherwise the page body scrolls the pinned header away.
   return (
-    <V2Page title="Worker" subtitle={workerId}>
+    <V2Page title="Worker" subtitle={workerId} scroll={false}>
       <WorkerBody workerId={workerId ?? ''} />
     </V2Page>
   );
@@ -172,20 +194,19 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
 
   const steerTicketId = detail.data?.ticket?.id ?? null;
   const { draft, patch } = useDraft(steerTicketId ? draftKey(ws, `ticket:${steerTicketId}`) : null);
-  const bottom = useRef<HTMLDivElement>(null);
 
   useEffect(() => setLastOutcome(null), [workerId]);
 
   if (detail.isLoading) {
     return (
-      <div className="p-5">
+      <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <SkeletonRows rows={6} />
       </div>
     );
   }
   if (detail.isError || !detail.data) {
     return (
-      <div className="p-5">
+      <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <ErrorState
           code="WORKER_NOT_FOUND"
           message="That worker has been archived."
@@ -363,27 +384,28 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
         </div>
       ) : null}
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === 'transcript' ? (
-          <div className="mx-auto max-w-3xl p-4 md:p-5">
-            {isSession && !ticket && thread ? (
-              <SessionThreadFeed
-                threadId={thread.id}
-                label={`${agent.name} conversation`}
-                sessionAgentId={agent.id}
-                roleName={detail.data.role?.name ?? agent.name}
-              />
-            ) : (
+      {tab === 'transcript' && isSession && !ticket && thread ? (
+        // VS-629: the session conversation owns the transcript scroller, so it renders as the region
+        // itself rather than nested in a second one.
+        <SessionThreadFeed
+          threadId={thread.id}
+          label={`${agent.name} conversation`}
+          sessionAgentId={agent.id}
+          roleName={detail.data.role?.name ?? agent.name}
+        />
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {tab === 'transcript' ? (
+            <div className="mx-auto max-w-3xl p-4 md:p-5">
               <WorkerFeed agentId={workerId} ws={ws} label={`${agent.name} transcript`} onTicket={onTicket} />
-            )}
-            <div ref={bottom} />
-          </div>
-        ) : (
-          <div className="mx-auto max-w-3xl p-4 md:p-5">
-            <Markdown source={brief.data?.brief ?? '_No brief._'} />
-          </div>
-        )}
-      </div>
+            </div>
+          ) : (
+            <div className="mx-auto max-w-3xl p-4 md:p-5">
+              <Markdown source={brief.data?.brief ?? '_No brief._'} />
+            </div>
+          )}
+        </div>
+      )}
 
       {ticket ? (
         <div className="flex-none border-t border-line-1 bg-bg-0 px-4 py-3 md:px-5">

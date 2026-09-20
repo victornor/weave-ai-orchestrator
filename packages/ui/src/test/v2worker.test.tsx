@@ -65,11 +65,14 @@ vi.mock('../api/hooks', () => ({
   useStartHandover: () => ({ mutate: state.start, error: null }),
   useEndHandover: () => ({ mutateAsync: state.end, error: null }),
   useWorkers: () => ({ data: [] }),
+  // `V2Page`'s counts fan out per workspace (VS-629 renders the whole page in a test).
+  useWorkersMany: () => [],
+  useDecisionsMany: () => [],
   useIncidents: () => ({ data: { items: [], total: 0 } }),
   useWorkspaces: () => ({ data: [] }),
 }));
 
-const { WorkerBody, sessionAuthorLabel } = await import('../v2/WorkerPage');
+const { WorkerBody, V2WorkerPage, sessionAuthorLabel } = await import('../v2/WorkerPage');
 
 /** A thread message with only the fields the session transcript reads. */
 const message = (over: Partial<ThreadMessage> = {}): ThreadMessage => ({
@@ -266,8 +269,10 @@ describe('V2 worker page', () => {
       expect(document.querySelector('[data-live-partials]')).toHaveTextContent('Looking into the failing test.');
       expect(screen.getByText('bash')).toBeInTheDocument();
       expect(document.querySelector('[data-live-activity]')).not.toBeNull();
-      // The conversation scrolls as one page: no nested scroller.
+      // VS-629: the conversation's one scroller is `data-v2-session-scroll`, and a turn never nests
+      // a second `role="log"` scroller of its own.
       expect(document.querySelector('[role="log"]')).toBeNull();
+      expect(document.querySelectorAll('[data-v2-session-scroll]')).toHaveLength(1);
     });
 
     it('renders each turn’s transcript between the human’s messages (VS-618)', () => {
@@ -358,6 +363,40 @@ describe('V2 worker page', () => {
       render(<WorkerBody workerId="a1" />);
       expect(document.querySelector('[data-live-activity]')).not.toBeNull();
       expect(document.querySelector('[data-live-whole-steps]')).not.toBeNull();
+    });
+  });
+
+  // VS-629: the page fills the frame; the header and composer are pinned rows and only the
+  // transcript region scrolls, so the document never scrolls the header away.
+  describe('the page frame (VS-629)', () => {
+    beforeEach(() => {
+      state.agent = agent({ id: 'a1', kind: 'session', ticketId: null, name: 'Backend Engineer — session', status: 'active', runtimeId: 'claude-code' });
+      state.noTicket = true;
+      state.thread = { id: 'th1', agentId: 'a1' };
+      state.role = { id: 'r1', name: 'Full-stack Engineer' };
+      state.threadMessages = [message({ id: 'm1', body: 'hello' })];
+    });
+
+    it('bounds the page and pins the header above the one transcript scroller', () => {
+      const { container } = render(<V2WorkerPage />);
+      const pageBody = container.querySelector('[data-v2-page-body]') as HTMLElement;
+      expect(pageBody).toHaveAttribute('data-v2-page-body', 'fill');
+      expect(pageBody.className).toContain('overflow-hidden');
+      expect(pageBody.className).not.toContain('overflow-y-auto');
+
+      const root = container.querySelector('[data-v2-worker]') as HTMLElement;
+      // The transcript region is the page's only scrolling region; the composer's own textarea
+      // scrolls its text, which is a control, not a page scroller.
+      const scrollers = [...root.querySelectorAll<HTMLElement>('.overflow-y-auto')].filter(
+        (el) => el.tagName !== 'TEXTAREA' && el.tagName !== 'INPUT',
+      );
+      expect(scrollers).toHaveLength(1);
+      const scroller = scrollers[0] as HTMLElement;
+      expect(scroller).toHaveAttribute('data-v2-session-scroll');
+      // The header is a pinned sibling of the scroller, not inside it, so it cannot scroll away.
+      const header = root.firstElementChild as HTMLElement;
+      expect(header.textContent).toContain('Backend Engineer — session');
+      expect(scroller.contains(header)).toBe(false);
     });
   });
 

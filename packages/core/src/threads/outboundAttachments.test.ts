@@ -153,6 +153,16 @@ describe('resolveOutboundAttachments', () => {
     expect(result!.mediaType).toBe('application/octet-stream');
   });
 
+  it('stores an MP4 as video/mp4 by extension and, with no extension, by its magic bytes (VS-597)', () => {
+    const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypisom'), Buffer.from([0, 0, 2, 0])]);
+    write('knowledge/clip.mp4', 'not really video');
+    write('knowledge/rendered-output', '');
+    writeFileSync(join(root, 'knowledge', 'rendered-output'), mp4);
+    const [byExt, byBytes] = resolveOutboundAttachments(ctx, [{ path: join(root, 'knowledge', 'clip.mp4') }, { path: join(root, 'knowledge', 'rendered-output') }]);
+    expect(byExt!.mediaType).toBe('video/mp4');
+    expect(byBytes!.mediaType).toBe('video/mp4');
+  });
+
   it('bundles several paths into one zip, defaulting its name to something identifying', () => {
     const [result] = resolveOutboundAttachments(ctx, [{
       paths: [join(root, 'knowledge', 'PROJECT.md'), join(root, 'projects', 'proj1', 'README.md')],

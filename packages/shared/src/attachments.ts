@@ -78,7 +78,10 @@ export const ATTACHMENT_ZIP_MEDIA_TYPE = 'application/zip';
  */
 const OUTBOUND_EXTENSION_MEDIA_TYPES: Record<string, string> = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
-  txt: 'text/plain', md: 'text/markdown',
+  txt: 'text/plain', md: 'text/markdown', log: 'text/plain', json: 'application/json', csv: 'text/csv',
+  pdf: 'application/pdf', zip: 'application/zip',
+  mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', mkv: 'video/x-matroska',
+  mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', flac: 'audio/flac',
 };
 
 /** Guesses a media type for an outbound single-file attachment from its filename's extension. */
@@ -87,6 +90,71 @@ export function guessOutboundMediaType(filename: string): string {
   if (dot < 0 || dot === filename.length - 1) return 'application/octet-stream';
   const ext = filename.slice(dot + 1).toLowerCase();
   return OUTBOUND_EXTENSION_MEDIA_TYPES[ext] ?? 'application/octet-stream';
+}
+
+const OCTET_STREAM = 'application/octet-stream';
+const startsWithBytes = (bytes: Uint8Array, at: number, sig: number[]): boolean => sig.every((b, i) => bytes[at + i] === b);
+const ascii = (s: string): number[] => [...s].map((c) => c.charCodeAt(0));
+
+/** Sniffs a non-image type (video, audio, pdf, zip) from leading bytes; `null` when nothing matches. */
+function sniffMediaType(bytes: Uint8Array): string | null {
+  const image = sniffImageType(bytes);
+  if (image) return image;
+  if (bytes.length >= 12 && startsWithBytes(bytes, 4, ascii('ftyp'))) {
+    const brand = String.fromCharCode(...bytes.slice(8, 12));
+    if (brand === 'qt  ') return 'video/quicktime';
+    if (brand.startsWith('M4A')) return 'audio/mp4';
+    return 'video/mp4';
+  }
+  if (startsWithBytes(bytes, 0, [0x1a, 0x45, 0xdf, 0xa3])) return 'video/webm';
+  if (startsWithBytes(bytes, 0, ascii('%PDF-'))) return 'application/pdf';
+  if (startsWithBytes(bytes, 0, [0x50, 0x4b, 0x03, 0x04])) return 'application/zip';
+  if (startsWithBytes(bytes, 0, ascii('OggS'))) return 'audio/ogg';
+  if (startsWithBytes(bytes, 0, ascii('fLaC'))) return 'audio/flac';
+  if (startsWithBytes(bytes, 0, ascii('ID3')) || (bytes[0] === 0xff && ((bytes[1] ?? 0) & 0xe0) === 0xe0)) return 'audio/mpeg';
+  if (bytes.length >= 12 && startsWithBytes(bytes, 0, ascii('RIFF')) && startsWithBytes(bytes, 8, ascii('WAVE'))) return 'audio/wav';
+  return null;
+}
+
+/**
+ * The media type to serve or store (VS-597). A specific stored type is trusted; only a missing or
+ * `application/octet-stream` one is refined, from the leading bytes first and the filename's extension
+ * second. Never yields `text/html` or SVG, so refining can never make an attachment renderable script.
+ */
+export function detectAttachmentMediaType(input: { stored?: string | null; filename?: string; bytes?: Uint8Array }): string {
+  const stored = (input.stored ?? '').trim().toLowerCase();
+  if (stored && stored !== OCTET_STREAM) return stored;
+  const sniffed = input.bytes ? sniffMediaType(input.bytes) : null;
+  if (sniffed) return sniffed;
+  const guessed = input.filename ? guessOutboundMediaType(input.filename) : OCTET_STREAM;
+  return guessed;
+}
+
+const MEDIA_TYPE_EXTENSIONS: Record<string, string> = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp',
+  'text/plain': 'txt', 'text/markdown': 'md', 'text/csv': 'csv', 'application/json': 'json',
+  'application/pdf': 'pdf', 'application/zip': 'zip',
+  'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm', 'video/x-matroska': 'mkv',
+  'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/wav': 'wav', 'audio/ogg': 'ogg', 'audio/flac': 'flac',
+};
+
+/** The name a served attachment is saved as: the label, plus the media type's extension when the label has none. */
+export function attachmentDownloadName(label: string, mediaType: string): string {
+  const ext = MEDIA_TYPE_EXTENSIONS[mediaType.toLowerCase()];
+  const name = label.trim() || 'attachment';
+  if (!ext) return name;
+  const dot = name.lastIndexOf('.');
+  const current = dot > 0 ? name.slice(dot + 1).toLowerCase() : '';
+  // A dot inside a phrase like "source -> 1920x1080" is not an extension: only a short alphanumeric tail is.
+  if (/^[a-z0-9]{1,5}$/.test(current) && OUTBOUND_EXTENSION_MEDIA_TYPES[current] !== undefined) return name;
+  return `${name}.${ext}`;
+}
+
+/** Media types safe to display in the browser itself: never HTML or SVG, so they cannot run script. */
+export function isAttachmentInlineSafe(mediaType: string): boolean {
+  const t = mediaType.toLowerCase();
+  if (t === 'image/svg+xml') return false;
+  return t.startsWith('image/') || t.startsWith('video/') || t.startsWith('audio/') || t === 'application/pdf' || t === 'text/plain' || t === 'text/markdown';
 }
 
 /**
@@ -104,8 +172,9 @@ function encode5987(value: string): string {
  * is reduced to printable ASCII (quotes and backslashes included, which would end the quoted string)
  * and the attachment's true display name is carried in the RFC 5987 `filename*` form instead.
  */
-export function attachmentContentDisposition(mediaType: string, filename: string): string {
-  if (mediaType.startsWith('image/')) return 'inline';
+export function attachmentContentDisposition(mediaType: string, filename: string, opts: { inline?: boolean } = {}): string {
+  if (mediaType.startsWith('image/') && mediaType !== 'image/svg+xml') return 'inline';
+  if (opts.inline && isAttachmentInlineSafe(mediaType)) return `inline; filename="${filename.replace(/[^\x20-\x7e]|["\\]/g, '_')}"; filename*=UTF-8''${encode5987(filename)}`;
   const ascii = filename.replace(/[^\x20-\x7e]|["\\]/g, '_');
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encode5987(filename)}`;
 }

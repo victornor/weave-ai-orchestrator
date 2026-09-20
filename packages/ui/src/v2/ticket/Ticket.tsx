@@ -55,6 +55,7 @@ import { activityLine, mergeWorkerActivity } from '../../lib/workerActivity';
 import { projectColorVar } from '../../lib/projectColor';
 import { ago, cents, duration, statusText, tokens } from '../../lib/format';
 import { cx } from '../../lib/cx';
+import { AttachmentItem } from '../../components/AttachmentItem';
 
 const TABS = [
   { key: 'artifacts', label: 'Artifacts' },
@@ -533,13 +534,17 @@ function AttachmentsSection({ attachments }: { attachments: TicketAttachment[] }
     <section className="flex flex-col gap-3" data-v2-section="attachments">
       <h2 className="text-head font-semibold text-text-strong">Attachments</h2>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {(attachments ?? []).map((attachment) => (
-          <a key={attachment.id} href={attachment.url} target="_blank" rel="noreferrer" className="v2-card overflow-hidden p-2.5 hover:border-accent-edge">
-            {attachment.mediaType.startsWith('image/') && attachment.url ? <img src={attachment.url} alt={attachment.label} className="mb-2 max-h-56 w-full rounded-r4 object-contain" /> : null}
-            <div className="truncate text-micro text-text-1">{attachment.label}</div>
-            <div className="ac-mono text-nano text-text-3">{attachment.mediaType} · {attachment.byteSize.toLocaleString()} bytes</div>
-          </a>
-        ))}
+        {(attachments ?? []).map((attachment) =>
+          attachment.mediaType.startsWith('image/') ? (
+            <a key={attachment.id} href={attachment.url} target="_blank" rel="noreferrer" className="v2-card overflow-hidden p-2.5 hover:border-accent-edge">
+              {attachment.url ? <img src={attachment.url} alt={attachment.label} className="mb-2 max-h-56 w-full rounded-r4 object-contain" /> : null}
+              <div className="truncate text-micro text-text-1">{attachment.label}</div>
+              <div className="ac-mono text-nano text-text-3">{attachment.mediaType} · {attachment.byteSize.toLocaleString()} bytes</div>
+            </a>
+          ) : attachment.url ? (
+            <AttachmentItem key={attachment.id} attachmentId={attachment.id} url={attachment.url} label={attachment.label} mediaType={attachment.mediaType} byteSize={attachment.byteSize} createdAt={attachment.createdAt} />
+          ) : null,
+        )}
       </div>
     </section>
   );

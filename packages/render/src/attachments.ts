@@ -28,3 +28,20 @@ export function attachmentToView(part: AttachmentPart): AttachmentView {
   const kind = isAttachmentImageType(part.mediaType) ? 'image' : isAttachmentTextType(part.mediaType) ? 'text' : 'other';
   return { id: part.id, filename: part.filename, mediaType: part.mediaType, byteSize: part.byteSize, kind, sizeLabel: formatBytes(part.byteSize) };
 }
+
+export type AttachmentKind = 'image' | 'video' | 'audio' | 'pdf' | 'text' | 'other';
+
+/**
+ * How a surface presents an attachment, from its media type alone (VS-597), so a card, the ticket
+ * page and chat cannot disagree. SVG is `other`: it is never previewed or opened inline.
+ */
+export function attachmentKindOf(mediaType: string): AttachmentKind {
+  const t = mediaType.toLowerCase();
+  if (t === 'image/svg+xml') return 'other';
+  if (t.startsWith('image/')) return 'image';
+  if (t.startsWith('video/')) return 'video';
+  if (t.startsWith('audio/')) return 'audio';
+  if (t === 'application/pdf') return 'pdf';
+  if (t === 'text/plain' || t === 'text/markdown') return 'text';
+  return 'other';
+}

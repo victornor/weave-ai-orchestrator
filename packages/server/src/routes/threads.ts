@@ -2,9 +2,10 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { z } from 'zod';
 import {
-  ATTACHMENT_MAX_PER_MESSAGE, OcError, attachmentContentDisposition, attachmentMaxBytes, isAttachmentImageType, sniffImageType,
+  ATTACHMENT_MAX_PER_MESSAGE, OcError, attachmentMaxBytes, isAttachmentImageType, sniffImageType,
   type AttachmentMediaType,
 } from '@weave-ai/shared';
+import { serveBytes } from '../attachmentResponse.js';
 import type { AppEnv } from '../types.js';
 import { body, query } from '../http.js';
 
@@ -58,14 +59,8 @@ export function threadRoutes(): Hono<AppEnv> {
   app.get('/:threadId/attachments/:attachmentId', (c) => {
     const { threadId, attachmentId } = c.req.param();
     const { attachment, bytes } = c.get('ws').services.threads.attachment(threadId, attachmentId);
-    // VS-528: the length comes from the bytes actually served, never the stored `byte_size`, so the
-    // response can never promise more than it sends; and the disposition names the download instead
-    // of leaving the browser to infer it from the UI's `download` attribute alone.
-    return new Response(bytes, { headers: {
-      'Content-Type': attachment.mediaType,
-      'Content-Length': String(bytes.byteLength),
-      'Content-Disposition': attachmentContentDisposition(attachment.mediaType, attachment.filename),
-    } });
+    // VS-528/VS-597: one serving path for stored bytes (length, disposition, ranges, ETag).
+    return serveBytes(c.req.raw, { bytes, mediaType: attachment.mediaType, filename: attachment.filename });
   });
 
   app.post('/:id/bind', async (c) => {

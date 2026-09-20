@@ -23,7 +23,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, statSync, unlinkSyn
 import { basename, dirname, extname, join } from 'node:path';
 import { flattenWakes } from '../prompts/index.js';
 import type { Wakeup } from '@weave-ai/shared';
-import { ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, guessOutboundMediaType } from '@weave-ai/shared';
+import { ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, detectAttachmentMediaType, guessOutboundMediaType } from '@weave-ai/shared';
 import { actingAgentHome, assertAttachablePath, assertNotHiddenUnderHome, resolveOutboundAttachmentRoots } from '../threads/outboundAttachments.js';
 import { sanitizeAttachmentFilename, sha256, writeGeneratedAttachment } from '../threads/attachmentStorage.js';
 
@@ -1473,7 +1473,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       if (bytes.byteLength > ATTACHMENT_MAX_OUTBOUND_FILE_BYTES) {
         throw new OcError('validation', `"${input.path}" cannot be attached: file grew beyond the ${ATTACHMENT_MAX_OUTBOUND_FILE_BYTES}-byte per-file cap`, { max: ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, actual: bytes.byteLength });
       }
-      const mediaType = guessOutboundMediaType(source);
+      const mediaType = detectAttachmentMediaType({ stored: guessOutboundMediaType(source), filename: source, bytes });
       const label = sanitizeAttachmentFilename(input.label ?? basename(source));
       const extension = (extname(label).slice(1) || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12) || 'bin';
       const stored = writeGeneratedAttachment(ctx, extension, bytes);

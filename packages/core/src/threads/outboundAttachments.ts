@@ -8,7 +8,7 @@
  */
 import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, join, sep } from 'node:path';
-import { OcError, ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, ATTACHMENT_MAX_ZIP_INPUT_BYTES, ATTACHMENT_ZIP_MEDIA_TYPE, guessOutboundMediaType } from '@weave-ai/shared';
+import { OcError, ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, ATTACHMENT_MAX_ZIP_INPUT_BYTES, ATTACHMENT_ZIP_MEDIA_TYPE, guessOutboundMediaType, detectAttachmentMediaType } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import { sanitizeAttachmentFilename } from './attachmentStorage.js';
 import { buildZip, zipEntryNamesFor } from './zip.js';
@@ -66,7 +66,8 @@ export function assertAttachablePath(ctx: WorkspaceContext, rawPath: string, roo
   // roots, computed once, rather than repeating the workers/archive filesystem walk per path.
   const attachableRoots = roots ?? resolveOutboundAttachmentRoots(ctx);
   if (!attachableRoots.some((root) => isUnderRoot(resolved, root))) {
-    throw new OcError('validation', `"${rawPath}" cannot be attached: it is outside the knowledge tree, every project's clone, and every worker's worktree`);
+    throw new OcError('validation', `"${rawPath}" cannot be attached: it is outside the knowledge tree, every project's clone, and every worker's worktree (workers/<id>/work). ` +
+      `/tmp and other directories are not attachable. For weave_ticket_attachment_put, put the file in your own agent home (not under a hidden directory) and attach that path; for weave_human_send, it must be under the knowledge tree, a project clone or a worker worktree`);
   }
   const stat = statSync(resolved);
   if (!stat.isFile()) throw new OcError('validation', `"${rawPath}" cannot be attached: it is not a regular file`);
@@ -176,6 +177,7 @@ export function resolveOutboundAttachments(ctx: WorkspaceContext, entries: Outbo
       return { filename: sanitizeZipName(entry.zipName ?? defaultZipName()), mediaType: ATTACHMENT_ZIP_MEDIA_TYPE, bytes: buildZip(zipEntries) };
     }
     const filename = sanitizeAttachmentFilename(basename(rawPaths[0]!));
-    return { filename, mediaType: guessOutboundMediaType(filename), bytes: readFileSync(resolvedPaths[0]!) };
+    const bytes = readFileSync(resolvedPaths[0]!);
+    return { filename, mediaType: detectAttachmentMediaType({ stored: guessOutboundMediaType(filename), filename, bytes }), bytes };
   });
 }

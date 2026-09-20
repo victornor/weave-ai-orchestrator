@@ -28,9 +28,10 @@ async function main(): Promise<void> {
     // The adapter closing our stdin means it is gone or is cancelling.
     rl.on('close', () => { if (init) ac.abort(); resolve(null); });
   });
-  const first = await initSeen;
-  if (!first) { write({ t: 'log', level: 'error', msg: 'no init message received' }); process.exit(2); }
+  const first0 = await initSeen;
+  if (!first0) { write({ t: 'log', level: 'error', msg: 'no init message received' }); process.exit(2); }
 
+  const first = process.argv.includes('--compact') ? { ...first0, mode: 'compact' as const } : first0;
   const io: LoopIO = {
     emit: (ev) => write({ t: 'event', ev }),
     partial: (p) => write({ t: 'partial', p }),

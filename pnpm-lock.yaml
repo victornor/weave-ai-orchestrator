@@ -38,6 +38,9 @@ importers:
       '@weave-ai/shared':
         specifier: workspace:*
         version: link:../shared
+      js-tiktoken:
+        specifier: ^1.0.21
+        version: 1.0.21
     devDependencies:
       yaml:
         specifier: ^2.9.0

@@ -559,6 +559,10 @@ export const ProviderCompatSchema = z.object({
   stopMax: z.number().int().positive().optional(),
   modelsPath: z.string().optional(),
   contextField: z.string().optional(),
+  /** How the request helps the provider cache the prompt prefix: nothing, a `prompt_cache_key`, or Anthropic-style `cache_control` markers. */
+  promptCache: z.enum(['none', 'key', 'anthropic']).optional(),
+  /** Dotted path in `usage` to the cached prompt tokens; the standard `prompt_tokens_details.cached_tokens` and DeepSeek's `prompt_cache_hit_tokens` are always read too. */
+  cachedTokensField: z.string().optional(),
 });
 export type ProviderCompat = z.infer<typeof ProviderCompatSchema>;
 

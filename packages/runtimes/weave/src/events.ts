@@ -9,7 +9,7 @@ export type ChildLine =
   | { kind: 'result'; result: ChildResult }
   | { kind: 'raw'; text: string };
 
-const EVENT_TYPES = new Set(['turn.started', 'turn.completed', 'assistant.text', 'assistant.thinking', 'tool.call', 'tool.result', 'tool.denied', 'command.executed', 'file.changed', 'usage.delta', 'error', 'session.started', 'session.resumed', 'runtime.raw']);
+const EVENT_TYPES = new Set(['turn.started', 'turn.completed', 'assistant.text', 'assistant.thinking', 'tool.call', 'tool.result', 'tool.denied', 'command.executed', 'file.changed', 'usage.delta', 'error', 'session.started', 'session.resumed', 'session.compaction.started', 'session.compaction.completed', 'runtime.raw']);
 
 /** Parse one line of child stdout. A line that is not a well-formed protocol message is kept as raw output, never dropped. */
 export function parseChildLine(line: string): ChildLine {

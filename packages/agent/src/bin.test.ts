@@ -24,8 +24,8 @@ const init = (prompt = 'go'): InitMessage => ({
 });
 
 /** Spawn the real child entry exactly as the adapter does: own process group, init on stdin, NDJSON on stdout. */
-function spawnChild(): { child: ChildProcess; msgs: ChildMessage[]; exited: Promise<{ code: number | null; signal: string | null }>; stderr: () => string } {
-  const child = spawn(process.execPath, ['--import', tsxLoader, join(here, 'bin.ts')], { cwd: dir, env: { PATH: process.env['PATH'] ?? '', HOME: dir }, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+function spawnChild(args: string[] = []): { child: ChildProcess; msgs: ChildMessage[]; exited: Promise<{ code: number | null; signal: string | null }>; stderr: () => string } {
+  const child = spawn(process.execPath, ['--import', tsxLoader, join(here, 'bin.ts'), ...args], { cwd: dir, env: { PATH: process.env['PATH'] ?? '', HOME: dir }, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
   kids.push(child);
   const msgs: ChildMessage[] = []; let buf = ''; let err = '';
   child.stdout!.on('data', (c: Buffer) => { buf += c.toString(); let i; while ((i = buf.indexOf('\n')) >= 0) { msgs.push(JSON.parse(buf.slice(0, i)) as ChildMessage); buf = buf.slice(i + 1); } });
@@ -91,5 +91,45 @@ describe('child process', () => {
     await until(() => mock.requests.length === 1);
     c.child.stdin!.write(`${JSON.stringify({ type: 'cancel', mode: 'interrupt' })}\n`);
     expect((await c.exited).code).toBe(143);
+  });
+});
+
+describe('child process, compact mode', () => {
+  it('summarises a stored session and exits 0 with one result, sending no tools', async () => {
+    const s = Session.open({ path: join(dir, 's.jsonl'), id: 'e2e', cwd: dir });
+    for (let i = 0; i < 20; i++) {
+      s.append({ role: 'user', text: `q${i} ${'lorem ipsum '.repeat(80)}` });
+      s.append({ role: 'assistant', content: [{ type: 'text', text: `a${i} ${'dolor sit '.repeat(80)}` }] });
+    }
+    s.close();
+    mock.script({ chunks: textChunks('## Goal\ncompacted by the child') });
+    const c = spawnChild(['--compact']);
+    c.child.stdin!.write(`${JSON.stringify({ ...init(''), mode: undefined, provider: { ...init().provider, params: { contextWindowTokens: 4000 } } })}\n`);
+    const { code } = await c.exited;
+    expect(code).toBe(0);
+    expect(c.msgs.filter((m) => m.t === 'result')).toHaveLength(1);
+    const r = resultOf(c.msgs);
+    expect(r.compaction).toMatchObject({ ok: true });
+    expect(r.compaction!.tokensAfter!).toBeLessThan(r.compaction!.tokensBefore!);
+    expect(mock.requests).toHaveLength(1);
+    expect(mock.requests[0]!.body['tools']).toBeUndefined();
+    const again = Session.open({ path: join(dir, 's.jsonl'), id: 'e2e', cwd: dir });
+    expect((again.context()[0] as { text: string }).text).toContain('compacted by the child');
+    again.close();
+  });
+  it('exits 0 with ok:false when there is nothing to summarise, and 1 with a tooling error when the summary fails', async () => {
+    const empty = spawnChild(['--compact']);
+    empty.child.stdin!.write(`${JSON.stringify(init(''))}\n`);
+    expect((await empty.exited).code).toBe(0);
+    expect(resultOf(empty.msgs).compaction).toMatchObject({ ok: false, reason: 'nothing to summarise' });
+
+    const s = Session.open({ path: join(dir, 's.jsonl'), id: 'e2e', cwd: dir });
+    for (let i = 0; i < 10; i++) { s.append({ role: 'user', text: `q${i} ${'lorem '.repeat(200)}` }); s.append({ role: 'assistant', content: [{ type: 'text', text: 'ok '.repeat(200) }] }); }
+    s.close();
+    mock.script({ status: 400, body: '{"error":{"message":"nope","code":"invalid"}}' });
+    const bad = spawnChild(['--compact']);
+    bad.child.stdin!.write(`${JSON.stringify({ ...init(''), provider: { ...init().provider, params: { contextWindowTokens: 4000 } } })}\n`);
+    expect((await bad.exited).code).toBe(1);
+    expect(resultOf(bad.msgs).error).toMatchObject({ code: 'compaction_failed', family: 'tooling' });
   });
 });

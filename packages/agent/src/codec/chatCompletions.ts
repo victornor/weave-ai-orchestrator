@@ -10,7 +10,7 @@ export type RequestOptions = Params;
  * not sent, so the provider's own default applies. Names and shapes follow the resolved `compat`
  * flags; the defaults are the ones every probed endpoint honoured.
  */
-export function buildRequest(input: { model: string; system: string; messages: Message[]; tools: ToolSpec[]; options: RequestOptions; compat?: Compat; effort?: string | null; warnings?: string[] }): Record<string, unknown> {
+export function buildRequest(input: { model: string; system: string; messages: Message[]; tools: ToolSpec[]; options: RequestOptions; compat?: Compat; effort?: string | null; warnings?: string[]; /** The session id: with `promptCache` it names the cached prefix. Absent for one-off requests such as a summary, which are never cached. */ cacheKey?: string }): Record<string, unknown> {
   const compat = input.compat ?? DEFAULT_COMPAT;
   const tools = compat.tools.supported ? input.tools : [];
   const body: Record<string, unknown> = {
@@ -20,9 +20,27 @@ export function buildRequest(input: { model: string; system: string; messages: M
   };
   if (compat.streamUsage === 'stream_options') body['stream_options'] = { include_usage: true };
   if (tools.length > 0) body['tools'] = tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters, ...(compat.tools.strict ? { strict: true } : {}) } }));
+  if (input.cacheKey) applyPromptCache(body, compat, input.cacheKey);
   const { warnings } = applyParams(body, input.options, compat, input.effort, tools.length > 0);
   input.warnings?.push(...warnings);
   return body;
+}
+
+/**
+ * `key`: `prompt_cache_key` names the prefix. `anthropic`: `cache_control` markers on the system message, the last tool
+ * and the last user message, the three places a Claude-compatible gateway reads them. Both leave the message order alone.
+ */
+function applyPromptCache(body: Record<string, unknown>, compat: Compat, key: string): void {
+  if (compat.promptCache === 'key') { body['prompt_cache_key'] = key; return; }
+  if (compat.promptCache !== 'anthropic') return;
+  const mark = { type: 'ephemeral' };
+  const withMarker = (content: unknown): unknown => (typeof content === 'string' ? [{ type: 'text', text: content, cache_control: mark }] : content);
+  const messages = body['messages'] as Array<Record<string, unknown>>;
+  const sys = messages.find((m) => m['role'] === compat.systemRole);
+  if (sys) sys['content'] = withMarker(sys['content']);
+  for (let i = messages.length - 1; i >= 0; i--) if (messages[i]!['role'] === 'user') { messages[i]!['content'] = withMarker(messages[i]!['content']); break; }
+  const tools = body['tools'] as Array<Record<string, unknown>> | undefined;
+  if (tools && tools.length > 0) tools[tools.length - 1]!['cache_control'] = mark;
 }
 
 export interface AssembledCall { id: string; name: string; argsText: string }
@@ -30,7 +48,7 @@ export interface StepResult {
   text: string; thinking: string; calls: AssembledCall[]; finishReason: string | null; refusal?: string; usage: Usage | null; model: string | null;
   error: { message: string; code?: string; type?: string } | null;
 }
-export interface ReducerOptions { reasoningField?: Compat['reasoning']['field'] }
+export interface ReducerOptions { reasoningField?: Compat['reasoning']['field']; cachedTokensField?: string | undefined }
 export interface ReducerHandlers {
   onText?(delta: string): void;
   onThinking?(delta: string): void;
@@ -74,7 +92,7 @@ export class StreamReducer {
       this.error = { message: String(e['message'] ?? 'provider error'), ...(e['code'] != null ? { code: String(e['code']) } : {}), ...(typeof e['type'] === 'string' ? { type: e['type'] } : {}) };
     }
     if (typeof chunk['model'] === 'string' && chunk['model']) this.model = chunk['model'];
-    if (isObj(chunk['usage'])) this.usage = readUsage(chunk['usage']);
+    if (isObj(chunk['usage'])) this.usage = readUsage(chunk['usage'], this.opts.cachedTokensField);
     const choice = Array.isArray(chunk['choices']) ? chunk['choices'][0] : undefined;
     if (!isObj(choice)) return;
     if (typeof choice['finish_reason'] === 'string') this.finish = choice['finish_reason'];
@@ -124,13 +142,15 @@ function reasoningOf(delta: Json, field: NonNullable<ReducerOptions['reasoningFi
   return '';
 }
 
-function readUsage(u: Json): Usage {
+function readUsage(u: Json, cachedField?: string): Usage {
   const pd = isObj(u['prompt_tokens_details']) ? u['prompt_tokens_details'] : {};
   const cd = isObj(u['completion_tokens_details']) ? u['completion_tokens_details'] : {};
   return {
     promptTokens: num(u['prompt_tokens']) ?? 0, completionTokens: num(u['completion_tokens']) ?? 0,
-    cachedTokens: num(pd['cached_tokens']) ?? num(u['prompt_cache_hit_tokens']) ?? 0, reasoningTokens: num(cd['reasoning_tokens']) ?? 0, estimated: false,
+    cachedTokens: (cachedField ? num(dotted(u, cachedField)) : undefined) ?? num(pd['cached_tokens']) ?? num(u['prompt_cache_hit_tokens']) ?? 0, reasoningTokens: num(cd['reasoning_tokens']) ?? 0, estimated: false,
   };
 }
+
+const dotted = (o: Json, path: string): unknown => path.split('.').reduce<unknown>((v, k) => (isObj(v) ? v[k] : undefined), o);
 
 export { classifyHttp } from '../errors.js';

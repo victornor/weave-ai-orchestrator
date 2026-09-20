@@ -1,4 +1,9 @@
 import { completeCompat } from './codec/params.js';
+import { compact, compactionThreshold, NOTHING_TO_SUMMARISE, SUMMARY_MAX_OUTPUT_TOKENS, type CompactOutcome } from './compaction.js';
+import { InstructionLoader } from './instructions.js';
+import { pruneMessages } from './prune.js';
+import { loadSkills, skillIndex, skillTool } from './skills.js';
+import { RequestSizer } from './tokens.js';
 import { buildRequest, StreamReducer, type StepResult } from './codec/chatCompletions.js';
 import { DoomGuard } from './doom.js';
 import { classifyFinish, classifyHttp, classifyNetwork, classifyStreamError, stopError } from './errors.js';
@@ -8,9 +13,10 @@ import { WireLog } from './wire.js';
 import { createMcpClient, type McpClient, type McpTool } from './mcp/client.js';
 import { assignMcpToolNames } from './mcp/naming.js';
 import { bashDenial, isAllowedByLists, modeToolNames, toolDenial, type PermissionConfig } from './permission.js';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { chatCompletionsUrl, requestHeaders, requestOptions, shellEnv } from './profile.js';
 import type { ChildEvent, ChildPartial, ChildResult, InitMessage } from './protocol.js';
+import { retentionDays, sweepSessions } from './retention.js';
 import { Session } from './session.js';
 import { SseParser } from './sse.js';
 import { bashTool } from './tools/bash.js';
@@ -41,10 +47,13 @@ const DEFAULT_REQUEST_MS = 600_000;
 const MAX_INVALID_CALLS = 3;
 const CONTINUE_PROMPT = 'Your previous reply was cut off by the output limit. Continue exactly where you stopped.';
 const DEADLINE_MARGIN_MS = 30_000;
-const PREAMBLE = [
+export const PREAMBLE = [
   'You are Weave Agent, a coding agent working in a git worktree through tools.',
-  'Use `read` to look at files and directories and `bash` to run commands; paths may be relative to the worktree.',
-  'Tool results are capped: when a result says it was truncated, page with `read` offset or open the named output file.',
+  'Use `read` to look at files and directories, `grep` and `glob` to search, `edit` and `write` to change files, and `bash` to run commands; paths may be relative to the worktree.',
+  'Read a file before you edit or overwrite it; `edit` needs an `old_string` that matches exactly once.',
+  'Tool results are capped: when a result says it was truncated, page with `read` offset or open the named output file. An older result may be replaced by a note that it was pruned: run the call again if you still need it.',
+  'A directory may have its own AGENTS.md: it is appended to the first result from that directory. Follow it.',
+  'The conversation may begin with a summary of earlier work; treat it as what happened.',
   'Work step by step, check your results, and say plainly what you did and what is left.',
 ].join('\n');
 
@@ -100,6 +109,9 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     ...(run.permission.firstTurn ? { firstTurn: true } : {}),
     ...(run.permission.bashDeny ? { bashDeny: run.permission.bashDeny } : {}),
   };
+  // Sessions unused for the retention period are dropped from the shared sessions directory.
+  const swept = sweepSessions(dirname(session.path), session.path, retentionDays(run.options));
+  if (swept.length > 0) io.log('info', 'removed expired sessions', { count: swept.length });
   const isFirst = session.messages.length === 0;
   const tokens = { prompt: 0, completion: 0, cached: 0 };
   let firstRequest: { freshTokens: number; cachedTokens: number } | undefined;
@@ -117,6 +129,8 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
   let invalidStreak = 0;
   let lengthHits = 0;
   const maxTurnTokens = typeof run.options['maxTurnTokens'] === 'number' && run.options['maxTurnTokens'] > 0 ? Math.floor(run.options['maxTurnTokens']) : undefined;
+  const sizer = new RequestSizer();
+  const window = opts.contextWindowTokens;
   const wire = run.options['debugWire'] === true ? new WireLog(join(dirname(run.spillDir), 'wire'), [provider.apiKey, ...Object.values(init.toolEnv)]) : null;
 
   const result = (over: Partial<ChildResult>): ChildResult => ({
@@ -138,6 +152,19 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     // from the request itself; `all` keeps every tool so a call the mode removed is answered with a
     // permission denial rather than "unknown tool".
     const webFetchEnabled = run.options['webFetch'] === true;
+    const skills = loadSkills(run.cwd);
+    const instructions = new InstructionLoader(wtCwd);
+    instructions.pin(join(run.cwd, 'AGENTS.md'));
+    const system = [PREAMBLE, init.systemPrompt.mode === 'inject' ? init.systemPrompt.text : '', skillIndex(skills)].filter(Boolean).join('\n\n');
+    if (init.mode === 'compact') {
+      // Out-of-band compaction (the adapter's `compactSession`): no prompt, no tools, one summary and done.
+      const out = await runCompaction('manual', []);
+      const noop = !out.ok && out.reason === NOTHING_TO_SUMMARISE;
+      if (out.ok || noop) return finish(result({ exitCode: 0, compaction: { ok: out.ok, ...(out.tokensBefore !== undefined ? { tokensBefore: out.tokensBefore } : {}), ...(out.tokensAfter !== undefined ? { tokensAfter: out.tokensAfter } : {}), ...(out.reason ? { reason: out.reason } : {}) } }), false);
+      const err: AgentError = { code: 'compaction_failed', family: 'tooling', message: `The conversation could not be compacted: ${out.reason ?? 'unknown'}` };
+      emit('error', { code: err.code, family: err.family, message: err.message });
+      return finish(result({ exitCode: 1, error: err }), true);
+    }
     const coreByName: Record<string, ToolDefinition> = { read: readTool, write: writeTool, edit: editTool, bash: bashTool, grep: grepTool, glob: globTool };
     if (webFetchEnabled) coreByName['web_fetch'] = makeWebFetchTool();
     const modeNames = new Set<string>(modeToolNames(run.permission.mode));
@@ -183,6 +210,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
         });
       }
     } catch (e) { if (e instanceof StepFailure) { emit('error', { code: e.err.code, family: e.err.family, message: e.err.message }); return finish(result({ exitCode: 1, error: e.err }), true); } throw e; }
+    if (skills.length > 0) all.set('skill', skillTool(skills));
     const tools = new Map<string, ToolDefinition>();
     for (const [name, tool] of all) {
       if (coreNames.has(name) && !modeNames.has(name)) continue;
@@ -190,11 +218,12 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       tools.set(name, tool);
     }
     const modeAllows = (name: string): boolean => !coreNames.has(name) || modeNames.has(name);
+    const toolList = toolSpecs([...tools.values()]);
     const ledger = new ReadLedger();
+    instructions.syncFrom(session.context());
     const rg = rgAvailable();
     if (!rg) io.log('info', 'ripgrep is not on PATH; using the built-in search');
 
-    const system = [PREAMBLE, init.systemPrompt.mode === 'inject' ? init.systemPrompt.text : ''].filter(Boolean).join('\n\n');
     session.append({ role: 'user', text: isFirst ? `${envBlock(run.cwd, wtCwd, run.worktree?.branch)}\n\n${init.prompt}` : init.prompt });
 
     const stepCap = run.limits.maxTurns ?? DEFAULT_STEP_CAP;
@@ -215,15 +244,35 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       steps++;
       const messageId = `${run.runId}:${steps}`;
       emit('turn.started', { messageId });
-      const reqWarnings: string[] = [];
-      const body = buildRequest({ model: run.model, system, messages: session.messages, tools: toolSpecs([...tools.values()]), options: opts, compat, effort: run.effort, warnings: reqWarnings });
-      for (const w of reqWarnings.splice(0)) if (!warned.has(w)) { warned.add(w); io.log('warn', w); }
-      const step = await streamStep(body);
+      if (window === undefined) {
+        if (!warned.has('window')) { warned.add('window'); io.log('warn', 'the context window is unknown, so the session is only compacted when the provider reports an overflow; set contextWindowTokens on the model or the provider'); }
+      } else if (sizer.estimate({ system, tools: toolList, messages: session.context() }) > compactionThreshold(window, opts.maxOutputTokens)) {
+        await runCompaction('proactive', toolList);
+      }
+      let overflowRetried = false;
+      let sent = 0;
+      let step: StepResult;
+      let body: Record<string, unknown>;
+      for (;;) {
+        const whole = session.context();
+        // Above 70 % of the window the oldest tool output is replaced by a stub in this request only.
+        const context = pruneMessages(whole, { estimate: sizer.estimate({ system, tools: toolList, messages: whole }), window });
+        sent = context.length;
+        const reqWarnings: string[] = [];
+        body = buildRequest({ model: run.model, system, messages: context, tools: toolList, options: opts, compat, effort: run.effort, warnings: reqWarnings, cacheKey: init.session.id });
+        for (const w of reqWarnings.splice(0)) if (!warned.has(w)) { warned.add(w); io.log('warn', w); }
+        try { step = await streamStep(body); break; } catch (e) {
+          // The provider says the request was too big: summarise and send it once more, then let the error stand.
+          if (!overflowRetried && e instanceof StepFailure && e.err.code === 'context_overflow') { overflowRetried = true; if ((await runCompaction('overflow', toolList)).ok) continue; }
+          throw e;
+        }
+      }
       inFlightReducer = null;
       if (step.model) model = step.model;
       const usage = step.usage ?? await estimateUsage(body, step);
       tokens.prompt += usage.promptTokens; tokens.completion += usage.completionTokens; tokens.cached += usage.cachedTokens;
       contextTokens = usage.promptTokens;
+      if (!usage.estimated) sizer.observe(usage.promptTokens, sent);
       firstRequest ??= { freshTokens: usage.promptTokens - usage.cachedTokens, cachedTokens: usage.cachedTokens };
       batch.flush();
       const content: ContentBlock[] = [];
@@ -284,6 +333,11 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
           }
           // A denied call is a permission answer, not a malformed one; only unknown tools and bad arguments count as invalid.
           invalidStreak = (tool === undefined && !denied) || !args.ok ? invalidStreak + 1 : 0;
+          // The first read or edit in a directory brings that directory's AGENTS.md along, once.
+          if (tool && args.ok && !out.isError && (c.name === 'read' || c.name === 'edit' || c.name === 'write') && typeof args.value['path'] === 'string') {
+            const extra = instructions.forPath(resolve(wtCwd, args.value['path']));
+            if (extra) out = { ...out, text: out.text + extra };
+          }
           if (out.text.length === 0) out = { ...out, text: '(no output)' };
           if (tool && args.ok && verdict === 'ok' && !stopFailure) doom.record(key, out.text);
           const images = compat.image.input === 'none' ? [] : (out.images ?? []);
@@ -302,10 +356,28 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     }
 
     // ---- one model request, retried on the ladder before any result is committed ----
-    async function streamStep(body: Record<string, unknown>): Promise<StepResult> {
+    async function runCompaction(trigger: 'proactive' | 'overflow' | 'manual', specs: ReturnType<typeof toolSpecs>): Promise<CompactOutcome> {
+      emit('session.compaction.started', { trigger });
+      const out = await compact({ session, window, complete, log: (level, msg, fields) => io.log(level, msg, fields) });
+      if (!out.ok) { io.log('info', 'compaction skipped', { trigger, why: out.reason }); emit('session.compaction.completed', { trigger, ok: false }); return out; }
+      sizer.reset();
+      instructions.syncFrom(session.context());
+      emit('session.compaction.completed', { trigger, ok: true, tokensBefore: out.tokensBefore, tokensAfter: out.tokensAfter, postTokens: sizer.estimate({ system, tools: specs, messages: session.context() }) });
+      return out;
+    }
+    /** One summary request through the run's own provider: no tools, no sampling extras, output capped, and none of it shown as the agent's reply. */
+    async function complete(sys: string, user: string): Promise<string> {
+      const { toolChoice: _tc, parallelToolCalls: _pt, stop: _st, responseFormat: _rf, ...rest } = opts;
+      const body = buildRequest({ model: run.model, system: sys, messages: [{ role: 'user', text: user }], tools: [], options: { ...rest, maxOutputTokens: Math.min(opts.maxOutputTokens ?? SUMMARY_MAX_OUTPUT_TOKENS, SUMMARY_MAX_OUTPUT_TOKENS) }, compat, effort: null });
+      const r = await streamStep(body, true);
+      if (r.usage) { tokens.prompt += r.usage.promptTokens; tokens.completion += r.usage.completionTokens; tokens.cached += r.usage.cachedTokens; }
+      if (!r.text.trim()) throw new Error('the model returned no summary');
+      return r.text;
+    }
+    async function streamStep(body: Record<string, unknown>, quiet = false): Promise<StepResult> {
       for (let attempt = 0; ; attempt++) {
         if (!sendStreamOptions) delete body['stream_options'];
-        try { return await requestOnce(body); } catch (e) {
+        try { return await requestOnce(body, quiet); } catch (e) {
           if (signal.aborted || e instanceof Cancelled) throw new Cancelled();
           if (e instanceof DropStreamOptions) { io.log('info', 'endpoint rejected stream_options; retrying without it'); attempt--; continue; }
           const err = e instanceof StepFailure ? e.err : classifyNetwork(e);
@@ -317,7 +389,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
         }
       }
     }
-    async function requestOnce(body: Record<string, unknown>): Promise<StepResult> {
+    async function requestOnce(body: Record<string, unknown>, quiet: boolean): Promise<StepResult> {
       const stepCtl = new AbortController();
       const onAbort = (): void => stepCtl.abort();
       signal.addEventListener('abort', onAbort, { once: true });
@@ -330,12 +402,12 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
       const arm = (what: string, ms: number): void => { if (phase) clearTimeout(phase); phase = setTimeout(() => cutoff(what, ms), ms); };
       const whole = setTimeout(() => cutoff('request timeout', requestMs), requestMs);
       const messageId = `${run.runId}:${steps}`;
-      const reducer = new StreamReducer({
+      const reducer = new StreamReducer(quiet ? {} : {
         onText: (d) => batch.add({ kind: 'text', partId: `${messageId}:t`, messageId, text: d }),
         onThinking: (d) => batch.add({ kind: 'thinking', partId: `${messageId}:k`, messageId, text: d }),
         onToolInput: (id, d) => batch.add({ kind: 'tool_input', partId: id, toolCallId: id, messageId, text: d }),
-      }, `call_${run.runId.slice(-6)}_${steps}`, { reasoningField: compat.reasoning.field });
-      inFlightReducer = reducer;
+      }, `call_${run.runId.slice(-6)}_${steps}`, { reasoningField: compat.reasoning.field, cachedTokensField: compat.cachedTokensField });
+      if (!quiet) inFlightReducer = reducer;
       try {
         const url = chatCompletionsUrl(provider.baseUrl, provider.query);
         const headers = requestHeaders(provider);

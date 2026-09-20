@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "Built-in agent S6: context, compaction, pruning, instructions, skills and
+  caching, proven at weaver scale"

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 export * from './protocol.js';
 export * from './types.js';
-export { Session, type SessionRef } from './session.js';
+export { Session, forkSessionFile, type SessionRef } from './session.js';
 export { SseParser } from './sse.js';
 export { requestOptions, requestHeaders } from './profile.js';
 

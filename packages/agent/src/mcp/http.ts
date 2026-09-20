@@ -1,14 +1,15 @@
 import { SseParser } from '../sse.js';
+import type { McpClient, McpTool } from './client.js';
+import { foldMcpContent, type McpToolResult } from './result.js';
 
-export interface McpTool { name: string; description: string; inputSchema: Record<string, unknown>; readOnly: boolean }
+export type { McpTool };
 export interface McpHttpOptions { url: string; headers?: Record<string, string>; fetch?: typeof fetch; listTimeoutMs?: number; callTimeoutMs?: number; clientName?: string }
-export const MCP_RESULT_MAX_CHARS = 50 * 1024;
 const PROTOCOL_VERSION = '2025-03-26';
 
 interface Rpc { jsonrpc: '2.0'; id?: number; result?: Record<string, unknown>; error?: { code: number; message: string }; method?: string }
 
 /** A streamable-HTTP MCP client: JSON or SSE replies, `Mcp-Session-Id`, static headers, no OAuth. */
-export class McpHttpClient {
+export class McpHttpClient implements McpClient {
   private nextId = 1;
   private sessionId: string | null = null;
   private readonly f: typeof fetch;
@@ -33,19 +34,18 @@ export class McpHttpClient {
     return tools;
   }
 
-  async callTool(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<{ text: string; isError: boolean }> {
+  async callTool(name: string, args: Record<string, unknown>, signal: AbortSignal): Promise<McpToolResult> {
     const id = this.nextId;
     try {
       const r = await this.request('tools/call', { name, arguments: args }, signal, this.o.callTimeoutMs ?? 60_000);
-      const parts = (r['content'] as Array<Record<string, unknown>> | undefined) ?? [];
-      let text = parts.map((p) => (p['type'] === 'text' ? String(p['text'] ?? '') : `[${String(p['type'])} content omitted]`)).join('\n');
-      if (text.length > MCP_RESULT_MAX_CHARS) text = `${text.slice(0, MCP_RESULT_MAX_CHARS)}\n[truncated at ${MCP_RESULT_MAX_CHARS} characters]`;
-      return { text, isError: r['isError'] === true };
+      return foldMcpContent(r['content'], r['isError'] === true);
     } catch (e) {
       if (signal.aborted) void this.post({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id, reason: 'cancelled' } } as Rpc, new AbortController().signal, false).catch(() => undefined);
       throw e;
     }
   }
+
+  async close(): Promise<void> { /* the turn's abort signal already ends an in-flight HTTP request */ }
 
   private async request(method: string, params: Record<string, unknown>, signal: AbortSignal, timeoutMs: number): Promise<Record<string, unknown>> {
     const id = this.nextId++;

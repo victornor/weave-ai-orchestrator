@@ -1,4 +1,6 @@
 import type { ToolSpec } from '../codec/chatCompletions.js';
+import type { ImageInput } from '../codec/params.js';
+import type { McpImagePart } from '../mcp/result.js';
 import type { PermissionMode } from '../permission.js';
 import type { ReadLedger } from './ledger.js';
 
@@ -11,6 +13,8 @@ export interface ToolCtx {
   configHome?: string | undefined;
   /** The turn's permission mode; confinement and deny patterns read it. */
   mode: PermissionMode;
+  /** How the profile takes images; `read` refuses an image when it is `none`. */
+  imageInput?: ImageInput | undefined;
   /** The shell's environment. Never carries the provider key or the run token. */
   env: Record<string, string>;
   signal: AbortSignal;
@@ -24,7 +28,7 @@ export interface ToolCtx {
   /** Emit a `runtime` event for this call; the loop adds the call id. */
   emit(type: string, payload: Record<string, unknown>): void;
 }
-export interface ToolOutput { text: string; isError?: boolean; meta?: { command?: string; exitCode?: number | null } }
+export interface ToolOutput { text: string; isError?: boolean; /** Image parts a tool produced (a `read` of an image, an MCP image result). */ images?: McpImagePart[]; meta?: { command?: string; exitCode?: number | null } }
 export interface ToolDefinition extends ToolSpec {
   /** Core tools and MCP tools share this shape. */
   readOnly?: boolean;

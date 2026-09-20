@@ -161,3 +161,24 @@ function assembleWith(bytes: Uint8Array, field: 'reasoning' | 'reasoning_content
   return red.result();
 }
 void assemble;
+
+describe('image input modes', () => {
+  const img = { mediaType: 'image/png', dataBase64: 'QUJD' };
+  const userWithImage: Message = { role: 'user', text: 'look', images: [img] };
+  const toolWithImage: Message = { role: 'toolResult', toolCallId: 'c1', name: 'read', text: 'Read image', isError: false, images: [img] };
+  const wire = (msgs: Message[], input: 'none' | 'user' | 'user_and_tool') => toWireMessages(msgs, compat({ image: { input } }));
+
+  it('puts a user image into a content array by default', () => {
+    const m = wire([userWithImage], 'user')[0]!;
+    expect(m['content']).toEqual([{ type: 'text', text: 'look' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } }]);
+  });
+
+  it('drops images entirely for none', () => {
+    expect(wire([userWithImage], 'none')[0]!['content']).toBe('look');
+  });
+
+  it('embeds a tool image only for user_and_tool', () => {
+    expect(wire([toolWithImage], 'user_and_tool')[0]!['content']).toEqual([{ type: 'text', text: 'Read image' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,QUJD' } }]);
+    expect(wire([toolWithImage], 'user')[0]!['content']).toBe('Read image');
+  });
+});

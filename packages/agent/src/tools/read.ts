@@ -1,6 +1,7 @@
 import { closeSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs';
 import { errorOutput, type ToolDefinition } from './index.js';
 import { confinePath } from './confine.js';
+import { detectImageType, IMAGE_MAX_BYTES, imagePart, readHeader } from './image.js';
 
 export const READ_MAX_LINES = 2000;
 export const READ_MAX_BYTES = 50 * 1024;
@@ -33,6 +34,14 @@ export const readTool: ToolDefinition = {
       return { text: shown.join('\n') + (names.length > shown.length ? `\n[showing ${shown.length} of ${names.length} entries]` : '') };
     }
     if (st.size > FILE_MAX_BYTES) return errorOutput(`file is ${st.size} bytes; too large to read, use bash`);
+    const mediaType = detectImageType(readHeader(path));
+    if (mediaType) {
+      if (ctx.imageInput === 'none') return errorOutput('this model cannot read images');
+      if (st.size > IMAGE_MAX_BYTES) return errorOutput(`image is ${st.size} bytes; larger than the ${IMAGE_MAX_BYTES} byte limit`);
+      ctx.ledger.record(path);
+      const data = readFileSync(path);
+      return { text: `Read image ${path} (${mediaType}, ${data.length} bytes)`, images: [imagePart(mediaType, data)] };
+    }
     if (isBinary(path, st.size)) return errorOutput('binary file');
     ctx.ledger.record(path);
     const offset = typeof args['offset'] === 'number' ? Math.max(1, Math.floor(args['offset'])) : 1;

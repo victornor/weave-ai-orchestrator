@@ -364,6 +364,39 @@ describe('run engine', () => {
     expect(rows[0]!.payload.text).toContain('[redacted]');
   });
 
+  // VS-595: partial output is ephemeral — broadcast, redacted, never stored, superseded on completion.
+  it('broadcasts redacted run.delta frames, stores none, and drops the partial once the part completes', async () => {
+    const frames: Array<{ parts: Array<{ text: string }> }> = [];
+    const orig = h.ctx.events.broadcast.bind(h.ctx.events);
+    vi.spyOn(h.ctx.events, 'broadcast').mockImplementation(((type: string, et: string, id: string, payload: unknown) => {
+      if (type === 'run.delta') frames.push(payload as { parts: Array<{ text: string }> });
+      return (orig as (...a: unknown[]) => unknown)(type, et, id, payload);
+    }) as never);
+    let liveDuring: unknown = null;
+    class StreamingRuntime extends FakeRuntime {
+      override async runTurn(input: TurnInput, sink: TurnSink): Promise<TurnResult> {
+        const t = input.env.AC_RUN_TOKEN!;
+        sink.onPartial?.({ kind: 'text', partId: 'p1', text: `key ${t.slice(0, 20)}` });
+        sink.onPartial?.({ kind: 'text', partId: 'p1', text: `${t.slice(20)} and then some ordinary trailing text` });
+        await new Promise((r) => setTimeout(r, 120));
+        liveDuring = h.services.runs!.live((await h.db.all<{ id: string }>('SELECT id FROM runs'))[0]!.id);
+        sink.onEvent({ ts: nowIso(), type: 'assistant.text', payload: { text: 'done', partId: 'p1' } });
+        return super.runTurn(input, sink);
+      }
+    }
+    h.ctx.registries.runtimes.set('fake', new StreamingRuntime());
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    const run = await runOnce();
+    const shown = frames.flatMap((f) => f.parts.map((p) => p.text)).join('');
+    expect(shown).toContain('[redacted]');
+    expect(shown).not.toContain('eyJ');
+    expect((liveDuring as { partials: Array<{ text: string }> }).partials[0]!.text).toContain('[redacted]');
+    expect(h.services.runs!.live(run.id)).toEqual({ partials: [] });
+    const types = h.db.all<{ type: string }>('SELECT type FROM run_events WHERE run_id = ?', [run.id]).map((r) => r.type);
+    expect(types).not.toContain('run.delta');
+    expect(h.db.all('SELECT 1 FROM run_events WHERE run_id = ? AND type = ?', [run.id, 'assistant.text'])).toHaveLength(1);
+  });
+
   // VS-92: a role's secrets in its workers' environment, from the store as well as the host.
   describe("a role's secrets", () => {
     /** Not a credential: a fixture, long enough for makeRedactor's 8-character floor. */

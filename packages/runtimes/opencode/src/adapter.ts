@@ -9,8 +9,9 @@ import type {
 import { classifyError, detectBinary, installBundleFiles, launchCommand, spawnLines, truncate, which, writeFiles } from '@weave-ai/runtime-sdk';
 import { extractReport } from '@weave-ai/shared';
 import { describeOpenCodeAccount } from './account.js';
-import { buildArgs, CONFIG_RELATIVE_PATH, opencodeConfig, resumeCommand } from './args.js';
-import { createOpenCodeParser, parseOpenCodeProviderErrors, type OpenCodeProviderError } from './events.js';
+import { buildArgs, CONFIG_RELATIVE_PATH, opencodeConfig, resumeCommand, type OpenCodeBuiltCommand } from './args.js';
+import { createOpenCodeParser, parseOpenCodeProviderErrors, type OpenCodeParseState, type OpenCodeProviderError } from './events.js';
+import { runServeTurn } from './serve.js';
 import { compactOpenCodeSession } from './compact.js';
 import { asOpenCodeSession, type OpenCodeSessionRef } from './session.js';
 
@@ -51,6 +52,61 @@ export function readProviderError(logPath: string | null, offset: number, sessio
   return appended ? parseOpenCodeProviderErrors(appended, sessionId) : null;
 }
 
+/** The turn's result from how it ended and what the stream said; shared by `run` and `serve` turns. */
+function finishTurn(a: {
+  input: TurnInput; sink: TurnSink; built: OpenCodeBuiltCommand; providerLog: string | null; logOffset: number; nextSeq: () => number;
+  outcome: { exitCode: number | null; signal: string | null; timedOut: boolean; stderr: string };
+  st: OpenCodeParseState;
+}): TurnResult {
+  const { input, sink, built, providerLog, logOffset, outcome, st } = a;
+  // VS-573: exit 0 after a `tool-calls` step is a stream cut off mid-work, not a finished turn.
+  const incomplete = outcome.exitCode === 0 && !outcome.timedOut && !st.isError && st.lastStepReason === 'tool-calls';
+  const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError || incomplete;
+  // The provider error the CLI logged for this session, if the turn ended without succeeding.
+  const providerError = failed ? readProviderError(providerLog, logOffset, st.sessionId ?? built.sessionId ?? null) : null;
+  if (providerError) {
+    // A typed event on the run, so the run page and `weave_run_inspect` show the provider's words
+    // rather than only "interrupted"; the engine also keeps the message on the run row.
+    sink.onEvent({
+      seq: a.nextSeq(),
+      ts: new Date().toISOString(),
+      type: 'error',
+      payload: {
+        name: 'ProviderError', provider: providerError.provider, model: providerError.model,
+        sessionId: providerError.sessionId, source: 'runtime_log', message: truncate(providerError.message, 2000),
+      },
+    });
+  }
+  // No native structured output: the report is a fenced json block in the final text (§9.4).
+  const structured = extractReport(st.finalText) ?? undefined;
+  const classified = failed ? classifyError(outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) : null;
+  // A real classification (auth, quota, transient) wins; the provider's own message beats the
+  // generic `unknown` a silent CLI retry leaves behind.
+  const error = incomplete
+    ? { code: 'incomplete_turn', family: 'transient_upstream' as const, message: truncate(providerError ? `opencode ended mid-work; provider ${providerError.provider ?? 'unknown'}: ${providerError.message}` : 'opencode exited after a tool-calls step without finishing the turn', 4000) }
+    : failed
+    ? (classified && classified.family !== 'unknown' ? classified : providerError
+      ? { code: 'provider_error', family: 'unknown' as const, message: truncate(`provider ${providerError.provider ?? 'unknown'}: ${providerError.message}`, 4000) }
+      : classified ?? { code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'opencode turn failed' })
+    : undefined;
+
+  return {
+    exitCode: outcome.exitCode,
+    signal: outcome.signal,
+    timedOut: outcome.timedOut,
+    session: st.sessionId ? { sessionId: st.sessionId } : (built.sessionId ? { sessionId: built.sessionId } : null),
+    finalText: st.finalText,
+    ...(structured !== undefined ? { structured } : {}),
+    ...(st.usage
+      ? { usage: { ...st.usage, ...(st.contextTokens != null ? { contextTokens: st.contextTokens } : {}), ...(st.firstRequest ? { firstRequest: st.firstRequest } : {}), basis: 'per_turn' as const } }
+      : {}),
+    ...(st.costUsd != null ? { cost: { usd: st.costUsd, status: 'reported' as const } } : {}),
+    ...(input.model ? { model: input.model } : {}),
+    provider: 'opencode',
+    ...(error ? { error } : {}),
+  };
+}
+
 export const capabilities: RuntimeCapabilities = {
   resumableSessions: true,
   forkSessions: true,
@@ -61,6 +117,7 @@ export const capabilities: RuntimeCapabilities = {
   usageReporting: 'per_turn',
   costReporting: true,
   permissionModes: ['auto', 'restricted', 'bypass'],
+  partialOutput: 'full',
 };
 
 /** Used only when `opencode models` cannot be run (binary missing, no providers configured). */
@@ -213,9 +270,19 @@ export const adapter: RuntimeAdapter = {
     // VS-461: where opencode's own log stood before this turn, so only what this turn appended is read.
     const providerLog = providerLogPath(input.configHome);
     const logOffset = logSize(providerLog);
+    let seq = 0;
+    const nextSeq = (): number => seq++;
+
+    // VS-595: a per-turn `opencode serve` gives partial output and a tool's start; a fork or an
+    // opt-out (`options.serve: false`) keeps `opencode run --format json`, as does a server that
+    // cannot start (`runServeTurn` returns null before anything ran).
+    const serve = built.forked || input.options?.['serve'] === false ? null : await runServeTurn(input, sink, onHandle, built, nextSeq);
+    if (serve) {
+      for (const ev of serve.finish()) sink.onEvent({ ...ev, seq: nextSeq() });
+      return finishTurn({ input, sink, built, providerLog, logOffset, nextSeq, outcome: serve.outcome, st: serve.state });
+    }
 
     const parser = createOpenCodeParser({ resumed: built.resumed });
-    let seq = 0;
     const launch = launchCommand(built.cmd, built.env);
     const run = spawnLines({
       cmd: launch.cmd,
@@ -228,61 +295,14 @@ export const adapter: RuntimeAdapter = {
       onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
       onLine: (stream, line) => {
         sink.onRaw(stream, line);
-        if (stream === 'stdout') for (const ev of parser.handle(line)) sink.onEvent({ ...ev, seq: seq++ });
+        if (stream === 'stdout') for (const ev of parser.handle(line)) sink.onEvent({ ...ev, seq: nextSeq() });
       },
     });
     onHandle?.({ pid: run.child.pid ?? null, cancel: (mode) => run.cancel(mode) });
 
     const outcome = await run.done;
-    for (const ev of parser.finish()) sink.onEvent({ ...ev, seq: seq++ });
-
-    const st = parser.state;
-    // VS-573: exit 0 after a `tool-calls` step is a stream cut off mid-work, not a finished turn.
-    const incomplete = outcome.exitCode === 0 && !outcome.timedOut && !st.isError && st.lastStepReason === 'tool-calls';
-    const failed = outcome.exitCode !== 0 || outcome.timedOut || st.isError || incomplete;
-    // The provider error the CLI logged for this session, if the turn ended without succeeding.
-    const providerError = failed ? readProviderError(providerLog, logOffset, st.sessionId ?? built.sessionId ?? null) : null;
-    if (providerError) {
-      // A typed event on the run, so the run page and `weave_run_inspect` show the provider's words
-      // rather than only "interrupted"; the engine also keeps the message on the run row.
-      sink.onEvent({
-        seq: seq++,
-        ts: new Date().toISOString(),
-        type: 'error',
-        payload: {
-          name: 'ProviderError', provider: providerError.provider, model: providerError.model,
-          sessionId: providerError.sessionId, source: 'runtime_log', message: truncate(providerError.message, 2000),
-        },
-      });
-    }
-    // No native structured output: the report is a fenced json block in the final text (§9.4).
-    const structured = extractReport(st.finalText) ?? undefined;
-    const classified = failed ? classifyError(outcome.exitCode ?? 1, `${st.errorMessage ?? ''}\n${outcome.stderr}`) : null;
-    // A real classification (auth, quota, transient) wins; the provider's own message beats the
-    // generic `unknown` a silent CLI retry leaves behind.
-    const error = incomplete
-      ? { code: 'incomplete_turn', family: 'transient_upstream' as const, message: truncate(providerError ? `opencode ended mid-work; provider ${providerError.provider ?? 'unknown'}: ${providerError.message}` : 'opencode exited after a tool-calls step without finishing the turn', 4000) }
-      : failed
-      ? (classified && classified.family !== 'unknown' ? classified : providerError
-        ? { code: 'provider_error', family: 'unknown' as const, message: truncate(`provider ${providerError.provider ?? 'unknown'}: ${providerError.message}`, 4000) }
-        : classified ?? { code: 'runtime_error', family: 'unknown' as const, message: st.errorMessage ?? 'opencode turn failed' })
-      : undefined;
-
-    return {
-      exitCode: outcome.exitCode,
-      signal: outcome.signal,
-      timedOut: outcome.timedOut,
-      session: st.sessionId ? { sessionId: st.sessionId } : (built.sessionId ? { sessionId: built.sessionId } : null),
-      finalText: st.finalText,
-      ...(structured !== undefined ? { structured } : {}),
-      ...(st.usage
-        ? { usage: { ...st.usage, ...(st.contextTokens != null ? { contextTokens: st.contextTokens } : {}), ...(st.firstRequest ? { firstRequest: st.firstRequest } : {}), basis: 'per_turn' as const } }
-        : {}),
-      ...(st.costUsd != null ? { cost: { usd: st.costUsd, status: 'reported' as const } } : {}),
-      ...(input.model ? { model: input.model } : {}),
-      provider: 'opencode',
-      ...(error ? { error } : {}),
-    };
+    for (const ev of parser.finish()) sink.onEvent({ ...ev, seq: nextSeq() });
+    return finishTurn({ input, sink, built, providerLog, logOffset, nextSeq, outcome, st: parser.state });
   },
 };
 

@@ -44,7 +44,8 @@ export function RunBody({ runId }: { runId: string }): React.ReactElement {
   const detail = useRunGlobal(runId);
   const live = isActiveRun(detail.data?.run.status);
   const ws = detail.data?.run.workspaceId ?? '';
-  const { events } = useRunEventStream(runId, { live, ws });
+  const stream = useRunEventStream(runId, { live, ws });
+  const { events } = stream;
 
   const workers = useWorkersMany(ws ? [ws] : [], { includeRetired: true });
   const weavers = useWeaverMany(ws ? [ws] : []);
@@ -121,7 +122,7 @@ export function RunBody({ runId }: { runId: string }): React.ReactElement {
       <section className="flex flex-col gap-2">
         <div className="ac-label">What it did</div>
         <div className="v2-card overflow-hidden">
-          <RunTranscript events={events} live={live} label="Run transcript" />
+          <RunTranscript events={events} live={live} stream={stream} runtimeId={detail.data?.run.runtimeId} label="Run transcript" />
         </div>
       </section>
 

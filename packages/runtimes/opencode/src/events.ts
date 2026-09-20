@@ -83,13 +83,13 @@ export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: fal
           const acc = textByMessage.get(mid) ?? [];
           acc.push(text);
           textByMessage.set(mid, acc);
-          out.push({ ts, type: 'assistant.text', payload: { text, messageId: mid } });
+          out.push({ ts, type: 'assistant.text', payload: { text, messageId: mid, ...(str(part?.['id']) ? { partId: str(part?.['id']) } : {}) } });
         }
         break;
       }
       case 'reasoning': {
         const think = str(part?.['text']) ?? '';
-        if (think) out.push({ ts, type: 'assistant.thinking', payload: { text: truncate(think, 2000), redacted: think.length > 2000 } });
+        if (think) out.push({ ts, type: 'assistant.thinking', payload: { text: truncate(think, 2000), redacted: think.length > 2000, ...(str(part?.['id']) ? { partId: str(part?.['id']) } : {}) } });
         break;
       }
       case 'tool_use':
@@ -134,27 +134,7 @@ export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: fal
 
   function tool(part: Json | null, ts: string): RuntimeEvent[] {
     if (!part) return [];
-    const name = str(part['tool']) ?? 'unknown';
-    const id = str(part['callID']) ?? str(part['id']) ?? '';
-    const st = obj(part['state']);
-    const status = str(st?.['status']) ?? 'unknown';
-    const out: RuntimeEvent[] = [{ ts, type: 'tool.call', payload: { id, name, input: st?.['input'], title: str(st?.['title']) } }];
-    if (status === 'completed' || status === 'error') {
-      const output = str(st?.['output']) ?? '';
-      const isError = status === 'error';
-      out.push({ ts, type: 'tool.result', payload: { id, name, status, isError, content: truncate(output) } });
-      if (SHELL_TOOLS.has(name)) {
-        const meta = obj(st?.['metadata']);
-        // VS-328: read the test tally from the whole output, before it is size-bounded.
-        const tests = parseTestSummary(output);
-        out.push({ ts, type: 'command.executed', payload: { id, command: str(obj(st?.['input'])?.['command']), exitCode: num(meta?.['exit']), output: truncate(output), isError, ...(tests ? { tests } : {}) } });
-      }
-      if (EDIT_TOOLS.has(name)) {
-        const path = str(obj(st?.['input'])?.['filePath'] ?? obj(st?.['input'])?.['file_path'] ?? obj(st?.['input'])?.['path']);
-        if (path) out.push({ ts, type: 'file.changed', payload: { id, path, tool: name } });
-      }
-    }
-    return out;
+    return toolEvents(part, ts, true);
   }
 
   /** OpenCode's stream just ends; call this once the process has exited. */
@@ -174,6 +154,36 @@ export function createOpenCodeParser(opts: { resumed: boolean } = { resumed: fal
   }
 
   return { state, handle, finish, get sessionAnnounced() { return announced; } };
+}
+
+/**
+ * The events for one opencode `tool` part: `tool.call` (when `withCall`), and — once the part is
+ * `completed` or `error` — `tool.result` plus the shell/edit events derived from it. Shared by the
+ * `run --format json` parser (which sees a finished part only) and the server driver (which sees the
+ * call when it starts and the result when it ends).
+ */
+export function toolEvents(part: Json, ts: string, withCall: boolean): RuntimeEvent[] {
+  const name = str(part['tool']) ?? 'unknown';
+  const id = str(part['callID']) ?? str(part['id']) ?? '';
+  const st = obj(part['state']);
+  const status = str(st?.['status']) ?? 'unknown';
+  const out: RuntimeEvent[] = withCall ? [{ ts, type: 'tool.call', payload: { id, name, input: st?.['input'], title: str(st?.['title']), ...(str(part['id']) ? { partId: str(part['id']) } : {}) } }] : [];
+  if (status === 'completed' || status === 'error') {
+    const output = str(st?.['output']) ?? '';
+    const isError = status === 'error';
+    out.push({ ts, type: 'tool.result', payload: { id, name, status, isError, content: truncate(output) } });
+    if (SHELL_TOOLS.has(name)) {
+      const meta = obj(st?.['metadata']);
+      // VS-328: read the test tally from the whole output, before it is size-bounded.
+      const tests = parseTestSummary(output);
+      out.push({ ts, type: 'command.executed', payload: { id, command: str(obj(st?.['input'])?.['command']), exitCode: num(meta?.['exit']), output: truncate(output), isError, ...(tests ? { tests } : {}) } });
+    }
+    if (EDIT_TOOLS.has(name)) {
+      const path = str(obj(st?.['input'])?.['filePath'] ?? obj(st?.['input'])?.['file_path'] ?? obj(st?.['input'])?.['path']);
+      if (path) out.push({ ts, type: 'file.changed', payload: { id, path, tool: name } });
+    }
+  }
+  return out;
 }
 
 /**

@@ -7,6 +7,8 @@ export const CONFIG_RELATIVE_PATH = '.opencode/opencode.json';
 export interface OpenCodeBuiltCommand extends BuiltCommand {
   sessionId: string | null;
   resumed: boolean;
+  /** `--fork`: the server driver has no fork route it was verified against, so a fork uses `run`. */
+  forked: boolean;
 }
 
 function str(v: unknown): string | null { return typeof v === 'string' && v.length > 0 ? v : null; }
@@ -78,7 +80,7 @@ export function buildArgs(input: TurnInput): OpenCodeBuiltCommand {
   // The message is positional; `--` keeps a prompt that starts with `-` out of yargs' hands.
   args.push('--', input.prompt);
 
-  return { cmd: 'opencode', args, stdin: null, env, files, sessionId: prev?.sessionId ?? null, resumed: Boolean(prev) };
+  return { cmd: 'opencode', args, stdin: null, env, files, sessionId: prev?.sessionId ?? null, resumed: Boolean(prev), forked: Boolean(prev?.fork) };
 }
 
 /**

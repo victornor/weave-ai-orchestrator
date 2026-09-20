@@ -19,6 +19,12 @@ export interface RuntimeCapabilities {
    * than inventing a point to count towards.
    */
   contextCompactionAt?: number;
+  /**
+   * VS-595: what partial output this adapter reports through `TurnSink.onPartial` while a step is
+   * being generated. `none` (the default when omitted): whole steps only. `text`: assistant text
+   * deltas. `full`: text, reasoning and tool-input deltas. The run page says so in words for `none`.
+   */
+  partialOutput?: 'none' | 'text' | 'full';
 }
 export interface RuntimeDetection { status: 'available' | 'missing_binary' | 'broken' | 'unsupported'; version?: string; path?: string; notes?: string }
 /** `contextWindowTokens` is the model's own window; a variant with a larger window is its own entry.
@@ -48,7 +54,26 @@ export interface TurnInput {
   containment?: ContainmentRequest;
 }
 export interface RuntimeEvent { seq?: number; ts: string; type: RunEventType; payload: Record<string, unknown> }
-export interface TurnSink { onSpawn(info: { pid: number; pgid: number | null }): void; onEvent(ev: RuntimeEvent): void; onRaw(stream: 'stdout' | 'stderr', chunk: string): void }
+/**
+ * VS-595: one appended fragment of a part still being generated. Ephemeral: the engine coalesces and
+ * broadcasts these but never stores them; the completed event for the same `partId` supersedes them.
+ */
+export interface RuntimePartial {
+  kind: 'text' | 'thinking' | 'tool_input';
+  /** Stable per part; the completed `assistant.text` / `assistant.thinking` / `tool.call` carries the same id. */
+  partId: string;
+  messageId?: string;
+  toolCallId?: string;
+  /** The appended delta, not the whole text. */
+  text: string;
+}
+export interface TurnSink {
+  onSpawn(info: { pid: number; pgid: number | null }): void;
+  onEvent(ev: RuntimeEvent): void;
+  onRaw(stream: 'stdout' | 'stderr', chunk: string): void;
+  /** Optional: a runtime that reports partial output calls this (see `capabilities.partialOutput`). */
+  onPartial?(p: RuntimePartial): void;
+}
 export interface TurnResult {
   exitCode: number | null; signal: string | null; timedOut: boolean; session: SessionRef | null; finalText: string | null; structured?: unknown;
   /**

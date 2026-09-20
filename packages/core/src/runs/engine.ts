@@ -22,6 +22,7 @@ import { ensureHomeCurrent } from '../workers/home.js';
 import { recordUsage } from '../usage/index.js';
 import { git, readGitIdentity } from '../util/git.js';
 import { emitRunEvent, runState } from './active.js';
+import { PartialBuffer } from './partials.js';
 import { effectiveModels, modelSettingFor, modelsFor } from '../models/resolve.js';
 import { runTokenSecret, signRunToken } from './runtoken.js';
 
@@ -268,6 +269,15 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   const started = Date.now();
   let seq = 0;
   let redact = makeRedactor([]);
+  let redactionSecrets: string[] = [];
+  // VS-595: partial output is ephemeral and redacted like any persisted event (see `partials.ts`).
+  const partials = new PartialBuffer({
+    runId,
+    emit: (frame) => { try { ctx.events.broadcast('run.delta', 'run', runId, frame); } catch (e) { log.warn({ err: String(e) }, 'run delta broadcast failed'); } },
+    redact: (text) => redact(text) as string,
+    secrets: () => redactionSecrets,
+  });
+  state.partials.set(runId, partials);
   const record = (type: RunEvent['type'], payload: Record<string, unknown>, stream: 'stdout' | 'stderr' | 'runtime' | 'system' = 'runtime', level = 'info'): void => {
     seq += 1;
     const ts = nowIso();
@@ -290,6 +300,8 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     try { appendFileSync(eventsPath, JSON.stringify({ seq, ts, type, stream, payload: clean }) + '\n', 'utf8'); } catch { /* disk full etc; the DB row is authoritative */ }
     const ev: RunEvent = { id: String(seq), runId, seq, ts, type, stream, level, payload: clean };
     emitRunEvent(ctx, runId, ev);
+    // VS-595: the completed part supersedes its partial output.
+    if ((type === 'assistant.text' || type === 'assistant.thinking' || type === 'tool.call') && typeof clean['partId'] === 'string') partials.complete(clean['partId']);
     // VS-328: fold the event into the live per-worker activity summary the board consumes.
     try { deps().activity.observe(agent.id, agent.ticketId ?? null, ev); } catch (e) { log.warn({ err: String(e) }, 'activity observe failed'); }
   };
@@ -444,7 +456,8 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     writeFileSync(join(runDir, 'mcp.json'), JSON.stringify({ mcpServers }, null, 2), 'utf8');
 
     const secrets = roleSecretsEnv(ctx, deps, role);
-    redact = makeRedactor([token, ...secrets.values]);
+    redactionSecrets = [token, ...secrets.values];
+    redact = makeRedactor(redactionSecrets);
     const worktreeIdentity = agent.worktreePath ? (await readGitIdentity(agent.worktreePath)).identity : null;
     const projectIdentity = !worktreeIdentity && project ? (await readGitIdentity(project.clonePath)).identity : null;
     const gitIdentity = worktreeIdentity ?? projectIdentity;
@@ -595,6 +608,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
               log.info({ agentId: agent.id, origin: 'adapter', postTokens }, 'runtime compaction completed');
             }
           },
+          onPartial: (p) => partials.push(p),
           onRaw: () => { /* raw stream is the runtime adapter's own concern; normalized events are recorded above */ },
         },
         (handle: TurnHandle) => {
@@ -620,6 +634,10 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     log.error({ err: err.message }, 'run failed in the engine');
     record('error', { message: failure.message, code: failure.code }, 'system', 'error');
   }
+
+  // The turn is over (finished, failed or cancelled): nothing partial outlives it.
+  partials.clear();
+  state.partials.delete(runId);
 
   // 6. collect result
   const report = await phase('collect_result', async () => {

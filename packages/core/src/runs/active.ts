@@ -3,6 +3,7 @@ import type { InputDelivery } from '@weave-ai/runtime-sdk';
 import { nowIso } from '@weave-ai/db';
 import type { Agent, AuthorKind, RunEvent } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
+import type { PartialBuffer } from './partials.js';
 
 export interface ActiveRun {
   runId: string;
@@ -20,6 +21,8 @@ export interface ActiveRun {
 
 export interface RunRuntimeState {
   active: Map<string, ActiveRun>;
+  /** VS-595: the partial output of each live run, for `GET /runs/:id/live`. */
+  partials: Map<string, PartialBuffer>;
   emitter: EventEmitter;
   stopping: boolean;
   /**
@@ -38,7 +41,7 @@ export function runState(ctx: WorkspaceContext): RunRuntimeState {
   if (!s) {
     const emitter = new EventEmitter();
     emitter.setMaxListeners(500);
-    s = { active: new Map(), emitter, stopping: false, shuttingDown: null };
+    s = { active: new Map(), partials: new Map(), emitter, stopping: false, shuttingDown: null };
     states.set(ctx, s);
   }
   return s;

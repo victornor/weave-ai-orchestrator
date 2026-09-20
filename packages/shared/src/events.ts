@@ -24,8 +24,23 @@ export type EventType = (typeof EVENT_TYPES)[number];
  *
  * `run.event` (VS-417) carries one `RunEvent` and lets every live run on a page share the one
  * workspace stream instead of opening a per-run `EventSource`. `worker.activity` (VS-328) is the
- * per-worker activity summary.
+ * per-worker activity summary. `run.delta` (VS-595) carries the coalesced partial output of the
+ * parts a live run is still generating; it is never stored, and a completed event supersedes it.
  */
-export const EPHEMERAL_EVENT_TYPES = ['worker.activity', 'run.event', 'session.compaction'] as const;
+export const EPHEMERAL_EVENT_TYPES = ['worker.activity', 'run.event', 'run.delta', 'session.compaction'] as const;
 export type EphemeralEventType = (typeof EPHEMERAL_EVENT_TYPES)[number];
 export interface WorkspaceEvent<T = unknown> { seq: number; workspaceId: string; type: EventType; entityType: string; entityId: string; payload: T; createdAt: string }
+
+/** VS-595: one part's partial output in a `run.delta` frame; `offset` is how many characters precede `text`. */
+export interface RunDeltaPart { partId: string; kind: 'text' | 'thinking' | 'tool_input'; offset: number; text: string }
+/** Payload of a `run.delta` frame: everything that changed since the run's previous frame. */
+export interface RunDeltaFrame { runId: string; parts: RunDeltaPart[] }
+/** `GET /runs/:id/live`: the partial output a live run has shown so far, for a page that just connected. */
+export interface RunLiveSnapshot { partials: Array<{ partId: string; kind: RunDeltaPart['kind']; text: string }> }
+
+/**
+ * VS-595: what partial output each runtime reports while a step is generated (its adapter's
+ * `capabilities.partialOutput`), for a page that must say whether it can stream. A runtime absent
+ * here reports whole steps only. Each adapter's own test pins its declaration to this table.
+ */
+export const RUNTIME_PARTIAL_OUTPUT: Readonly<Record<string, 'text' | 'full'>> = { opencode: 'full' };

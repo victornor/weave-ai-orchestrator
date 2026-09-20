@@ -1,0 +1,69 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RunDeltaFrame } from '@weave-ai/shared';
+import { makeRedactor } from './engine.js';
+import { PartialBuffer } from './partials.js';
+
+const SECRET = 'sk-live-0123456789';
+const setup = (secrets: string[] = [], capChars?: number) => {
+  const frames: RunDeltaFrame[] = [];
+  const r = makeRedactor(secrets);
+  const buf = new PartialBuffer({ runId: 'r1', emit: (f) => frames.push(f), redact: (t) => r(t) as string, secrets: () => secrets, ...(capChars ? { capChars } : {}) });
+  return { buf, frames };
+};
+const text = (frames: RunDeltaFrame[], partId = 'p1'): string => frames.flatMap((f) => f.parts).filter((p) => p.partId === partId).map((p) => p.text).join('');
+
+describe('PartialBuffer (VS-595)', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('coalesces 200 deltas in one second into at most 20 frames, in order, with offsets', () => {
+    const { buf, frames } = setup();
+    for (let i = 0; i < 200; i++) { buf.push({ kind: 'text', partId: 'p1', text: `${i},` }); vi.advanceTimersByTime(5); }
+    vi.advanceTimersByTime(60);
+    expect(frames.length).toBeLessThanOrEqual(21);
+    expect(text(frames)).toBe(Array.from({ length: 200 }, (_, i) => `${i},`).join(''));
+    let expected = 0;
+    for (const f of frames) for (const p of f.parts) { expect(p.offset).toBe(expected); expected += p.text.length; }
+  });
+
+  it('masks a secret split across two deltas and never shows half of it', () => {
+    const { buf, frames } = setup([SECRET]);
+    buf.push({ kind: 'text', partId: 'p1', text: `token is ${SECRET.slice(0, 7)}` });
+    vi.advanceTimersByTime(60);
+    expect(text(frames)).not.toContain(SECRET.slice(0, 4));
+    buf.push({ kind: 'text', partId: 'p1', text: `${SECRET.slice(7)} ok, and more text follows here` });
+    vi.advanceTimersByTime(60);
+    const shown = text(frames);
+    expect(shown).toContain('[redacted]');
+    expect(shown).not.toContain(SECRET.slice(0, 4));
+    expect(shown).not.toContain(SECRET.slice(-4));
+    expect(buf.snapshot().partials[0]!.text).toBe(shown);
+  });
+
+  it('drops a superseded part and keeps the snapshot to live parts', () => {
+    const { buf } = setup();
+    buf.push({ kind: 'thinking', partId: 'p1', text: 'hmm' });
+    buf.push({ kind: 'text', partId: 'p2', text: 'hello' });
+    vi.advanceTimersByTime(60);
+    expect(buf.snapshot().partials.map((p) => p.partId).sort()).toEqual(['p1', 'p2']);
+    buf.complete('p1');
+    expect(buf.snapshot().partials.map((p) => p.partId)).toEqual(['p2']);
+  });
+
+  it('truncates a part at the cap without failing', () => {
+    const { buf, frames } = setup([], 10);
+    buf.push({ kind: 'text', partId: 'p1', text: '0123456789ABCDEF' });
+    buf.push({ kind: 'text', partId: 'p1', text: 'more' });
+    vi.advanceTimersByTime(60);
+    expect(text(frames)).toBe('0123456789');
+  });
+
+  it('emits nothing after clear (cancel mid-stream, cut-off stream)', () => {
+    const { buf, frames } = setup();
+    buf.push({ kind: 'text', partId: 'p1', text: 'half a sent' });
+    buf.clear();
+    vi.advanceTimersByTime(200);
+    expect(frames).toEqual([]);
+    expect(buf.snapshot().partials).toEqual([]);
+  });
+});

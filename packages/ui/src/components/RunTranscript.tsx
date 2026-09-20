@@ -14,6 +14,7 @@ import { Transcript } from './Transcript';
 import { ScrollToBottomButton } from './ScrollToBottom';
 import { useStickToBottom } from '../lib/stickToBottom';
 import { cx } from '../lib/cx';
+import { LiveActivity, LivePartials, type LiveRunProps } from './LiveActivity';
 import type { RunEvent } from '@weave-ai/shared';
 
 export function RunTranscript({
@@ -24,8 +25,13 @@ export function RunTranscript({
   height,
   maxHeight,
   className,
+  stream,
+  runtimeId,
 }: {
   events: readonly RunEvent[];
+  /** VS-595: the run's partial output; with `live`, the activity row and the streaming text render. */
+  stream?: Pick<LiveRunProps, 'partials' | 'lastPartialAt' | 'partialSince'>;
+  runtimeId?: string | null;
   live?: boolean;
   /**
    * Whether the list opens at its newest line and follows new ones, independent of `live`. A pane
@@ -49,7 +55,9 @@ export function RunTranscript({
   maxHeight?: number;
   className?: string;
 }): React.ReactElement {
-  const stick = useStickToBottom([events.length], { follow: follow ?? live, contained: true });
+  const partials = stream?.partials ?? [];
+  const partialChars = partials.reduce((n, p) => n + p.text.length, 0);
+  const stick = useStickToBottom([events.length, partialChars], { follow: follow ?? live, contained: true });
 
   return (
     <div className="relative">
@@ -61,7 +69,13 @@ export function RunTranscript({
         style={height !== undefined ? { height, maxHeight: 'none' } : maxHeight !== undefined ? { maxHeight } : undefined}
         className={cx('ac-scroll max-h-[calc(var(--ac-app-h)*0.5)] md:max-h-[calc(var(--ac-app-h)*0.6)]', className)}
       >
-        <Transcript events={events} className="gap-2" />
+        {live && events.length === 0 ? null : <Transcript events={events} className="gap-2" />}
+        {live ? (
+          <div className="flex flex-col gap-2 p-3.5 pt-1">
+            <LivePartials partials={partials} />
+            <LiveActivity events={events} partials={partials} lastPartialAt={stream?.lastPartialAt ?? null} partialSince={stream?.partialSince ?? null} runtimeId={runtimeId} />
+          </div>
+        ) : null}
         <div ref={stick.bottomRef} />
       </div>
       {stick.atBottom ? null : <ScrollToBottomButton unread={stick.unread} onClick={stick.toBottom} />}

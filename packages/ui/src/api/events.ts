@@ -329,6 +329,7 @@ const TRACKED: (EventType | EphemeralEventType)[] = [
   'wake.skipped',
   'run.started',
   'run.event',
+  'run.delta',
   'run.finished',
   'roadmap.created',
   'roadmap.updated',

@@ -17,15 +17,22 @@
  * re-reading the run's persisted events on reconnect.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { RunEvent } from '@weave-ai/shared';
+import type { RunDeltaFrame, RunEvent, RunLiveSnapshot } from '@weave-ai/shared';
 import { useHookWs } from './context';
 import { useRunEvents } from './hooks';
+import { api } from './client';
+import { applyDelta, dropSuperseded, fromSnapshot, type PartialMap, type PartialText } from '../lib/livePartials';
 import { qk } from './keys';
 import type { EventStream, GlobalEventStream, ConnectionStatus } from './events';
 import { acquireGlobalStream, acquireWorkspaceStream, releaseGlobalStream, releaseWorkspaceStream, useStreamQueryClient } from './streams';
 
 export interface RunEventStream {
   events: RunEvent[];
+  /** VS-595: what the run is still generating (text, reasoning), superseded parts already dropped. */
+  partials: PartialText[];
+  /** When a fragment last arrived, and when the current burst began; null until one has. */
+  lastPartialAt: number | null;
+  partialSince: number | null;
   status: ConnectionStatus;
   retryNow: () => void;
 }
@@ -60,10 +67,17 @@ export function useRunEventStream(runId: string | null, { live = true, newest = 
   const seq = useRef(0);
   const [status, setStatus] = useState<ConnectionStatus>({ state: 'connecting', capturedAt: null, attempts: 0 });
   const streamRef = useRef<(EventStream | GlobalEventStream) | null>(null);
+  const [partialMap, setPartialMap] = useState<PartialMap>(new Map());
+  const [partialClock, setPartialClock] = useState<{ last: number | null; since: number | null }>({ last: null, since: null });
+  const pendingDeltas = useRef<RunDeltaFrame['parts']>([]);
+  const frameHandle = useRef<number | null>(null);
 
   useEffect(() => {
     setTail([]);
     seq.current = 0;
+    setPartialMap(new Map());
+    setPartialClock({ last: null, since: null });
+    pendingDeltas.current = [];
   }, [runId]);
 
   useEffect(() => {
@@ -75,6 +89,29 @@ export function useRunEventStream(runId: string | null, { live = true, newest = 
     streamRef.current = stream;
     setStatus(stream.getStatus());
     let connectedBefore = false;
+    // A page that connects mid-step reads what has been shown so far once, then follows frames.
+    const readLive = (): void => {
+      void api.ws<RunLiveSnapshot>(ws, `/runs/${runId}/live`).then((snap) => {
+        setPartialMap((cur) => (snap.partials.length > 0 ? fromSnapshot(snap) : cur));
+        if (snap.partials.length > 0) setPartialClock((c) => ({ last: Date.now(), since: c.since ?? Date.now() }));
+      }).catch(() => undefined);
+    };
+    readLive();
+    // Frames arrive many times a second; rendering once per animation frame keeps the page smooth.
+    const flush = (): void => {
+      frameHandle.current = null;
+      const parts = pendingDeltas.current;
+      pendingDeltas.current = [];
+      if (parts.length === 0) return;
+      let gap = false;
+      setPartialMap((cur) => { const r = applyDelta(cur, parts); gap = gap || r.gap; return r.map; });
+      setPartialClock((c) => ({ last: Date.now(), since: c.since ?? Date.now() }));
+      if (gap) readLive();
+    };
+    const schedule = (): void => {
+      if (frameHandle.current !== null) return;
+      frameHandle.current = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(flush) : (setTimeout(flush, 16) as unknown as number);
+    };
     const offStatus = stream.subscribe((next) => {
       setStatus(next);
       if (next.state !== 'connected') return;
@@ -85,7 +122,15 @@ export function useRunEventStream(runId: string | null, { live = true, newest = 
       connectedBefore = true;
     });
     const offFrame = stream.onEvent((e) => {
-      if (String(e.type) !== 'run.event' || (global && e.workspaceId !== ws)) return;
+      if (global && e.workspaceId !== ws) return;
+      if (String(e.type) === 'run.delta') {
+        const d = e.payload as RunDeltaFrame | null;
+        if (!d || d.runId !== runId || !Array.isArray(d.parts)) return;
+        pendingDeltas.current.push(...d.parts);
+        schedule();
+        return;
+      }
+      if (String(e.type) !== 'run.event') return;
       const p = e.payload as { runId?: string; event?: RunEvent } | null;
       const evt = p?.event;
       if (!evt || (p.runId && p.runId !== runId) || typeof evt.seq !== 'number') return;
@@ -95,6 +140,8 @@ export function useRunEventStream(runId: string | null, { live = true, newest = 
     return () => {
       offStatus();
       offFrame();
+      if (frameHandle.current !== null && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(frameHandle.current);
+      frameHandle.current = null;
       streamRef.current = null;
       if (global) releaseGlobalStream();
       else releaseWorkspaceStream(ws);
@@ -102,6 +149,7 @@ export function useRunEventStream(runId: string | null, { live = true, newest = 
   }, [runId, ws, live, qc, global]);
 
   const events = useMemo(() => mergeRunEvents(persisted.data ?? [], tail), [persisted.data, tail]);
+  const partials = useMemo(() => (live ? dropSuperseded(partialMap, events) : []), [live, partialMap, events]);
 
-  return { events, status, retryNow: () => streamRef.current?.retryNow() };
+  return { events, partials, lastPartialAt: partialClock.last, partialSince: partialClock.since, status, retryNow: () => streamRef.current?.retryNow() };
 }

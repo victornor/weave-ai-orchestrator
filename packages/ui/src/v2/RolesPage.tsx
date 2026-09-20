@@ -24,6 +24,7 @@ import { A, useGo } from '../app/link';
 import { useWs } from '../api/context';
 import {
   useCreateThread,
+  useMcpServers,
   useModels,
   usePostThreadMessage,
   useProjects,
@@ -558,11 +559,16 @@ function RoleDrawer({ roleId, onClose }: { roleId: string; onClose: () => void }
   const [reason, setReason] = useState('');
   const [maxWorkers, setMaxWorkers] = useState('');
   const [synced, setSynced] = useState(false);
+  // VS-621: which MCP servers this role may use; null until the role loads, so an untouched control
+  // never sends a patch. A persistent session runs under this role, so the list covers it too.
+  const servers = useMcpServers();
+  const [allowed, setAllowed] = useState<string[] | null>(null);
 
   useEffect(() => {
     if (role.data && !synced) {
       setCharter(role.data.charter);
       setMaxWorkers(String(role.data.role.maxWorkers));
+      setAllowed(role.data.role.mcpServers);
       setSynced(true);
     }
   }, [role.data, synced]);
@@ -665,6 +671,43 @@ function RoleDrawer({ roleId, onClose }: { roleId: string; onClose: () => void }
                   </button>
                 </div>
               </section>
+
+              {servers.data && servers.data.servers.length > 0 ? (
+                <section>
+                  <div className="ac-label mb-1.5">MCP servers</div>
+                  <div className="v2-card divide-y divide-line-1">
+                    {servers.data.servers.map((s) => {
+                      const checked = (allowed ?? []).includes(s.name);
+                      return (
+                        <label key={s.name} className="flex items-center gap-2 px-2.5 py-2 text-micro text-text-2">
+                          <input
+                            type="checkbox"
+                            aria-label={`Allow ${s.name}`}
+                            checked={checked}
+                            onChange={(e) => setAllowed((prev) => {
+                              const next = new Set(prev ?? []);
+                              if (e.target.checked) next.add(s.name); else next.delete(s.name);
+                              return [...next];
+                            })}
+                          />
+                          <span className="ac-mono">{s.name}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={allowed === null || update.isPending || [...allowed].sort().join() === [...detail.role.mcpServers].sort().join()}
+                      onClick={() => allowed && update.mutate({ id: roleId, patch: { mcpServers: allowed }, reason: 'MCP servers set from the V2 Roles page' })}
+                      className="h-7 rounded-r4 border border-line-2 bg-bg-2 px-3 text-micro text-text-1 disabled:opacity-40"
+                    >
+                      Save servers
+                    </button>
+                    <span className="text-nano text-text-3">A weave run gets only the servers selected here.</span>
+                  </div>
+                </section>
+              ) : null}
             </div>
           )}
         </div>

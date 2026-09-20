@@ -24,7 +24,7 @@ const spec: RoleSpec = {
   id: 'api-backend', name: 'Backend Engineer', project: 'api', charterSummary: 'Owns the api service.',
   scope: 'Backend work in the api repo.', responsibilities: ['Implement handlers'], capabilities: ['node'],
   exclusions: ['frontend'], rules: ['Run the tests'], runtime: 'claude', model: null, sessionPolicy: 'per_ticket',
-  maxWorkers: 2, memoryLimitMb: null, permission: { mode: 'auto', allowed: [], denied: [], bashDeny: [] }, secrets: [], createdBy: 'weaver',
+  maxWorkers: 2, memoryLimitMb: null, permission: { mode: 'auto', allowed: [], denied: [], bashDeny: [] }, secrets: [], mcpServers: [], createdBy: 'weaver',
 } as RoleSpec;
 
 describe('prompt rendering', () => {

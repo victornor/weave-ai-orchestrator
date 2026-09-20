@@ -11,7 +11,7 @@ describe('the V2 settings section registry', () => {
 
   it('lists the workspace sections and the kept V1 ones, with no Budget tab', () => {
     const keys = V2_WORKSPACE_SECTIONS.map((s) => s.key);
-    expect(keys).toEqual(['general', 'weaver', 'models', 'providers', 'projects', 'knowledge', 'worker-memory', 'approvals', 'channels', 'presentation', 'plugins']);
+    expect(keys).toEqual(['general', 'weaver', 'models', 'providers', 'mcp', 'projects', 'knowledge', 'worker-memory', 'approvals', 'channels', 'presentation', 'plugins']);
     expect(keys).not.toContain('budget');
   });
 

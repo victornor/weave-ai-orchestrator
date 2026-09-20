@@ -12,6 +12,7 @@ import { cx } from '../../lib/cx';
 import { scopeFromSearch, sectionFor, sectionsOfScope, type V2SettingsScope } from './sections';
 import { DaemonModelsSection, WorkspaceModelsSection } from './sections/Models';
 import { ProvidersSection } from './sections/Providers';
+import { McpServersSection } from './sections/McpServers';
 import { ApprovalsSection, GeneralSection, KnowledgeSection, PluginsSection, WeaverSection, WorkerMemorySection } from './sections/Workspace';
 import {
   ChannelsSection,
@@ -62,6 +63,7 @@ function WorkspaceBody({ section }: { section: string }): React.ReactElement | n
     case 'weaver': return <WeaverSection />;
     case 'models': return <WorkspaceModelsSection />;
     case 'providers': return <ProvidersSection />;
+    case 'mcp': return <McpServersSection />;
     case 'projects': return <ProjectsSection />;
     case 'knowledge': return <KnowledgeSection />;
     case 'worker-memory': return <WorkerMemorySection />;

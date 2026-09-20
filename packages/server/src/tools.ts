@@ -914,18 +914,18 @@ export const TOOLS: ToolDef[] = [
     handler: (ctx, i) => ({ role: svc(ctx).roles.get(i.id), charter: svc(ctx).roles.charter(i.id), freeSlots: svc(ctx).roles.freeSlots(i.id), concurrency: svc(ctx).roles.concurrency(i.id), revisions: svc(ctx).roles.revisions(i.id) }),
   },
   {
-    name: 'weave_role_hire', scope: 'weaver', input: RoleSpecSchema,
-    description: 'Hire a role from a full RoleSpec (scope, responsibilities, exclusions, runtime, model, permission). Hiring needs human approval unless hireApproval is none; you get back a pending_activation role and a decision id.',
+    name: 'weave_role_hire', scope: 'weaver', input: RoleSpecSchema.omit({ mcpServers: true }),
+    description: 'Hire a role from a full RoleSpec (scope, responsibilities, exclusions, runtime, model, permission). Hiring needs human approval unless hireApproval is none; you get back a pending_activation role and a decision id. A role\'s MCP servers are not set here: the human allows them in Settings.',
     handler: (ctx, i) => svc(ctx).roles.hire(ctx.actor, i),
   },
   {
     name: 'weave_role_update', scope: 'weaver', input: z.object({
       id: z.string().min(1),
-      patch: RoleSpecSchema.partial().strict(),
+      patch: RoleSpecSchema.omit({ mcpServers: true }).partial().strict(),
       reason: z.string().min(1),
       applyToRunning: z.boolean().optional(),
     }),
-    description: 'Edit a role\'s spec fields — the short description (`charterSummary`), `scope`, `responsibilities`, `capabilities`, `exclusions`, `rules`, `sessionPolicy`, `permission`, `notes`, `name`, `title` and `icon`. `id` and `project` are immutable; `secrets` and `maxWorkers` are changed with weave_role_set_secrets and weave_role_set_max_workers. Use weave_role_update_charter for the charter prose. A change to `permission` is security-sensitive and follows the hire policy: it is raised as an approval and applies only once approved (with hireApproval none it applies directly). `applyToRunning` re-briefs live workers from the new spec immediately. The result says whether a spec-rendered charter was rewritten — if it says the charter was left alone, it was written by hand and must be updated with weave_role_update_charter.',
+    description: 'Edit a role\'s spec fields — the short description (`charterSummary`), `scope`, `responsibilities`, `capabilities`, `exclusions`, `rules`, `sessionPolicy`, `permission`, `notes`, `name`, `title` and `icon`. `id` and `project` are immutable; `secrets` and `maxWorkers` are changed with weave_role_set_secrets and weave_role_set_max_workers, and `mcpServers` is set by the human in Settings, never here. Use weave_role_update_charter for the charter prose. A change to `permission` is security-sensitive and follows the hire policy: it is raised as an approval and applies only once approved (with hireApproval none it applies directly). `applyToRunning` re-briefs live workers from the new spec immediately. The result says whether a spec-rendered charter was rewritten — if it says the charter was left alone, it was written by hand and must be updated with weave_role_update_charter.',
     handler: (ctx, i) => svc(ctx).roles.requestUpdate(ctx.actor, i.id, i.patch, i.reason, { applyToRunning: i.applyToRunning }),
   },
   {

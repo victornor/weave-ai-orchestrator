@@ -138,6 +138,11 @@ describe('a turn through a fake child', () => {
     expect(record().init['mcpServers']).toEqual({ demo: { type: 'stdio', command: 'node', args: ['s.js'], env: { A: '1' } } });
   });
 
+  it('carries an MCP server\'s timeouts and readOnly flag onto the init line (VS-621)', async () => {
+    await runFake('replay', { mcpServers: { demo: { type: 'stdio', command: 'node', args: ['s.js'], listTimeoutMs: 1234, callTimeoutMs: 5678, readOnly: true } } });
+    expect(record().init['mcpServers']).toEqual({ demo: { type: 'stdio', command: 'node', args: ['s.js'], listTimeoutMs: 1234, callTimeoutMs: 5678, readOnly: true } });
+  });
+
   it('sends the model without the provider prefix, the options, the system prompt and session/spill locations under the config home', async () => {
     await runFake('replay');
     const init = record().init;

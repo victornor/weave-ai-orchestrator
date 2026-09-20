@@ -592,6 +592,50 @@ export const ProviderProfileSchema = z.object({
 });
 export type ProviderProfile = z.infer<typeof ProviderProfileSchema>;
 
+/**
+ * VS-621: an MCP server for the built-in `weave` runtime. A secret value is never here — a value in
+ * `env` or `headers` may carry a `${SECRET_NAME}` reference resolved from the workspace secret store
+ * when a run is built, so the config file, a backup of it, and every response stay value-free.
+ * `readOnly` is the human's declaration that a stdio/HTTP server only reads (see the `restricted`
+ * permission mode); MCP's own `readOnlyHint` annotation is advisory and not trusted for it.
+ */
+export const MCP_SERVER_RESERVED_NAME = 'weave-ai';
+const MCP_SERVER_NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const SECRET_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+
+/** Every `${NAME}` in a value must name a valid workspace secret; a literal (no `${…}`) is allowed. */
+export function validSecretRefs(value: string): boolean {
+  const re = /\$\{([^}]*)\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(value)) !== null) if (!SECRET_NAME.test(m[1] ?? '')) return false;
+  return true;
+}
+
+const secretRefValue = z.string().refine(validSecretRefs, 'every ${NAME} must name a workspace secret ([A-Za-z_][A-Za-z0-9_]*)');
+
+export const McpServerSchema = z.object({
+  /** `http` talks streamable HTTP; `stdio` spawns `command` with `args` and `env`. */
+  type: z.enum(['http', 'stdio']),
+  url: z.string().url().optional(),
+  headers: z.record(z.string(), secretRefValue).default({}),
+  command: z.string().min(1).optional(),
+  args: z.array(z.string()).default([]),
+  /** Environment variable name → its literal value or a `${SECRET_NAME}` reference. */
+  env: z.record(z.string(), secretRefValue).default({}),
+  listTimeoutMs: z.number().int().positive().default(30_000),
+  callTimeoutMs: z.number().int().positive().default(60_000),
+  readOnly: z.boolean().default(false),
+}).strict().superRefine((s, ctx) => {
+  if (s.type === 'stdio' && !s.command) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['command'], message: 'a stdio server needs a command' });
+  if (s.type === 'http' && !s.url) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['url'], message: 'an http server needs a url' });
+});
+export type McpServer = z.infer<typeof McpServerSchema>;
+
+export const McpServersSchema = z
+  .record(z.string().regex(MCP_SERVER_NAME, 'kebab-case server name'), McpServerSchema)
+  .refine((m) => !(MCP_SERVER_RESERVED_NAME in m), `"${MCP_SERVER_RESERVED_NAME}" is the run-scoped server's name and cannot be redefined`)
+  .default({});
+
 export const WorkspaceConfigSchema = withKeyAlias(z.object({
   version: z.literal(1),
   id: slug,
@@ -602,11 +646,15 @@ export const WorkspaceConfigSchema = withKeyAlias(z.object({
   models: WorkspaceModelsSchema.default({}),
   /** Model providers for the `weave` runtime, by provider id. */
   providers: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/), ProviderProfileSchema).default({}),
+  /** User-configured MCP servers for the built-in `weave` runtime (VS-621), by server name. */
+  mcpServers: McpServersSchema,
   projects: z.array(ProjectConfigSchema).default([]),
   weaver: z.object({
     channels: z.array(z.string()).default(['web', 'cli']),
     heartbeatIntervalSec: z.number().int().optional(),
     humanName: z.string().optional(),
+    /** VS-621: the MCP servers the weaver may use; the weaver has no role, so its allow list lives here. Default none. */
+    mcpServers: z.array(z.string()).default([]),
   }).default({}),
   presentation: PresentationConfigSchema.default({}),
   channels: z.record(z.string(), z.record(z.string(), z.unknown())).default({}),
@@ -659,6 +707,8 @@ export const RoleSpecSchema = z.object({
   memoryLimitMb: z.number().int().min(WORKER_MEMORY_MIN_MB).max(WORKER_MEMORY_MAX_MB).nullable().default(null),
   permission: z.object({ mode: z.enum(PERMISSION_MODES).default('auto'), allowed: z.array(z.string()).default([]), denied: z.array(z.string()).default([]), bashDeny: z.array(z.string()).default([]) }).default({}),
   secrets: z.array(z.string()).default([]),
+  /** VS-621: the workspace MCP servers this role's `weave` runs may use. Default none. */
+  mcpServers: z.array(z.string()).default([]),
   notes: z.string().optional(),
   createdBy: legacyCreatedBy.default('weaver'),
   createdAt: z.string().optional(),

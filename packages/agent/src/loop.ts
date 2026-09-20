@@ -172,6 +172,8 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     const all = new Map<string, ToolDefinition>(Object.entries(coreByName));
     const clientsByServer = new Map<string, McpClient>();
     const toolsByServer = new Map<string, McpTool[]>();
+    // VS-621: which wire names belong to a user server, and whether that server is declared read-only.
+    const userMcpWire = new Map<string, boolean>();
     // A stdio MCP server gets an explicit, minimal environment: the plain base the shell tools start
     // from (PATH/HOME/LANG/TMPDIR/USER/TERM), never the ambient process env and never the turn's role
     // secrets, which ride in `init.toolEnv`. The server's own `env` is added on top of this base.
@@ -201,9 +203,12 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
         }
       }
       const nameMap = assignMcpToolNames([...toolsByServer].map(([server, tools]) => ({ server, tools: tools.map((t) => t.name) })), new Set<string>(), WEAVE_MCP_SERVER);
+      // `restricted` keeps a user server's tools only when the human marked it read-only; the run-scoped
+      // Weave server's tools stay, as they already are gated by the run token and the first-turn list.
       for (const [name, ref] of nameMap) {
         const client = clientsByServer.get(ref.server)!;
         const meta = toolsByServer.get(ref.server)!.find((t) => t.name === ref.tool)!;
+        if (ref.server !== WEAVE_MCP_SERVER) userMcpWire.set(name, init.mcpServers[ref.server]?.readOnly === true);
         all.set(name, {
           name, description: meta.description, parameters: meta.inputSchema, readOnly: meta.readOnly,
           run: async (args, ctx) => { const r = await client.callTool(ref.tool, args, ctx.signal); return { text: r.text, isError: r.isError, ...(r.images ? { images: r.images } : {}) }; },
@@ -212,12 +217,14 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     } catch (e) { if (e instanceof StepFailure) { emit('error', { code: e.err.code, family: e.err.family, message: e.err.message }); return finish(result({ exitCode: 1, error: e.err }), true); } throw e; }
     if (skills.length > 0) all.set('skill', skillTool(skills));
     const tools = new Map<string, ToolDefinition>();
+    const restrictedDropsMcp = (name: string): boolean => run.permission.mode === 'restricted' && userMcpWire.has(name) && userMcpWire.get(name) !== true;
     for (const [name, tool] of all) {
       if (coreNames.has(name) && !modeNames.has(name)) continue;
+      if (restrictedDropsMcp(name)) continue;
       if (!isAllowedByLists(name, permissionCfg)) continue;
       tools.set(name, tool);
     }
-    const modeAllows = (name: string): boolean => !coreNames.has(name) || modeNames.has(name);
+    const modeAllows = (name: string): boolean => restrictedDropsMcp(name) ? false : (!coreNames.has(name) || modeNames.has(name));
     const toolList = toolSpecs([...tools.values()]);
     const ledger = new ReadLedger();
     instructions.syncFrom(session.context());

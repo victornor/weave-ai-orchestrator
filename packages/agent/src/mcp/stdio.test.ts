@@ -72,4 +72,11 @@ describe('McpStdioClient', () => {
     await until(() => !alive(pid));
     expect(alive(pid)).toBe(false);
   });
+
+  it('fails a call that exceeds its configured callTimeoutMs (VS-621)', async () => {
+    const c = new McpStdioClient({ command: process.execPath, args: [script], env: { HOLD: '1' }, callTimeoutMs: 80 });
+    await c.initialize(new AbortController().signal);
+    await expect(c.callTool('echo', { text: 'hi' }, new AbortController().signal)).rejects.toThrow(/timed out after 80ms/);
+    await c.close();
+  });
 });

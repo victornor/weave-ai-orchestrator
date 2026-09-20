@@ -248,7 +248,7 @@ describe('roles', () => {
     it('refuses immutable, separately-owned, unknown and empty patches, writing nothing', async () => {
       await roles.hire(CONDUCTOR, spec());
       const revisions = roles.revisions('api-backend').length;
-      const refused: Array<Record<string, unknown>> = [{ id: 'other' }, { project: 'other' }, { secrets: ['X'] }, { maxWorkers: 5 }, { nope: true }, {}];
+      const refused: Array<Record<string, unknown>> = [{ id: 'other' }, { project: 'other' }, { secrets: ['X'] }, { maxWorkers: 5 }, { mcpServers: ['github'] }, { nope: true }, {}];
       for (const patch of refused) {
         await expect(roles.requestUpdate(CONDUCTOR, 'api-backend', patch as never, 'nope')).rejects.toMatchObject({ code: 'validation' });
       }

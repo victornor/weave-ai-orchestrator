@@ -65,6 +65,12 @@ vi.mock('../api/hooks', () => ({
   useSetProviderSecret: () => ({ mutate: () => undefined, isPending: false }),
   useClearProviderSecret: () => ({ mutate: () => undefined, isPending: false }),
   useTestProvider: () => ({ mutate: () => undefined, isPending: false, isError: false }),
+  useMcpServers: () => ({ isLoading: false, isError: false, data: { servers: [] } }),
+  useSaveMcpServer: () => ({ mutate: () => undefined, mutateAsync: async () => undefined, isError: false }),
+  useDeleteMcpServer: () => ({ mutate: () => undefined }),
+  useSetMcpSecret: () => ({ mutate: () => undefined, isPending: false }),
+  useClearMcpSecret: () => ({ mutate: () => undefined, isPending: false }),
+  useTestMcpServer: () => ({ mutate: () => undefined, isPending: false, isError: false, error: null }),
 }));
 
 vi.mock('../settings/sections', () => ({
@@ -141,6 +147,7 @@ describe('every listed section renders a real body', () => {
     dictation: 'dictation-body', device: 'device-note-body',
     general: 'Ticket prefix', weaver: 'Reviews every approval before you see it',
     models: 'Overridden here: 2 agents, 0 worker-options catalogs.', providers: 'None configured.',
+    mcp: 'None configured.',
     projects: 'projects-body', knowledge: 'Curation',
     'worker-memory': 'Effective limit',
     approvals: 'Proposal approval', channels: 'channels-body', presentation: 'presentation-body',

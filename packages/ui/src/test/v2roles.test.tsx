@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   tickets: [] as unknown[],
   runs: [] as unknown[],
   roleDetail: undefined as unknown,
+  mcpServers: [] as unknown[],
   threads: [] as unknown[],
   go: vi.fn(),
   roleAction: vi.fn(),
@@ -56,6 +57,7 @@ vi.mock('../api/hooks', () => ({
     data: (state.runs as Run[]).filter((r) => !params.status || r.status === params.status),
   }),
   useRole: () => ({ data: state.roleDetail, isLoading: false, isError: false }),
+  useMcpServers: () => ({ data: { servers: state.mcpServers } }),
   useRoleAction: () => ({
     mutate: state.roleAction,
     isPending: false,
@@ -114,6 +116,7 @@ beforeEach(() => {
   state.tickets = [ticket({ id: 'tk_1', identifier: 'ACME-42', title: 'Dark mode' })];
   state.runs = [];
   state.roleDetail = undefined;
+  state.mcpServers = [];
   state.threads = [{ id: 't1', agentId: 'weaver1' }];
   state.events = [textEvent];
   state.roleActionError = false;
@@ -362,6 +365,27 @@ describe('the V2 Roles screen', () => {
     fireEvent.change(screen.getByLabelText('Max workers'), { target: { value: '6' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(state.updateRole).toHaveBeenCalledWith({ id: 'r1', patch: { maxWorkers: 6 }, reason: 'max workers set from the V2 Roles page' });
+  });
+
+  // VS-621: a role's allow list of workspace MCP servers, default none.
+  it('allows a workspace MCP server on a role', () => {
+    state.roles = [role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer' })];
+    state.mcpServers = [{ name: 'github', config: { type: 'stdio', command: 'npx', args: [], env: {}, headers: {}, listTimeoutMs: 30000, callTimeoutMs: 60000, readOnly: false }, secrets: [] }];
+    state.roleDetail = { role: role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer' }), charter: 'Own the API.', revisions: [], workers: [] };
+    render(<V2RolesScreen />);
+    fireEvent.click(screen.getByRole('button', { name: 'Charter' }));
+    fireEvent.click(screen.getByLabelText('Allow github'));
+    fireEvent.click(screen.getByRole('button', { name: 'Save servers' }));
+    expect(state.updateRole).toHaveBeenCalledWith({ id: 'r1', patch: { mcpServers: ['github'] }, reason: 'MCP servers set from the V2 Roles page' });
+  });
+
+  it('does not offer an MCP server control when the workspace has none', () => {
+    state.roles = [role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer' })];
+    state.roleDetail = { role: role({ id: 'r1', projectId: 'p1', name: 'Backend Engineer' }), charter: 'Own the API.', revisions: [], workers: [] };
+    render(<V2RolesScreen />);
+    fireEvent.click(screen.getByRole('button', { name: 'Charter' }));
+    expect(screen.queryByText('MCP servers')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save servers' })).toBeNull();
   });
 
   it('starts a session against a role and opens the new worker', () => {

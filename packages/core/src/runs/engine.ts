@@ -8,7 +8,7 @@ import {
   isWorkerOptionConfigured, isProgressRunEvent, MCP_SERVER_NAME, PLANNER_TOOLS, FIRST_TURN_TOOLS,
   TERMINAL_TICKET_STATUSES, resolveWorkerMemoryMb,
   type Agent, type AgentKind, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
-  type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode,
+  type RunPhase, type RunReport, type Ticket, type Wakeup, type SessionPolicy, type PermissionMode, type McpServer,
 } from '@weave-ai/shared';
 import type { ContainmentRequest, McpServerConfig, RuntimeEvent, TurnHandle, TurnInput, TurnResult } from '@weave-ai/runtime-sdk';
 import { readScopeMemoryPeak, releaseScope, scopeUnitName, systemdScopeAvailable, truncate } from '@weave-ai/runtime-sdk';
@@ -93,6 +93,63 @@ export function makeRedactor(secrets: string[]): (v: unknown) => unknown {
     return v;
   };
   return (v: unknown) => walk(v);
+}
+
+// ---------- MCP servers (VS-621) ----------
+
+/**
+ * The MCP servers a `weave` run may use, from the workspace definitions its role (or the weaver)
+ * allows. Every `${SECRET_NAME}` in an `env` or `headers` value is resolved from the workspace
+ * secret store; the resolved values are returned for redaction and never stored in the definitions
+ * view that `mcp.json` records. A server with a reference that resolves to nothing is omitted whole,
+ * so it never starts unauthenticated.
+ */
+export function buildMcpServers(input: {
+  configServers: Record<string, McpServer>;
+  allowed: string[];
+  resolveSecret: (name: string) => string | null;
+}): { servers: Record<string, McpServerConfig>; definitions: Record<string, McpServerConfig>; secretValues: string[]; missing: string[]; unknown: string[] } {
+  const servers: Record<string, McpServerConfig> = {};
+  const definitions: Record<string, McpServerConfig> = {};
+  const secretValues: string[] = [];
+  const missing: string[] = [];
+  const unknown: string[] = [];
+  for (const name of [...new Set(input.allowed)]) {
+    const cfg = input.configServers[name];
+    if (!cfg) { unknown.push(name); continue; }
+    const serverMissing = new Set<string>();
+    const resolve = (value: string): string => value.replace(/\$\{([^}]*)\}/g, (_m, ref: string) => {
+      const secret = input.resolveSecret(ref);
+      if (secret == null) { serverMissing.add(ref); return ''; }
+      secretValues.push(secret);
+      return secret;
+    });
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(cfg.env)) env[k] = resolve(v);
+    const headers: Record<string, string> = {};
+    for (const [k, v] of Object.entries(cfg.headers)) headers[k] = resolve(v);
+    if (serverMissing.size > 0) { for (const ref of serverMissing) missing.push(`${name}:${ref}`); continue; }
+    const timeouts = { listTimeoutMs: cfg.listTimeoutMs, callTimeoutMs: cfg.callTimeoutMs, readOnly: cfg.readOnly };
+    if (cfg.type === 'stdio') {
+      servers[name] = { type: 'stdio', command: cfg.command ?? '', args: cfg.args, env, ...timeouts };
+      definitions[name] = { type: 'stdio', command: cfg.command ?? '', args: cfg.args, env: cfg.env, ...timeouts };
+    } else {
+      servers[name] = { type: 'http', url: cfg.url ?? '', headers, ...timeouts };
+      definitions[name] = { type: 'http', url: cfg.url ?? '', headers: cfg.headers, ...timeouts };
+    }
+  }
+  return { servers, definitions, secretValues, missing, unknown };
+}
+
+/** The `mcp.json` debug view: the run token's `Authorization` value (the only real secret in it) is scrubbed. */
+function redactMcpJson(servers: Record<string, McpServerConfig>): Record<string, McpServerConfig> {
+  const out: Record<string, McpServerConfig> = {};
+  for (const [name, cfg] of Object.entries(servers)) {
+    if (!cfg.headers) { out[name] = cfg; continue; }
+    const headers = Object.fromEntries(Object.entries(cfg.headers).map(([k, v]) => [k, /^authorization$/i.test(k) ? '[redacted]' : v]));
+    out[name] = { ...cfg, headers };
+  }
+  return out;
 }
 
 function boundPayload(payload: unknown): Record<string, unknown> {
@@ -464,16 +521,30 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
 
     // 4. run token + MCP config + env
     const token = await mintRunToken(ctx, { agentId: agent.id, runId, ticketId: agent.ticketId, planId: agent.planId, kind: agent.kind, projectId: agent.projectId, roleId: agent.roleId, firstTurn: isFirstInteractiveTurn });
-    const mcpServers: Record<string, McpServerConfig> = {
+    const baseMcpServers: Record<string, McpServerConfig> = {
       [MCP_SERVER_NAME]: { type: 'http', url: `${ctx.loopbackUrl.replace(/\/$/, '')}/mcp/runs/${runId}`, headers: { Authorization: `Bearer ${token}` } },
     };
-    writeFileSync(join(runDir, 'mcp.json'), JSON.stringify({ mcpServers }, null, 2), 'utf8');
+    // VS-621: user MCP servers are for the built-in `weave` runtime only, and only they that the
+    // run's role (or the weaver's own list) allows. A CLI runtime keeps its own MCP config untouched.
+    let mcpServers: Record<string, McpServerConfig> = baseMcpServers;
+    let mcpJsonServers: Record<string, McpServerConfig> = baseMcpServers;
+    let mcpSecretValues: string[] = [];
+    if (setting.runtime === 'weave') {
+      const allowed = agent.kind === 'weaver' ? (ctx.config.weaver?.mcpServers ?? []) : (role?.mcpServers ?? []);
+      const built = buildMcpServers({ configServers: ctx.config.mcpServers ?? {}, allowed, resolveSecret: (name) => deps().secrets.value(name) });
+      if (built.unknown.length > 0) log.info({ names: built.unknown }, 'allowed MCP servers are not defined in this workspace');
+      if (built.missing.length > 0) log.warn({ refs: built.missing }, 'MCP servers omitted: a referenced secret has no value');
+      mcpServers = { ...baseMcpServers, ...built.servers };
+      mcpJsonServers = { ...baseMcpServers, ...built.definitions };
+      mcpSecretValues = built.secretValues;
+    }
+    writeFileSync(join(runDir, 'mcp.json'), JSON.stringify({ mcpServers: redactMcpJson(mcpJsonServers) }, null, 2), 'utf8');
 
     const secrets = roleSecretsEnv(ctx, deps, role);
     // VS-619: a key the adapter will read from the workspace store is redacted exactly as a
     // role-attached secret is, though it never travels through `env`.
     const storeKey = providerStoreKey(ctx, deps, setting.model);
-    redactionSecrets = [token, ...secrets.values, ...(storeKey ? [storeKey] : [])];
+    redactionSecrets = [token, ...secrets.values, ...(storeKey ? [storeKey] : []), ...mcpSecretValues];
     redact = makeRedactor(redactionSecrets);
     const worktreeIdentity = agent.worktreePath ? (await readGitIdentity(agent.worktreePath)).identity : null;
     const projectIdentity = !worktreeIdentity && project ? (await readGitIdentity(project.clonePath)).identity : null;

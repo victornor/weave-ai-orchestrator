@@ -163,6 +163,29 @@ export interface ProvidersPayload { providers: ProviderView[]; presets: PresetSu
 /** `POST /providers/:id/test` (VS-609): the per-capability probe verdict and the flags it measured. */
 export interface ProviderTestReport { ok?: boolean; provider: string; model: string; checks: Array<{ name: string; ok: boolean; detail: string }>; detected: Record<string, unknown> }
 
+/* ------------------------------------------------------- MCP servers (VS-621) */
+
+/**
+ * One MCP server definition as `GET /mcp` returns it. A secret value is never here: an `env` or
+ * `headers` value may carry a `${SECRET_NAME}` reference, resolved at run time. Fields the daemon
+ * has defaulted are present.
+ */
+export interface McpServer {
+  type: 'http' | 'stdio';
+  url?: string;
+  headers: Record<string, string>;
+  command?: string;
+  args: string[];
+  env: Record<string, string>;
+  listTimeoutMs: number;
+  callTimeoutMs: number;
+  readOnly: boolean;
+}
+export interface McpServerView { name: string; config: McpServer; secrets: Array<{ name: string; configured: boolean }> }
+export interface McpServersPayload { servers: McpServerView[] }
+/** `POST /mcp/:name/test`: the server's tools, or why it could not be reached. */
+export interface McpTestReport { name: string; ok: boolean; tools: Array<{ name: string; description: string }>; error?: string }
+
 
 /** VS-318: one host tool the daemon needs, as `/api/daemon/host-tools` and `/api/health` report it. */
 export interface HostToolInfo { id: string; available: boolean; version: string | null; path: string | null; need: 'required' | 'recommended'; purpose: string }

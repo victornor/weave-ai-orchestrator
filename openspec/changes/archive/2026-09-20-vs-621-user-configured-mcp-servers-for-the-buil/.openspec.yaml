@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "User-configured MCP servers for the built-in weave agent: workspace and
+  role config, Settings section, secrets by reference"

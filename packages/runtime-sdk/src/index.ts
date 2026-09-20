@@ -48,6 +48,13 @@ export interface TurnInput {
   permission: { mode: PermissionMode; allowedTools?: string[]; deniedTools?: string[]; bashDeny?: string[]; firstTurn?: boolean };
   model?: string | null; effort?: string | null; configHome?: string;
   /**
+   * VS-619: the workspace this run belongs to. A runtime whose provider profiles live in workspace
+   * config (`weave`) uses it to resolve the provider profile and its API key from the run's own
+   * workspace, never another workspace's. Absent means the caller has no workspace (a catalog
+   * request), and the host falls back to its aggregate lookup.
+   */
+  workspaceId?: string;
+  /**
    * VS-579: when set, the adapter spawns this turn inside a memory-limited systemd scope. Absent
    * (a non-worker agent, or a host with no systemd user manager) means a plain spawn as before.
    */
@@ -189,10 +196,17 @@ export interface ResumeCommand { cmd: string; args: string[]; env: Record<string
  * configuration to know what it can talk to. Read lazily: the workspaces load after the adapters register.
  */
 export interface RuntimeHost {
-  /** Every model provider the workspaces configure, by provider id (the first workspace defining an id wins). */
-  providers(): Record<string, ProviderProfile>;
-  /** The API key of a provider, read from the secrets of the workspace that defines it; undefined when there is none. Used for model discovery only: a run gets its key through its own environment. */
-  providerKey?(providerId: string): string | undefined;
+  /**
+   * The model providers a runtime may talk to, by provider id. Given a `workspaceId`, only that
+   * workspace's providers; without one, every workspace's with the first defining an id winning —
+   * the aggregate a caller with no run (the runtime catalog, `detect()`) needs.
+   */
+  providers(workspaceId?: string): Record<string, ProviderProfile>;
+  /**
+   * The API key of a provider, read from the secret store of the named workspace, or — when no
+   * workspace is named — the first workspace defining the id (VS-619). Undefined when there is none.
+   */
+  providerKey?(providerId: string, workspaceId?: string): string | undefined;
 }
 
 export interface RuntimeAdapter {
@@ -200,7 +214,11 @@ export interface RuntimeAdapter {
   /** Optional: called once when the daemon registers the adapter, before any workspace loads. */
   attach?(host: RuntimeHost): void;
   detect(): Promise<RuntimeDetection>;
-  listModels(): Promise<RuntimeModel[]>;
+  /**
+   * The models this runtime offers. `workspaceId` scopes a runtime whose catalog is workspace
+   * config (VS-619); a runtime with a fixed catalog ignores it.
+   */
+  listModels(workspaceId?: string): Promise<RuntimeModel[]>;
   configSchema(): JsonSchema;
   installInstructions(home: AgentHome, bundle: InstructionBundle): Promise<void>;
   runTurn(input: TurnInput, sink: TurnSink, onHandle?: (h: TurnHandle) => void): Promise<TurnResult>;
@@ -218,9 +236,10 @@ export interface RuntimeAdapter {
    * The context window of one of this runtime's models, in tokens, when the runtime can state it —
    * what a percentage compaction policy is a fraction of. Optional: a runtime whose models carry no
    * window (OpenCode) omits it, and a percentage policy is then reported as unavailable for it
-   * rather than measured against a window nobody declared. Never throws; unknown resolves undefined.
+   * rather than measured against a window nobody declared. `workspaceId` scopes a runtime whose
+   * catalog is workspace config (VS-619). Never throws; unknown resolves undefined.
    */
-  modelContextWindow?(model: string | null | undefined): Promise<number | undefined>;
+  modelContextWindow?(model: string | null | undefined, workspaceId?: string): Promise<number | undefined>;
   /**
    * The billing mode and plan limit windows of the account these credentials belong to.
    * Optional: an adapter that cannot determine any of it omits the method rather than

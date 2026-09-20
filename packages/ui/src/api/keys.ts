@@ -11,7 +11,7 @@ export const qk = {
   daemonModels: () => ['daemon', 'models'] as const,
   daemonHostTools: () => ['daemon', 'host-tools'] as const,
   incidents: (reporter?: string) => ['incidents', reporter ?? 'all'] as const,
-  runtimeModels: (id: string) => ['runtimes', id, 'models'] as const,
+  runtimeModels: (id: string, workspace?: string) => ['runtimes', id, 'models', workspace ?? ''] as const,
 
   workspace: (ws: string) => ['w', ws] as const,
   briefing: (ws: string) => ['w', ws, 'briefing'] as const,

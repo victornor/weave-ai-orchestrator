@@ -109,7 +109,7 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
   const rowRuns = useMemo(() => new Set((messages.data ?? []).map((m) => m.runId).filter((id): id is string => Boolean(id))), [messages.data]);
   useLiveRunSettle(live, setLive, rowRuns);
   const revealIds = useNewOutboundMessageIds(messages.data, threadId);
-  const plannerModels = useRuntimeModels(plannerRuntimeId);
+  const plannerModels = useRuntimeModels(plannerRuntimeId, ws);
   const runtimes = useRuntimes();
   const compactionAt = (runtimes.data ?? []).find((r) => r.id === plannerRuntimeId)?.capabilities['contextCompactionAt'] as number | undefined;
   const resolveContext = useCallback(

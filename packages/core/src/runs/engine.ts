@@ -136,6 +136,20 @@ function roleSecretsEnv(ctx: WorkspaceContext, deps: () => CoreServices, role: R
   return { env, values };
 }
 
+/**
+ * VS-619: the value of the provider secret the run's model names, held in the run's own workspace
+ * store — for redaction only. The adapter reads the same secret through `RuntimeHost.providerKey`;
+ * the engine never passes it to the child. `undefined` when the model names no configured provider,
+ * its profile carries no `apiKeySecret`, or the store holds no value.
+ */
+function providerStoreKey(ctx: WorkspaceContext, deps: () => CoreServices, model: string | null | undefined): string | undefined {
+  const providerId = model?.split('/')[0];
+  if (!providerId || providerId === model) return undefined;
+  const profile = ctx.config.providers?.[providerId];
+  if (!profile?.apiKeySecret) return undefined;
+  return deps().secrets.value(profile.apiKeySecret) ?? undefined;
+}
+
 function classifyLiveness(status: Run['status'], report: RunReport | null, ticketStatus: string | null): RunLiveness {
   if (status !== 'succeeded') return 'failed';
   if (!report) return 'empty';
@@ -456,7 +470,10 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     writeFileSync(join(runDir, 'mcp.json'), JSON.stringify({ mcpServers }, null, 2), 'utf8');
 
     const secrets = roleSecretsEnv(ctx, deps, role);
-    redactionSecrets = [token, ...secrets.values];
+    // VS-619: a key the adapter will read from the workspace store is redacted exactly as a
+    // role-attached secret is, though it never travels through `env`.
+    const storeKey = providerStoreKey(ctx, deps, setting.model);
+    redactionSecrets = [token, ...secrets.values, ...(storeKey ? [storeKey] : [])];
     redact = makeRedactor(redactionSecrets);
     const worktreeIdentity = agent.worktreePath ? (await readGitIdentity(agent.worktreePath)).identity : null;
     const projectIdentity = !worktreeIdentity && project ? (await readGitIdentity(project.clonePath)).identity : null;
@@ -570,6 +587,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       model: setting.model ?? null,
       effort: setting.effort ?? null,
       configHome,
+      workspaceId: ctx.workspaceId,
       containment,
     };
 

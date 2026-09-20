@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
 import { FakeRuntime, type RuntimeEvent, type TurnHandle, type TurnInput, type TurnSink, type TurnResult } from '@weave-ai/runtime-sdk';
-import { RECORDED_RUN_PHASES, RUN_PHASES, type Decision, type Run, type Wakeup } from '@weave-ai/shared';
+import { ProviderProfileSchema, RECORDED_RUN_PHASES, RUN_PHASES, type Decision, type Run, type Wakeup } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import type { Actor } from '../api.js';
 import { createDecisionsService } from '../decisions/service.js';
@@ -478,6 +478,34 @@ describe('run engine', () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]!.payload.text).not.toContain(FAKE);
       expect(rows[0]!.payload.text).toContain('[redacted]');
+    });
+  });
+
+  // VS-619: a run whose model names a provider with a `apiKeySecret` gets that secret's value from
+  // its own workspace store into the turn's redaction values, and carries its workspace id.
+  describe('a provider key held in the workspace store', () => {
+    const STORE_KEY = 'weave-llm-fake-key-000000';
+
+    it('passes the workspace id and redacts the store-resolved key from what the turn records', async () => {
+      h.ctx.config.providers = { fake: ProviderProfileSchema.parse({ baseUrl: 'https://llm.example.test/v1', apiKeySecret: 'WEAVE_LLM_FAKE_KEY', models: { m: {} } }) };
+      h.ctx.config.models = { weaver: { runtime: 'fake', model: 'fake/m' }, workers: { runtime: 'fake', model: 'fake/m' }, workerOptions: [] };
+      h.services.secrets!.put({ kind: 'human', id: 'victor' }, { name: 'WEAVE_LLM_FAKE_KEY' }, STORE_KEY);
+      class LeakyRuntime extends FakeRuntime {
+        override async runTurn(input: TurnInput, sink: TurnSink): Promise<TurnResult> {
+          sink.onEvent({ ts: nowIso(), type: 'assistant.text', payload: { text: `the provider key is ${STORE_KEY}` } });
+          return super.runTurn(input, sink);
+        }
+      }
+      const leaky = new LeakyRuntime();
+      h.ctx.registries.runtimes.set('fake', leaky);
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      const run = await runOnce();
+      expect(leaky.inputs[0]!.workspaceId).toBe(h.ctx.workspaceId);
+      expect(leaky.inputs[0]!.env['WEAVE_LLM_FAKE_KEY']).toBeUndefined();
+      const rows = h.db.all<{ payload: { text?: string } }>("SELECT payload_json FROM run_events WHERE run_id = ? AND type = 'assistant.text'", [run.id]);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.payload.text).toContain('[redacted]');
+      expect(rows[0]!.payload.text).not.toContain(STORE_KEY);
     });
   });
 

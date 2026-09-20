@@ -49,7 +49,7 @@ export function RunBody({ runId }: { runId: string }): React.ReactElement {
 
   const workers = useWorkersMany(ws ? [ws] : [], { includeRetired: true });
   const weavers = useWeaverMany(ws ? [ws] : []);
-  const runtimeModels = useRuntimeModels(detail.data?.run.runtimeId ?? null);
+  const runtimeModels = useRuntimeModels(detail.data?.run.runtimeId ?? null, ws);
 
   if (detail.isLoading) {
     return (

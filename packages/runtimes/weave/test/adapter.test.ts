@@ -201,6 +201,68 @@ describe('a turn that cannot start', () => {
   });
 });
 
+describe('the provider key comes from the workspace secret store (VS-619)', () => {
+  const STORE_KEY = 'sk-from-the-store-123';
+
+  it('runs with no role on the key its own workspace holds, and keeps it off argv, the child env and the tool env', async () => {
+    const seen: Array<[string, string | undefined]> = [];
+    const a = createAdapter({ entry: FAKE, host: {
+      providers: () => ({ test: profile }),
+      providerKey: (id, ws) => { seen.push([id, ws]); return id === 'test' && ws === 'ws-1' ? STORE_KEY : undefined; },
+    } });
+    const k = sink();
+    const r = await a.runTurn(input('replay', { env: { [AC_ENV.RUN_ID]: 'run-1' }, workspaceId: 'ws-1' }), k.s);
+    expect(r.exitCode).toBe(0);
+    const rec = record();
+    expect(rec.init['provider']).toMatchObject({ id: 'test', baseUrl: profile.baseUrl, apiKey: STORE_KEY });
+    expect(JSON.stringify(rec.argv)).not.toContain(STORE_KEY);
+    expect(JSON.stringify(rec.env)).not.toContain(STORE_KEY);
+    expect(JSON.stringify(rec.init['toolEnv'])).not.toContain(STORE_KEY);
+    expect(seen).toContainEqual(['test', 'ws-1']);
+  });
+
+  it('lets a role-attached secret win over the store', async () => {
+    const roleKey = 'sk-from-the-role-456';
+    const a = createAdapter({ entry: FAKE, host: { providers: () => ({ test: profile }), providerKey: () => STORE_KEY } });
+    const r = await a.runTurn(input('replay', { env: { [AC_ENV.RUN_ID]: 'run-1', WEAVE_LLM_TEST_KEY: roleKey }, workspaceId: 'ws-1' }), sink().s);
+    expect(r.exitCode).toBe(0);
+    expect(record().init['provider']).toMatchObject({ apiKey: roleKey });
+  });
+
+  it("resolves the profile and key of the run's own workspace, never another's", async () => {
+    const other: ProviderProfile = { ...profile, baseUrl: 'https://other.example.test/v1' };
+    const a = createAdapter({ entry: FAKE, host: {
+      providers: (ws) => (ws === 'ws-2' ? { test: other } : { test: profile }),
+      providerKey: (_id, ws) => (ws === 'ws-2' ? 'sk-ws-2-000' : 'sk-ws-1-000'),
+    } });
+    await a.runTurn(input('replay', { env: { [AC_ENV.RUN_ID]: 'run-1' }, workspaceId: 'ws-2' }), sink().s);
+    expect(record().init['provider']).toMatchObject({ baseUrl: other.baseUrl, apiKey: 'sk-ws-2-000' });
+  });
+
+  it('names both places a missing key can be set', async () => {
+    const { result } = await runFake('replay', { env: { [AC_ENV.RUN_ID]: 'run-1' }, workspaceId: 'ws-1' });
+    expect(result.error).toMatchObject({ code: 'key_missing', family: 'auth' });
+    expect(result.error!.message).toContain('Settings > Providers');
+    expect(result.error!.message).toContain('role');
+  });
+
+  it('scopes model discovery to the workspace, using that workspace\'s profile and key', async () => {
+    const seen: Array<{ url: string; auth: string | null }> = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      seen.push({ url: String(url), auth: new Headers(init?.headers).get('authorization') });
+      return new Response(JSON.stringify({ data: [{ id: 'x' }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    const w1: ProviderProfile = { ...profile, baseUrl: 'https://w1.example.test/v1', discover: true };
+    const w2: ProviderProfile = { ...profile, baseUrl: 'https://w2.example.test/v1', discover: true };
+    const a = createAdapter({ entry: FAKE, fetch: fetchFn, host: {
+      providers: (ws) => (ws === 'ws-2' ? { test: w2 } : { test: w1 }),
+      providerKey: (_id, ws) => (ws === 'ws-2' ? 'sk-ws-2-000' : 'sk-ws-1-000'),
+    } });
+    expect((await a.listModels('ws-2')).map((m) => m.id)).toEqual(['test/big-model', 'test/x']);
+    expect(seen).toEqual([{ url: 'https://w2.example.test/v1/models', auth: 'Bearer sk-ws-2-000' }]);
+  });
+});
+
 describe('the S2 events', () => {
   it('keeps file.changed, command.executed and tool.denied instead of folding them into runtime.raw', () => {
     for (const type of ['file.changed', 'command.executed', 'tool.denied']) {

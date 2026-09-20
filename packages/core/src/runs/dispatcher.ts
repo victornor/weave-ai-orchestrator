@@ -70,12 +70,14 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
   // cannot apply there — only an absolute `tokens` policy does.
   const windowCache = new Map<string, { expires: number; value: Promise<number | undefined> }>();
   const modelWindow = (runtimeId: string, model: string | null): Promise<number | undefined> => {
-    const key = `${runtimeId}\u0000${model ?? ''}`;
+    // VS-619: the runtime's model window is resolved for this workspace, so a workspace-config
+    // catalog (weave) uses its own provider rather than another workspace's.
+    const key = `${ctx.workspaceId}\u0000${runtimeId}\u0000${model ?? ''}`;
     const hit = windowCache.get(key);
     if (hit && hit.expires > Date.now()) return hit.value;
     const adapter = ctx.registries.runtimes.get(runtimeId);
     const value = adapter?.modelContextWindow
-      ? Promise.resolve(adapter.modelContextWindow(model)).catch(() => undefined)
+      ? Promise.resolve(adapter.modelContextWindow(model, ctx.workspaceId)).catch(() => undefined)
       : Promise.resolve(undefined);
     windowCache.set(key, { expires: Date.now() + 300_000, value });
     return value;

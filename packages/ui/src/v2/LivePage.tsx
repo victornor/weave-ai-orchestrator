@@ -118,7 +118,7 @@ interface LiveCardProps {
 function LiveCard({ cell, ui, ticket, projectLabel: project, projectColor, optionName, bodyHeight, resize, focused }: LiveCardProps): React.ReactElement {
   const { run } = useWorkerRun(cell.id, cell.ws);
   const runtimeId = run?.runtimeId ?? cell.runtimeId;
-  const runtimeModels = useRuntimeModels(runtimeId);
+  const runtimeModels = useRuntimeModels(runtimeId, cell.ws);
   const resolved = resolveModel(runtimeModels.data ?? null, run?.model ?? null);
   const modelLabel = resolved ? modelOptionLabel(resolved) : (run?.model ?? null);
   // VS-554: the same inputs the weaver chat and the run page feed `contextStrip` — the last

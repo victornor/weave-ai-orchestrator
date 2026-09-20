@@ -542,11 +542,11 @@ export function useRuntimes(): UseQueryResult<T.RuntimeInfo[]> {
   return useQuery({ queryKey: qk.runtimes(), queryFn: () => api.root<T.RuntimeInfo[]>('/runtimes'), staleTime: 60_000 });
 }
 
-export function useRuntimeModels(runtimeId: string | null | undefined): UseQueryResult<T.RuntimeModel[]> {
+export function useRuntimeModels(runtimeId: string | null | undefined, workspace?: string): UseQueryResult<T.RuntimeModel[]> {
   return useQuery({
-    queryKey: qk.runtimeModels(runtimeId ?? ''),
+    queryKey: qk.runtimeModels(runtimeId ?? '', workspace),
     queryFn: () =>
-      api.root<Array<string | T.RuntimeModel> | { models: Array<string | T.RuntimeModel> }>(`/runtimes/${runtimeId}/models`).then((r) => {
+      api.root<Array<string | T.RuntimeModel> | { models: Array<string | T.RuntimeModel> }>(`/runtimes/${runtimeId}/models${qs({ workspace })}`).then((r) => {
         const list = listOf<string | T.RuntimeModel>(r, 'models');
         return list.map((m) => (typeof m === 'string' ? { id: m, label: m } : m));
       }),

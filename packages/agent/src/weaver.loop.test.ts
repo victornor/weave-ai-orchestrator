@@ -6,6 +6,7 @@ import { compactionThreshold } from './compaction.js';
 import { runAgentTurn, type LoopDeps, type LoopIO } from './loop.js';
 import type { ChildEvent, InitMessage } from './protocol.js';
 import { Session } from './session.js';
+import { SteeringQueue } from './steering.js';
 import { startMockMcp, type MockMcp } from './testkit/mockMcp.js';
 import { startMockProvider, textChunks, toolCallChunks, type MockProvider } from './testkit/mockProvider.js';
 import { messagesTokens, TOKEN_MARGIN, toolsTokens } from './tokens.js';
@@ -154,5 +155,32 @@ describe('at the weaver\'s scale', () => {
     const withTools = harness();
     await runAgentTurn(init({ window: WINDOW, withMcp: true }), withTools.io, new AbortController().signal, fast);
     expect(withTools.events.some((e) => e.type === 'session.compaction.completed')).toBe(true);
+  });
+});
+
+describe('a weaver turn with live input', () => {
+  it('answers a human message sent while it runs, in the same turn, with a valid history', async () => {
+    const q = new SteeringQueue();
+    let pushed = false;
+    const h = harness();
+    const io: LoopIO = { ...h.io, emit: (e) => { h.events.push(e); if (e.type === 'assistant.text' && !pushed) { pushed = true; q.push('Actually, tell captain the deploy is finished.'); } } };
+    mock.script({ chunks: textChunks('Working on the workspace.') }, { chunks: textChunks('Told captain the deploy is finished.') });
+    const r = await runAgentTurn(init({ window: WINDOW, withMcp: false }), io, new AbortController().signal, { ...fast, steering: q });
+    expect(r.finalText).toBe('Told captain the deploy is finished.');
+    expect(mock.requests).toHaveLength(2);
+    const second = msgs(1);
+    const resultAt = second.findIndex((m) => m.role === 'tool');
+    const humanAt = second.findIndex((m) => m.role === 'user' && String(m.content).includes('tell captain the deploy is finished'));
+    expect(humanAt).toBeGreaterThanOrEqual(0);
+    expect(resultAt === -1 || humanAt > resultAt).toBe(true);
+    // The history is still valid after the injected message.
+    const s = Session.open({ path: join(dir, 'weaver.jsonl'), id: 'weaver-1', cwd: dir });
+    for (let i = 0; i < s.messages.length; i++) {
+      const cur = s.messages[i]!;
+      if (cur.role !== 'assistant') continue;
+      const ids = cur.content.filter((b) => b.type === 'toolCall').map((b) => (b as { id: string }).id);
+      expect(s.messages.slice(i + 1, i + 1 + ids.length).map((x) => (x.role === 'toolResult' ? x.toolCallId : null))).toEqual(ids);
+    }
+    s.close();
   });
 });

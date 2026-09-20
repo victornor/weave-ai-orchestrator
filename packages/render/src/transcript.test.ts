@@ -152,6 +152,20 @@ describe('runEventsToTranscript', () => {
     expect((blocks[0] as StatusBlock).text).toBe('asked you a question: Postgres or SQLite? · waiting 2m00s');
   });
 
+  it('renders a runtime todo list as a todo update, not a plan waiting for approval', () => {
+    reset();
+    const blocks = runEventsToTranscript([ev('plan.proposed', { id: 't1', items: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'pending' }] })]);
+    const s = blocks[0] as StatusBlock;
+    expect(s.kind).toBe('status');
+    expect(s.text).toBe('updated the todo list · 1/2 done');
+  });
+
+  it('still renders a real plan proposal as waiting for approval', () => {
+    reset();
+    const blocks = runEventsToTranscript([ev('plan.proposed', { title: 'Dark mode', plan: 'step 1' })]);
+    expect((blocks[0] as StatusBlock).text).toContain('waiting for approval');
+  });
+
   it('redacts secrets in text, tool output and file diffs', () => {
     reset();
     const blocks = runEventsToTranscript([

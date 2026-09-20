@@ -290,7 +290,12 @@ export function runEventsToTranscript(events: readonly RunEvent[]): TranscriptBl
         break;
       }
       case 'plan.proposed': {
-        out.push({ id: e.id, type: 'status', text: 'proposed a plan', status: 'needs-you' });
+        // A runtime's todo list (codex `todo_list`, weave `todo_write`) is an update, not something
+        // waiting for the human; only a real plan proposal reads as needing approval.
+        const items = Array.isArray(p['items']) ? p['items'] : null;
+        out.push(items
+          ? { id: e.id, type: 'status', text: `updated the todo list · ${items.length} item${items.length === 1 ? '' : 's'}`, status: 'working' }
+          : { id: e.id, type: 'status', text: 'proposed a plan', status: 'needs-you' });
         break;
       }
       case 'error': {

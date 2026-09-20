@@ -22,6 +22,8 @@ export interface InitMessage {
   provider: { id: string; baseUrl: string; auth: string; headers: Record<string, string>; query?: Record<string, string>; apiKey?: string; /** Resolved by the adapter (preset < profile < model < option); the child never sees the layers. */ compat?: ProviderCompat; params?: ProviderParams & { contextWindowTokens?: number }; timeouts?: { connectMs?: number; idleMs?: number; requestMs?: number } };
   prompt: string;
   systemPrompt: { text: string; mode: 'inject' | 'skip' };
+  /** S7: when set, the child offers a `submit_result` tool with these parameters and returns the call's arguments as `result.structured`. */
+  outputSchema?: Record<string, unknown>;
   session: { path: string; id: string };
   mcpServers: Record<string, { type?: 'http' | 'stdio'; url?: string; headers?: Record<string, string>; command?: string; args?: string[]; env?: Record<string, string>; listTimeoutMs?: number; callTimeoutMs?: number; readOnly?: boolean }>;
   toolEnv: Record<string, string>;
@@ -34,6 +36,8 @@ export interface ChildResult {
   exitCode: number | null; signal: string | null; timedOut: boolean;
   session: { v: 1; id: string; path: string; leafId: string | null } | null;
   finalText: string | null;
+  /** S7: the arguments the model passed to `submit_result`, when the run carried an `outputSchema`. */
+  structured?: unknown;
   usage?: { inputTokens: number; outputTokens: number; cachedInputTokens?: number; contextTokens?: number; basis: 'per_turn'; firstRequest?: { freshTokens: number; cachedTokens: number } };
   model?: string; provider?: string;
   /** Set by a `compact`-mode run. */

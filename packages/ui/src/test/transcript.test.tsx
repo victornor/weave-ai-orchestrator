@@ -118,6 +118,16 @@ describe('runEventsToTranscript', () => {
     expect(blocks.map((b) => b.type)).toEqual(['phase', 'status']);
   });
 
+  it('renders a runtime todo list as a working todo update, not a needs-you plan', () => {
+    const [todo] = runEventsToTranscript([
+      ev({ type: 'plan.proposed', payload: { id: 't1', items: [{ content: 'a', status: 'completed' }, { content: 'b', status: 'pending' }] } }),
+    ]);
+    expect(todo).toMatchObject({ type: 'status', status: 'working', text: 'updated the todo list · 2 items' });
+
+    const [plan] = runEventsToTranscript([ev({ type: 'plan.proposed', payload: { title: 'Dark mode' } })]);
+    expect(plan).toMatchObject({ type: 'status', status: 'needs-you', text: 'proposed a plan' });
+  });
+
   const REPORT = {
     state: 'working',
     summary: 'Opened the PR for VS-147.',

@@ -261,6 +261,24 @@ describe('run engine', () => {
     expect(claims).toMatchObject({ workspaceId: h.workspaceId, runId: run.id, agentId: h.conductorId, agentKind: 'weaver' });
   });
 
+  it('gives the report schema only to turns that owe one (VS-614)', async () => {
+    // A ticketless persistent session is a raw session (VS-618, VS-620): no report schema, so the
+    // weave runtime adds no `submit_result` tool and never nudges it to submit.
+    const sessionId = h.addWorker(null, { kind: 'session', runtimeId: 'fake', worktreePath: null, branch: null });
+    runtime.queue.push({ finalText: 'hello' });
+    h.services.wake!.enqueue(sessionId, { source: 'human_message', reason: 'hi' });
+    await runOnce(sessionId);
+    expect(runtime.inputs.at(-1)!.outputSchema).toBeUndefined();
+
+    // The same session took a ticket (takeTicketForSession): now it owes the report like a worker.
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    h.db.update('agents', sessionId, { ticketId, updatedAt: nowIso() });
+    runtime.queue.push({ structured: { state: 'done', summary: 'done', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+    h.services.wake!.enqueue(sessionId, { source: 'human_message', reason: 'work' });
+    await runOnce(sessionId);
+    expect(runtime.inputs.at(-1)!.outputSchema).toBeTruthy();
+  });
+
   it('passes a worker worktree Git identity to the runtime environment', async () => {
     const worktree = join(h.ctx.paths.root, 'identity-worktree');
     mkdirSync(worktree, { recursive: true });

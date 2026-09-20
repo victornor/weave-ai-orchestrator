@@ -354,6 +354,151 @@ describe('decisions', () => {
     expect(wake.calls.some((c) => c.agentId === workerId && c.input.source === 'retry')).toBe(false);
   });
 
+  // VS-625: a card that describes a worker being stopped is stale the moment something other than
+  // an answer puts it back to work. Closing it, and refusing to act on a late answer, are what stop
+  // a second turn starting on top of a healthy one.
+  describe('closing a worker\'s stop cards (VS-625)', () => {
+    it('supersedes an open decision with the reason recorded', async () => {
+      const t = ticket();
+      const d = decisions.create(SYSTEM, { ticketId: t.id, kind: 'question', title: 'q' });
+      const closed = decisions.supersede(HUMAN, d.id, 'the worker was resumed by the weaver at 2026-09-20T00:00:00.000Z');
+      expect(closed.status).toBe('superseded');
+      expect(decisions.get(d.id)).toMatchObject({
+        status: 'superseded',
+        answerText: 'the worker was resumed by the weaver at 2026-09-20T00:00:00.000Z',
+      });
+      await new Promise((r) => setImmediate(r));
+      expect(h.events.some((e) => e.type === 'decision.superseded')).toBe(true);
+    });
+
+    it('refuses to rewrite a decision that is not open', () => {
+      const t = ticket();
+      const d = decisions.create(SYSTEM, { ticketId: t.id, kind: 'question', title: 'q' });
+      decisions.supersede(HUMAN, d.id, 'first');
+      expect(() => decisions.supersede(HUMAN, d.id, 'again')).toThrow(/superseded/);
+      expect(decisions.get(d.id).answerText).toBe('first');
+    });
+
+    it('closes only the named worker\'s parking and stalled cards, and no other kind', () => {
+      const t = ticket();
+      const worker = h.addWorker(t.id);
+      const t2 = ticket({ title: 'second' });
+      const other = h.addWorker(t2.id);
+      const parking = decisions.create(SYSTEM, { ticketId: t.id, kind: 'retry_approval', owner: 'human', title: 'failed', target: { agentId: worker, ticketId: t.id }, correlationKey: `retry:${worker}` });
+      const stalled = decisions.create(SYSTEM, { ticketId: t.id, kind: 'gate_finding', owner: 'weaver', title: 'stalled', correlationKey: `stalled-worker:${worker}` });
+      const otherParking = decisions.create(SYSTEM, { ticketId: t2.id, kind: 'retry_approval', owner: 'human', title: 'other', target: { agentId: other, ticketId: t2.id }, correlationKey: `retry:${other}` });
+      const question = decisions.create(SYSTEM, { ticketId: t.id, kind: 'question', title: 'unrelated' });
+
+      const closed = decisions.supersedeWorkerStopCards(HUMAN, worker, 'the worker was resumed by the human at 2026-09-20T00:00:00.000Z');
+
+      expect(closed).toBe(2);
+      expect(decisions.get(parking.id).status).toBe('superseded');
+      expect(decisions.get(stalled.id).status).toBe('superseded');
+      expect(decisions.get(otherParking.id).status).toBe('open');
+      expect(decisions.get(question.id).status).toBe('open');
+    });
+
+    it('leaves an already-answered parking card alone', async () => {
+      const t = ticket();
+      const worker = h.addWorker(t.id);
+      h.db.update('agents', worker, { status: 'paused', pauseReason: 'boom', pauseDetailJson: { family: 'unknown' } });
+      const relaunch = vi.fn(async () => undefined);
+      h.services.workers = { relaunch } as never;
+      const parking = decisions.create(SYSTEM, { ticketId: t.id, kind: 'retry_approval', owner: 'human', title: 'failed', correlationKey: `retry:${worker}`, target: { agentId: worker, ticketId: t.id } });
+
+      await decisions.answer(HUMAN, parking.id, { key: 'retry' });
+      decisions.supersedeWorkerStopCards(HUMAN, worker, 'the worker was resumed');
+
+      expect(decisions.get(parking.id).status).toBe('answered');
+    });
+  });
+
+  describe('answering a stale parking card starts nothing (VS-625)', () => {
+    const OPTIONS = [
+      { key: 'retry', label: 'Retry now' },
+      { key: 'retry_1h', label: 'Retry in an hour' },
+      { key: 'switch:deep', label: 'Continue on deep' },
+      { key: 'cancel', label: 'Cancel the ticket' },
+    ];
+
+    /** A blocked ticket with a parked-looking parking card for a worker whose status is `status`. */
+    function openCard(status: string): { ticketId: string; workerId: string; id: string } {
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      h.db.update('agents', workerId, { status, pauseReason: 'boom: waiting for a human', pauseDetailJson: { family: 'unknown' } });
+      h.db.update('tickets', t.id, { status: 'blocked', blockedFromStatus: 'in_progress', workerModelId: 'standard' });
+      const d = decisions.create(SYSTEM, { ticketId: t.id, kind: 'retry_approval', owner: 'human', title: 'Worker failed', options: OPTIONS, correlationKey: `retry:${workerId}`, target: { agentId: workerId, ticketId: t.id } });
+      return { ticketId: t.id, workerId, id: d.id };
+    }
+
+    const commentBodies = (ticketId: string): string[] =>
+      h.db.all<{ body: string }>('SELECT body FROM ticket_comments WHERE ticket_id = ?', [ticketId]).map((c) => c.body);
+
+    it('does not relaunch or wake a worker that is already running', async () => {
+      h.ctx.config.models.workerOptions = [
+        { id: 'standard', description: 'Specified work.', runtime: 'claude', model: null },
+        { id: 'deep', description: 'Cause unknown.', runtime: 'claude', model: 'opus' },
+      ];
+      const { ticketId, workerId, id } = openCard('active');
+      const relaunch = vi.fn(async () => undefined);
+      const resume = vi.fn();
+      const cancel = vi.fn();
+      h.services.workers = { relaunch, resume, cancel } as never;
+      wake.calls.length = 0;
+
+      await decisions.answer(HUMAN, id, { key: 'retry' });
+
+      expect(relaunch).not.toHaveBeenCalled();
+      expect(wake.calls.filter((c) => c.agentId === workerId)).toHaveLength(0);
+      expect(tickets.get(ticketId).status).toBe('blocked');
+      expect(commentBodies(ticketId).some((b) => /already resumed/i.test(b))).toBe(true);
+    });
+
+    it('books no deferred retry on a stale card', async () => {
+      const { id, workerId } = openCard('active');
+      h.services.workers = { relaunch: vi.fn(async () => undefined), resume: vi.fn(), cancel: vi.fn() } as never;
+      wake.calls.length = 0;
+
+      await decisions.answer(HUMAN, id, { key: 'retry_1h' });
+
+      expect(wake.calls.filter((c) => c.agentId === workerId && c.input.source === 'retry')).toHaveLength(0);
+    });
+
+    it('changes no catalog option on a stale card', async () => {
+      h.ctx.config.models.workerOptions = [
+        { id: 'standard', description: 'Specified work.', runtime: 'claude', model: null },
+        { id: 'deep', description: 'Cause unknown.', runtime: 'claude', model: 'opus' },
+      ];
+      const { id, ticketId } = openCard('active');
+      h.services.workers = { relaunch: vi.fn(async () => undefined), resume: vi.fn(), cancel: vi.fn() } as never;
+
+      await decisions.answer(HUMAN, id, { key: 'switch:deep' });
+
+      expect(tickets.get(ticketId).workerModelId).toBe('standard');
+    });
+
+    it('cancels nothing on a stale card', async () => {
+      const { id, ticketId, workerId } = openCard('active');
+      h.services.workers = { relaunch: vi.fn(async () => undefined), resume: vi.fn(), cancel: vi.fn() } as never;
+
+      await decisions.answer(HUMAN, id, { key: 'cancel' });
+
+      expect(tickets.get(ticketId).status).toBe('blocked');
+      expect(wake.calls.filter((c) => c.agentId === workerId)).toHaveLength(0);
+    });
+
+    it('still acts on a card whose worker is parked', async () => {
+      const { id, ticketId, workerId } = openCard('paused');
+      const relaunch = vi.fn(async () => undefined);
+      h.services.workers = { relaunch, resume: vi.fn(), cancel: vi.fn() } as never;
+
+      await decisions.answer(HUMAN, id, { key: 'retry' });
+
+      expect(relaunch).toHaveBeenCalledWith(HUMAN, workerId, 'the human asked for a retry');
+      expect(tickets.get(ticketId).status).toBe('in_progress');
+    });
+  });
+
   it('merge approval approve moves the ticket to merging and wakes the worker', async () => {
     const t = ticket();
     const workerId = h.addWorker(t.id);

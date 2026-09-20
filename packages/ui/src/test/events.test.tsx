@@ -72,6 +72,15 @@ describe('decision cache patching', () => {
     expect(withPatched(next, key, seed)).toEqual([fakeDecision('dec_2', 'open')]);
   });
 
+  // VS-625: closing a worker's parking card as superseded is what removes it from Needs you, whose
+  // source query is exactly this one (`NeedsYouPage.tsx`): no refetch, no design change.
+  it('removes a superseded retry_approval card from an open Needs-you query', () => {
+    const key = [...qk.decisions('ws1'), { status: 'open', owner: 'human' }];
+    const seed = [fakeDecision('dec_1', 'open', { kind: 'retry_approval' }), fakeDecision('dec_2', 'open')];
+    const next = event('decision.superseded', { payload: fakeDecision('dec_1', 'superseded', { kind: 'retry_approval' }) });
+    expect(withPatched(next, key, seed)).toEqual([seed[1]]);
+  });
+
   it('replaces an answered decision in place in a query whose filter still includes answered', () => {
     const key = [...qk.decisions('ws1'), { status: ['open', 'answered'], owner: 'human', limit: 200 }];
     const seed = [fakeDecision('dec_1', 'open')];

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: Close a worker's stale retry approval card when the worker is resumed or
+  relaunched, and make a late answer a no-op

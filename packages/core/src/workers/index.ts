@@ -71,6 +71,15 @@ function preservedResumeQueued(ctx: WorkspaceContext, workerId: string): boolean
   return runs.some((r) => (r.wakeupIds ?? []).some((id) => queuedIds.has(id)));
 }
 
+/**
+ * VS-625: who put a worker back to work, in the words a card's close note uses. A resume/relaunch
+ * reaches here from the human, from the conductor's `weave_worker_relaunch`, or from the daemon's
+ * own recovery.
+ */
+function resumerLabel(actor: Actor): string {
+  return actor.kind === 'human' ? 'the human' : actor.kind === 'agent' ? 'the weaver' : 'the system';
+}
+
 export function branchSlug(title: string): string {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '') || 'work';
 }
@@ -726,6 +735,11 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const derived = await progressNote(agent, ticket);
       const relaunchNote = [note, derived].filter(Boolean).join(' ');
       ctx.db.update('agents', workerId, { briefRevision: agent.briefRevision + 1, status: 'active', errorText: null, updatedAt: nowIso() });
+      // VS-625: a relaunch is the other way a worker goes back to work (a parked worker took the
+      // resume branch above); its stop cards are just as stale. Best effort, like the resume path.
+      try {
+        deps().decisions.supersedeWorkerStopCards(actor, workerId, `the worker was relaunched by ${resumerLabel(actor)} at ${nowIso()}`);
+      } catch (e) { log.warn({ workerId, err: String(e) }, 'closing the worker\'s stop cards on relaunch failed'); }
       const updated = get(workerId);
       await renderHome(ctx, deps, updated, { relaunchNote });
       deps().wake.enqueue(workerId, { source: 'system', reason: 'relaunch', payload: { relaunchNote }, requestedBy: actor });
@@ -791,6 +805,13 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.resume', 'agent', id, {});
       ctx.events.emit('worker.status', 'agent', id, { status: 'active' });
       if (!wasPaused) return get(id);
+
+      // VS-625: the worker is back at work, so any card that said it was stopped is stale — the
+      // human could answer it and start a second turn on top of this one. Close them first; a
+      // failure here must not cost the worker its turn, so it is best effort.
+      try {
+        deps().decisions.supersedeWorkerStopCards(actor, id, `the worker was resumed by ${resumerLabel(actor)} at ${nowIso()}`);
+      } catch (e) { log.warn({ workerId: id, err: String(e) }, 'closing the worker\'s stop cards on resume failed'); }
 
       // Idempotent per turn: resuming twice before the worker runs coalesces into the same wake.
       try {

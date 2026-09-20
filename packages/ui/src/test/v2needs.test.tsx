@@ -75,6 +75,18 @@ describe('the V2 Needs you screen', () => {
     expect(screen.getByText('Where should the theme preference live?')).toBeInTheDocument();
   });
 
+  // VS-625: the daemon closes a worker's parking card as superseded the moment it is resumed, so the
+  // open-human query Needs you reads no longer returns it — no design change, the card just goes.
+  it('drops a retry_approval card from the list once the daemon no longer returns it open', () => {
+    state.decisions = [makeDecision({ id: 'd1', workspaceId: 'ws1', kind: 'retry_approval', title: 'Backend Engineer #1 failed', options: [{ key: 'retry', label: 'Retry now' }] })];
+    const { rerender } = render(<V2NeedsPage />);
+    expect(screen.getByText('Backend Engineer #1 failed')).toBeInTheDocument();
+
+    state.decisions = [];
+    rerender(<V2NeedsPage />);
+    expect(screen.queryByText('Backend Engineer #1 failed')).not.toBeInTheDocument();
+  });
+
   it('shows a merge card\'s live CI chip from the ticket delivery (VS-481)', () => {
     state.decisions = [makeDecision({ id: 'd1', workspaceId: 'ws1', kind: 'merge_approval', title: 'Merge ACME-42' })];
     state.tickets = [makeTicket({

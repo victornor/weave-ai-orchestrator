@@ -4,12 +4,14 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { classifyFinish, classifyHttp, classifyNetwork, classifyStreamError, isRetryable, parseErrorBody, stopError } from './errors.js';
 
-interface Row { name: string; source: string; status: number; body: string; expect: { code: string; family: string; maxRetries?: number; message?: string } }
-const rows = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'errors', 'table.json'), 'utf8')) as Row[];
+interface Row { name: string; source: string; status: number; body?: string; bodyFile?: string; expect: { code: string; family: string; maxRetries?: number; message?: string } }
+const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'errors');
+const rows = JSON.parse(readFileSync(join(fixturesDir, 'table.json'), 'utf8')) as Row[];
+const bodyOf = (r: Row): string => (r.bodyFile ? readFileSync(join(fixturesDir, r.bodyFile), 'utf8') : r.body ?? '');
 
 describe('error table', () => {
   it.each(rows.map((r) => [r.name, r] as const))('%s', (_n, r) => {
-    const e = classifyHttp(r.status, r.body);
+    const e = classifyHttp(r.status, bodyOf(r));
     expect(e).toMatchObject({ code: r.expect.code, family: r.expect.family, status: r.status });
     if (r.expect.maxRetries !== undefined) expect(e.maxRetries).toBe(r.expect.maxRetries);
     if (r.expect.message) expect(e.message).toBe(r.expect.message);
@@ -23,6 +25,24 @@ describe('error table', () => {
   });
   it('names the flag to set when an endpoint rejects a parameter', () => {
     expect(classifyHttp(400, '{"error":{"message":"Unknown parameter: \'seed\'"}}').message).toContain('omitParams');
+  });
+  it('reduces an HTML challenge page to one line naming the status, the title and the User-Agent hint, and never retries it', () => {
+    const body = readFileSync(join(fixturesDir, 'cloudflare-challenge.html'), 'utf8');
+    const e = classifyHttp(503, body);
+    expect(e).toMatchObject({ code: 'html_error', family: 'tooling', status: 503, maxRetries: 0 });
+    expect(e.message).toBe('HTTP 503: the endpoint returned an HTML page titled "Just a moment..." (likely a bot challenge or a gateway error); try setting a User-Agent header on the provider');
+    expect(e.message.split('\n')).toHaveLength(1);
+    expect(e.message).not.toContain('<');
+    expect(isRetryable(e)).toBe(false);
+  });
+  it('cuts a long plain-text body to 200 characters on one line', () => {
+    const body = readFileSync(join(fixturesDir, 'long-plain-error.txt'), 'utf8');
+    expect(body.length).toBeGreaterThan(300);
+    const e = classifyHttp(500, body);
+    expect(e.family).toBe('transient_upstream');
+    expect(e.message.length).toBeLessThanOrEqual(201);
+    expect(e.message.endsWith('…')).toBe(true);
+    expect(e.message.split('\n')).toHaveLength(1);
   });
 });
 

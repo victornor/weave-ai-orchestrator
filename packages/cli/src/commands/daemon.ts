@@ -8,7 +8,7 @@ import { parse as parseYaml } from 'yaml';
 import { join } from 'node:path';
 import { configHome } from '../contexts.js';
 import { followLog, installLaunchdAgent, installService, isRunning, listenPort, logFile, pidFile, preflightRestart, readPid, realRun, reconcileDetachedDaemon, renderLaunchdPlist, renderServiceUnit, resolveServerBin, startDaemon, startDaemonService, stopDaemon, stopDaemonService, systemdMainPid, tailLog, verifyRestart, LAUNCHD_LABEL, type RestartTarget } from '../daemon.js';
-import { buildRelease, currentLink, findPortHolder, listReleases, previousLink, pruneReleases, readLink, releaseSha, releaseStamp, resolveInstalledUnit, resolveWorkspaceStateDir, switchRelease, writeUserShims, type ShimWriteResult } from '../release.js';
+import { buildRelease, currentLink, findPortHolder, listReleases, previousLink, pruneReleases, readLink, releaseSha, releaseStamp, resolveInstalledUnit, resolveWorkspaceStateDir, switchRelease, writeShimsFromRelease, writeUserShims, type ShimWriteResult } from '../release.js';
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { AC_ENV, isTerminalUpgrade, type Upgrade } from '@weave-ai/shared';
@@ -331,6 +331,9 @@ worker run (AC_RUN_TOKEN set): agents propose upgrades through tickets, humans r
       if (pruned.length) write(style.dim(`pruned ${pruned.join(', ')}`));
 
       // VS-377: the release moved, so the PATH shim must follow it (and be created if the host predates it).
+      // VS-631: run the *new* release's own writer after the flip, so a shim that release introduces is
+      // written on the upgrade that introduces it, not the one after.
+      writeShimsFromRelease(built.path);
       const shim = writeUserShims();
 
       if (opts['restart'] === false) {
@@ -402,6 +405,16 @@ when the daemon is not answering and has to be replaced from here.`)
     .action(async (upgradeId: string) => run(async () => {
       const verdict = await runUpgradeRunner(upgradeId);
       emit(verdict, () => write(verdict.outcome === 'completed' ? `${style.ok('upgraded')} ${verdict.version ?? '?'}` : style.bad(verdict.message)));
+    }));
+
+  // VS-631: the upgrade runs the *new* release's own copy of this command after `current` flips, so a
+  // shim that release introduces is written on the upgrade that introduces it.
+  daemon
+    .command('write-shims', { hidden: true })
+    .description('internal: write this release\'s CLI shims (an upgrade calls it after the current symlink flips)')
+    .action(async () => run(async () => {
+      const shim = writeUserShims();
+      emit(shim, () => reportShim(shim));
     }));
 
   daemon

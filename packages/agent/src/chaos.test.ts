@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runAgentTurn, type LoopDeps, type LoopIO } from './loop.js';
 import type { ChildEvent, InitMessage } from './protocol.js';
@@ -13,11 +14,11 @@ let dir: string; let mock: MockProvider;
 beforeEach(async () => { dir = mkdtempSync(join(tmpdir(), 'wa-chaos-')); mkdirSync(join(dir, 'wt')); writeFileSync(join(dir, 'wt', 'a.txt'), 'alpha\n'); mock = await startMockProvider(); });
 afterEach(async () => { await mock.close(); rmSync(dir, { recursive: true, force: true }); });
 
-function makeInit(over: { options?: Record<string, unknown>; maxTurns?: number } = {}): InitMessage {
+function makeInit(over: { options?: Record<string, unknown>; maxTurns?: number; params?: InitMessage['provider']['params'] } = {}): InitMessage {
   return {
     type: 'init', v: 1,
     run: { runId: 'run-chaos1', turnEpoch: 1, cwd: dir, worktree: { path: join(dir, 'wt'), branch: 'ac/x' }, limits: { timeoutMs: 600_000, ...(over.maxTurns ? { maxTurns: over.maxTurns } : {}) }, permission: { mode: 'auto' }, model: 'mock-model', options: over.options ?? {}, spillDir: join(dir, 'spill') },
-    provider: { id: 'mock', baseUrl: mock.baseUrl, auth: 'bearer', headers: {}, apiKey: KEY },
+    provider: { id: 'mock', baseUrl: mock.baseUrl, auth: 'bearer', headers: {}, apiKey: KEY, ...(over.params ? { params: over.params } : {}) },
     prompt: 'go', systemPrompt: { text: 'HOME', mode: 'inject' },
     session: { path: join(dir, 's.jsonl'), id: 'sess1' }, mcpServers: {}, toolEnv: { PATH: process.env['PATH'] ?? '' },
   };
@@ -342,5 +343,25 @@ describe('debugWire', () => {
     mock.script({ chunks: textChunks('hello') });
     await run(makeInit());
     expect(existsSync(join(dir, 'wire'))).toBe(false);
+  });
+  it('shortens an HTML challenge page to one line, does not retry it, and keeps the full body only in the wire capture (VS-631)', async () => {
+    const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'errors', 'cloudflare-challenge.html'), 'utf8');
+    mock.script({ status: 503, headers: { 'content-type': 'text/html' }, body: html });
+    const { r } = await run(makeInit({ options: { debugWire: true } }));
+    expect(mock.requests).toHaveLength(1); // a challenge page is not retried
+    expect(r.error).toMatchObject({ code: 'html_error', family: 'tooling' });
+    expect(r.error!.message).toBe('HTTP 503: the endpoint returned an HTML page titled "Just a moment..." (likely a bot challenge or a gateway error); try setting a User-Agent header on the provider');
+    const wire = readdirSync(join(dir, 'wire')).map((f) => readFileSync(join(dir, 'wire', f), 'utf8')).join('');
+    expect(wire).toContain('<title>Just a moment...</title>');
+  });
+});
+
+describe('unknown context window (VS-631)', () => {
+  it('warns with the --context-window hint, and the flag silences it', async () => {
+    mock.script({ chunks: textChunks('one') }, { chunks: textChunks('two') });
+    const warned = await run(makeInit());
+    expect(warned.h.logs.join('\n')).toContain('--context-window');
+    const quiet = await run(makeInit({ params: { contextWindowTokens: 128000 } }));
+    expect(quiet.h.logs.join('\n')).not.toContain('context window is unknown');
   });
 });

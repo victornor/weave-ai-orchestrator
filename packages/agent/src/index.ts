@@ -8,6 +8,7 @@ export { validateAgainstSchema } from './validate.js';
 export { Session, forkSessionFile, type SessionRef } from './session.js';
 export { SseParser } from './sse.js';
 export { requestOptions, requestHeaders } from './profile.js';
+export { agentUserAgent, agentVersion } from './version.js';
 
 /** The child entry file next to this module: `bin.js` in a build, `bin.ts` when the package is loaded from source. */
 export function agentEntryPath(): string {

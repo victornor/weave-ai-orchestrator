@@ -6,6 +6,7 @@ import type { ChildEvent } from '../protocol.js';
 import { Session } from '../session.js';
 import { startMockProvider, textChunks, type MockProvider } from '../testkit/mockProvider.js';
 import { loadReplConfig } from './config.js';
+import { startup } from './main.js';
 import { buildReplInit, runReplTurn, skillRootsFor, type ReplState } from './run.js';
 import { listSessions, newSessionId, sessionPath } from './sessions.js';
 
@@ -92,5 +93,25 @@ describe('a REPL turn on the shared loop', () => {
     const reopened = Session.open({ path: s.sessionPath, id: s.sessionId, cwd });
     expect(reopened.messages[0]).toMatchObject({ role: 'user' });
     reopened.close();
+  });
+});
+
+describe('--context-window (VS-631)', () => {
+  const mkIo = (env: NodeJS.ProcessEnv) => ({ stdout: (): void => undefined, stderr: (): void => undefined, env, cwd, userHome: dir });
+  it('seeds the run\'s contextWindowTokens and refuses anything but a positive whole number', () => {
+    const env = { PATH: process.env['PATH'] ?? '', HOME: dir, WEAVE_LLM_MOCK_KEY: KEY } as NodeJS.ProcessEnv;
+    const good = startup({ provider: 'mock', baseUrl: mock.baseUrl, model: 'mock-model', contextWindow: '128000' }, mkIo(env));
+    if (!good.ok) throw new Error(good.message);
+    expect(good.state.params).toEqual({ contextWindowTokens: 128000 });
+    for (const bad of ['0', '-5', 'lots']) {
+      const r = startup({ provider: 'mock', baseUrl: mock.baseUrl, model: 'mock-model', contextWindow: bad }, mkIo(env));
+      expect(r).toMatchObject({ ok: false });
+      if (!r.ok) expect(r.message).toMatch(/positive whole number/);
+    }
+  });
+  it('flows into the run provider params, which the loop reads as its options', () => {
+    const b = buildReplInit(state({ params: { contextWindowTokens: 128000 } }), cfg(), 'p', t());
+    if (!b.ok) throw new Error(b.error);
+    expect(b.init.provider.params?.contextWindowTokens).toBe(128000);
   });
 });

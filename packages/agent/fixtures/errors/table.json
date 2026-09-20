@@ -271,5 +271,26 @@
    "code": "upstream_error",
    "family": "transient_upstream"
   }
+ },
+ {
+  "name": "cloudflare: html challenge page (VS-631 live check)",
+  "source": "hand-written, the shape of the Cloudflare interstitial that answered codeify.cc",
+  "status": 503,
+  "bodyFile": "cloudflare-challenge.html",
+  "expect": {
+   "code": "html_error",
+   "family": "tooling",
+   "maxRetries": 0
+  }
+ },
+ {
+  "name": "long plain-text error body (VS-631)",
+  "source": "hand-written",
+  "status": 500,
+  "bodyFile": "long-plain-error.txt",
+  "expect": {
+   "code": "upstream_error",
+   "family": "transient_upstream"
+  }
  }
 ]

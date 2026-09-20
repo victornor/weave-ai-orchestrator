@@ -376,6 +376,20 @@ describe('building', () => {
 // ---------- 4.6 backups and the switch ----------
 
 describe('switching', () => {
+  it('writes the CLI shims from the new release\'s own code after the switch (VS-631)', async () => {
+    fx.addWorkspace('ws1');
+    const order: string[] = [];
+    const seen: string[] = [];
+    const svc = fx.service({
+      switchTo: () => { order.push('switch'); return { previous: null }; },
+      writeShims: (release) => { order.push('shims'); seen.push(release); },
+    });
+    svc.request({ requestedBy: 'op1' });
+    await svc.settled();
+    expect(seen).toEqual([TO_RELEASE]);
+    expect(order).toEqual(['switch', 'shims']);
+  });
+
   it('backs the databases up before the symlink moves and records where they went', async () => {
     fx.addWorkspace('ws1');
     const order: string[] = [];

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { INTERRUPTED, runAgentTurn, type LoopDeps, type LoopIO } from './loop.js';
 import type { ChildEvent, ChildPartial, ChildResult, InitMessage } from './protocol.js';
 import { Session } from './session.js';
+import { agentUserAgent } from './version.js';
 import { frame, startMockProvider, textChunks, toolCallChunks, type MockProvider } from './testkit/mockProvider.js';
 import { startMockMcp, type MockMcp } from './testkit/mockMcp.js';
 
@@ -13,11 +14,11 @@ let dir: string; let mock: MockProvider; let mcp: MockMcp | undefined;
 beforeEach(async () => { dir = mkdtempSync(join(tmpdir(), 'wa-loop-')); mkdirSync(join(dir, 'wt')); mock = await startMockProvider(); });
 afterEach(async () => { await mock.close(); await mcp?.close(); mcp = undefined; rmSync(dir, { recursive: true, force: true }); });
 
-function makeInit(over: { prompt?: string; options?: Record<string, unknown>; mcpServers?: InitMessage['mcpServers']; toolEnv?: Record<string, string>; maxTurns?: number; session?: string; mode?: 'auto' | 'restricted' | 'bypass'; permission?: Partial<InitMessage['run']['permission']>; compat?: InitMessage['provider']['compat'] } = {}): InitMessage {
+function makeInit(over: { prompt?: string; options?: Record<string, unknown>; mcpServers?: InitMessage['mcpServers']; toolEnv?: Record<string, string>; maxTurns?: number; session?: string; mode?: 'auto' | 'restricted' | 'bypass'; permission?: Partial<InitMessage['run']['permission']>; compat?: InitMessage['provider']['compat']; headers?: InitMessage['provider']['headers'] } = {}): InitMessage {
   return {
     type: 'init', v: 1,
     run: { runId: 'run-abc123', turnEpoch: 1, cwd: dir, worktree: { path: join(dir, 'wt'), branch: 'ac/x' }, limits: { timeoutMs: 600_000, ...(over.maxTurns ? { maxTurns: over.maxTurns } : {}) }, permission: { mode: over.mode ?? 'auto', ...over.permission }, model: 'mock-model', options: over.options ?? {}, spillDir: join(dir, 'spill') },
-    provider: { id: 'mock', baseUrl: mock.baseUrl, auth: 'bearer', headers: {}, apiKey: KEY, ...(over.compat ? { compat: over.compat } : {}) },
+    provider: { id: 'mock', baseUrl: mock.baseUrl, auth: 'bearer', headers: over.headers ?? {}, apiKey: KEY, ...(over.compat ? { compat: over.compat } : {}) },
     prompt: over.prompt ?? 'hello', systemPrompt: { text: 'HOME INSTRUCTIONS', mode: 'inject' },
     session: { path: join(dir, over.session ?? 's.jsonl'), id: 'sess1' }, mcpServers: over.mcpServers ?? {}, toolEnv: { PATH: process.env['PATH'] ?? '', ...over.toolEnv },
   };
@@ -520,5 +521,20 @@ describe('stdio MCP server environment', () => {
     expect(env['MY_ROLE_SECRET']).toBeUndefined();
     expect(env['PATH']).toBeDefined();
     expect(env['ENVFILE']).toBe(envfile);
+  });
+});
+
+describe('provider request headers (VS-631)', () => {
+  it('names the agent package version, not a hard-coded literal', () => {
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string };
+    expect(agentUserAgent()).toBe(`weave-agent/${pkg.version}`);
+  });
+  it('sends the default weave-agent User-Agent on a chat request, and a profile header replaces it with exactly one', async () => {
+    mock.script({ chunks: textChunks('one') }, { chunks: textChunks('two') });
+    await runAgentTurn(makeInit(), harness().io, new AbortController().signal, fast);
+    expect(mock.requests[0]!.headers['user-agent']).toBe(agentUserAgent());
+    await runAgentTurn(makeInit({ headers: { 'User-Agent': 'custom/1' } }), harness().io, new AbortController().signal, fast);
+    expect(mock.requests[1]!.headers['user-agent']).toBe('custom/1');
+    expect(Object.keys(mock.requests[1]!.headers).filter((k) => k.toLowerCase() === 'user-agent')).toHaveLength(1);
   });
 });

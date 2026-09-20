@@ -11,13 +11,14 @@ Run the built-in agent yourself in this terminal.
       --base-url <url>     an OpenAI-compatible endpoint; key from WEAVE_LLM_<PROVIDER>_KEY
       --preset <name>      provider preset for --base-url (default openai-compatible)
       --model <id>         model id, or provider/model
+      --context-window <n> the model's context window in tokens (when the endpoint does not say)
       --permission <mode>  auto (default), restricted (read-only) or bypass
       --workspace-dir <d>  read providers and MCP servers from this workspace
       --verbose            with -p, show tool calls and events on stderr
   -h, --help               this text
 `;
 
-const VALUE_FLAGS: Record<string, keyof ReplOptions> = { '-p': 'prompt', '--print': 'prompt', '--resume': 'resume', '--provider': 'provider', '--base-url': 'baseUrl', '--preset': 'preset', '--model': 'model', '--permission': 'permission', '--workspace-dir': 'workspaceDir' };
+const VALUE_FLAGS: Record<string, keyof ReplOptions> = { '-p': 'prompt', '--print': 'prompt', '--resume': 'resume', '--provider': 'provider', '--base-url': 'baseUrl', '--preset': 'preset', '--model': 'model', '--context-window': 'contextWindow', '--permission': 'permission', '--workspace-dir': 'workspaceDir' };
 
 /** Parse the REPL's own flags. Kept here (not in the CLI's commander) so the agent package can be started on its own, as the pty tests do. */
 export function parseReplArgs(argv: readonly string[]): { opts: ReplOptions } | { help: true } | { error: string } {

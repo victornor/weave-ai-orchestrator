@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { keyVarFor, loadReplConfig, resolveApiKey, resolveMcpRefs } from './config.js';
 
@@ -74,5 +74,85 @@ describe('keys', () => {
     const { server, missing } = resolveMcpRefs({ type: 'stdio', command: 'x', args: [], headers: {}, env: { A: '${HAVE}', B: '${GONE}' }, listTimeoutMs: 1, callTimeoutMs: 1, readOnly: false }, { env: { HAVE: 'v' }, workspace: null });
     expect(server.env).toEqual({ A: 'v', B: '' });
     expect(missing).toEqual(['GONE']);
+  });
+});
+
+describe('a literal apiKey in the user config (VS-631)', () => {
+  const agentFile = (): string => join(home, '.config', 'weave', 'agent.yaml');
+  const agentYaml = (key: string): string => `provider: local
+model: m1
+providers:
+  local:
+    baseUrl: http://127.0.0.1:1234/v1
+    apiKey: "${key}"
+    models:
+      m1: {}
+`;
+
+  it('loads a literal key from the user agent.yaml with no workspace, and it is the first source', () => {
+    mkdirSync(dirname(agentFile()), { recursive: true });
+    writeFileSync(agentFile(), agentYaml('sk-literal-123456'));
+    const c = loadReplConfig({ flags: {}, env: env({ WEAVE_LLM_LOCAL_KEY: 'sk-env-wins-not' }), cwd: dir, home });
+    expect(c.providers['local']!.apiKey).toBe('sk-literal-123456');
+    expect(resolveApiKey({ providerId: 'local', profile: c.providers['local']!, env: env({ WEAVE_LLM_LOCAL_KEY: 'sk-env-wins-not' }), workspace: null })).toMatchObject({ key: 'sk-literal-123456', source: 'config' });
+    expect(c.notes.join('\n')).not.toContain('sk-literal-123456');
+  });
+
+  it('resolves ${NAME} and {env:NAME} references from the environment', () => {
+    mkdirSync(dirname(agentFile()), { recursive: true });
+    for (const ref of ['${LOCAL_KEY}', '{env:LOCAL_KEY}']) {
+      writeFileSync(agentFile(), agentYaml(ref));
+      const e = env({ LOCAL_KEY: 'sk-ref-999' });
+      const c = loadReplConfig({ flags: {}, env: e, cwd: dir, home });
+      expect(resolveApiKey({ providerId: 'local', profile: c.providers['local']!, env: e, workspace: null })).toMatchObject({ key: 'sk-ref-999', source: 'config', name: 'LOCAL_KEY' });
+    }
+  });
+
+  it('rejects a literal apiKey in a workspace.yaml, naming the field and never the value', () => {
+    const wsd = join(dir, 'ws2'); mkdirSync(wsd, { recursive: true });
+    writeFileSync(join(wsd, 'workspace.yaml'), `version: 1
+id: t
+name: T
+ticketPrefix: TT
+providers:
+  bad:
+    baseUrl: http://127.0.0.1:1/v1
+    apiKey: sk-workspace-secret-777
+    models: { m1: {} }
+`);
+    const c = loadReplConfig({ flags: { provider: 'bad', model: 'm1' }, env: env(), cwd: wsd, home });
+    expect(c.providers['bad']).toBeUndefined();
+    const reason = c.providerErrors['bad']!;
+    expect(reason).toContain('workspace.yaml');
+    expect(reason).toContain('apiKey');
+    expect(reason).not.toContain('sk-workspace-secret-777');
+  });
+
+  it('says why a provider holding a key in apiKeySecret was skipped, without the value', () => {
+    mkdirSync(dirname(agentFile()), { recursive: true });
+    writeFileSync(agentFile(), `providers:
+  codeify:
+    baseUrl: http://127.0.0.1:1234/v1
+    apiKeySecret: sk-test-abc123
+    models: { m1: {} }
+`);
+    const c = loadReplConfig({ flags: {}, env: env(), cwd: dir, home });
+    const reason = c.providerErrors['codeify']!;
+    expect(reason).toContain('agent.yaml');
+    expect(reason).toContain('apiKeySecret');
+    expect(reason).toContain('WEAVE_LLM_CODEIFY_KEY');
+    expect(reason).not.toContain('sk-test');
+  });
+
+  it('warns once when the config is group-readable and holds a plaintext credential; a 0600 file is silent', () => {
+    mkdirSync(dirname(agentFile()), { recursive: true });
+    writeFileSync(agentFile(), agentYaml('sk-literal-123456'));
+    chmodSync(agentFile(), 0o644);
+    const c = loadReplConfig({ flags: {}, env: env(), cwd: dir, home });
+    expect(c.warnings.join('\n')).toContain('chmod 600');
+    expect(c.warnings.join('\n')).toContain('644');
+    expect(c.warnings.join('\n')).not.toContain('sk-literal-123456');
+    chmodSync(agentFile(), 0o600);
+    expect(loadReplConfig({ flags: {}, env: env(), cwd: dir, home }).warnings).toEqual([]);
   });
 });

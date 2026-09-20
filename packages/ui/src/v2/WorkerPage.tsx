@@ -5,7 +5,7 @@
  * the header actions, the session-handover band and a steer composer that shares its draft with the
  * ticket reply box. The transcript is VS-345's shared `WorkerFeed`, not a private run stream.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
 import { agentUiStatus, heldByHuman, projectLabel, type ThreadMessage } from '@weave-ai/shared';
 import { workerPauseReason } from '@weave-ai/render';
@@ -38,7 +38,8 @@ import { cents, tokens } from '../lib/format';
 import { cx } from '../lib/cx';
 import { V2Page } from './V2Page';
 import { WorkerFeed, useWorkerRun } from './WorkerFeed';
-import { LiveActivity } from '../components/LiveActivity';
+import { LiveTurnSection } from './LiveTurnSection';
+import { useLiveRunSettle, type LiveChatRun } from './ChatConversation';
 import { useRunEventStream } from '../api/runStream';
 
 const TABS = [
@@ -73,16 +74,34 @@ export function sessionAuthorLabel(
 /**
  * VS-495: a persistent session with no ticket has no ticket-comment history for `WorkerFeed` to
  * read — its conversation lives in its own thread instead, the same storage the weaver's own chat
- * uses. This renders that thread plainly: no live-run trace, no decision cards, no dispatch chips —
- * those are `ChatConversation`'s weaver/planner-only extras (see `PlanTab`), and a persistent
- * session's ticketless turns raise none of them.
+ * uses. This renders that thread plainly: no decision cards, no dispatch chips — those are
+ * `ChatConversation`'s weaver/planner-only extras (see `PlanTab`), and a persistent session's
+ * ticketless turns raise none of them.
+ *
+ * VS-602/VS-616: it does show the live turn — the streaming text, each tool call and result, and the
+ * activity row — through the same `LiveTurnSection` the chats use, because a persistent session is a
+ * direct conversation with that worker (captain, 2026-09-20). The turn is held on screen after it
+ * finishes until the thread carries its answer, so the delivered message replaces it with nothing
+ * duplicated.
  */
 function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }: { threadId: string; label: string; sessionAgentId: string; roleName: string }): React.ReactElement {
   const history = useThreadMessages(threadId);
-  // VS-602: a ticketless session has no ticket-comment feed, but its live turn must still show what
-  // it is doing rather than look idle. Follow the session agent's current run.
+  // Follow the session agent's current run, and hold it once it finishes so the answer can replace
+  // it in the same render rather than leaving a frame of empty space.
   const { run, live } = useWorkerRun(sessionAgentId);
   const stream = useRunEventStream(run?.id ?? null, { live });
+  const [liveRun, setLiveRun] = useState<LiveChatRun | null>(null);
+  useEffect(() => {
+    if (!run) return;
+    setLiveRun((cur) => (cur && cur.id === run.id ? { ...cur, running: live } : { id: run.id, running: live, fromStart: false }));
+  }, [run, live]);
+  const threadRunIds = useMemo(
+    () => new Set((history.data ?? []).map((m) => m.runId).filter((id): id is string => Boolean(id))),
+    [history.data],
+  );
+  // The same settle the weaver and planner chats use: clear once a message accounts for the run, or
+  // after the settle delay if none does (VS-616).
+  useLiveRunSettle(liveRun, setLiveRun, threadRunIds);
   if (history.isLoading) return <SkeletonRows rows={4} />;
   if (history.isError) return <ErrorState code="THREAD_UNREADABLE" message={history.error?.message ?? 'Could not load this conversation.'} />;
   const body = !history.data?.length ? (
@@ -110,18 +129,23 @@ function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }: { thre
       )}
     </ol>
   );
+  // The live turn renders below the delivered messages, where the next answer will land, and only
+  // while the thread has not yet accounted for its run — so the answer (or the run-id-carrying
+  // VS-596 system notice) replaces it in the same render, with no duplicated text.
+  const showLive = Boolean(liveRun && run && liveRun.id === run.id && !threadRunIds.has(run.id));
   return (
     <div className="flex flex-col gap-2">
-      {live && run ? (
-        <LiveActivity
+      {body}
+      {showLive && run ? (
+        <LiveTurnSection
           events={stream.events}
           partials={stream.partials}
           lastPartialAt={stream.lastPartialAt}
           partialSince={stream.partialSince}
           runtimeId={run.runtimeId}
+          runId={run.id}
         />
       ) : null}
-      {body}
     </div>
   );
 }

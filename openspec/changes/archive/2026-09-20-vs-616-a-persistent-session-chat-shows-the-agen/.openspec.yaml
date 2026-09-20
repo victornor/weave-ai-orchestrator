@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: A persistent session chat shows the agent's streamed text and tool calls
+  as they happen, like the worker live view

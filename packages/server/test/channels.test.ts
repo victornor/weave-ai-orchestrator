@@ -1,5 +1,6 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import type { ChannelAdapter, ChannelContext, InboundMessage, OutboundMessage, RejectedContact, SendResult } from '@weave-ai/channel-sdk';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ChannelAdapter, ChannelContext, ChannelProgress, InboundMessage, OutboundMessage, RejectedContact, SendResult } from '@weave-ai/channel-sdk';
+import type { WorkerActivitySummary } from '@weave-ai/shared';
 import { newId, nowIso } from '@weave-ai/db';
 import { ChannelManager, decisionCard } from '../src/channels.js';
 import { makeHarness, decision, type Harness } from './fakes.js';
@@ -44,6 +45,22 @@ function wireThreads(h: Harness): void {
       return { id, channelId: cid, ticketId: null, externalThreadId };
     },
     primaryThread: () => db.get<{ id: string }>('SELECT id FROM channel_threads WHERE is_primary = 1 LIMIT 1') ?? null,
+    list: (filter: { agentId?: string; ticketId?: string; channelKind?: string } = {}) => {
+      const where: string[] = ['c.workspace_id = ?'];
+      const params: string[] = [h.runtime.id];
+      if (filter.channelKind) { where.push('c.kind = ?'); params.push(filter.channelKind); }
+      if (filter.agentId) { where.push('t.agent_id = ?'); params.push(filter.agentId); }
+      if (filter.ticketId) { where.push('t.ticket_id = ?'); params.push(filter.ticketId); }
+      return db.all<Record<string, unknown>>(
+        `SELECT t.* FROM channel_threads t JOIN channels c ON c.id = t.channel_id WHERE ${where.join(' AND ')}`,
+        params,
+      ).map((r) => ({
+        id: String(r.id), channelId: String(r.channelId), agentId: String(r.agentId),
+        ticketId: (r.ticketId as string | null) ?? null, externalThreadId: (r.externalThreadId as string | null) ?? null,
+        externalUserId: (r.externalUserId as string | null) ?? null, humanLabel: (r.humanLabel as string | null) ?? null,
+        createdAt: String(r.createdAt ?? ''), lastMessageAt: (r.lastMessageAt as string | null) ?? null,
+      }));
+    },
     bindTicket: (_actor: unknown, threadId: string, ticketId: string | null) => {
       db.run('UPDATE channel_threads SET ticket_id = ? WHERE id = ?', [ticketId, threadId]);
       return { id: threadId, ticketId };
@@ -179,6 +196,132 @@ describe('ChannelManager', () => {
     const row = h.db.get<{ deliveryStatus: string; attempts: number }>('SELECT delivery_status, attempts FROM thread_messages WHERE direction = ?', ['outbound']);
     expect(row?.deliveryStatus).toBe('failed');
     expect(row?.attempts).toBe(5);
+  });
+});
+
+/** VS-604: the daemon turns a live worker into start/update/end progress on the channel threads bound to it. */
+describe('channel progress (VS-604)', () => {
+  interface ProgressAdapter extends ChannelAdapter {
+    progressCalls: ChannelProgress[];
+    sent: OutboundMessage[];
+    throwOnProgress: boolean;
+  }
+
+  function progressAdapter(kind: string): ProgressAdapter {
+    const state = {
+      kind,
+      capabilities: { supportsButtons: true, supportsMarkdown: true, supportsEdit: true, supportsThreads: false, supportsFiles: false, maxTextBytes: 4096 },
+      progressCalls: [] as ChannelProgress[],
+      sent: [] as OutboundMessage[],
+      throwOnProgress: false,
+      configSchema: () => ({}),
+      validateConfig: () => ({ ok: true as const }),
+      async start() { return { stop: async () => undefined }; },
+      async send(msg: OutboundMessage): Promise<SendResult> { state.sent.push(msg); return { delivered: true }; },
+      progress(p: ChannelProgress) {
+        if (state.throwOnProgress) throw new Error('progress boom');
+        state.progressCalls.push(p);
+      },
+    };
+    return state as unknown as ProgressAdapter;
+  }
+
+  function threadFor(h: Harness, kind: string, externalThreadId: string, agentId: string, ticketId: string | null = null): string {
+    const cid = h.db.get<{ id: string }>('SELECT id FROM channels WHERE workspace_id = ? AND kind = ?', [h.runtime.id, kind])!.id;
+    const id = newId();
+    h.db.run(
+      'INSERT INTO channel_threads (id, channel_id, agent_id, ticket_id, external_thread_id, external_user_id, human_label, is_primary, created_at) VALUES (?,?,?,?,?,?,?,?,?)',
+      [id, cid, agentId, ticketId, externalThreadId, 'u1', null, 0, nowIso()],
+    );
+    return id;
+  }
+
+  const live = (over: Partial<NonNullable<WorkerActivitySummary['live']>> = {}): NonNullable<WorkerActivitySummary['live']> => ({
+    state: 'tool', label: 'Running bash sleep 3; ls', since: new Date(Date.now() - 3000).toISOString(),
+    toolCount: 1, turnMs: 3000, sinceLastMs: 0, wholeStepsOnly: false, ...over,
+  });
+
+  const summary = (agentId: string, over: Partial<WorkerActivitySummary> = {}): WorkerActivitySummary =>
+    ({ agentId, ticketId: null, activity: null, live: live(), tests: null, ...over });
+
+  const emit = async (h: Harness, s: WorkerActivitySummary): Promise<void> => {
+    h.bus.broadcast('worker.activity', 'worker', s.agentId, s);
+    await new Promise((r) => setTimeout(r, 10));
+  };
+
+  async function boot(): Promise<{ h: Harness; adapter: ProgressAdapter; plain: ReturnType<typeof fakeAdapter> }> {
+    harness = makeHarness();
+    const adapter = progressAdapter('test');
+    const plain = fakeAdapter();
+    (plain as unknown as { kind: string }).kind = 'plain';
+    harness.runtime.ctx.registries.channels.set('test', adapter);
+    harness.runtime.ctx.registries.channels.set('plain', plain);
+    harness.runtime.ctx.config.channels = { test: {}, plain: {} };
+    harness.runtime.ctx.config.weaver.channels = ['test', 'plain'];
+    wireThreads(harness);
+    manager = new ChannelManager(harness.runtime.ctx, harness.runtime.services);
+    await manager.start();
+    return { h: harness, adapter, plain };
+  }
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('starts once, coalesces updates to one per 2 s, and ends when the live frame clears', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-20T10:00:00.000Z'));
+    const { h, adapter } = await boot();
+    threadFor(h, 'test', 'chat1', 'ag_conductor');
+
+    await emit(h, summary('ag_conductor'));
+    expect(adapter.progressCalls.map((c) => c.phase)).toEqual(['start']);
+    expect(adapter.progressCalls[0]).toMatchObject({ threadExternalId: 'chat1', text: 'Working · 3 s · 1 tool call' });
+
+    // A changed state one second later is dropped by the coalescer.
+    vi.setSystemTime(new Date('2026-09-20T10:00:01.000Z'));
+    await emit(h, summary('ag_conductor', { live: live({ state: 'waiting', label: 'Waiting for the model', since: '2026-09-20T10:00:00.500Z' }) }));
+    expect(adapter.progressCalls.map((c) => c.phase)).toEqual(['start']);
+
+    // Three seconds after the start, the same changed state becomes the update.
+    vi.setSystemTime(new Date('2026-09-20T10:00:03.000Z'));
+    await emit(h, summary('ag_conductor', { live: live({ state: 'waiting', label: 'Waiting for the model', since: '2026-09-20T10:00:00.500Z' }) }));
+    expect(adapter.progressCalls.map((c) => c.phase)).toEqual(['start', 'update']);
+    expect(adapter.progressCalls[1]!.text).toBe('Waiting for the model · 2 s · 1 tool call');
+
+    vi.setSystemTime(new Date('2026-09-20T10:00:04.000Z'));
+    await emit(h, summary('ag_conductor', { live: null }));
+    expect(adapter.progressCalls.map((c) => c.phase)).toEqual(['start', 'update', 'end']);
+  });
+
+  it('does nothing for a run with no bound channel thread', async () => {
+    const { h, adapter } = await boot();
+    await emit(h, summary('ag_nobody'));
+    expect(adapter.progressCalls).toEqual([]);
+  });
+
+  it('skips a channel whose adapter has no progress, without failing', async () => {
+    const { h, adapter } = await boot();
+    threadFor(h, 'plain', 'chat-plain', 'ag_plain');
+    await expect(emit(h, summary('ag_plain'))).resolves.toBeUndefined();
+    expect(adapter.progressCalls).toEqual([]);
+  });
+
+  it('follows a /talk ticket thread for the worker that owns the run', async () => {
+    const { h, adapter } = await boot();
+    threadFor(h, 'test', 'chat-talk', 'ag_conductor', 'tk_1');
+    await emit(h, summary('ag_worker', { ticketId: 'tk_1' }));
+    expect(adapter.progressCalls.map((c) => c.phase)).toEqual(['start']);
+    expect(adapter.progressCalls[0]!.threadExternalId).toBe('chat-talk');
+  });
+
+  it('logs and swallows a progress failure, leaving outbound delivery intact', async () => {
+    const { h, adapter } = await boot();
+    adapter.throwOnProgress = true;
+    const threadId = threadFor(h, 'test', 'chat1', 'ag_conductor');
+    await expect(emit(h, summary('ag_conductor'))).resolves.toBeUndefined();
+
+    await h.runtime.services.threads.outbound({ kind: 'agent', id: 'ag_1' }, threadId, 'shipped it');
+    await manager!.drain();
+    expect(adapter.sent.map((m) => m.message.text)).toContain('shipped it');
   });
 });
 

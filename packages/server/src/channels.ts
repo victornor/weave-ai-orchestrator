@@ -3,18 +3,21 @@
  * messages into `threads`, and drains outbound `thread_messages` rows with `delivery_status =
  * 'pending'` through the owning adapter with capability degradation and backoff.
  */
-import type { ChannelAdapter, CanonicalMessage, CanonicalPart, InboundMessage, RejectedContact, RunningChannel } from '@weave-ai/channel-sdk';
+import type { ChannelAdapter, ChannelProgress, CanonicalMessage, CanonicalPart, InboundMessage, RejectedContact, RunningChannel } from '@weave-ai/channel-sdk';
 import { degrade, textMessage } from '@weave-ai/channel-sdk';
 import type { Actor, CoreServices, SecretsService, WorkspaceContext } from '@weave-ai/core';
 import { getLogger } from '@weave-ai/core';
 import { newId, nowIso } from '@weave-ai/db';
 import { UNRESOLVED_ENV_REF } from '@weave-ai/channel-telegram';
-import { OcError, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, type Decision, type WorkspaceEvent } from '@weave-ai/shared';
+import { progressLine, type LiveTurnState } from '@weave-ai/render';
+import { OcError, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, type ChannelThread, type Decision, type WorkerActivitySummary, type WorkspaceEvent } from '@weave-ai/shared';
 
 const log = getLogger('channel');
 const SYSTEM: Actor = { kind: 'system', id: null };
 const MAX_ATTEMPTS = 5;
 const SWEEP_MS = 10_000;
+/** VS-604: at most one live-turn `progress('update')` per agent per window. */
+export const PROGRESS_UPDATE_MS = 2000;
 /** VS-135: a flood of distinct strangers costs at most this many rows; existing entries always update. */
 const PENDING_CAP = 50;
 /** VS-135: long enough that a weekly check of Settings still finds who is waiting, short enough that a leaked bot handle does not accumulate forever. */
@@ -51,6 +54,10 @@ interface PendingRow {
   externalThreadId: string | null; channelKind: string;
 }
 
+/** VS-604: a channel thread that can show a live turn, and the adapter that shows it. */
+interface ProgressTarget { adapter: ChannelAdapter; threadExternalId: string }
+interface ProgressState { targets: ProgressTarget[]; lastUpdateAt: number; lastText: string }
+
 export class ChannelManager {
   private running = new Map<string, RunningChannel>();
   private adapters = new Map<string, ChannelAdapter>();
@@ -59,6 +66,8 @@ export class ChannelManager {
   private draining = false;
   private stopped = false;
   private cardsSent = new Set<string>();
+  /** VS-604: one live-turn progress state per agent, present only while its run is live. */
+  private progress = new Map<string, ProgressState>();
   /** The effective config each kind was last (re)started with, so `workspace.updated` only restarts a kind whose config actually changed (VS-135). */
   private lastEffectiveConfig = new Map<string, string>();
 
@@ -135,6 +144,8 @@ export class ChannelManager {
     if (running) {
       this.running.delete(kind);
       this.adapters.delete(kind);
+      // A progress state holds the adapter it started against; a restart drops those targets.
+      this.progress.clear();
       await running.stop().catch((e: unknown) => log.warn({ err: e, kind }, 'channel stop failed during restart'));
     }
     await this.startOne(kind);
@@ -203,9 +214,86 @@ export class ChannelManager {
   private async onEvent(ev: WorkspaceEvent): Promise<void> {
     if (this.stopped) return;
     if (ev.type === 'thread.message') { await this.drain(); return; }
+    // VS-604: an ephemeral frame, absent from `EventType`; it is how a live run reaches a channel.
+    if ((ev.type as string) === 'worker.activity') { this.onWorkerActivity(ev.payload as WorkerActivitySummary); return; }
     if (ev.type === 'decision.created') await this.pushDecisionCard(ev.entityId);
     if (ev.type === 'decision.updated') await this.pushDecisionReviewFollowUp(ev.entityId);
     if (ev.type === 'workspace.updated') await this.reconcileChannels();
+  }
+
+  // ---------- progress (VS-604) ----------
+
+  /**
+   * The daemon's live-turn signal. `worker.activity` is already coalesced by the activity service and
+   * carries the same `liveTurn` fields the web row uses, so the channel manager does not re-derive a
+   * live state: a non-null `live` starts and updates progress, a null one ends it. Nothing here can fail
+   * a turn — every adapter call is fire-and-forget and logged.
+   */
+  private onWorkerActivity(summary: WorkerActivitySummary): void {
+    const agentId = summary.agentId;
+    const live = summary.live ?? null;
+    const existing = this.progress.get(agentId);
+    if (!live) {
+      if (!existing) return;
+      this.progress.delete(agentId);
+      for (const target of existing.targets) this.callProgress(target, { threadExternalId: target.threadExternalId, phase: 'end' });
+      return;
+    }
+    const text = progressLine({
+      state: live.state as LiveTurnState,
+      stateMs: Math.max(0, Date.now() - Date.parse(live.since)),
+      toolCount: live.toolCount,
+      wholeStepsOnly: live.wholeStepsOnly,
+    });
+    if (!existing) {
+      const targets = this.progressTargets(agentId, summary.ticketId);
+      if (!targets.length) return;
+      this.progress.set(agentId, { targets, lastUpdateAt: Date.now(), lastText: text });
+      for (const target of targets) this.callProgress(target, { threadExternalId: target.threadExternalId, phase: 'start', text });
+      return;
+    }
+    if (text === existing.lastText) return;
+    if (Date.now() - existing.lastUpdateAt < PROGRESS_UPDATE_MS) return;
+    existing.lastUpdateAt = Date.now();
+    existing.lastText = text;
+    for (const target of existing.targets) this.callProgress(target, { threadExternalId: target.threadExternalId, phase: 'update', text });
+  }
+
+  /**
+   * The channel threads bound to a live run: those owned by the run's agent, plus — because a `/talk`
+   * thread stays owned by the conductor while it is switched to a ticket — those bound to the run's
+   * ticket. Only kinds whose running adapter implements `progress` are kept.
+   */
+  private progressTargets(agentId: string, ticketId: string | null): ProgressTarget[] {
+    const seen = new Set<string>();
+    const targets: ProgressTarget[] = [];
+    const consider = (threads: ChannelThread[]): void => {
+      for (const thread of threads) {
+        if (!thread.externalThreadId || seen.has(thread.id)) continue;
+        seen.add(thread.id);
+        const kind = this.ctx.db.get<{ kind: string }>('SELECT kind FROM channels WHERE id = ?', [thread.channelId])?.kind;
+        const adapter = kind ? this.adapters.get(kind) : undefined;
+        if (!adapter?.progress) continue;
+        targets.push({ adapter, threadExternalId: thread.externalThreadId });
+      }
+    };
+    try {
+      consider(this.services.threads.list({ agentId }));
+      if (ticketId) consider(this.services.threads.list({ ticketId }));
+    } catch (e) {
+      log.warn({ err: e, agentId }, 'resolving channel progress targets failed');
+    }
+    return targets;
+  }
+
+  /** Fire a progress call without ever letting it reach the run. */
+  private callProgress(target: ProgressTarget, p: ChannelProgress): void {
+    try {
+      void Promise.resolve(target.adapter.progress!(p)).catch((e: unknown) =>
+        log.warn({ err: e, kind: target.adapter.kind, phase: p.phase }, 'channel progress failed'));
+    } catch (e) {
+      log.warn({ err: e, kind: target.adapter.kind, phase: p.phase }, 'channel progress failed');
+    }
   }
 
   /**

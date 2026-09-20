@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PermanentChannelError, RetryableChannelError, textMessage, type ChannelContext, type InboundMessage, type RejectedContact } from '@weave-ai/channel-sdk';
-import { createTelegramAdapter } from '../src/index.js';
+import { createTelegramAdapter, PROGRESS_DELETE_AFTER_MS } from '../src/index.js';
 import { mapTelegramError, isParseError } from '../src/api.js';
 import { parseUpdate } from '../src/updates.js';
 import { CallbackCodec } from '../src/callbacks.js';
@@ -340,5 +340,155 @@ describe('send', () => {
     const adapter = createTelegramAdapter({ fetchImpl: (() => { throw new Error('no network'); }) as unknown as typeof globalThis.fetch });
     const result = await adapter.send({ threadExternalId: '1', message: textMessage('x') });
     expect(result).toMatchObject({ delivered: false, error: { code: 'not_started', retryable: true } });
+  });
+});
+
+/** VS-604: a turn shows as a refreshed typing action and one placeholder message edited in place. */
+describe('progress', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  const fakeTimers = { toFake: ['setTimeout', 'clearTimeout', 'Date'] as Array<'setTimeout' | 'clearTimeout' | 'Date'> };
+
+  async function boot(responder: (method: string, body: Record<string, unknown>) => Reply): Promise<{
+    adapter: ReturnType<typeof createTelegramAdapter>;
+    ctx: ReturnType<typeof makeCtx>;
+    running: { stop(): Promise<void> };
+    calls: Call[];
+  }> {
+    const { fetchImpl, calls } = makeFetch(responder);
+    const adapter = createTelegramAdapter({ fetchImpl, sleep: async () => undefined });
+    const ctx = makeCtx({ botToken: 'T', allowedUserIds: [] });
+    const running = await adapter.start(ctx);
+    return { adapter, ctx, running, calls };
+  }
+
+  const ok = (method: string): Reply => (method === 'getUpdates' ? 'hang' : okBody({ message_id: 11 }));
+  const typing = (calls: Call[]): number => calls.filter((c) => c.method === 'sendChatAction').length;
+  const edits = (calls: Call[]): Call[] => calls.filter((c) => c.method === 'editMessageText');
+
+  it('keeps the typing action refreshed inside its expiry, and stops it at the turn end', async () => {
+    vi.useFakeTimers(fakeTimers);
+    const { adapter, running, calls } = await boot(ok);
+    await adapter.progress!({ threadExternalId: '5', phase: 'start', text: 'Working · 0 s' });
+    expect(typing(calls)).toBe(1);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(typing(calls)).toBe(2);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(typing(calls)).toBe(3);
+
+    await adapter.progress!({ threadExternalId: '5', phase: 'end' });
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(typing(calls)).toBe(3);
+    await running.stop();
+  });
+
+  it('sends one placeholder and coalesces edits to about one per 3 s', async () => {
+    vi.useFakeTimers(fakeTimers);
+    const { adapter, running, calls } = await boot(ok);
+    await adapter.progress!({ threadExternalId: '5', phase: 'start', text: 'Working · 0 s' });
+    expect(calls.filter((c) => c.method === 'sendMessage')).toHaveLength(1);
+
+    await adapter.progress!({ threadExternalId: '5', phase: 'update', text: 'Working · 1 s' });
+    expect(edits(calls)).toHaveLength(1);
+    await adapter.progress!({ threadExternalId: '5', phase: 'update', text: 'Working · 2 s' });
+    expect(edits(calls)).toHaveLength(1);
+    expect(calls.filter((c) => c.method === 'sendMessage')).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await adapter.progress!({ threadExternalId: '5', phase: 'update', text: 'Working · 5 s' });
+    expect(edits(calls)).toHaveLength(2);
+    expect(edits(calls)[1]!.body.text).toBe('Working · 5 s');
+    await running.stop();
+  });
+
+  it('honours a 429 retry_after and then sends the newest text, without failing the turn', async () => {
+    vi.useFakeTimers(fakeTimers);
+    let firstEdit = true;
+    const { adapter, ctx, running, calls } = await boot((method) => {
+      if (method === 'getUpdates') return 'hang';
+      if (method === 'editMessageText' && firstEdit) {
+        firstEdit = false;
+        return { status: 429, body: { ok: false, description: 'Too Many Requests', parameters: { retry_after: 5 } } };
+      }
+      return okBody({ message_id: 11 });
+    });
+    await adapter.progress!({ threadExternalId: '5', phase: 'start', text: 'Working · 0 s' });
+    await adapter.progress!({ threadExternalId: '5', phase: 'update', text: 'Working · 1 s' });
+    expect(edits(calls)).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await adapter.progress!({ threadExternalId: '5', phase: 'update', text: 'Working · 4 s' });
+    expect(edits(calls)).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(3000);
+    await adapter.progress!({ threadExternalId: '5', phase: 'update', text: 'Working · 7 s' });
+    expect(edits(calls)).toHaveLength(2);
+    expect(edits(calls)[1]!.body.text).toBe('Working · 7 s');
+    expect(ctx.logs.some((l) => l.msg.includes('rate limited'))).toBe(true);
+    await running.stop();
+  });
+
+  it('delivers the answer with sendMessage and never editMessageText, then deletes the placeholder', async () => {
+    const { adapter, running, calls } = await boot(ok);
+    await adapter.progress!({ threadExternalId: '5', phase: 'start', text: 'Working · 0 s' });
+    const result = await adapter.send({ threadExternalId: '5', message: textMessage('Done: shipped it.') });
+
+    expect(result).toEqual({ delivered: true, externalMessageId: '11' });
+    const sends = calls.filter((c) => c.method === 'sendMessage');
+    expect(sends).toHaveLength(2); // the placeholder and the answer
+    expect(String(sends[1]!.body.text)).toContain('shipped it');
+    // An edit raises no Telegram notification, so the answer is never delivered as one.
+    expect(edits(calls)).toHaveLength(0);
+    const del = calls.find((c) => c.method === 'deleteMessage');
+    expect(del?.body).toMatchObject({ chat_id: '5', message_id: 11 });
+    expect(calls.indexOf(del!)).toBeGreaterThan(calls.indexOf(sends[1]!)); // deleted after the answer
+    await running.stop();
+  });
+
+  it('sends a card or attachment answer normally and still deletes the placeholder', async () => {
+    const { adapter, running, calls } = await boot(ok);
+    await adapter.progress!({ threadExternalId: '5', phase: 'start', text: 'Working · 0 s' });
+    const result = await adapter.send({
+      threadExternalId: '5',
+      message: { text: '', parts: [{ type: 'file', name: 'r.md', mime: 'text/markdown', data: new Uint8Array([1]) }] },
+    });
+    expect(result.delivered).toBe(true);
+    expect(calls.some((c) => c.method === 'sendDocument')).toBe(true);
+    expect(edits(calls)).toHaveLength(0);
+    expect(calls.some((c) => c.method === 'deleteMessage')).toBe(true);
+    await running.stop();
+  });
+
+  it('ignores a late update once the answer has been sent', async () => {
+    const { adapter, running, calls } = await boot(ok);
+    await adapter.progress!({ threadExternalId: '5', phase: 'start', text: 'Working · 0 s' });
+    await adapter.send({ threadExternalId: '5', message: textMessage('Done.') });
+    const before = calls.length;
+    await adapter.progress!({ threadExternalId: '5', phase: 'update', text: 'Working · 9 s' });
+    expect(calls.length).toBe(before);
+    expect(edits(calls)).toHaveLength(0);
+    await running.stop();
+  });
+
+  it('deletes the placeholder when no answer follows', async () => {
+    vi.useFakeTimers(fakeTimers);
+    const { adapter, running, calls } = await boot(ok);
+    await adapter.progress!({ threadExternalId: '5', phase: 'start', text: 'Working · 0 s' });
+    await adapter.progress!({ threadExternalId: '5', phase: 'end' });
+
+    await vi.advanceTimersByTimeAsync(PROGRESS_DELETE_AFTER_MS);
+    const del = calls.find((c) => c.method === 'deleteMessage');
+    expect(del?.body).toMatchObject({ chat_id: '5', message_id: 11 });
+    await running.stop();
+  });
+
+  it('logs and swallows a progress failure, never throwing into the run', async () => {
+    const { adapter, ctx, running } = await boot((method) =>
+      (method === 'getUpdates' ? 'hang' : { status: 500, body: { ok: false, description: 'server blew up' } }));
+    await expect(adapter.progress!({ threadExternalId: '5', phase: 'start', text: 'Working · 0 s' })).resolves.toBeUndefined();
+    await expect(adapter.progress!({ threadExternalId: '5', phase: 'update', text: 'Working · 1 s' })).resolves.toBeUndefined();
+    await expect(adapter.progress!({ threadExternalId: '5', phase: 'end' })).resolves.toBeUndefined();
+    expect(ctx.logs.some((l) => l.level === 'warn')).toBe(true);
+    await running.stop();
   });
 });

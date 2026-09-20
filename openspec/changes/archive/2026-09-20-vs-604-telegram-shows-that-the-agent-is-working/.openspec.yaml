@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-20
+goal: "Telegram shows that the agent is working: a typing indicator and one
+  progress message that is edited in place"

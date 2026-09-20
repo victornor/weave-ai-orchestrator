@@ -142,6 +142,19 @@ export class TelegramClient {
     await this.call('sendChatAction', { chat_id: chatId, action }, signal ? { signal } : {});
   }
 
+  /** VS-604: edit one message in place — the channel's single progress affordance. */
+  async editMessageText(chatId: string, messageId: string, text: string, opts: { parseMode?: string; replyMarkup?: unknown; signal?: AbortSignal } = {}): Promise<void> {
+    const params: Record<string, unknown> = { chat_id: chatId, message_id: Number(messageId), text };
+    if (opts.parseMode) params['parse_mode'] = opts.parseMode;
+    if (opts.replyMarkup) params['reply_markup'] = opts.replyMarkup;
+    await this.call('editMessageText', params, opts.signal ? { signal: opts.signal } : {});
+  }
+
+  /** VS-604: remove a progress placeholder that no answer followed. */
+  async deleteMessage(chatId: string, messageId: string, signal?: AbortSignal): Promise<void> {
+    await this.call('deleteMessage', { chat_id: chatId, message_id: Number(messageId) }, signal ? { signal } : {});
+  }
+
   async answerCallbackQuery(id: string, text?: string, signal?: AbortSignal): Promise<void> {
     await this.call('answerCallbackQuery', { callback_query_id: id, ...(text ? { text } : {}) }, signal ? { signal } : {});
   }

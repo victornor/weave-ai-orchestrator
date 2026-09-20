@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent } from '@weave-ai/shared';
-import { clock, liveActivityLine, liveTurn, liveTurnLine } from './liveTurn.js';
+import { clock, liveActivityLine, liveTurn, liveTurnLine, progressLine } from './liveTurn.js';
 
 let seq = 0;
 const T0 = Date.parse('2026-09-19T12:00:00.000Z');
@@ -86,5 +86,28 @@ describe('liveActivityLine (VS-603)', () => {
     expect(liveActivityLine(done, [{ partId: 'p', kind: 'text', text: 'Hi' }], now(3), { partialOutput: 'full', partialSince: now(2.5) })).toBe('Writing · 0 s · 1 tool call');
     expect(liveActivityLine(done, [{ partId: 'p', kind: 'thinking', text: 'hm' }], now(3), { partialOutput: 'full' })).toBe('Thinking · 1 s · 1 tool call');
     expect(liveActivityLine(done, [], now(3), { partialOutput: 'none' })).toBe('Waiting for the model · 1 s · 1 tool call · whole steps only');
+  });
+});
+
+describe('progressLine (VS-604)', () => {
+  it('states a running tool generically, never the command or its target', () => {
+    const t = liveTurn([call('a', 1, 'sleep 3; ls')], [], now(4), { partialOutput: 'full' });
+    const line = progressLine(t);
+    expect(line).toBe('Working · 3 s · 1 tool call');
+    expect(line).not.toContain('bash');
+    expect(line).not.toContain('sleep');
+    expect(line).not.toContain('ls');
+  });
+
+  it('states the model wait, the writing and the thinking states with their seconds', () => {
+    const e = [call('a', 1), result('a', 2)];
+    expect(progressLine(liveTurn(e, [], now(6), { partialOutput: 'full' }))).toBe('Waiting for the model · 4 s · 1 tool call');
+    expect(progressLine(liveTurn(e, [{ partId: 'p', kind: 'text', text: 'Hi' }], now(3), { partialOutput: 'full', partialSince: now(2.5) }))).toBe('Writing · 0 s · 1 tool call');
+    expect(progressLine(liveTurn(e, [{ partId: 'p', kind: 'thinking', text: 'hm' }], now(3), { partialOutput: 'full' }))).toBe('Thinking · 1 s · 1 tool call');
+  });
+
+  it('states the turn start and the whole-steps-only notice, and omits a zero tool count', () => {
+    expect(progressLine(liveTurn([], [], now(2), {}))).toBe('Starting the turn · 0 s · whole steps only');
+    expect(progressLine(liveTurn([], [], now(2), { partialOutput: 'full' }))).toBe('Starting the turn · 0 s');
   });
 });

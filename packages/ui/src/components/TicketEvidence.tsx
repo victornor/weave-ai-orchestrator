@@ -2,7 +2,8 @@
  * The ticket's attached evidence, rendered inside an approval card (VS-555).
  *
  * Images show as previews and open at full size in an overlay that never navigates away from the
- * card; a non-image is not dropped — it shows its label, media type and size with a download. Newest
+ * card; a non-image is not dropped — video and audio play in place, a PDF or text opens in a tab, and
+ * anything else downloads with a visible error and retry (VS-597, `AttachmentItem`). Newest
  * first, each item labelled with when it was captured, and nothing at all when there is no evidence,
  * so a card for a ticket with no attachments is byte-for-byte what it was before.
  *
@@ -12,13 +13,10 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { TicketAttachment } from '@weave-ai/shared';
 import { ago } from '../lib/format';
+import { AttachmentItem } from './AttachmentItem';
 import { cx } from '../lib/cx';
 
 const isImage = (a: TicketAttachment): boolean => a.mediaType.startsWith('image/');
-
-function bytes(n: number): string {
-  return `${n.toLocaleString()} bytes`;
-}
 
 export interface TicketEvidenceProps {
   attachments: readonly TicketAttachment[] | null | undefined;
@@ -56,21 +54,9 @@ export function TicketEvidence({ attachments, className }: TicketEvidenceProps):
             <span className="truncate text-nano text-text-2">{a.label}</span>
             <span className="text-nano text-text-3">{ago(a.createdAt)}</span>
           </button>
-        ) : (
-          <a
-            key={a.id}
-            data-attachment={a.id}
-            href={a.url ?? undefined}
-            download={a.label}
-            title={a.label}
-            className="flex max-w-72 flex-col gap-0.5 rounded-r4 border border-line-2 px-2 py-1.5 hover:border-accent-edge"
-          >
-            <span className="truncate text-micro text-text-1">{a.label}</span>
-            <span className="ac-mono text-nano text-text-3">
-              {a.mediaType} · {bytes(a.byteSize)} · {ago(a.createdAt)} · download
-            </span>
-          </a>
-        ),
+        ) : a.url ? (
+          <AttachmentItem key={a.id} attachmentId={a.id} url={a.url} label={a.label} mediaType={a.mediaType} byteSize={a.byteSize} createdAt={a.createdAt} />
+        ) : null,
       )}
 
       {open && open.url

@@ -11,6 +11,7 @@
  */
 import { useMemo } from 'react';
 import type { ThreadMessage } from '@weave-ai/shared';
+import { AttachmentItem } from '../components/AttachmentItem';
 import { attachmentPartsOf, attachmentToView } from '@weave-ai/render';
 import { Markdown } from '../components/Markdown';
 import { clock, tokens } from '../lib/format';
@@ -79,12 +80,7 @@ export function AttachmentRows({ ws, threadId, parts }: { ws: string; threadId: 
         }
         return (
           <li key={a.id}>
-            <a href={href} download={a.filename} className="flex items-center gap-2 rounded-r4 border border-line-1 bg-bg-2 px-2 py-1.5 no-underline hover:bg-bg-3">
-              <AttachmentGlyph kind={a.kind} />
-              <span className="min-w-0 flex-1 truncate text-micro text-text-1">{a.filename}</span>
-              <span className="ac-mono flex-none text-nano text-text-3">{a.sizeLabel}</span>
-              <span className="v2-tag flex-none text-text-3">{a.kind}</span>
-            </a>
+            <AttachmentItem attachmentId={a.id} url={href} label={a.filename} mediaType={a.mediaType} byteSize={a.byteSize} />
           </li>
         );
       })}

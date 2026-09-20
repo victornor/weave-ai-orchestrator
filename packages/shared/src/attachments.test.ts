@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ATTACHMENT_MAX_IMAGE_BYTES, ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_MAX_TEXT_BYTES,
   ATTACHMENT_MAX_ZIP_INPUT_BYTES, ATTACHMENT_ZIP_MEDIA_TYPE,
-  attachmentContentDisposition, attachmentMaxBytes, guessOutboundMediaType, isAttachmentImageType, isAttachmentTextType, sniffImageType,
+  attachmentContentDisposition, attachmentDownloadName, attachmentMaxBytes, detectAttachmentMediaType, isAttachmentInlineSafe, guessOutboundMediaType, isAttachmentImageType, isAttachmentTextType, sniffImageType,
 } from './attachments.js';
 
 describe('attachment policy constants', () => {
@@ -88,5 +88,43 @@ describe('attachmentContentDisposition (VS-528)', () => {
   it('never leaves a raw non-ASCII byte or control character in the header value', () => {
     const value = attachmentContentDisposition('application/octet-stream', 'a"b\nrésumé.bin');
     expect(value).toMatch(/^[\x20-\x7e]*$/); // every byte is printable ASCII, so Node cannot throw
+  });
+});
+
+const MP4 = Buffer.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0, 0, 2, 0]);
+
+describe('detectAttachmentMediaType (VS-597)', () => {
+  it('refines octet-stream from the leading bytes, before the extension', () => {
+    expect(detectAttachmentMediaType({ stored: 'application/octet-stream', filename: 'x', bytes: MP4 })).toBe('video/mp4');
+    expect(detectAttachmentMediaType({ stored: 'application/octet-stream', filename: 'x.bin', bytes: Buffer.from('%PDF-1.7') })).toBe('application/pdf');
+    expect(detectAttachmentMediaType({ stored: 'application/octet-stream', bytes: Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 1]) })).toBe('video/webm');
+    expect(detectAttachmentMediaType({ stored: 'application/octet-stream', bytes: Buffer.from('PK\x03\x04') })).toBe('application/zip');
+    expect(detectAttachmentMediaType({ stored: 'application/octet-stream', bytes: Buffer.from('ID3\x04') })).toBe('audio/mpeg');
+  });
+  it('falls back to the extension and then to octet-stream', () => {
+    expect(detectAttachmentMediaType({ stored: 'application/octet-stream', filename: 'clip.MP4', bytes: Buffer.from('zz') })).toBe('video/mp4');
+    expect(detectAttachmentMediaType({ stored: 'application/octet-stream', filename: 'blob', bytes: Buffer.from('zz') })).toBe('application/octet-stream');
+  });
+  it('trusts a specific stored type and never produces html or svg', () => {
+    expect(detectAttachmentMediaType({ stored: 'text/plain', filename: 'a.mp4', bytes: MP4 })).toBe('text/plain');
+    expect(detectAttachmentMediaType({ stored: 'application/octet-stream', filename: 'a.html', bytes: Buffer.from('<svg xmlns>') })).toBe('application/octet-stream');
+    expect(isAttachmentInlineSafe('image/svg+xml')).toBe(false);
+    expect(isAttachmentInlineSafe('text/html')).toBe(false);
+  });
+});
+
+describe('attachmentDownloadName (VS-597)', () => {
+  it('adds the media type extension only when the label has none', () => {
+    expect(attachmentDownloadName('Rendered output (720p -> 1920x1080, audio kept)', 'video/mp4')).toBe('Rendered output (720p -> 1920x1080, audio kept).mp4');
+    expect(attachmentDownloadName('clip.mp4', 'video/mp4')).toBe('clip.mp4');
+    expect(attachmentDownloadName('notes', 'application/octet-stream')).toBe('notes');
+  });
+});
+
+describe('attachmentContentDisposition inline option (VS-597)', () => {
+  it('serves a safe type inline with a name when asked, and never svg', () => {
+    expect(attachmentContentDisposition('application/pdf', 'a.pdf', { inline: true })).toBe(`inline; filename="a.pdf"; filename*=UTF-8''a.pdf`);
+    expect(attachmentContentDisposition('image/svg+xml', 'a.svg', { inline: true })).toMatch(/^attachment;/);
+    expect(attachmentContentDisposition('application/zip', 'a.zip', { inline: true })).toMatch(/^attachment;/);
   });
 });

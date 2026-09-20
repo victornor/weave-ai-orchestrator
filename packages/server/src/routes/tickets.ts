@@ -6,6 +6,7 @@ import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
 import { requireOperator } from '../auth.js';
 import { ARTIFACT_CSP } from '../artifact-csp.js';
+import { serveBytes } from '../attachmentResponse.js';
 
 const CreateSchema = z.object({
   projectId: z.string().nullish(), kind: z.enum(TICKET_KINDS), title: z.string().min(1), description: z.string().default(''),
@@ -133,11 +134,7 @@ export function ticketRoutes(): Hono<AppEnv> {
     const s = c.get('ws').services;
     const attachment = s.tickets.attachment(c.req.param('id'), c.req.param('attachmentId'));
     const bytes = readAttachmentBytes(c.get('ws').ctx, attachment.storageKey);
-    return new Response(bytes as unknown as ArrayBuffer, { status: 200, headers: {
-      'content-type': attachment.mediaType, 'content-length': String(attachment.byteSize),
-      'content-disposition': attachment.mediaType.startsWith('image/') ? 'inline' : `attachment; filename="${attachment.label.replace(/["\\\r\n]/g, '_')}"`,
-      'x-content-type-options': 'nosniff',
-    }});
+    return serveBytes(c.req.raw, { bytes, mediaType: attachment.mediaType, filename: attachment.label, sha256: attachment.sha256 });
   });
 
   // VS-269: an artifact's raw HTML, verbatim, behind a sandboxing CSP. Human web session only —

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { attachmentPartsOf, attachmentToView } from './attachments.js';
+import { attachmentKindOf, attachmentPartsOf, attachmentToView } from './attachments.js';
 
 describe('attachmentPartsOf', () => {
   it('picks out well-formed attachment parts and drops anything else', () => {
@@ -29,5 +29,17 @@ describe('attachmentToView', () => {
 
   it('classifies a text document', () => {
     expect(attachmentToView({ type: 'attachment', id: 'a2', filename: 'notes.txt', mediaType: 'text/plain', byteSize: 42 }).kind).toBe('text');
+  });
+});
+
+describe('attachmentKindOf (VS-597)', () => {
+  it('classifies by media type, keeping svg out of the inline kinds', () => {
+    expect(attachmentKindOf('image/png')).toBe('image');
+    expect(attachmentKindOf('video/mp4')).toBe('video');
+    expect(attachmentKindOf('audio/mpeg')).toBe('audio');
+    expect(attachmentKindOf('application/pdf')).toBe('pdf');
+    expect(attachmentKindOf('text/markdown')).toBe('text');
+    expect(attachmentKindOf('image/svg+xml')).toBe('other');
+    expect(attachmentKindOf('application/zip')).toBe('other');
   });
 });

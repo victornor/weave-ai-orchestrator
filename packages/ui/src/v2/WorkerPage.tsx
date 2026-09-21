@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from '@tanstack/react-router';
-import { agentUiStatus, heldByHuman, projectLabel, type ThreadMessage } from '@weave-ai/shared';
+import { agentUiStatus, heldByHuman, projectLabel, sessionRetirementLabel, type ThreadMessage } from '@weave-ai/shared';
 import { workerPauseReason } from '@weave-ai/render';
 import {
   useCompactWorker,
@@ -15,7 +15,7 @@ import {
   useHandoverCommand,
   useModels,
   usePostThreadMessage,
-  useRuns,
+  useSessionRuns,
   useSetSessionOption,
   useStartHandover,
   useThreadMessages,
@@ -86,29 +86,43 @@ export function sessionAuthorLabel(
  * text, tool calls, diffs, file previews, commands), live while a turn runs and unchanged after.
  * The engine's delivered copy of a turn's final text is not rendered again — the transcript holds
  * those words — so nothing is shown twice.
+ *
+ * VS-656: the turns are the agent's own runs, fetched by agent and paged with the conversation, so a
+ * retired session's turns stay visible; where one session was retired and the next began, a boundary
+ * names the reason the model's memory was reset there.
  */
-export function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }: { threadId: string; label: string; sessionAgentId: string; roleName: string }): React.ReactElement {
+export function SessionThreadFeed({ threadId, label, sessionAgentId, roleName, sessions }: { threadId: string; label: string; sessionAgentId: string; roleName: string; sessions: readonly { id: string; retiredReason: string | null }[] }): React.ReactElement {
   const onTicket = useTicketLink();
   const history = useThreadMessages(threadId);
-  // The session's runs come from the same `useRuns` query `useWorkerRun` already makes, so this is a
-  // cache hit, not a second request. Bound them to the loaded conversation window so a long history
-  // does not mount a transcript per turn ever recorded.
-  const recent = useRuns({ limit: 200 });
+  // VS-656: the session's own runs, scoped to the agent and paged with the conversation. A shared
+  // workspace window let other agents' activity push a retired session's turns (and so their
+  // replies) out of view while the human's messages, which are thread rows, stayed.
+  const [pages, setPages] = useState(1);
+  useEffect(() => setPages(1), [sessionAgentId]);
+  const recent = useSessionRuns(sessionAgentId, pages);
   const messages = history.data ?? [];
-  const oldest = messages[0]?.createdAt;
   const runs = useMemo(
-    () => (oldest ? (recent.data ?? []).filter((r) => r.agentId === sessionAgentId && (r.startedAt ?? r.createdAt) >= oldest) : []),
-    [recent.data, sessionAgentId, oldest],
+    () => (recent.data ?? []).filter((r) => r.agentId === sessionAgentId),
+    [recent.data, sessionAgentId],
   );
   const { rows, answersByRun } = useMemo(
-    () => sessionConversationRows(messages, runs, sessionAgentId),
-    [messages, runs, sessionAgentId],
+    () => sessionConversationRows(messages, runs, sessionAgentId, sessions),
+    [messages, runs, sessionAgentId, sessions],
   );
   // VS-629: the conversation is the surface's one scroller, and it follows with the shared hook the
   // weaver chat uses — a streaming turn stays in view, a reader scrolling up is left where they are.
   // The signal is the row count; growth inside a row (a live turn's stream, a delivered answer) is
   // caught by the hook's own ResizeObserver pin, which is also what re-pins for the on-screen keyboard.
-  const stick = useStickToBottom([rows.length], { exact: true, ready: !history.isLoading });
+  // VS-656: reaching the top asks for the page before the loaded history and grows the run window with it.
+  const stick = useStickToBottom([rows.length], {
+    exact: true,
+    ready: !history.isLoading,
+    older: {
+      hasOlder: history.hasOlder,
+      isLoadingOlder: history.isLoadingOlder,
+      loadOlder: () => { setPages((p) => p + 1); history.loadOlder(); },
+    },
+  });
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={stick.scrollRef} data-v2-session-scroll className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -122,7 +136,14 @@ export function SessionThreadFeed({ threadId, label, sessionAgentId, roleName }:
           ) : (
             <ol aria-label={label} className="flex flex-col gap-3">
               {rows.map((row) =>
-                row.kind === 'turn' ? (
+                row.kind === 'boundary' ? (
+                  // VS-656: a new session began here, so the human can see the model's memory was reset.
+                  <li key={row.key} data-v2-session-boundary className="flex items-center gap-3 py-2">
+                    <span aria-hidden className="h-px flex-1 bg-line-1" />
+                    <span className="ac-mono text-center text-nano text-text-4">New session: {sessionRetirementLabel(row.reason)}</span>
+                    <span aria-hidden className="h-px flex-1 bg-line-1" />
+                  </li>
+                ) : row.kind === 'turn' ? (
                   <li key={row.key}>
                     <SessionTurn run={row.run} deliveredText={answersByRun.get(row.run.id) ?? null} onTicket={onTicket} />
                   </li>
@@ -392,6 +413,7 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
           label={`${agent.name} conversation`}
           sessionAgentId={agent.id}
           roleName={detail.data.role?.name ?? agent.name}
+          sessions={detail.data.sessions ?? []}
         />
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">

@@ -97,6 +97,13 @@ export function workerRoutes(): Hono<AppEnv> {
       sessionTurns: worker.kind === 'session' || worker.kind === 'weaver'
         ? (ws.ctx.db.get<{ n: number }>("SELECT turn_count AS n FROM agent_sessions WHERE agent_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1", [worker.id])?.n ?? null)
         : null,
+      // VS-656: every session this agent has had, oldest first, so the conversation surface can mark
+      // where a session was retired and name the reason the model's memory was reset there.
+      sessions: ws.ctx.db.all<{ id: string; status: string; turnCount: number; createdAt: string; updatedAt: string; retiredReason: string | null }>(
+        `SELECT id, status, turn_count AS turnCount, created_at AS createdAt, updated_at AS updatedAt, retired_reason AS retiredReason
+           FROM agent_sessions WHERE agent_id = ? ORDER BY created_at ASC`,
+        [worker.id],
+      ),
     });
   });
 

@@ -1,4 +1,5 @@
-/** VS-618: ordering a persistent session's raw conversation from its thread messages and its runs. */
+/** VS-618: ordering a persistent session's raw conversation from its thread messages and its runs.
+ *  VS-656: marking where a session was retired and the next began. */
 import { describe, expect, it } from 'vitest';
 import type { ThreadMessage } from '@weave-ai/shared';
 import { run } from '../test/factories';
@@ -58,5 +59,37 @@ describe('sessionConversationRows', () => {
     const { rows } = sessionConversationRows([message({ id: 'm1', createdAt: 't1' })], runs, 'a1');
 
     expect(rows.map((r) => r.key)).toEqual(['m:m1', 'r:run1']);
+  });
+
+  it('marks the boundary between two sessions with the retired session\'s stored reason (VS-656)', () => {
+    const runs = [
+      run({ id: 'run1', agentId: 'a1', sessionId: 's1', startedAt: 't1', createdAt: 't1' }),
+      run({ id: 'run2', agentId: 'a1', sessionId: 's1', startedAt: 't2', createdAt: 't2' }),
+      run({ id: 'run3', agentId: 'a1', sessionId: 's2', startedAt: 't3', createdAt: 't3' }),
+    ];
+    const sessions = [
+      { id: 's1', retiredReason: 'tool_contract' },
+      { id: 's2', retiredReason: null },
+    ];
+    const { rows } = sessionConversationRows([], runs, 'a1', sessions);
+
+    expect(rows.map((r) => r.kind)).toEqual(['turn', 'turn', 'boundary', 'turn']);
+    const boundary = rows[2]!;
+    expect(boundary.kind === 'boundary' && boundary.reason).toBe('tool_contract');
+    // The boundary sits immediately before the first run of the new session.
+    expect(rows[3]!.kind === 'turn' && rows[3]!.run.id).toBe('run3');
+  });
+
+  it('draws no boundary for a single session, and a reasonless one when none is stored (VS-656)', () => {
+    const single = sessionConversationRows([], [run({ id: 'r1', agentId: 'a1', sessionId: 's1', startedAt: 't1', createdAt: 't1' })], 'a1', [{ id: 's1', retiredReason: null }]);
+    expect(single.rows.map((r) => r.kind)).toEqual(['turn']);
+
+    const unknown = sessionConversationRows([], [
+      run({ id: 'r1', agentId: 'a1', sessionId: 's1', startedAt: 't1', createdAt: 't1' }),
+      run({ id: 'r2', agentId: 'a1', sessionId: 's2', startedAt: 't2', createdAt: 't2' }),
+    ], 'a1');
+    expect(unknown.rows.map((r) => r.kind)).toEqual(['turn', 'boundary', 'turn']);
+    const boundary = unknown.rows[1]!;
+    expect(boundary.kind === 'boundary' && boundary.reason).toBeNull();
   });
 });

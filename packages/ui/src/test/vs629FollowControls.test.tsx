@@ -42,6 +42,7 @@ vi.mock('../api/hooks', () => ({
   usePartialOutput: () => 'full',
   useThreadMessages: () => ({ data: [message], isLoading: false, isError: false, error: null }),
   useRuns: () => ({ data: [] }),
+  useSessionRuns: () => ({ data: [] }),
   useTicket: () => ({ data: { ticket: { id: 'tk1', identifier: 'ACME-42', kind: 'change', status: 'in_progress', title: 'A ticket' }, worker: null, project: null, role: null, blockers: [], attachments: [] }, isLoading: false, isError: false }),
   useTicketRuns: () => ({ data: [], isLoading: false }),
   useTicketComments: () => ({ data: [], isLoading: false }),
@@ -68,14 +69,14 @@ describe('the session conversation follow control (VS-629)', () => {
   it('offers jump-to-latest while paused and resumes on activation', () => {
     stick.atBottom = false;
     stick.unread = true;
-    render(<SessionThreadFeed threadId="th1" label="Conversation" sessionAgentId="a1" roleName="Backend Engineer" />);
+    render(<SessionThreadFeed threadId="th1" label="Conversation" sessionAgentId="a1" roleName="Backend Engineer" sessions={[]} />);
     const button = screen.getByRole('button', { name: 'Scroll to bottom — new messages' });
     fireEvent.click(button);
     expect(stick.toBottom).toHaveBeenCalledTimes(1);
   });
 
   it('shows no control while at the bottom', () => {
-    render(<SessionThreadFeed threadId="th1" label="Conversation" sessionAgentId="a1" roleName="Backend Engineer" />);
+    render(<SessionThreadFeed threadId="th1" label="Conversation" sessionAgentId="a1" roleName="Backend Engineer" sessions={[]} />);
     expect(screen.queryByRole('button', { name: /Scroll to bottom/ })).toBeNull();
   });
 });

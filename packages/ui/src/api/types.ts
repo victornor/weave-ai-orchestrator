@@ -439,6 +439,17 @@ export interface DocumentRevision {
 /** A worker's own pending scheduled wakeup (VS-317): when it asked to be woken, and why. */
 export interface WorkerScheduledWake { at: string | null; reason: string }
 
+/** VS-656: one of an agent's sessions, as `GET /workers/:id` reports it (oldest first). */
+export interface WorkerSession {
+  id: string;
+  status: string;
+  turnCount: number;
+  createdAt: string;
+  updatedAt: string;
+  /** Why this session was retired; null while active or on a row that predates the reason column. */
+  retiredReason: string | null;
+}
+
 export interface WorkerDetail {
   agent: Agent;
   ticket: Ticket | null;
@@ -462,6 +473,8 @@ export interface WorkerDetail {
   sessionResumable: boolean;
   /** VS-526: turns taken by the current session; 0 means a fresh conversation (e.g. after a runtime change). Null when the agent has no session. */
   sessionTurns?: number | null;
+  /** VS-656: every session this agent has had, oldest first, so the conversation can mark a retirement. */
+  sessions?: WorkerSession[];
   /** True while the session is being compacted out of band: wakes are held, so a message sent now is queued. */
   compacting: boolean;
   compactingError: string | null;

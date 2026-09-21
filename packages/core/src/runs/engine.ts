@@ -527,7 +527,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     const policy = sessionPolicyFor(agent, role);
     // VS-542: a changed tool contract retires the session so the runtime fetches the current schema.
     const turnSession = sessions.forTurn({ id: agent.id, kind: agent.kind, runtimeId: setting.runtime }, policy, ctx.toolContractHash?.(agent.kind));
-    promptOptions = { ...promptOptions, isFirstTurn: promptOptions.isFirstTurn ?? turnSession.isFirstTurn, sessionStale: turnSession.stale, turnEpoch: run.turnEpoch, runId };
+    promptOptions = { ...promptOptions, isFirstTurn: promptOptions.isFirstTurn ?? turnSession.isFirstTurn, sessionStale: turnSession.stale, sessionRetiredReason: turnSession.retireReason, turnEpoch: run.turnEpoch, runId };
     const prompt = await phase('build_prompt', async () => {
       const text = await buildTurnPrompt(ctx, deps, agent, wakes, promptOptions);
       writeFileSync(join(runDir, 'prompt.md'), text, 'utf8');

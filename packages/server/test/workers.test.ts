@@ -247,6 +247,38 @@ describe('GET /workers/:id — role (VS-553)', () => {
   });
 });
 
+describe('GET /workers/:id — sessions (VS-656)', () => {
+  it('returns the agent\'s sessions oldest-first with their retirement reason', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['get'] = () => worker({ id: 'ag_session', kind: 'session', ticketId: null });
+    h.db.run(
+      "INSERT INTO agents (id, workspace_id, kind, name, runtime_id, status, home_path, created_at, updated_at) VALUES ('ag_session', 'ws1', 'session', 'Backend Engineer — session', 'opencode', 'active', '/tmp/home', 't0', 't0')",
+    );
+    h.db.run(
+      "INSERT INTO agent_sessions (id, agent_id, runtime_id, status, turn_count, retired_reason, created_at, updated_at) VALUES ('s1','ag_session','opencode','stale',6,'tool_contract','2026-09-19T00:00:00.000Z','2026-09-21T00:00:00.000Z')",
+    );
+    h.db.run(
+      "INSERT INTO agent_sessions (id, agent_id, runtime_id, status, turn_count, created_at, updated_at) VALUES ('s2','ag_session','opencode','active',2,'2026-09-21T00:00:01.000Z','2026-09-21T00:05:00.000Z')",
+    );
+
+    const res = await fetch('/api/w/ws1/workers/ag_session', { headers: authed() });
+    expect(res.status).toBe(200);
+    const detail = await res.json();
+    expect(detail.sessions.map((s: { id: string }) => s.id)).toEqual(['s1', 's2']);
+    expect(detail.sessions[0]).toMatchObject({ status: 'stale', turnCount: 6, retiredReason: 'tool_contract' });
+    expect(detail.sessions[1]).toMatchObject({ status: 'active', turnCount: 2, retiredReason: null });
+  });
+
+  it('returns an empty list for an agent with no sessions', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['get'] = () => worker();
+
+    const res = await fetch('/api/w/ws1/workers/ag_1', { headers: authed() });
+    expect(res.status).toBe(200);
+    expect((await res.json()).sessions).toEqual([]);
+  });
+});
+
 describe('GET /workers — stalled (VS-498)', () => {
   function seedStallRow(h: Harness, agentId: string, ticketId: string): void {
     h.db.run(

@@ -27,6 +27,14 @@ export type RoleStatus = (typeof ROLE_STATUSES)[number];
 export const SESSION_POLICIES = ['per_ticket', 'fresh', 'persistent'] as const;
 export type SessionPolicy = (typeof SESSION_POLICIES)[number];
 
+/**
+ * VS-656: why a persistent session was retired. Recorded on `agent_sessions.retired_reason` when
+ * the session is retired, so the conversation surface can show a boundary naming the reason the
+ * model's memory was reset there.
+ */
+export const SESSION_RETIRED_REASONS = ['tool_contract', 'idle', 'runtime', 'reset'] as const;
+export type SessionRetiredReason = (typeof SESSION_RETIRED_REASONS)[number];
+
 export const TICKET_KINDS = ['change', 'task', 'scout', 'question', 'operational'] as const;
 export type TicketKind = (typeof TICKET_KINDS)[number];
 

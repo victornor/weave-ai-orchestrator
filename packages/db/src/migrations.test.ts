@@ -1834,4 +1834,34 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0061_session_retired_reason (VS-656)', () => {
+    it('adds a nullable retired_reason to agent_sessions and leaves existing rows without one', () => {
+      const path = join(dir, 'session-retired-reason.sqlite');
+      const before = openDbAsOf(path, '0060_plan_artifact_required.sql');
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      before.insert('agents', {
+        id: 'a-session', workspaceId: 'w1', kind: 'session', name: 'Session', runtimeId: 'opencode',
+        homePath: '/tmp/session', createdAt: 't0', updatedAt: 't0',
+      });
+      before.run(
+        `INSERT INTO agent_sessions (id, agent_id, runtime_id, status, turn_count, created_at, updated_at)
+         VALUES ('s-legacy', 'a-session', 'opencode', 'stale', 6, 't0', 't0')`);
+      before.close();
+
+      const db = openDb(path);
+      const cols = db.all<{ name: string }>('PRAGMA table_info(agent_sessions)').map((c) => c.name);
+      expect(cols).toContain('retired_reason');
+      expect(db.get<{ retiredReason: string | null }>('SELECT retired_reason AS retiredReason FROM agent_sessions WHERE id = ?', ['s-legacy']))
+        .toMatchObject({ retiredReason: null });
+      db.insert('agent_sessions', {
+        id: 's-new', agentId: 'a-session', runtimeId: 'opencode', status: 'active', turnCount: 0,
+        retiredReason: 'tool_contract', createdAt: 't0', updatedAt: 't0',
+      });
+      expect(db.get('SELECT retired_reason AS retiredReason FROM agent_sessions WHERE id = ?', ['s-new'])).toMatchObject({ retiredReason: 'tool_contract' });
+      db.close();
+    });
+  });
 });

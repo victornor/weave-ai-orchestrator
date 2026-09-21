@@ -1,5 +1,20 @@
 import type { AgentStatus, TicketStatus, UiStatus, DecisionStatus } from './enums.js';
 
+/**
+ * VS-656: the human sentence for why a persistent session was retired, shown where a new session
+ * begins. A known reason names its cause; an unknown or absent one still says the conversation
+ * restarted, because the boundary matters even when its cause is not on record.
+ */
+export function sessionRetirementLabel(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'tool_contract': return "the agent's tools changed at an upgrade";
+    case 'idle': return 'the conversation had been idle for a long time';
+    case 'runtime': return "the session's runtime changed";
+    case 'reset': return 'the session was reset';
+    default: return 'the conversation restarted here';
+  }
+}
+
 /** Map domain states onto the nine UI status tokens (design contract §2). */
 export function ticketUiStatus(status: TicketStatus, opts: { hasOpenHumanDecision?: boolean; workerStalled?: boolean } = {}): UiStatus {
   if (opts.hasOpenHumanDecision) return 'needs-you';

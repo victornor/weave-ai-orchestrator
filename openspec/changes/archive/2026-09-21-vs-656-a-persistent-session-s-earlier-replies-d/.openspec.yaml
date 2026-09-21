@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-21
+goal: A persistent session's earlier replies stay visible across a retired
+  session, the boundary is marked, and the new session is given the prior
+  conversation

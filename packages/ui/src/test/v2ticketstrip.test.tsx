@@ -2,6 +2,8 @@
  * VS-634: the strip under a weaver message — one chip per referenced ticket, capped at six with a
  * "+N more" that expands in place, its status updating without a remount, and its click going
  * through the link handler it is given.
+ * VS-637: each chip grows an expand control that toggles the inline feed panel independently of the
+ * body's open-ticket action.
  */
 import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -9,6 +11,11 @@ import type { Agent, UiStatus } from '@weave-ai/shared';
 import { V2TicketStrip, MAX_STRIP_CHIPS } from '../v2/ChatChips';
 import { agent, ticket } from './factories';
 import type { Dispatch } from '../lib/dispatch';
+
+vi.mock('../api/hooks', () => ({
+  useTicketComments: () => ({ data: [], isLoading: false }),
+  useTicketRuns: () => ({ data: [], isLoading: false }),
+}));
 
 function reference(identifier: string, over: { status?: UiStatus; worker?: Agent | null } = {}): Dispatch {
   return {
@@ -65,5 +72,44 @@ describe('V2TicketStrip (VS-634)', () => {
     const chips = container.querySelectorAll('[data-v2-dispatch-chip]');
     expect(chips[0]!.textContent).toContain('VS-1 title');
     expect(chips[1]!.textContent).toContain('Platform Engineer #552');
+  });
+});
+
+describe('V2DispatchChip expand control (VS-637)', () => {
+  it('keeps the expand control separate from the chip body', () => {
+    const open = vi.fn();
+    const { container } = render(<V2TicketStrip references={[reference('VS-1')]} projectIds={[]} open={open} />);
+    const body = container.querySelector('[data-v2-dispatch-chip]')!;
+    const chevron = container.querySelector('[data-v2-chip-expand]')!;
+    expect(chevron).not.toBe(body);
+    expect(body.contains(chevron)).toBe(false);
+    expect(chevron.contains(body)).toBe(false);
+    // Both sit in the one chip tag.
+    expect(chevron.closest('[data-v2-ticket-chip]')).toBe(body.closest('[data-v2-ticket-chip]'));
+  });
+
+  it('toggles the panel from the chevron and leaves the body opening the modal', () => {
+    const open = vi.fn();
+    const { container } = render(<V2TicketStrip references={[reference('VS-1')]} projectIds={[]} open={open} />);
+    const body = container.querySelector('[data-v2-dispatch-chip]')!;
+    const chevron = container.querySelector('[data-v2-chip-expand]')!;
+
+    expect(chevron.getAttribute('aria-expanded')).toBe('false');
+    expect(chevron.getAttribute('aria-label')).toBe('Show live status of VS-1');
+
+    fireEvent.click(body);
+    expect(open).toHaveBeenCalledWith('VS-1');
+    expect(chevron.getAttribute('aria-expanded')).toBe('false');
+    expect(container.querySelector('[data-ticket-chip-feed]')).toBeNull();
+
+    fireEvent.click(chevron);
+    expect(chevron.getAttribute('aria-expanded')).toBe('true');
+    expect(chevron.getAttribute('aria-label')).toBe('Hide live status of VS-1');
+    const panel = container.querySelector('[data-v2-chip-panel]')!;
+    expect(chevron.getAttribute('aria-controls')).toBe(panel.querySelector('[data-ticket-chip-feed]')!.id);
+
+    fireEvent.click(chevron);
+    expect(chevron.getAttribute('aria-expanded')).toBe('false');
+    expect(open).toHaveBeenCalledTimes(1);
   });
 });

@@ -538,3 +538,29 @@ describe('provider request headers (VS-631)', () => {
     expect(Object.keys(mock.requests[1]!.headers).filter((k) => k.toLowerCase() === 'user-agent')).toHaveLength(1);
   });
 });
+
+describe('text-form tool calls (VS-655)', () => {
+  const DSML = 'I will check.\n<｜｜DSML｜｜ invoke name="bash">\n<｜｜DSML｜｜ parameter name="command" string="true">touch ran.txt</｜｜DSML｜｜ parameter>\n</｜｜DSML｜｜ invoke>';
+  it('fails a DSML text reply with no structured calls as tooling, and runs nothing', async () => {
+    mock.script({ chunks: textChunks(DSML) });
+    const h = harness();
+    const r = await runAgentTurn(makeInit(), h.io, new AbortController().signal, fast);
+    expect(r.exitCode).toBe(1);
+    expect(r.error).toMatchObject({ code: 'text_tool_calls', family: 'tooling' });
+    expect(r.error?.message).toContain('wrote its tool calls as message text');
+    expect(h.types()).not.toContain('tool.call');
+    expect(existsSync(join(dir, 'wt', 'ran.txt'))).toBe(false);
+    expect(mock.requests).toHaveLength(1);
+  });
+  it('leaves ordinary prose about tool calls alone', async () => {
+    mock.script({ chunks: textChunks('I would use the bash tool to invoke it.') });
+    const r = await runAgentTurn(makeInit(), harness().io, new AbortController().signal, fast);
+    expect(r.exitCode).toBe(0);
+    expect(r.error).toBeUndefined();
+  });
+  it('fails at start, before any request, when the profile declares tools unsupported', async () => {
+    const r = await runAgentTurn(makeInit({ compat: { tools: { supported: false } } }), harness().io, new AbortController().signal, fast);
+    expect(r.error).toMatchObject({ code: 'tools_unsupported', family: 'tooling' });
+    expect(mock.requests).toHaveLength(0);
+  });
+});

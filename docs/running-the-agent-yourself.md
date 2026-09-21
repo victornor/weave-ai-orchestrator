@@ -92,6 +92,8 @@ Streamed text goes to stdout and the rendered events go to stderr. With `-p`, **
 
 A request that fails is one line. An endpoint that answers with an HTML page — a Cloudflare bot challenge, a gateway error — is reported as the status, the page title and a hint, never as the raw page; the built-in agent already sends `User-Agent: weave-agent/<version>` by default, and a provider profile's own `user-agent` header replaces it.
 
+A model that writes its tool calls as message text (DeepSeek's `<｜DSML｜invoke …>` form) instead of structured `tool_calls` fails the turn as `text_tool_calls` (family `tooling`); nothing in that text is run. A provider profile that sets `compat.tools.supported: false` fails a turn that needs tools at start as `tools_unsupported`, before any request. To capture the exchange for a suspect endpoint, run one turn on the weave runtime with the `debugWire` run option set to true (the REPL has no such flag); the redacted request and response land in the run's `wire` directory beside its spill directory.
+
 ## Not verified here
 
 Every automated check runs against the mock provider; a real turn from a real terminal on a real endpoint has to be run by a person (`weave repl -p "say hi" --provider … --base-url …`).

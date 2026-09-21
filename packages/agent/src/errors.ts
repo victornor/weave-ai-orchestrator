@@ -140,6 +140,8 @@ export const stopError = {
   budget: (used: number, cap: number): AgentError => ({ code: 'budget_exhausted', family: 'tooling', message: `Stopped: ${used} tokens used against a budget of ${cap}.` }),
   truncated: (): AgentError => ({ code: 'output_truncated', family: 'tooling', message: 'The model hit its output limit twice in one turn. Raise maxOutputTokens or split the task.' }),
   invalidCalls: (n: number): AgentError => ({ code: 'tool_call_invalid', family: 'tooling', message: `The model sent ${n} invalid tool calls in a row.` }),
+  textToolCalls: (provider: string, model: string): AgentError => ({ code: 'text_tool_calls', family: 'tooling', message: `${provider}/${model} wrote its tool calls as message text instead of structured tool calls, so nothing ran. The endpoint or model may not support native tool calling; set compat.tools.supported to false on the provider, or capture the exchange with the debugWire option.` }),
+  toolsUnsupported: (provider: string, model: string): AgentError => ({ code: 'tools_unsupported', family: 'tooling', message: `Provider ${provider} declares native tool calls unsupported (compat.tools.supported is false), so ${model} cannot run a turn that needs tools.` }),
   doom: (name: string): AgentError => ({ code: 'doom_loop', family: 'tooling', message: `Stopped: the model kept repeating the same ${name} call with the same result.` }),
 };
 

@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-21
+goal: "Built-in agent: a model that writes its tool calls as text must fail as tooling, not end an empty turn"

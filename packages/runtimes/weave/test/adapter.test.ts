@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -6,8 +7,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
 import { agentUserAgent } from '@weave-ai/agent';
 import { AC_ENV, ProviderProfileSchema, validateRuntimeOptions, type ProviderProfile } from '@weave-ai/shared';
-import type { RuntimeEvent, RuntimePartial, TurnHandle, TurnInput, TurnSink } from '@weave-ai/runtime-sdk';
-import { capabilities, createAdapter } from '../src/index.js';
+import type { RuntimeEvent, RuntimePartial, SpawnProc, TurnHandle, TurnInput, TurnSink } from '@weave-ai/runtime-sdk';
+import { capabilities, createAdapter, type WeaveAdapterOptions } from '../src/index.js';
 import { parseChildLine } from '../src/events.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -213,6 +214,65 @@ describe('a turn through a fake child', () => {
     expect(r.raw).toEqual(expect.arrayContaining(['not json at all', '[warn] careful {"a":1}']));
     expect(r.events.map((e) => e.type)).toContain('runtime.raw');
     expect(r.result.finalText).toBe('ok');
+  });
+});
+
+describe('containment gives the wrapper the user bus without widening the agent env (VS-640)', () => {
+  // A stand-in for systemd-run: it records what it was spawned with, strips the `env -u` keys the
+  // plan named, then runs the real fake agent — so the agent's own environment is observable.
+  const containedAdapter = (over: Partial<WeaveAdapterOptions> = {}) => {
+    const captures: Array<{ cmd: string; args: string[]; env: Record<string, string> }> = [];
+    const spawnProc: SpawnProc = ((cmd: string, args: string[], options: Parameters<typeof spawn>[2]) => {
+      const env = { ...((options?.env ?? {}) as Record<string, string>) };
+      captures.push({ cmd, args: [...args], env: { ...env } });
+      for (let i = 0; i < args.length - 1; i++) if (args[i] === '-u') delete env[args[i + 1]!];
+      const i = args.indexOf(process.execPath);
+      const real = i >= 0 ? args.slice(i) : [cmd, ...args];
+      return spawn(real[0]!, real.slice(1), { ...(options as object), env } as Parameters<typeof spawn>[2]);
+    }) as SpawnProc;
+    const adapter = createAdapter({ entry: FAKE, host: { providers: () => ({ test: profile }) }, spawnProc, scopeAvailable: true, ...over });
+    return { adapter, captures };
+  };
+
+  const bus = readFileSync(join(here, '..', '..', '..', 'runtime-sdk', 'src', 'fixtures', 'vs-639-systemd-run-user-bus.txt'), 'utf8').trim();
+
+  const withXdg = (fn: () => Promise<void>): Promise<void> => {
+    const prev = process.env['XDG_RUNTIME_DIR'];
+    process.env['XDG_RUNTIME_DIR'] = '/run/user/1000';
+    return fn().finally(() => { if (prev === undefined) delete process.env['XDG_RUNTIME_DIR']; else process.env['XDG_RUNTIME_DIR'] = prev; });
+  };
+
+  it('puts XDG_RUNTIME_DIR on systemd-run and strips it from the contained command', async () => {
+    await withXdg(async () => {
+      const { adapter, captures } = containedAdapter();
+      const r = await runFake('replay', { containment: { runId: 'run-1', memoryMb: 512 } }, adapter);
+      expect(r.result.exitCode).toBe(0);
+      expect(captures[0]!.cmd).toBe('systemd-run');
+      expect(captures[0]!.env['XDG_RUNTIME_DIR']).toBe('/run/user/1000');
+      const i = captures[0]!.args.indexOf('env');
+      expect(captures[0]!.args.slice(i, i + 3)).toEqual(['env', '-u', 'XDG_RUNTIME_DIR']);
+      const rec = record();
+      expect(rec.env).not.toHaveProperty('XDG_RUNTIME_DIR');
+      expect(Object.keys(rec.env).every((k) => ['PATH', 'HOME', 'LANG', 'TMPDIR'].includes(k))).toBe(true);
+    });
+  });
+
+  it('reports containment unavailable in plain words when the wrapper cannot start', async () => {
+    const script = `process.stderr.write(${JSON.stringify(bus + '\n')}); process.exit(1);`;
+    const spawnProc: SpawnProc = ((_cmd: string, _args: string[], options: Parameters<typeof spawn>[2]) => spawn(process.execPath, ['-e', script], options)) as SpawnProc;
+    const adapter = createAdapter({ entry: FAKE, host: { providers: () => ({ test: profile }) }, spawnProc, scopeAvailable: true });
+    const { result } = await runFake('replay', { containment: { runId: 'run-1', memoryMb: 512 } }, adapter);
+    expect(result.error).toMatchObject({ code: 'containment_unavailable', family: 'tooling' });
+    expect(result.error!.message).toMatch(/containment is unavailable/i);
+    expect(result.error!.message).not.toContain('user scope bus');
+  });
+
+  it('still classifies a genuine contained crash, and a SIGKILL, as before', async () => {
+    const { adapter } = containedAdapter();
+    const crash = await runFake('crash', { containment: { runId: 'run-1', memoryMb: 512 } }, adapter);
+    expect(crash.result).toMatchObject({ error: { code: 'agent_crashed', family: 'unknown' } });
+    const killed = await runFake('sigkill', { containment: { runId: 'run-1', memoryMb: 512 } }, adapter);
+    expect(killed.result).toMatchObject({ error: { code: 'killed', family: 'resource' } });
   });
 });
 

@@ -1,8 +1,9 @@
+import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { classifyError, resolveSpawnTarget, spawnLines } from './process.js';
+import { classifyError, planSpawn, resolveSpawnTarget, spawnLines, type SpawnProc } from './process.js';
 
 const fixture = (name: string): string =>
   readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', name), 'utf8').trim();
@@ -123,5 +124,53 @@ describe('resolveSpawnTarget (VS-579)', () => {
   it('spawns the command unchanged when containment is off or unavailable', () => {
     expect(resolveSpawnTarget('/usr/bin/claude', ['-p'], { runId: 'r1', memoryMb: 2048 }, false)).toEqual({ cmd: '/usr/bin/claude', args: ['-p'], scopeUnit: null });
     expect(resolveSpawnTarget('/usr/bin/claude', ['-p'], undefined, true)).toEqual({ cmd: '/usr/bin/claude', args: ['-p'], scopeUnit: null });
+  });
+});
+
+describe('planSpawn containment env (VS-640)', () => {
+  it('gives the wrapper the user-bus vars while the command env keeps only the allowlist', () => {
+    const env = { PATH: '/usr/bin', HOME: '/home/user', LANG: 'C.UTF-8', TMPDIR: '/tmp' };
+    const plan = planSpawn({
+      cmd: '/usr/bin/node', args: ['agent.js'], env, available: true, containment: { runId: 'r1', memoryMb: 2048 },
+      containmentEnv: { XDG_RUNTIME_DIR: '/run/user/1000', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus' },
+    });
+    expect(plan.cmd).toBe('systemd-run');
+    expect(plan.scopeUnit).toBe('ac-run-r1.scope');
+    expect(plan.env).toEqual({ ...env, XDG_RUNTIME_DIR: '/run/user/1000', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus' });
+    expect(plan.agentEnv).toEqual(env);
+    expect(plan.agentEnv).not.toHaveProperty('XDG_RUNTIME_DIR');
+    const i = plan.args.indexOf('env');
+    expect(plan.args.slice(i, i + 5)).toEqual(['env', '-u', 'XDG_RUNTIME_DIR', '-u', 'DBUS_SESSION_BUS_ADDRESS']);
+    expect(plan.args.slice(-2)).toEqual(['/usr/bin/node', 'agent.js']);
+  });
+
+  it('adds no bus variable and no env -u when containment is off or unavailable', () => {
+    const env = { PATH: '/usr/bin' };
+    const off = planSpawn({ cmd: '/usr/bin/node', args: ['a.js'], env, available: true, containmentEnv: { XDG_RUNTIME_DIR: '/run/user/1000' } });
+    expect(off).toEqual({ cmd: '/usr/bin/node', args: ['a.js'], env, agentEnv: env, scopeUnit: null });
+    const unavailable = planSpawn({ cmd: '/usr/bin/node', args: ['a.js'], env, available: false, containment: { runId: 'r', memoryMb: 1 }, containmentEnv: { XDG_RUNTIME_DIR: '/run/user/1000' } });
+    expect(unavailable).toEqual({ cmd: '/usr/bin/node', args: ['a.js'], env, agentEnv: env, scopeUnit: null });
+  });
+});
+
+describe('spawnLines containment failure (VS-640)', () => {
+  const bus = fixture('vs-639-systemd-run-user-bus.txt');
+  const script = `process.stderr.write(${JSON.stringify(bus + '\n')}); process.exit(1);`;
+  // A stand-in for systemd-run: it fails before starting the command, writing the real bus text.
+  const fakeSpawn: SpawnProc = ((_cmd: string, _args: string[], options: Parameters<typeof spawn>[2]) => spawn(process.execPath, ['-e', script], options)) as SpawnProc;
+  const opts = { cmd: process.execPath, args: ['-e', '0'], cwd: process.cwd(), env: process.env as Record<string, string>, timeoutMs: 5000, onLine: () => {}, containment: { runId: 'r1', memoryMb: 512 }, containmentEnv: { XDG_RUNTIME_DIR: '/run/user/1000' }, spawnProc: fakeSpawn };
+
+  it('flags a wrapped wrapper that could not reach the user manager', async () => {
+    const run = spawnLines({ ...opts, scopeAvailable: true });
+    const outcome = await run.done;
+    expect(run.scopeUnit).toBe('ac-run-r1.scope');
+    expect(outcome.containmentFailed).toBe(true);
+  });
+
+  it('does not flag the same stderr when nothing was wrapped', async () => {
+    const run = spawnLines({ ...opts, scopeAvailable: false });
+    const outcome = await run.done;
+    expect(run.scopeUnit).toBeNull();
+    expect(outcome.containmentFailed).toBe(false);
   });
 });

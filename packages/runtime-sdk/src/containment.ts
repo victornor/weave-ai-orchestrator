@@ -33,6 +33,30 @@ export interface ContainmentEnvironment {
 }
 
 export const WORKER_SLICE = 'app.slice';
+
+/** The variables `systemd-run` reads to find the user manager. Kept separate from the command's own environment (VS-640). */
+export const USER_BUS_ENV_KEYS = ['XDG_RUNTIME_DIR', 'DBUS_SESSION_BUS_ADDRESS'] as const;
+
+/**
+ * VS-640: the variables a `systemd-run` containment wrapper needs, picked from a source environment
+ * (the daemon's own). The wrapper process gets these; they are removed from the contained command, so
+ * a runtime whose child environment is an allowlist never inherits them.
+ */
+export function containmentWrapperEnv(source: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of USER_BUS_ENV_KEYS) if (source[k] !== undefined) out[k] = source[k]!;
+  return out;
+}
+
+/**
+ * VS-640: `systemd-run` could not reach the user manager, so the wrapper died before the command
+ * existed. The text is the exact failure captured from the VS-639 run
+ * (`src/fixtures/vs-639-systemd-run-user-bus.txt`); only the distinctive phrase is asserted on, so a
+ * wrapper that adds surrounding context still matches.
+ */
+export function containmentStartFailure(stderr: string): boolean {
+  return stderr.includes('Failed to connect to user scope bus');
+}
 /**
  * VS-388's guard variable, mirrored here: a test run must never reach the host's service manager.
  * `stopScope`/`readScopeMemoryPeak` shell out to `systemctl`, so they refuse while it is set, and

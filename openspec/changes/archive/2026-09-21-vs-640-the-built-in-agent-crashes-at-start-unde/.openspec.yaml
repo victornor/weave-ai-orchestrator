@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-21
+goal: The weave runtime's contained worker spawn must give the systemd-run
+  wrapper the user-bus env it needs without widening the agent's env, and report
+  a plain containment-unavailable failure when the wrapper cannot start

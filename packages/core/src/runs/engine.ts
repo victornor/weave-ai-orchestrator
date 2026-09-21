@@ -27,6 +27,7 @@ import { PartialBuffer } from './partials.js';
 import { effectiveModels, modelSettingFor, modelsFor } from '../models/resolve.js';
 import { runTokenSecret, signRunToken } from './runtoken.js';
 import { effectiveMcpServers, effectiveProviders, scopedSecretValue } from '../scoped.js';
+import { daemonSecretStore } from '../secrets/daemon.js';
 
 /**
  * An interactive session's agent's first turn (VS-101, VS-462): read the ticket and its comments,
@@ -199,17 +200,17 @@ function roleSecretsEnv(ctx: WorkspaceContext, deps: () => CoreServices, role: R
 }
 
 /**
- * VS-619: the value of the provider secret the run's model names, held in the run's own workspace
- * store — for redaction only. The adapter reads the same secret through `RuntimeHost.providerKey`;
- * the engine never passes it to the child. `undefined` when the model names no configured provider,
- * its profile carries no `apiKeySecret`, or the store holds no value.
+ * VS-619 / VS-654: the value of the provider secret the run's model names, held in the daemon
+ * secret store — for redaction only. The adapter reads the same secret through
+ * `RuntimeHost.providerKey`; the engine never passes it to the child. `undefined` when the model
+ * names no daemon provider, its profile carries no `apiKeySecret`, or the store holds no value.
  */
-function providerStoreKey(ctx: WorkspaceContext, deps: () => CoreServices, model: string | null | undefined): string | undefined {
+function providerStoreKey(ctx: WorkspaceContext, model: string | null | undefined): string | undefined {
   const providerId = model?.split('/')[0];
   if (!providerId || providerId === model) return undefined;
   const profile = effectiveProviders(ctx)[providerId];
   if (!profile?.apiKeySecret) return undefined;
-  return scopedSecretValue(ctx, (n) => deps().secrets.value(n), profile.apiKeySecret) ?? undefined;
+  return daemonSecretStore(ctx.daemonConfigDir)?.get(profile.apiKeySecret) ?? undefined;
 }
 
 function classifyLiveness(status: Run['status'], report: RunReport | null, ticketStatus: string | null): RunLiveness {
@@ -572,7 +573,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     const secrets = roleSecretsEnv(ctx, deps, role);
     // VS-619: a key the adapter will read from the workspace store is redacted exactly as a
     // role-attached secret is, though it never travels through `env`.
-    const storeKey = providerStoreKey(ctx, deps, setting.model);
+    const storeKey = providerStoreKey(ctx, setting.model);
     redactionSecrets = [token, ...secrets.values, ...(storeKey ? [storeKey] : []), ...mcpSecretValues];
     redact = makeRedactor(redactionSecrets);
     const worktreeIdentity = agent.worktreePath ? (await readGitIdentity(agent.worktreePath)).identity : null;

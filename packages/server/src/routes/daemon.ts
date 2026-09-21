@@ -112,8 +112,8 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
   app.get('/runtimes/:id/models', async (c) => {
     const adapter = deps.registries.runtimes.get(c.req.param('id'));
     if (!adapter) throw new OcError('not_found', `runtime ${c.req.param('id')} is not registered`);
-    // VS-619: a runtime whose catalog is workspace config (`weave`) scopes to the named workspace,
-    // so a second workspace defining the same provider id never sees or sends another's key.
+    // VS-619 / VS-654: `workspace` is still accepted and validated, but the `weave` runtime's
+    // providers are daemon-only now, so it no longer selects a catalog.
     const workspace = c.req.query('workspace');
     if (workspace !== undefined && workspace !== '') {
       if (!deps.workspaces.get(workspace)) throw new OcError('not_found', `workspace ${workspace} is not loaded`);

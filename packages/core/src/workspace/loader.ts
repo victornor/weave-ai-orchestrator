@@ -27,6 +27,9 @@ import type { LoadOptions, WorkspaceLoader } from './index.js';
 
 export const WORKSPACE_FILE = 'workspace.yaml';
 
+/** VS-654: workspaces whose ignored legacy provider block has already been reported this process. */
+const legacyProviderNoticeShown = new Set<string>();
+
 // ---------- config dir (daemon-level) ----------
 
 /** VS-258: collapsed into `@weave-ai/release`, the one place old/new resolution happens. */
@@ -229,6 +232,14 @@ class Loader implements WorkspaceLoader {
 
     const log = getLogger('daemon', { workspace: config.id });
     if (missing.length) log.warn({ missing }, 'workspace.yaml references environment variables that are not set');
+
+    // VS-654: providers are daemon-only. A legacy `providers`/`disabledProviders` block is retained
+    // on disk (never deleted) but resolved by nothing; report it once per workspace for the process.
+    if ((Object.keys(config.providers).length > 0 || config.disabledProviders.length > 0) && !legacyProviderNoticeShown.has(config.id)) {
+      legacyProviderNoticeShown.add(config.id);
+      log.warn({ providers: Object.keys(config.providers), disabled: config.disabledProviders },
+        'workspace provider entries are ignored: providers are daemon-only now, configure them in the daemon settings (Settings → Providers)');
+    }
 
     ensureLayout(root, opts.stateDir);
     const paths = opts.stateDir

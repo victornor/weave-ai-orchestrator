@@ -17,7 +17,7 @@ import type { Db } from '@weave-ai/db';
 import {
   createRegistries, createCore, createAuthService, createIncidentsService, getLogger, initLogger, workspaceLoader,
   stageWorkspaceImport, importTickets, ensureHostToolPath, startHostToolProbe,
-  effectiveProviders, daemonSecretStore, resolveScopedSecret,
+  daemonSecretStore,
   isNamespacedToolName, PLUGIN_ID_RE, PluginDataService, ARTIFACT_KIT_CSS, generateV2PluginCss,
   type Registries, type WorkspaceContext, type PluginRuntime,
 } from '@weave-ai/core';
@@ -379,37 +379,19 @@ function makeAdmin(
 // ---------- plugins and built-in adapters ----------
 
 /**
- * VS-619: the provider profiles and keys a runtime asks for. With a `workspaceId` the answer comes
- * from that workspace alone, so a run never uses another workspace's profile or key — a named
- * workspace that does not define the id resolves nothing. Without one it keeps the aggregate (first
- * workspace defining an id wins) for the callers that have no run, such as the runtime catalog.
+ * VS-619 / VS-654: the provider profiles and keys a runtime asks for. Providers are daemon-only,
+ * so both answer from `daemon.yaml` and the daemon secret store; the optional workspace id on the
+ * host surface SHALL NOT select a profile or a key, and a legacy workspace provider block changes
+ * nothing. `workspaces` is kept in the signature so the call sites (and the surface the runtime SDK
+ * declares) do not churn.
  */
 export function createRuntimeHost(workspaces: Map<string, WorkspaceRuntime>, configDir?: string, daemon?: DaemonConfig): RuntimeHost {
-  // VS-633: a run sees the daemon's providers with its own workspace's entries replacing or adding
-  // to them; the aggregate (no run) is the daemon's set plus the first workspace defining an extra id.
-  const providers = (workspaceId?: string): Record<string, ProviderProfile> => {
-    if (workspaceId !== undefined) {
-      const ws = workspaces.get(workspaceId);
-      return ws ? effectiveProviders({ config: ws.ctx.config, daemon: daemon ?? ws.ctx.daemon, daemonConfigDir: configDir ?? '' }) : {};
-    }
-    const out: Record<string, ProviderProfile> = { ...(daemon?.providers ?? {}) };
-    for (const ws of workspaces.values()) for (const [id, profile] of Object.entries(ws.ctx.config.providers ?? {})) out[id] ??= profile;
-    return out;
-  };
-  const providerKey = (providerId: string, workspaceId?: string): string | undefined => {
-    const daemonStore = daemonSecretStore(configDir ?? '');
-    const keyFrom = (profile: ProviderProfile | undefined, workspaceValue: (n: string) => string | null): string | undefined =>
-      profile?.apiKeySecret ? resolveScopedSecret(workspaceValue, daemonStore, profile.apiKeySecret) ?? undefined : undefined;
-    if (workspaceId !== undefined) {
-      const ws = workspaces.get(workspaceId);
-      if (!ws) return undefined;
-      return keyFrom(providers(workspaceId)[providerId], (n) => ws.services.secrets.value(n));
-    }
-    for (const ws of workspaces.values()) {
-      const profile = ws.ctx.config.providers?.[providerId];
-      if (profile) return keyFrom(profile, (n) => ws.services.secrets.value(n));
-    }
-    return keyFrom(daemon?.providers?.[providerId], () => null);
+  void workspaces;
+  const providers = (_workspaceId?: string): Record<string, ProviderProfile> => ({ ...(daemon?.providers ?? {}) });
+  const providerKey = (providerId: string, _workspaceId?: string): string | undefined => {
+    const profile = daemon?.providers?.[providerId];
+    if (!profile?.apiKeySecret) return undefined;
+    return daemonSecretStore(configDir ?? '')?.get(profile.apiKeySecret) ?? undefined;
   };
   return { providers, providerKey, ...(configDir ? { configDir } : {}) };
 }

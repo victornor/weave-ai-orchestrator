@@ -33,12 +33,13 @@ describe('loadReplConfig', () => {
     expect(c).toMatchObject({ providers: {}, provider: null, model: null, permission: 'auto', workspace: null });
   });
 
-  it('reads the nearest workspace from a subdirectory: its provider, first model and MCP server', () => {
+  it('reads the nearest workspace from a subdirectory: its MCP server, ignoring its provider block (VS-654)', () => {
     writeFileSync(join(ws, 'workspace.yaml'), wsYaml);
     const c = loadReplConfig({ flags: {}, env: env(), cwd: join(ws, 'sub'), home });
     expect(c.workspace?.root).toBe(ws);
-    expect(c.provider).toBe('local');
-    expect(c.model).toBe('m1');
+    // VS-654: providers are daemon-only, so the workspace's `providers` block is ignored.
+    expect(c.providers).toEqual({});
+    expect(c.provider).toBeNull();
     expect(Object.keys(c.mcpServers)).toEqual(['files']);
     expect(c.sources.some((s) => s.startsWith('workspace '))).toBe(true);
   });
@@ -108,7 +109,7 @@ providers:
     }
   });
 
-  it('rejects a literal apiKey in a workspace.yaml, naming the field and never the value', () => {
+  it('ignores a literal apiKey in a workspace.yaml along with the whole workspace provider block', () => {
     const wsd = join(dir, 'ws2'); mkdirSync(wsd, { recursive: true });
     writeFileSync(join(wsd, 'workspace.yaml'), `version: 1
 id: t
@@ -121,11 +122,10 @@ providers:
     models: { m1: {} }
 `);
     const c = loadReplConfig({ flags: { provider: 'bad', model: 'm1' }, env: env(), cwd: wsd, home });
+    // VS-654: the workspace provider block is not read at all, so its literal key is never seen.
     expect(c.providers['bad']).toBeUndefined();
-    const reason = c.providerErrors['bad']!;
-    expect(reason).toContain('workspace.yaml');
-    expect(reason).toContain('apiKey');
-    expect(reason).not.toContain('sk-workspace-secret-777');
+    expect(c.providerErrors['bad']).toBeUndefined();
+    expect(JSON.stringify(c)).not.toContain('sk-workspace-secret-777');
   });
 
   it('says why a provider holding a key in apiKeySecret was skipped, without the value', () => {
@@ -203,7 +203,7 @@ mcpServers:
     expect(Object.keys(c.providers).sort()).toEqual(['other', 'shared']);
   });
 
-  it('lets the user file and then a workspace replace a daemon entry whole, not merge it', () => {
+  it('lets the user file replace a daemon entry whole, and ignores a workspace provider block', () => {
     writeDaemon(daemonYaml);
     writeFileSync(join(daemonDir(), 'agent.yaml'), 'providers:\n  shared:\n    baseUrl: http://127.0.0.1:9001/v1\n    models:\n      mine: {}\n');
     let c = loadReplConfig({ flags: {}, env: env(), cwd: dir, home });
@@ -211,16 +211,19 @@ mcpServers:
     expect(c.providers['shared']!.apiKeySecret).toBeUndefined();
     writeFileSync(join(ws, 'workspace.yaml'), `version: 1\nid: acme\nname: Acme\nticketPrefix: AC\nproviders:\n  shared:\n    baseUrl: http://127.0.0.1:9002/v1\n    models:\n      theirs: {}\n`);
     c = loadReplConfig({ flags: {}, env: env(), cwd: ws, home });
-    expect(c.providers['shared']).toMatchObject({ baseUrl: 'http://127.0.0.1:9002/v1', models: { theirs: {} } });
+    // VS-654: the workspace `providers` block is ignored; the user file's value stands.
+    expect(c.providers['shared']).toMatchObject({ baseUrl: 'http://127.0.0.1:9001/v1', models: { mine: {} } });
     expect(c.providers['other']).toBeDefined();
   });
 
-  it('drops a daemon entry the workspace disables, unless the workspace defines its own', () => {
+  it('ignores a workspace disabledProviders for a daemon provider, but still drops a disabled daemon MCP server', () => {
     writeDaemon(daemonYaml);
     writeFileSync(join(ws, 'workspace.yaml'), `version: 1\nid: acme\nname: Acme\nticketPrefix: AC\ndisabledProviders: [other, shared]\ndisabledMcpServers: [docs]\nproviders:\n  shared:\n    baseUrl: http://127.0.0.1:9002/v1\n    models:\n      theirs: {}\n`);
     const c = loadReplConfig({ flags: {}, env: env(), cwd: ws, home });
-    expect(Object.keys(c.providers)).toEqual(['shared']);
-    expect(c.providers['shared']!.baseUrl).toBe('http://127.0.0.1:9002/v1');
+    // VS-654: providers ignore the workspace layer, so both daemon providers remain.
+    expect(Object.keys(c.providers).sort()).toEqual(['other', 'shared']);
+    expect(c.providers['shared']!.baseUrl).toBe('http://127.0.0.1:4000/v1');
+    // MCP servers keep the workspace layer: a disabled daemon server is dropped.
     expect(c.mcpServers['docs']).toBeUndefined();
   });
 

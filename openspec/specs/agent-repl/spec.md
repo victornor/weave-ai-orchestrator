@@ -21,23 +21,33 @@ An interactive terminal client for Weave AI's built-in agent, so a person can ru
 - **THEN** `weave-agent` exists next to `weave` afterwards, pointing at the new release's REPL entry
 
 ### Requirement: Standalone operation and configuration sources
-The REPL SHALL run with no daemon and no workspace, from any directory. Provider profiles SHALL come from, in order, `--provider`/`--base-url` flags, the nearest workspace's `providers`, then the user's `agent.yaml` (`$XDG_CONFIG_HOME/weave/agent.yaml`, else `~/.config/weave/agent.yaml`). A provider key SHALL be resolved first hit wins: the profile's own `apiKey` (a literal, or a `${NAME}`/`{env:NAME}` reference read from the environment), then the environment name in the profile's `apiKeySecret` or `WEAVE_LLM_<PROVIDER>_KEY`, then the workspace secret store read locally, else, on a terminal, a hidden in-memory prompt. No `--api-key` flag SHALL exist. A literal `apiKey` SHALL be honoured only in the user's own `agent.yaml`; the same field in a workspace's `workspace.yaml` SHALL be rejected with a one-line message naming the field and telling the person to use `apiKeySecret` or the environment. A key SHALL NOT appear in argv, output, logs, `--debug` output, session files, the bash tool's environment or any error or validation message; only the user's own `agent.yaml` may hold a literal key.
+
+The REPL SHALL run with no daemon and no workspace, from any directory. Provider profiles SHALL come from, in order, `--provider`/`--base-url` flags, the user's `agent.yaml` (`$XDG_CONFIG_HOME/weave/agent.yaml`, else `~/.config/weave/agent.yaml`), then the daemon's `daemon.yaml` in its config directory. A provider in a workspace's `workspace.yaml` SHALL be ignored; the nearest workspace SHALL contribute MCP servers only. A provider key SHALL be resolved first hit wins: the profile's own `apiKey` (a literal, or a `${NAME}`/`{env:NAME}` reference read from the environment), then the environment name in the profile's `apiKeySecret` or `WEAVE_LLM_<PROVIDER>_KEY`, then the daemon's encrypted secret store read locally, else, on a terminal, a hidden in-memory prompt. A workspace secret store SHALL NOT contribute a provider key. No `--api-key` flag SHALL exist. A literal `apiKey` SHALL be honoured only in the user's own `agent.yaml`. A key SHALL NOT appear in argv, output, logs, `--debug` output, session files, the bash tool's environment or any error or validation message; only the user's own `agent.yaml` may hold a literal key.
 
 #### Scenario: Environment key, scratch home
+
 - **WHEN** the REPL runs with a scratch `HOME`, no workspace and `WEAVE_LLM_<PROVIDER>_KEY` set, and completes a turn
 - **THEN** the request carries the key, and the key appears in no argv, terminal output or session file
 
 #### Scenario: Workspace provider
-- **WHEN** a workspace with a provider and a stored secret resolves from the working directory
-- **THEN** that provider and key are used without contacting the daemon
+
+- **WHEN** the nearest workspace defines a provider and neither the user's `agent.yaml` nor `daemon.yaml` defines it
+- **THEN** the REPL does not use that provider
 
 #### Scenario: Literal key in the user config, any directory
+
 - **WHEN** the REPL runs from a directory with no workspace above it, a scratch `HOME`/`XDG_CONFIG_HOME` holds an `agent.yaml` whose provider sets a literal `apiKey`, and a turn completes against a mock endpoint
 - **THEN** the request carries the key as its bearer, and the key appears in no stdout, stderr, argv, session file or `--verbose` transcript
 
 #### Scenario: Literal key in a workspace config is refused
+
 - **WHEN** the nearest `workspace.yaml` sets a literal `apiKey` on a provider
-- **THEN** that provider is skipped with a one-line message naming the field and pointing at `apiKeySecret` or the environment, and no part of the value appears
+- **THEN** that provider is ignored along with the whole workspace provider block, no part of the value is read, and no part of it appears in output or a session file
+
+#### Scenario: The daemon's provider and key are used
+
+- **WHEN** only `daemon.yaml` defines a provider, its key is in the daemon secret store, and no user `agent.yaml` exists
+- **THEN** the REPL uses that provider and key without contacting the daemon
 
 ### Requirement: One-shot and resume modes
 `-p "<prompt>"` SHALL run one turn, print the final text to stdout and exit with the loop's exit code. `-c` SHALL resume the most recent human session for the current directory and `--resume <id>` a named one, for both `-p` and the interactive mode.

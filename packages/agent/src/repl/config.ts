@@ -166,9 +166,10 @@ export interface LoadInput { flags: ReplFlags; env: NodeJS.ProcessEnv; cwd: stri
 
 /**
  * Where things come from, lowest to highest: the daemon's `daemon.yaml` (VS-633), the user's `agent.yaml`,
- * the nearest workspace's `providers` and `mcpServers`, then the command line. A workspace entry with the
- * same id replaces the whole entry; a daemon entry the workspace lists in `disabledProviders` /
- * `disabledMcpServers` (and does not define itself) is dropped. Reading these is reading files: the daemon is never
+ * then the command line. VS-654: providers are daemon-only, so the nearest workspace contributes
+ * `mcpServers` only — a `providers`/`disabledProviders` block there is ignored. An MCP server entry with
+ * the same name replaces the whole entry; a daemon server the workspace lists in `disabledMcpServers`
+ * (and does not define itself) is dropped. Reading these is reading files: the daemon is never
  * contacted. A file that does not parse is a note, not a failure, so a broken config still lets `-p` run.
  */
 export function loadReplConfig(i: LoadInput): ReplConfig {
@@ -223,11 +224,10 @@ export function loadReplConfig(i: LoadInput): ReplConfig {
     if (doc) {
       workspace = workspaceRef(wsFile);
       sources.push(`workspace ${wsFile}`);
-      const wsProviders = providersFrom(doc['providers'], wsFile, notes, { allowApiKey: false, errors: providerErrors });
+      // VS-654: providers are daemon-only; a workspace `providers`/`disabledProviders` block is
+      // ignored. The workspace layer remains for MCP servers only.
       const wsMcp = mcpFrom(doc['mcpServers'], wsFile, notes);
-      for (const id of stringList(doc['disabledProviders'])) if (!(id in wsProviders) && id in daemonProviders && providers[id] === daemonProviders[id]) delete providers[id];
       for (const name of stringList(doc['disabledMcpServers'])) if (!(name in wsMcp) && name in daemonMcp && mcpServers[name] === daemonMcp[name]) delete mcpServers[name];
-      providers = { ...providers, ...wsProviders };
       mcpServers = { ...mcpServers, ...wsMcp };
     }
   } else if (i.flags.workspaceDir) notes.push(`no workspace.yaml in ${resolve(i.cwd, i.flags.workspaceDir)}`);
@@ -273,7 +273,8 @@ export function resolveApiKeyRef(value: string, env: NodeJS.ProcessEnv): { key: 
 /**
  * The provider's key, first hit wins: the profile's own `apiKey` (a literal, or a `${NAME}` reference
  * read from the environment — VS-631, user `agent.yaml` only), then the environment under `apiKeySecret`
- * or `WEAVE_LLM_<PROVIDER>_KEY`, then the workspace secret store on disk, then the daemon's (VS-633).
+ * or `WEAVE_LLM_<PROVIDER>_KEY`, then the daemon's secret store (VS-633). VS-654: a workspace secret
+ * store no longer contributes a provider key. `workspace` stays on the input for the MCP resolver.
  */
 export function resolveApiKey(o: { providerId: string; profile: ReplProviderProfile; env: NodeJS.ProcessEnv; workspace: WorkspaceRef | null; daemonDir?: string | null }): ResolvedKey {
   let unresolved: string | undefined;
@@ -284,7 +285,6 @@ export function resolveApiKey(o: { providerId: string; profile: ReplProviderProf
   }
   const names = [...new Set([o.profile.apiKeySecret, keyVarFor(o.providerId)].filter((n): n is string => !!n))];
   for (const n of names) { const v = o.env[n]; if (v) return { key: v, source: 'env', name: n }; }
-  if (o.workspace) for (const n of names) { const v = openWorkspaceSecret(o.workspace.stateDir, n); if (v) return { key: v, source: 'workspace', name: n }; }
   if (o.daemonDir) for (const n of names) { const v = openDaemonSecret(o.daemonDir, n); if (v) return { key: v, source: 'daemon', name: n }; }
   return { key: undefined, source: 'none', name: unresolved ?? names[0] ?? keyVarFor(o.providerId) };
 }

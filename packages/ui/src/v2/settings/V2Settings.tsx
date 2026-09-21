@@ -4,6 +4,7 @@
  * workspace-scoped body is wrapped in a `WorkspaceProvider` so the existing workspace hooks address
  * the selected workspace.
  */
+import { useEffect } from 'react';
 import { V2Page } from '../V2Page';
 import { WorkspaceProvider } from '../../api/context';
 import { useWorkspaces } from '../../api/hooks';
@@ -49,7 +50,7 @@ function DaemonBody({ section }: { section: string }): React.ReactElement | null
   switch (section) {
     case 'updates': return <UpdatesSection />;
     case 'models': return <DaemonModelsSection />;
-    case 'providers': return <ProvidersSection scope="daemon" />;
+    case 'providers': return <ProvidersSection />;
     case 'mcp': return <McpServersSection scope="daemon" />;
     case 'security': return <SecuritySection />;
     case 'host-tools': return <HostToolsSection />;
@@ -64,7 +65,6 @@ function WorkspaceBody({ section }: { section: string }): React.ReactElement | n
     case 'general': return <GeneralSection />;
     case 'weaver': return <WeaverSection />;
     case 'models': return <WorkspaceModelsSection />;
-    case 'providers': return <ProvidersSection scope="workspace" />;
     case 'mcp': return <McpServersSection scope="workspace" />;
     case 'projects': return <ProjectsSection />;
     case 'knowledge': return <KnowledgeSection />;
@@ -86,6 +86,15 @@ export function V2Settings(): React.ReactElement {
   const section = sectionFor(scope, search['section']);
   const list = workspaces.data ?? [];
   const activeWsName = list.find((w) => w.id === wsId)?.name ?? wsId;
+
+  // VS-654: a stale `section` for this scope (the removed workspace `providers`) renders the scope's
+  // first section; normalize the URL so the address matches what is shown.
+  const requestedSection = search['section'];
+  useEffect(() => {
+    if (requestedSection && requestedSection !== section.key) {
+      go('/settings', { search: { ...search, ...(scope === 'workspace' ? { scope: wsId } : {}), section: section.key }, replace: true });
+    }
+  }, [requestedSection, section.key, scope, wsId]);
 
   const chooseScope = (id: string | null): void => {
     const next: Record<string, string | undefined> = { ...search };

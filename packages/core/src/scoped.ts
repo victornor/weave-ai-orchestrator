@@ -2,6 +2,10 @@
  * VS-633: what a workspace sees of the daemon-level providers and MCP servers, and the secret
  * lookup that goes with them. `ctx.daemon` is the live daemon config object, so an edit made in the
  * daemon settings is seen by the next run with no reload.
+ *
+ * VS-654: providers are daemon-only, so `effectiveProviders` is the daemon's set and a workspace
+ * contributes nothing — a legacy `providers`/`disabledProviders` block in `workspace.yaml` is
+ * ignored. MCP servers keep the per-workspace override.
  */
 import { mergedValues, mergeScoped, type McpServer, type ProviderProfile, type ScopedEntry } from '@weave-ai/shared';
 import type { WorkspaceContext } from './context.js';
@@ -9,16 +13,13 @@ import { daemonSecretStore, resolveScopedSecret } from './secrets/daemon.js';
 
 type ScopeCtx = Pick<WorkspaceContext, 'config' | 'daemon' | 'daemonConfigDir'>;
 
-export function scopedProviders(ctx: ScopeCtx): Record<string, ScopedEntry<ProviderProfile>> {
-  return mergeScoped({ daemon: ctx.daemon?.providers, workspace: ctx.config.providers, disabled: ctx.config.disabledProviders });
-}
-
 export function scopedMcpServers(ctx: ScopeCtx): Record<string, ScopedEntry<McpServer>> {
   return mergeScoped({ daemon: ctx.daemon?.mcpServers, workspace: ctx.config.mcpServers, disabled: ctx.config.disabledMcpServers });
 }
 
-export function effectiveProviders(ctx: ScopeCtx): Record<string, ProviderProfile> {
-  return mergedValues({ daemon: ctx.daemon?.providers, workspace: ctx.config.providers, disabled: ctx.config.disabledProviders });
+/** VS-654: the daemon's providers, whatever workspace the caller is in. */
+export function effectiveProviders(ctx: Pick<WorkspaceContext, 'daemon'>): Record<string, ProviderProfile> {
+  return { ...(ctx.daemon?.providers ?? {}) };
 }
 
 export function effectiveMcpServers(ctx: ScopeCtx): Record<string, McpServer> {

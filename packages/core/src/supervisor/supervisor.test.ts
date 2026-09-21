@@ -209,6 +209,19 @@ describe('supervisor', () => {
     expect(wake.calls.some((c) => c.agentId === workerId && (c.input as { reason: string }).reason === 'liveness_repair')).toBe(true);
   });
 
+  it('withholds liveness repair once the worker\'s last two runs ended empty (VS-653)', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const workerId = h.addWorker(ticketId);
+    const ticket = h.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [ticketId])!;
+    h.services.tickets = { livenessViolations: () => [ticket] } as never;
+    const at = (n: number): string => new Date(Date.now() - (3 - n) * 60_000).toISOString();
+    for (const n of [1, 2]) {
+      h.db.insert('runs', { id: newId(), workspaceId: h.workspaceId, agentId: workerId, wakeupIdsJson: [], cwd: h.ctx.paths.weaver, runtimeId: 'fake', status: 'failed', errorCode: 'empty_turn', errorFamily: 'tooling', liveness: 'failed', turnEpoch: n, createdAt: at(n), startedAt: at(n), finishedAt: at(n) } as never);
+    }
+    await supervisor.tick();
+    expect(wake.calls.some((c) => c.agentId === workerId && (c.input as { reason: string }).reason === 'liveness_repair')).toBe(false);
+  });
+
   it('expires due decisions every tick', async () => {
     await supervisor.tick();
     expect(h.services.decisions!.expireDue).toHaveBeenCalled();

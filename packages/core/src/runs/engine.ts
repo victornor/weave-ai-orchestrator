@@ -70,6 +70,9 @@ export const RETRYABLE: RunErrorFamily[] = ['transient_upstream', 'resource'];
 
 /** VS-579: the run error code a worker killed for exceeding its memory limit carries. */
 export const WORKER_MEMORY_ERROR_CODE = 'worker_memory_limit';
+
+/** VS-653: the run error code of a worker turn that reported nothing and left no trace on its ticket. */
+export const EMPTY_TURN_ERROR_CODE = 'empty_turn';
 /** How close to the limit a scope's peak must be before an unattributed SIGKILL is read as memory. */
 const MEMORY_KILL_PEAK_RATIO = 0.9;
 
@@ -1059,6 +1062,19 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
     errorFamily = 'tooling';
   } else if (f.cancelled) { status = 'cancelled'; errorCode = errorCode ?? 'cancelled'; errorFamily = errorFamily ?? 'tooling'; }
 
+  // VS-653: a worker turn that returned no report and left nothing on its ticket, while the ticket
+  // was in a status where the worker is expected to act, did not do its job: recording it
+  // `succeeded` hid a worker that could not act (no tools, no report path) behind a green run and
+  // let the supervisor resume it forever. It is a tooling failure, which parks the worker for a human.
+  if (status === 'succeeded' && f.agent.kind === 'worker' && f.ticket && !f.report && !f.cancelled && !shuttingDown
+    && !TICKET_STATUSES_NOT_EXPECTING_ACTION.has(f.ticket.status)
+    && !(TERMINAL_TICKET_STATUSES as readonly string[]).includes(f.ticket.status)
+    && !runProducedEvidence(ctx, runId, f.ticket.id)) {
+    status = 'failed';
+    errorCode = EMPTY_TURN_ERROR_CODE;
+    errorFamily = 'tooling';
+  }
+
   // VS-339: a shutdown cut is resumed by leaving its wakes queued and its worker active, as boot
   // recovery does for a run orphaned by a hard kill.
   const shutdownInterrupted = status === 'interrupted' && errorCode === 'interrupted_by_shutdown';
@@ -1076,7 +1092,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   const memoryMessage = memoryKilled && f.memory
     ? `worker exceeded its memory limit (peak ${fmtMemoryMb(f.memory.peakBytes)} of ${f.memory.limitMb} MB)`
     : null;
-  const failureMessage = memoryMessage ?? f.failure?.message ?? r?.error?.message ?? null;
+  const failureMessage = memoryMessage ?? f.failure?.message ?? r?.error?.message ?? (errorCode === EMPTY_TURN_ERROR_CODE ? 'the turn ended without a report and left nothing on its ticket; the worker may have no way to report (check the run\'s tools.offered event)' : null);
   const summary = f.report?.summary ?? memoryMessage ?? (r?.finalText ? r.finalText.slice(0, 1000) : f.failure?.message ?? null);
 
   // VS-137: an authentication failure that keeps recurring on one worker, with the runtime confirmed

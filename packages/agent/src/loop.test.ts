@@ -50,7 +50,7 @@ describe('a turn', () => {
     mock.script({ chunks: toolCallChunks([{ id: 'call_1', name: 'read', args: '{"path":"a.txt"}' }]) }, { chunks: textChunks('The file says alpha.') });
     const h = harness();
     const r = await runAgentTurn(makeInit(), h.io, new AbortController().signal, fast);
-    expect(h.types()).toEqual(['turn.started', 'usage.delta', 'tool.call', 'tool.result', 'turn.started', 'assistant.text', 'usage.delta', 'turn.completed']);
+    expect(h.types()).toEqual(['tools.offered', 'turn.started', 'usage.delta', 'tool.call', 'tool.result', 'turn.started', 'assistant.text', 'usage.delta', 'turn.completed']);
     const call = h.events.find((e) => e.type === 'tool.call')!;
     expect(call.payload).toMatchObject({ id: 'call_1', name: 'read', input: { path: 'a.txt' } });
     expect(h.events.find((e) => e.type === 'tool.result')!.payload).toMatchObject({ id: 'call_1', isError: false, content: '1\talpha\n2\tbeta' });

@@ -1873,17 +1873,24 @@ describe('run engine', () => {
       expect(openGateFindings(ticketId)).toHaveLength(0);
     });
 
-    it('still raises the gate for three genuinely inert turns — no report, no evidence, a ticket the worker was expected to act on', async () => {
+    it('fails a genuinely inert turn — no report, no evidence, a ticket the worker was expected to act on — as empty_turn and parks the worker (VS-653)', async () => {
       const ticketId = seedTicket(h, { status: 'in_progress' });
       const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
-      for (let i = 0; i < 3; i += 1) {
-        runtime.queue.push({ structured: undefined, finalText: 'I looked around and did nothing' });
-        const run = await runWorkerTurn(workerId, ticketId);
-        expect(run.liveness).toBe('empty');
-      }
-      const findings = openGateFindings(ticketId);
-      expect(findings).toHaveLength(1);
-      expect(findings[0]!.title).toContain('three empty turns');
+      runtime.queue.push({ structured: undefined, finalText: 'I looked around and did nothing' });
+      const run = await runWorkerTurn(workerId, ticketId);
+      expect(run.status).toBe('failed');
+      expect(run.errorCode).toBe('empty_turn');
+      expect(run.errorFamily).toBe('tooling');
+      expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('paused');
+    });
+
+    it('does not fail an empty turn as empty_turn while the ticket awaits someone else (VS-653)', async () => {
+      const ticketId = seedTicket(h, { status: 'in_review' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      runtime.queue.push({ structured: undefined, finalText: 'waiting' });
+      const run = await runWorkerTurn(workerId, ticketId);
+      expect(run.status).toBe('succeeded');
+      expect(run.liveness).toBe('empty');
     });
 
     it('does not raise the gate for a worker correctly idle on a ticket awaiting human approval', async () => {
@@ -1897,40 +1904,20 @@ describe('run engine', () => {
       expect(openGateFindings(ticketId)).toHaveLength(0);
     });
 
-    it('trips the gate once the same worker is expected to act again, counting only turns from that point', async () => {
+    it('fails an inert turn only from the point the worker is expected to act again (VS-653)', async () => {
       const HUMAN: Actor = { kind: 'human', id: 'victor' };
       const ticketId = seedTicket(h, { status: 'in_review' });
-      // A raw-seeded ticket carries no creation history; anchor its starting status the way
-      // `tickets.create()` would, so reconstructing an earlier run's status doesn't fall back to
-      // reading the ticket's *current* status once it later transitions.
       h.db.insert('activity', {
         id: newId(), workspaceId: h.workspaceId, actorKind: 'human', actorId: 'victor', ticketId, entityType: 'ticket', entityId: ticketId,
         action: 'ticket.create', detailsJson: { kind: 'task', identifier: 'TST-1', status: 'in_review' }, createdAt: nowIso(),
       });
       const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
-
-      // Two turns while correctly parked: idle, no evidence, not expected to act.
-      for (let i = 0; i < 2; i += 1) {
-        runtime.queue.push({ structured: { state: 'idle', summary: 'waiting on review', tickets: [], knowledge: { recorded: false, reason: 'nothing new' } } });
-        await runWorkerTurn(workerId, ticketId, `parked ${i}`);
-      }
-      expect(openGateFindings(ticketId)).toHaveLength(0);
-
-      // The ticket is sent back for more work — logged through the real transition, so the gate can
-      // tell "expected to act" apart from "still parked" for these two prior turns.
+      runtime.queue.push({ structured: { state: 'idle', summary: 'waiting on review', tickets: [], knowledge: { recorded: false, reason: 'nothing new' } } });
+      expect((await runWorkerTurn(workerId, ticketId, 'parked')).status).toBe('succeeded');
       await h.services.tickets!.transition(HUMAN, ticketId, { to: 'in_progress', note: 'needs another pass' });
-
-      // Only one inert turn since then: not enough on its own.
       runtime.queue.push({ structured: undefined, finalText: 'nothing yet' });
-      await runWorkerTurn(workerId, ticketId, 'back to it');
-      expect(openGateFindings(ticketId)).toHaveLength(0);
-
-      // A second and third inert turn while expected to act completes three in a row from that point.
-      for (let i = 0; i < 2; i += 1) {
-        runtime.queue.push({ structured: undefined, finalText: 'still nothing' });
-        await runWorkerTurn(workerId, ticketId, `stuck ${i}`);
-      }
-      expect(openGateFindings(ticketId)).toHaveLength(1);
+      const run = await runWorkerTurn(workerId, ticketId, 'back to it');
+      expect(run.errorCode).toBe('empty_turn');
     });
 
     it('never counts an advanced turn toward the gate, whether or not it also called weave_report mid-turn', async () => {

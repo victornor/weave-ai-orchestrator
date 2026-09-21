@@ -1,20 +1,17 @@
 /**
- * Settings → Providers (VS-610, VS-633): the `weave` runtime's provider profiles — list, add from a
- * preset, edit, a masked key input that never renders a stored value back, and a Test connection
- * action whose per-capability results can be applied to the profile's `compat`.
+ * Settings → daemon → Providers (VS-610, VS-654): the `weave` runtime's provider profiles — list,
+ * add from a preset, edit, a masked key input that never renders a stored value back, and a Test
+ * connection action whose per-capability results can be applied to the profile's `compat`.
  *
- * Two scopes share these components. In the daemon scope a provider is configured once and is visible
- * to every workspace; its key lives in the daemon secret store. In a workspace scope the list is the
- * merged view: an inherited entry is read-only and marked "from daemon", with Override (copy it into
- * this workspace to edit) and Hide here; an override or addition is editable, and Remove override
- * restores the daemon's.
+ * Providers are daemon-only: they are configured once here and visible to every workspace, and the
+ * key lives in the daemon secret store. There is no workspace-scoped Providers section.
  *
  * The key is written through the provider's own secret route, never through config; nothing here
  * ever holds a stored key, only the one being typed.
  */
 import { useEffect, useState } from 'react';
 import { PROVIDER_MODEL_ENTRY_SCHEMA, runtimeOptionProperties } from '@weave-ai/shared';
-import { useClearProviderSecret, useDeleteProvider, useDiscoverProviderModels, useProviders, useSaveProvider, useSetProviderDisabled, useSetProviderSecret, useTestProvider, type AgentConfigScope } from '../../../api/hooks';
+import { useClearProviderSecret, useDeleteProvider, useDiscoverProviderModels, useProviders, useSaveProvider, useSetProviderSecret, useTestProvider } from '../../../api/hooks';
 import type * as T from '../../../api/types';
 import { Button } from '../../../components/Button';
 import { SkeletonRows } from '../../../components/Skeleton';
@@ -164,9 +161,9 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 /** The masked key input plus its status; a stored value is never read into the field. The draft is lifted so discovery can use a typed-but-unsaved key. */
-function SecretRow({ id, secretName, configured, value, onValueChange, onSet, onClear, pending, scope }: {
+function SecretRow({ id, secretName, configured, value, onValueChange, onSet, onClear, pending }: {
   id: string; secretName: string | undefined; configured: boolean; value: string;
-  onValueChange: (value: string) => void; onSet: (value: string) => void; onClear: () => void; pending: boolean; scope: AgentConfigScope;
+  onValueChange: (value: string) => void; onSet: (value: string) => void; onClear: () => void; pending: boolean;
 }): React.ReactElement {
   return (
     <div className="v2-recessed flex flex-col gap-1 rounded-r4 border border-line-1 px-3 py-2">
@@ -189,9 +186,7 @@ function SecretRow({ id, secretName, configured, value, onValueChange, onSet, on
         <Button size="sm" variant="danger" disabled={!configured || pending} onClick={onClear}>Clear</Button>
       </div>
       <span className="text-nano text-text-3">
-        {scope === 'daemon'
-          ? 'Held only in the daemon secret store, and used by every workspace that has no secret of this name. Never shown here again once saved.'
-          : 'Held only in the workspace secret store; it wins over a daemon secret of the same name. Never shown here again once saved.'}
+        Held only in the daemon secret store, and used by every workspace. Never shown here again once saved.
       </span>
     </div>
   );
@@ -222,8 +217,6 @@ function TestResult({ report, onApply, hideApply }: {
     </div>
   );
 }
-
-const SOURCE_TAG: Record<T.ConfigSource, string | null> = { daemon: null, workspace: 'this workspace', override: 'overrides daemon' };
 
 /** The Test connection model selector (VS-635): the provider's configured models plus a free-text id, sending the chosen id as `asked`. */
 function TestControls({ providerId, modelIds, pending, onTest }: {
@@ -316,13 +309,10 @@ function ModelEntriesEditor({ rows, onChange, onFetch, discovering, discovered, 
   );
 }
 
-function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
-  view: T.ProviderView; scope: AgentConfigScope; onSave: (profile: T.ProviderProfile) => Promise<void>; onRemove: () => void;
-  onOverride?: () => void; onHide?: () => void;
+function ProviderRow({ view, onSave, onRemove }: {
+  view: T.ProviderView; onSave: (profile: T.ProviderProfile) => Promise<void>; onRemove: () => void;
 }): React.ReactElement {
   const { id, profile, secretConfigured, models: modelIds } = view;
-  const inherited = scope === 'workspace' && view.source === 'daemon';
-  const tag = scope === 'workspace' ? (inherited ? 'from daemon' : SOURCE_TAG[view.source ?? 'workspace']) : null;
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => draftOf(profile));
   const [modelRows, setModelRows] = useState<ModelRow[]>(() => modelRowsOf(profile.models));
@@ -332,10 +322,10 @@ function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
   const [discovered, setDiscovered] = useState<Array<{ id: string; contextWindow?: number }> | null>(null);
   const [discoverError, setDiscoverError] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
-  const set = useSetProviderSecret(scope);
-  const clear = useClearProviderSecret(scope);
-  const test = useTestProvider(scope);
-  const discover = useDiscoverProviderModels(scope);
+  const set = useSetProviderSecret();
+  const clear = useClearProviderSecret();
+  const test = useTestProvider();
+  const discover = useDiscoverProviderModels();
   useEffect(() => {
     setDraft(draftOf(profile)); setModelRows(modelRowsOf(profile.models)); setKeyDraft('');
     setDiscovered(null); setDiscoverError(null); setReport(null);
@@ -377,7 +367,6 @@ function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
       <div className="flex items-baseline gap-2 px-3 py-2">
         <button type="button" className="flex min-w-0 flex-1 items-baseline gap-2 text-left" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
           <span className="ac-mono text-meta text-text-1">{id}</span>
-          {tag ? <span className="v2-tag text-text-2">{tag}</span> : null}
           <span className="v2-tag text-text-2">{profile.preset ?? 'custom'}</span>
           <span className="truncate text-micro text-text-3">{profile.baseUrl}</span>
           <span className="text-nano text-text-3">{modelIds.length} model{modelIds.length === 1 ? '' : 's'}</span>
@@ -385,28 +374,7 @@ function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
           <span className="ml-auto text-text-3" aria-hidden>{open ? '▾' : '▸'}</span>
         </button>
       </div>
-      {open && inherited ? (
-        <div className="v2-anim-fade flex flex-col gap-3 border-t border-line-1 p-3">
-          <p className="text-micro text-text-3">
-            Defined in the daemon settings and used as it is by this workspace. Override it to change it here only, or hide it from this workspace.
-          </p>
-          <div className="grid gap-1 text-micro text-text-2 sm:grid-cols-2">
-            <span>base URL <span className="ac-mono text-text-1">{profile.baseUrl}</span></span>
-            <span>models <span className="ac-mono text-text-1">{modelIds.join(', ') || 'discovered'}</span></span>
-            <span>key <span className="text-text-1">{secretConfigured ? 'set (daemon or workspace store)' : 'not set'}</span></span>
-          </div>
-          {test.isError ? <span role="alert" className="text-micro text-failed">{test.error.message}</span> : null}
-          {report ? <TestResult report={report} hideApply /> : null}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <TestControls providerId={id} modelIds={modelIds} pending={test.isPending} onTest={(model) => test.mutate({ id, model }, { onSuccess: (r) => setReport(r) })} />
-            <div className="flex gap-2">
-              <Button size="sm" variant="primary" onClick={onOverride}>Override</Button>
-              <Button size="sm" onClick={onHide}>Hide here</Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      {open && !inherited ? (
+      {open ? (
         <div className="v2-anim-fade flex flex-col gap-3 border-t border-line-1 p-3">
           <div className="grid gap-2 sm:grid-cols-2">
             <Field label="base URL">
@@ -415,7 +383,7 @@ function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
             <Field label="preset" hint="Base compat flags; leave empty for the generic OpenAI-compatible set.">
               <input aria-label={`${id} preset`} className={cx(inputCx, 'ac-mono')} value={draft.preset} onChange={(e) => setDraft({ ...draft, preset: e.target.value })} />
             </Field>
-            <Field label="secret name" hint={scope === 'daemon' ? 'The daemon secret the key is stored under.' : 'The secret the key is stored under; a workspace secret of this name wins over the daemon\'s.'}>
+            <Field label="secret name" hint="The daemon secret the key is stored under.">
               <input aria-label={`${id} secret name`} className={cx(inputCx, 'ac-mono')} value={draft.apiKeySecret} onChange={(e) => setDraft({ ...draft, apiKeySecret: e.target.value })} />
             </Field>
             <Field label="auth">
@@ -458,7 +426,7 @@ function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
           </label>
           <ModelEntriesEditor rows={modelRows} onChange={setModelRows} onFetch={fetchModels} discovering={discover.isPending}
             discovered={discovered} discoverError={discoverError} onPick={pickModel} />
-          <SecretRow id={id} scope={scope} secretName={profile.apiKeySecret} configured={secretConfigured} pending={set.isPending || clear.isPending}
+          <SecretRow id={id} secretName={profile.apiKeySecret} configured={secretConfigured} pending={set.isPending || clear.isPending}
             value={keyDraft} onValueChange={setKeyDraft}
             onSet={(value) => { set.mutate({ id, value }); setKeyDraft(''); }} onClear={() => clear.mutate(id)} />
           {error ? <span role="alert" className="text-micro text-failed">{error}</span> : null}
@@ -473,7 +441,7 @@ function ProviderRow({ view, scope, onSave, onRemove, onOverride, onHide }: {
                   <Button size="sm" variant="danger" onClick={onRemove}>Confirm remove</Button>
                   <Button size="sm" onClick={() => setConfirmRemove(false)}>Cancel</Button>
                 </>
-              ) : <Button size="sm" variant="danger" onClick={() => setConfirmRemove(true)}>{view.source === 'override' ? 'Remove override' : 'Remove'}</Button>}
+              ) : <Button size="sm" variant="danger" onClick={() => setConfirmRemove(true)}>Remove</Button>}
             </div>
           </div>
         </div>
@@ -532,26 +500,22 @@ function AddProvider({ presets, onAdd, onCancel }: {
   );
 }
 
-export function ProvidersSection({ scope = 'workspace' }: { scope?: AgentConfigScope }): React.ReactElement {
-  const providers = useProviders(scope);
-  const save = useSaveProvider(scope);
-  const remove = useDeleteProvider(scope);
-  const hide = useSetProviderDisabled();
+export function ProvidersSection(): React.ReactElement {
+  const providers = useProviders();
+  const save = useSaveProvider();
+  const remove = useDeleteProvider();
   const [adding, setAdding] = useState(false);
   if (providers.isLoading) return <SkeletonRows rows={3} />;
-  if (providers.isError) return <p className="text-micro text-text-3">The {scope === 'daemon' ? "daemon's" : "workspace's"} providers could not be read: {providers.error.message}</p>;
+  if (providers.isError) return <p className="text-micro text-text-3">The daemon's providers could not be read: {providers.error.message}</p>;
   const list = providers.data?.providers ?? [];
-  const hidden = providers.data?.disabled ?? [];
   const presets = providers.data?.presets ?? [];
   return (
     <div className="flex flex-col gap-3">
       <p className="text-micro leading-relaxed text-text-3">
-        {scope === 'daemon'
-          ? <>Providers for the built-in <span className="ac-mono">weave</span> runtime, configured once here and visible to every workspace. A worker option that names one of them (Models) works in any workspace. </>
-          : <>Providers this workspace uses for the built-in <span className="ac-mono">weave</span> runtime: those inherited from the daemon settings, plus any this workspace overrides or adds. </>}
-        Repository content is sent to
-        whichever endpoint you configure; no default provider ships, so nothing leaves this machine until
-        you add one and point a model at it.
+        Providers for the built-in <span className="ac-mono">weave</span> runtime, configured once here
+        and visible to every workspace. A worker option that names one of them (Models) works in any
+        workspace. Repository content is sent to whichever endpoint you configure; no default provider
+        ships, so nothing leaves this machine until you add one and point a model at it.
       </p>
       <div className="flex items-baseline gap-2">
         <span className="ac-label text-text-1">Providers</span>
@@ -560,25 +524,10 @@ export function ProvidersSection({ scope = 'workspace' }: { scope?: AgentConfigS
       </div>
       {list.length === 0 && !adding ? <p className="text-micro text-text-3">None configured.</p> : null}
       {list.map((p) => (
-        <ProviderRow key={p.id} view={p} scope={scope}
+        <ProviderRow key={p.id} view={p}
           onSave={async (profile) => { await save.mutateAsync({ id: p.id, profile }); }}
-          onRemove={() => remove.mutate(p.id)}
-          onOverride={() => void save.mutateAsync({ id: p.id, profile: p.profile })}
-          onHide={() => hide.mutate({ id: p.id, disabled: true })} />
+          onRemove={() => remove.mutate(p.id)} />
       ))}
-      {hidden.length > 0 ? (
-        <div className="flex flex-col gap-1">
-          <span className="ac-label">Hidden from this workspace</span>
-          {hidden.map((p) => (
-            <div key={p.id} className="v2-card flex items-baseline gap-2 px-3 py-2">
-              <span className="ac-mono text-meta text-text-1">{p.id}</span>
-              <span className="v2-tag text-text-2">from daemon</span>
-              <span className="min-w-0 flex-1 truncate text-micro text-text-3">{p.profile.baseUrl}</span>
-              <Button size="sm" onClick={() => hide.mutate({ id: p.id, disabled: false })}>Show again</Button>
-            </div>
-          ))}
-        </div>
-      ) : null}
       {adding && presets.length > 0 ? (
         <AddProvider presets={presets} onCancel={() => setAdding(false)}
           onAdd={(id, profile) => void save.mutateAsync({ id, profile }).then(() => setAdding(false))} />

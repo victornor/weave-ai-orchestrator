@@ -143,6 +143,34 @@ describe('workspace loader', () => {
     delete process.env.AC_TEST_TG_TOKEN;
   });
 
+  // VS-654: providers are daemon-only. A legacy `providers`/`disabledProviders` block loads, is
+  // retained on every save (no stored data is deleted) and is resolved by nothing.
+  it('loads and preserves a legacy workspace provider block, ignoring it (VS-654)', async () => {
+    await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });
+    const file = join(root, 'workspace.yaml');
+    const raw = YAML.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    writeFileSync(file, YAML.stringify({
+      ...raw,
+      providers: { legacy: { baseUrl: 'https://legacy.test/v1', auth: 'bearer', headers: {}, models: { m: {} } } },
+      disabledProviders: ['gone'],
+    }), 'utf8');
+
+    // Loads without error, and keeps the block in memory (the schema does not strip it).
+    const ctx = await load();
+    expect(Object.keys(ctx.config.providers)).toEqual(['legacy']);
+    expect(ctx.config.disabledProviders).toEqual(['gone']);
+    // A second load exercises the once-per-process notice path and still does not throw.
+    const again = await load();
+    expect(again.config.id).toBe('acme');
+
+    // A config write rewrites the file with the block still present: no stored data is deleted.
+    await ctx.saveConfig({ ...ctx.config, name: 'Acme Labs Renamed' });
+    const after = YAML.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+    expect(Object.keys(after['providers'] as Record<string, unknown>)).toEqual(['legacy']);
+    expect(after['disabledProviders']).toEqual(['gone']);
+    expect(after['name']).toBe('Acme Labs Renamed');
+  });
+
   it('rejects an invalid workspace.yaml and a missing one', async () => {
     await expect(load(root)).rejects.toMatchObject({ code: 'not_found' });
     await loader.initWorkspace(root, { id: 'acme', name: 'Acme Labs', ticketPrefix: 'ACME' });

@@ -35,7 +35,6 @@ export const qk = {
   workerHandoverCommand: (ws: string, id: string) => ['w', ws, 'workers', id, 'handover-command'] as const,
   weaver: (ws: string) => ['w', ws, 'weaver'] as const,
   models: (ws: string) => ['w', ws, 'models'] as const,
-  providers: (ws: string) => ['w', ws, 'providers'] as const,
   mcpServers: (ws: string) => ['w', ws, 'mcp'] as const,
   /** VS-633: the daemon-level providers and MCP servers. */
   daemonProviders: () => ['daemon', 'providers'] as const,

@@ -11,7 +11,12 @@ import { authed, makeHarness, type Harness } from './fakes.js';
 
 let harness: Harness | null = null;
 let server: Server | null = null;
-afterEach(async () => { await harness?.close(); harness = null; await new Promise<void>((r) => (server ? server.close(() => r()) : r())); server = null; });
+const dirs: string[] = [];
+afterEach(async () => {
+  await harness?.close(); harness = null;
+  await new Promise<void>((r) => (server ? server.close(() => r()) : r())); server = null;
+  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+});
 
 /** A tiny OpenAI-compatible endpoint: models, a stream (text or tool call by prompt), and the two output-cap spellings. */
 async function endpoint(): Promise<{ baseUrl: string; seen: Array<{ url: string; auth: string | undefined; body: Record<string, unknown> }> }> {
@@ -40,79 +45,81 @@ async function endpoint(): Promise<{ baseUrl: string; seen: Array<{ url: string;
   return { baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/v1`, seen };
 }
 
-const post = (h: Harness, path: string, payload: unknown = {}) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/w/ws1${path}`, { method: 'POST', headers: { ...authed(), 'content-type': 'application/json' }, body: JSON.stringify(payload) }));
-const req = (h: Harness, method: string, path: string, payload?: unknown) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/w/ws1${path}`, { method, headers: { ...authed(), 'content-type': 'application/json' }, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}) }));
-
-/** Make `saveConfig` real enough for a route test: it swaps the in-memory config, as the daemon's does. */
-function persistConfig(h: Harness): { saved: Array<{ providers: Record<string, unknown> }> } {
-  const saved: Array<{ providers: Record<string, unknown> }> = [];
-  h.runtime.ctx.saveConfig = async (next) => { saved.push(next as never); h.runtime.ctx.config = next; };
-  return { saved };
+/** A harness with a scratch daemon config dir (so the daemon store and `daemon.yaml` never touch the host). */
+function withDir(): { dir: string; h: Harness } {
+  const dir = mkdtempSync(join(tmpdir(), 'vs654-providers-'));
+  dirs.push(dir);
+  const h = makeHarness({ daemonConfigDir: dir });
+  harness = h;
+  return { dir, h };
 }
 
-describe('provider administration', () => {
+const dreq = (h: Harness, method: string, path: string, payload?: unknown) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/daemon/providers${path}`, { method, headers: { ...authed(), 'content-type': 'application/json' }, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}) }));
+const wreq = (h: Harness, method: string, path: string, payload?: unknown) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/w/ws1${path}`, { method, headers: { ...authed(), 'content-type': 'application/json' }, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}) }));
+
+const profile = (baseUrl: string) => ({ baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_D_KEY', models: { m1: {} } });
+
+describe('daemon provider administration', () => {
   it('lists each provider with its secret state and model ids, and the preset catalogue, never a key', async () => {
-    harness = makeHarness();
-    harness.runtime.ctx.config.providers['openrouter'] = { baseUrl: 'https://openrouter.ai/api/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_OPENROUTER_KEY', models: { 'deepseek/deepseek-r1': {} } };
-    harness.runtime.ctx.config.providers['local'] = { baseUrl: 'http://127.0.0.1:11434/v1', auth: 'none', headers: {}, models: { llama: {} } };
-    harness.runtime.services.secrets.put({ kind: 'human', id: 'h' } as never, { name: 'WEAVE_LLM_OPENROUTER_KEY' }, 'sk-not-real-000000');
-    const res = await req(harness, 'GET', '/providers');
+    const { dir, h } = withDir();
+    await dreq(h, 'PUT', '/openrouter', { baseUrl: 'https://openrouter.ai/api/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_OPENROUTER_KEY', models: { 'deepseek/deepseek-r1': {} } });
+    await dreq(h, 'PUT', '/local', { baseUrl: 'http://127.0.0.1:11434/v1', auth: 'none', headers: {}, models: { llama: {} } });
+    await dreq(h, 'POST', '/openrouter/secret', { value: 'sk-not-real-000000' });
+    const res = await dreq(h, 'GET', '');
     expect(res.status).toBe(200);
-    const json = await res.json() as { providers: Array<{ id: string; secretConfigured: boolean; models: string[] }>; presets: Array<{ id: string; description: string }> };
-    expect(json.providers.map((p) => `${p.id}:${p.secretConfigured}:${p.models.join(',')}`)).toEqual(['openrouter:true:deepseek/deepseek-r1', 'local:false:llama']);
+    const json = await res.json() as { providers: Array<{ id: string; secretConfigured: boolean; models: string[]; source: string }>; presets: Array<{ id: string; description: string }> };
+    expect(json.providers.map((p) => `${p.id}:${p.secretConfigured}:${p.models.join(',')}:${p.source}`)).toEqual(['openrouter:true:deepseek/deepseek-r1:daemon', 'local:false:llama:daemon']);
     expect(json.presets.map((p) => p.id)).toContain('openai');
     expect(json.presets.find((p) => p.id === 'openai')?.description).toBeTruthy();
     expect(JSON.stringify(json)).not.toContain('sk-not-real');
+    expect(daemonSecretStore(dir)!.get('WEAVE_LLM_OPENROUTER_KEY')).toBe('sk-not-real-000000');
   });
 
-  it('creates, updates and removes a profile, and refuses an invalid one without writing', async () => {
-    harness = makeHarness();
-    const { saved } = persistConfig(harness);
-    const profile = { baseUrl: 'https://api.example.test/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_EXAMPLE_KEY', models: { m1: { contextWindow: 8000 } } };
-    const created = await req(harness, 'PUT', '/providers/example', profile);
+  it('creates, updates and removes a profile in daemon.yaml, and refuses an invalid one without writing', async () => {
+    const { dir, h } = withDir();
+    const created = await dreq(h, 'PUT', '/example', { baseUrl: 'https://api.example.test/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_EXAMPLE_KEY', models: { m1: { contextWindow: 8000 } } });
     expect(created.status).toBe(200);
     expect((await created.json() as { models: string[] }).models).toEqual(['m1']);
-    expect(Object.keys(saved.at(-1)!.providers)).toEqual(['example']);
+    expect(readFileSync(join(dir, 'daemon.yaml'), 'utf8')).toContain('example:');
     // A malformed profile is a validation 400 and does not write.
-    const before = saved.length;
-    const bad = await req(harness, 'PUT', '/providers/example', { baseUrl: 'not a url' });
+    const bad = await dreq(h, 'PUT', '/example', { baseUrl: 'not a url' });
     expect(bad.status).toBe(400);
     expect((await bad.json() as { error: { code: string } }).error.code).toBe('validation');
-    expect(saved).toHaveLength(before);
     // Remove.
-    expect((await req(harness, 'DELETE', '/providers/example')).status).toBe(200);
-    expect(saved.at(-1)!.providers).toEqual({});
-    expect((await req(harness, 'DELETE', '/providers/example')).status).toBe(404);
+    expect((await dreq(h, 'DELETE', '/example')).status).toBe(200);
+    expect((await (await dreq(h, 'GET', '')).json() as { providers: unknown[] }).providers).toEqual([]);
+    expect((await dreq(h, 'DELETE', '/example')).status).toBe(404);
   });
 
-  it('sets and clears a provider key, never returning its value', async () => {
-    harness = makeHarness();
-    harness.runtime.ctx.config.providers['mock'] = { baseUrl: 'http://127.0.0.1:1/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_MOCK_KEY', models: { m1: {} } };
-    harness.runtime.ctx.config.providers['nokeyname'] = { baseUrl: 'http://127.0.0.1:1/v1', auth: 'none', headers: {}, models: {} };
-    const set = await post(harness, '/providers/mock/secret', { value: 'sk-secret-value-000' });
+  it('sets and clears a provider key in the daemon store, never returning its value', async () => {
+    const { dir, h } = withDir();
+    await dreq(h, 'PUT', '/mock', { baseUrl: 'http://127.0.0.1:1/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_MOCK_KEY', models: { m1: {} } });
+    await dreq(h, 'PUT', '/nokeyname', { baseUrl: 'http://127.0.0.1:1/v1', auth: 'none', headers: {}, models: {} });
+    const set = await dreq(h, 'POST', '/mock/secret', { value: 'sk-secret-value-000' });
     expect(set.status).toBe(200);
     const setJson = await set.json() as { ok: boolean; configured: boolean; secretName: string };
     expect(setJson).toMatchObject({ ok: true, configured: true, secretName: 'WEAVE_LLM_MOCK_KEY' });
     expect(JSON.stringify(setJson)).not.toContain('sk-secret-value');
-    expect(harness.runtime.services.secrets.has('WEAVE_LLM_MOCK_KEY')).toBe(true);
+    expect(daemonSecretStore(dir)!.has('WEAVE_LLM_MOCK_KEY')).toBe(true);
+    // The workspace store is not written and does not shadow the daemon key.
+    expect(h.runtime.services.secrets.has('WEAVE_LLM_MOCK_KEY')).toBe(false);
     // A profile that names no apiKeySecret has nowhere to hold one.
-    const refused = await post(harness, '/providers/nokeyname/secret', { value: 'sk-x' });
+    const refused = await dreq(h, 'POST', '/nokeyname/secret', { value: 'sk-x' });
     expect(refused.status).toBe(400);
     // Clear.
-    const cleared = await req(harness, 'DELETE', '/providers/mock/secret');
+    const cleared = await dreq(h, 'DELETE', '/mock/secret');
     expect((await cleared.json() as { configured: boolean }).configured).toBe(false);
-    expect(harness.runtime.services.secrets.has('WEAVE_LLM_MOCK_KEY')).toBe(false);
+    expect(daemonSecretStore(dir)!.has('WEAVE_LLM_MOCK_KEY')).toBe(false);
   });
 });
 
-
-describe('POST /providers/:id/test', () => {
-  it('runs the probes with the provider\'s secret and reports each capability, never the key', async () => {
-    harness = makeHarness();
+describe('POST /api/daemon/providers/:id/test', () => {
+  it('runs the probes with the daemon provider\'s secret and reports each capability, never the key', async () => {
+    const { h } = withDir();
     const ep = await endpoint();
-    harness.runtime.ctx.config.providers['mock'] = { baseUrl: ep.baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_MOCK_KEY', preset: 'openai', models: { m1: {} } };
-    harness.runtime.services.secrets.put({ kind: 'human', id: 'h' } as never, { name: 'WEAVE_LLM_MOCK_KEY' }, 'held');
-    const res = await post(harness, '/providers/mock/test');
+    await dreq(h, 'PUT', '/mock', { baseUrl: ep.baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_MOCK_KEY', preset: 'openai', models: { m1: {} } });
+    await dreq(h, 'POST', '/mock/secret', { value: 'held' });
+    const res = await dreq(h, 'POST', '/mock/test', {});
     expect(res.status).toBe(200);
     const json = await res.json() as { ok: boolean; provider: string; model: string; checks: Array<{ name: string; ok: boolean }>; detected: Record<string, unknown> };
     expect(json).toMatchObject({ ok: true, provider: 'mock', model: 'm1' });
@@ -122,29 +129,29 @@ describe('POST /providers/:id/test', () => {
     expect(JSON.stringify(json)).not.toContain('held');
   });
   it('names a missing secret without calling the endpoint', async () => {
-    harness = makeHarness();
+    const { h } = withDir();
     const ep = await endpoint();
-    harness.runtime.ctx.config.providers['nokey'] = { baseUrl: ep.baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_NOKEY_KEY', models: { m1: {} } };
-    const json = await (await post(harness, '/providers/nokey/test')).json() as { ok: boolean; checks: Array<{ detail: string }> };
+    await dreq(h, 'PUT', '/nokey', { baseUrl: ep.baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_NOKEY_KEY', models: { m1: {} } });
+    const json = await (await dreq(h, 'POST', '/nokey/test', {})).json() as { ok: boolean; checks: Array<{ detail: string }> };
     expect(json.ok).toBe(false);
     expect(json.checks[0]!.detail).toContain('WEAVE_LLM_NOKEY_KEY');
     expect(ep.seen).toHaveLength(0);
   });
   it('404s an unknown provider and asks for a model when the profile lists none', async () => {
-    harness = makeHarness();
-    expect((await post(harness, '/providers/ghost/test')).status).toBe(404);
-    harness.runtime.ctx.config.providers['bare'] = { baseUrl: 'http://127.0.0.1:1/v1', auth: 'none', headers: {}, models: {} };
-    const res = await post(harness, '/providers/bare/test');
+    const { h } = withDir();
+    expect((await dreq(h, 'POST', '/ghost/test', {})).status).toBe(404);
+    await dreq(h, 'PUT', '/bare', { baseUrl: 'http://127.0.0.1:1/v1', auth: 'none', headers: {}, models: {} });
+    const res = await dreq(h, 'POST', '/bare/test', {});
     expect(res.status).toBe(400);
     const err = await res.json() as { error: { code: string; message: string } };
     expect(err.error.code).toBe('validation');
     expect(err.error.message).toBe('provider bare has no models; add one on the Providers page or pass a model to test');
   });
   it('uses a model named in the body even when the profile lists none (VS-635)', async () => {
-    harness = makeHarness();
+    const { h } = withDir();
     const ep = await endpoint();
-    harness.runtime.ctx.config.providers['mock'] = { baseUrl: ep.baseUrl, auth: 'none', headers: {}, preset: 'openai', models: {} };
-    const res = await post(harness, '/providers/mock/test', { model: 'typed-model' });
+    await dreq(h, 'PUT', '/mock', { baseUrl: ep.baseUrl, auth: 'none', headers: {}, preset: 'openai', models: {} });
+    const res = await dreq(h, 'POST', '/mock/test', { model: 'typed-model' });
     expect(res.status).toBe(200);
     expect((await res.json() as { model: string }).model).toBe('typed-model');
     expect(ep.seen.every((s) => (s.body['model'] ?? 'typed-model') === 'typed-model')).toBe(true);
@@ -152,165 +159,82 @@ describe('POST /providers/:id/test', () => {
 });
 
 // VS-635: the on-demand model discovery behind the Settings models editor.
-describe('POST /providers/:id/discover', () => {
-  const dreq = (h: Harness, method: string, path: string, payload?: unknown) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/daemon/providers${path}`, { method, headers: { ...authed(), 'content-type': 'application/json' }, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}) }));
-
-  it('returns the endpoint\'s ids with the stored key, and never the key', async () => {
-    harness = makeHarness();
+describe('POST /api/daemon/providers/:id/discover', () => {
+  it('returns the endpoint\'s ids with the daemon-stored key, and never the key', async () => {
+    const { h } = withDir();
     const ep = await endpoint();
-    harness.runtime.ctx.config.providers['mock'] = { baseUrl: ep.baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_MOCK_KEY', models: {} };
-    harness.runtime.services.secrets.put({ kind: 'human', id: 'h' } as never, { name: 'WEAVE_LLM_MOCK_KEY' }, 'sk-discovery-key');
-    const res = await post(harness, '/providers/mock/discover');
+    await dreq(h, 'PUT', '/mock', { baseUrl: ep.baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_MOCK_KEY', models: {} });
+    await dreq(h, 'POST', '/mock/secret', { value: 'sk-discovery-key' });
+    const res = await dreq(h, 'POST', '/mock/discover', {});
     expect(res.status).toBe(200);
     const json = await res.json() as { provider: string; ok: boolean; models: Array<{ id: string }> };
     expect(json).toMatchObject({ provider: 'mock', ok: true });
     expect(json.models.map((m) => m.id)).toEqual(['m1']);
-    // The workspace store's value was used (the fake records it as `held`), and no value is returned.
-    expect(ep.seen.at(-1)!.auth).toBe('Bearer held');
-    expect(JSON.stringify(json)).not.toContain('held');
+    expect(ep.seen.at(-1)!.auth).toBe('Bearer sk-discovery-key');
+    expect(JSON.stringify(json)).not.toContain('sk-discovery-key');
   });
 
   it('fetches against a draft profile before it is saved, and with a key typed but not saved', async () => {
-    harness = makeHarness();
+    const { h } = withDir();
     const ep = await endpoint();
     // The stored profile points at a dead port; the body carries the real endpoint and the typed key.
-    harness.runtime.ctx.config.providers['draft'] = { baseUrl: 'http://127.0.0.1:1/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_DRAFT_KEY', models: {} };
-    const res = await post(harness, '/providers/draft/discover', {
+    await dreq(h, 'PUT', '/draft', { baseUrl: 'http://127.0.0.1:1/v1', auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_DRAFT_KEY', models: {} });
+    const res = await dreq(h, 'POST', '/draft/discover', {
       profile: { baseUrl: ep.baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_DRAFT_KEY', models: {} },
       apiKey: 'sk-typed-not-saved',
     });
     expect(await res.json()).toMatchObject({ provider: 'draft', ok: true, models: [{ id: 'm1' }] });
     expect(ep.seen.at(-1)!.auth).toBe('Bearer sk-typed-not-saved');
-    expect(harness.runtime.services.secrets.has('WEAVE_LLM_DRAFT_KEY')).toBe(false);
   });
 
   it('names a failure in one line and returns no ids', async () => {
-    harness = makeHarness();
+    const { h } = withDir();
     const dead = createServer((_req, res) => { res.writeHead(500, { 'content-type': 'text/plain' }); res.end('nope'); });
     await new Promise<void>((r) => dead.listen(0, '127.0.0.1', r));
     try {
-      harness.runtime.ctx.config.providers['bad'] = { baseUrl: `http://127.0.0.1:${(dead.address() as AddressInfo).port}/v1`, auth: 'none', headers: {}, models: {} };
-      const json = await (await post(harness, '/providers/bad/discover')).json() as { ok: boolean; models: unknown[]; error: string };
+      await dreq(h, 'PUT', '/bad', { baseUrl: `http://127.0.0.1:${(dead.address() as AddressInfo).port}/v1`, auth: 'none', headers: {}, models: {} });
+      const json = await (await dreq(h, 'POST', '/bad/discover', {})).json() as { ok: boolean; models: unknown[]; error: string };
       expect(json.ok).toBe(false);
       expect(json.models).toEqual([]);
       expect(json.error).toBe('HTTP 500');
     } finally { await new Promise<void>((r) => dead.close(() => r())); }
   });
 
-  it('discovers a daemon provider from the daemon scope with its daemon key', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'vs635-discover-'));
-    const h = makeHarness({ daemonConfigDir: dir });
-    harness = h;
-    try {
-      const ep = await endpoint();
-      await dreq(h, 'PUT', '/dp', { baseUrl: ep.baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_D_KEY', models: {} });
-      await dreq(h, 'POST', '/dp/secret', { value: 'sk-daemon-disco' });
-      const json = await (await dreq(h, 'POST', '/dp/discover', {})).json() as { ok: boolean; models: Array<{ id: string }> };
-      expect(json).toMatchObject({ ok: true, models: [{ id: 'm1' }] });
-      expect(ep.seen.at(-1)!.auth).toBe('Bearer sk-daemon-disco');
-    } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
-
   it('404s an unknown provider', async () => {
-    harness = makeHarness();
-    expect((await post(harness, '/providers/ghost/discover')).status).toBe(404);
+    const { h } = withDir();
+    expect((await dreq(h, 'POST', '/ghost/discover', {})).status).toBe(404);
   });
 });
 
-// VS-633: the daemon scope, and the merged, marked view a workspace gets.
-describe('daemon-level providers', () => {
-  const dreq = (h: Harness, method: string, path: string, payload?: unknown) => createApp(h.deps).fetch(new Request(`http://127.0.0.1:7433/api/daemon/providers${path}`, { method, headers: { ...authed(), 'content-type': 'application/json' }, ...(payload !== undefined ? { body: JSON.stringify(payload) } : {}) }));
-  const scratchDir = (): string => mkdtempSync(join(tmpdir(), 'vs633-daemon-'));
-  const profile = (baseUrl: string) => ({ baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'WEAVE_LLM_D_KEY', models: { m1: {} } });
-  const withDir = (): { dir: string; h: Harness } => { const dir = scratchDir(); const h = makeHarness({ daemonConfigDir: dir }); return { dir, h }; };
-
-  it('creates a provider in daemon.yaml, visible to a workspace marked from the daemon, and removes it', async () => {
-    const { dir, h } = withDir(); harness = h;
-    try {
-      const put = await dreq(h, 'PUT', '/dp', profile('https://d.example.test/v1'));
-      expect(put.status).toBe(200);
-      expect(readFileSync(join(dir, 'daemon.yaml'), 'utf8')).toContain('dp:');
-      const ws = await (await req(h, 'GET', '/providers')).json() as { providers: Array<{ id: string; source: string }> };
-      expect(ws.providers.map((p) => `${p.id}:${p.source}`)).toEqual(['dp:daemon']);
-      expect((await dreq(h, 'DELETE', '/dp')).status).toBe(200);
-      expect((await (await req(h, 'GET', '/providers')).json() as { providers: unknown[] }).providers).toEqual([]);
-      expect((await dreq(h, 'DELETE', '/dp')).status).toBe(404);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+// VS-654: providers are daemon-only. There is no workspace provider surface, and a legacy workspace block is inert.
+describe('providers are daemon-only', () => {
+  it('does not mount any workspace provider route', async () => {
+    const { h } = withDir();
+    expect((await wreq(h, 'GET', '/providers')).status).toBe(404);
+    expect((await wreq(h, 'PUT', '/providers/x', profile('https://x.test/v1'))).status).toBe(404);
+    expect((await wreq(h, 'POST', '/providers/x/secret', { value: 'sk-x' })).status).toBe(404);
+    expect((await wreq(h, 'POST', '/providers/x/test', {})).status).toBe(404);
+    expect((await wreq(h, 'POST', '/providers/x/disable')).status).toBe(404);
+    expect((await wreq(h, 'DELETE', '/providers/x/disable')).status).toBe(404);
   });
 
-  it('holds a daemon key in the daemon store: found by a workspace with no secret, never returned, cleared on request', async () => {
-    const { dir, h } = withDir(); harness = h;
-    try {
-      await dreq(h, 'PUT', '/dp', profile('https://d.example.test/v1'));
-      const set = await dreq(h, 'POST', '/dp/secret', { value: 'sk-daemon-secret-0000' });
-      expect(await set.json()).toMatchObject({ ok: true, configured: true, secretName: 'WEAVE_LLM_D_KEY' });
-      expect(daemonSecretStore(dir)!.get('WEAVE_LLM_D_KEY')).toBe('sk-daemon-secret-0000');
-      expect(h.runtime.services.secrets.has('WEAVE_LLM_D_KEY')).toBe(false);
-      const daemonList = await (await dreq(h, 'GET', '')).text();
-      const wsList = await (await req(h, 'GET', '/providers')).text();
-      expect(daemonList).not.toContain('sk-daemon-secret');
-      expect(wsList).not.toContain('sk-daemon-secret');
-      expect(JSON.parse(wsList).providers[0]).toMatchObject({ id: 'dp', secretConfigured: true });
-      await dreq(h, 'DELETE', '/dp/secret');
-      expect(JSON.parse(await (await req(h, 'GET', '/providers')).text()).providers[0].secretConfigured).toBe(false);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
-
-  it('a workspace overrides a daemon provider whole, and removing the override restores it', async () => {
-    const { dir, h } = withDir(); harness = h;
-    try {
-      persistConfig(h);
-      await dreq(h, 'PUT', '/dp', profile('https://d.example.test/v1'));
-      // Inherited entries cannot be edited or given a key from the workspace scope.
-      expect((await req(h, 'DELETE', '/providers/dp')).status).toBe(400);
-      expect((await post(h, '/providers/dp/secret', { value: 'sk-x-000000' })).status).toBe(400);
-      const over = await req(h, 'PUT', '/providers/dp', { ...profile('https://w.example.test/v1'), models: { other: {} } });
-      expect(await over.json()).toMatchObject({ source: 'override', models: ['other'] });
-      expect(h.runtime.ctx.daemon.providers['dp']!.baseUrl).toBe('https://d.example.test/v1');
-      expect((await req(h, 'DELETE', '/providers/dp')).status).toBe(200);
-      const back = await (await req(h, 'GET', '/providers')).json() as { providers: Array<{ id: string; source: string; profile: { baseUrl: string } }> };
-      expect(back.providers.map((p) => `${p.id}:${p.source}:${p.profile.baseUrl}`)).toEqual(['dp:daemon:https://d.example.test/v1']);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
-
-  it('a workspace can disable an inherited provider and enable it again', async () => {
-    const { dir, h } = withDir(); harness = h;
-    try {
-      persistConfig(h);
-      await dreq(h, 'PUT', '/dp', profile('https://d.example.test/v1'));
-      expect((await req(h, 'POST', '/providers/dp/disable')).status).toBe(200);
-      const hidden = await (await req(h, 'GET', '/providers')).json() as { providers: unknown[]; disabled: Array<{ id: string }> };
-      expect(hidden.providers).toEqual([]);
-      expect(hidden.disabled.map((d) => d.id)).toEqual(['dp']);
-      expect((await req(h, 'DELETE', '/providers/dp/disable')).status).toBe(200);
-      expect((await (await req(h, 'GET', '/providers')).json() as { providers: unknown[] }).providers).toHaveLength(1);
-      expect((await req(h, 'POST', '/providers/ghost/disable')).status).toBe(404);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
-  });
-
-  it('tests a daemon provider from the daemon scope with its daemon key, and from a workspace that inherits it', async () => {
-    const { dir, h } = withDir(); harness = h;
-    try {
-      const ep = await endpoint();
-      await dreq(h, 'PUT', '/dp', { ...profile(ep.baseUrl), preset: 'openai' });
-      const noKey = await (await dreq(h, 'POST', '/dp/test', {})).json() as { ok: boolean; checks: Array<{ detail: string }> };
-      expect(noKey.ok).toBe(false);
-      expect(noKey.checks[0]!.detail).toContain('WEAVE_LLM_D_KEY');
-      await dreq(h, 'POST', '/dp/secret', { value: 'held-daemon-key' });
-      const ok = await (await dreq(h, 'POST', '/dp/test', {})).json() as { ok: boolean };
-      expect(ok.ok).toBe(true);
-      expect((await (await post(h, '/providers/dp/test', {})).json() as { ok: boolean }).ok).toBe(true);
-      expect(new Set(ep.seen.filter((s) => s.auth).map((s) => s.auth))).toEqual(new Set(['Bearer held-daemon-key']));
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+  it('still returns a legacy workspace provider block from the workspace config, unused by the daemon routes', async () => {
+    const { h } = withDir();
+    h.runtime.ctx.config.providers['legacy'] = { baseUrl: 'https://legacy.test/v1', auth: 'bearer', headers: {}, models: {} };
+    h.runtime.ctx.config.disabledProviders = ['something'];
+    // The daemon's own list is unaffected by a workspace block.
+    expect((await (await dreq(h, 'GET', '')).json() as { providers: unknown[]; presets: unknown[] }).providers).toEqual([]);
+    // The workspace config still carries the retained fields.
+    const summary = await (await wreq(h, 'GET', '')).json() as { config: { providers: Record<string, unknown>; disabledProviders: string[] } };
+    expect(Object.keys(summary.config.providers)).toEqual(['legacy']);
+    expect(summary.config.disabledProviders).toEqual(['something']);
   });
 
   it('refuses a run token on the daemon routes', async () => {
-    const { dir, h } = withDir(); harness = h;
-    try {
-      h.deps.listener = 'loopback';
-      const token = await signRunToken(runTokenSecret(h.runtime.ctx.db), { workspaceId: 'ws1', runId: 'run_1', agentId: 'ag_1', agentKind: 'worker', projectId: 'p1', ticketId: null, roleId: null, planId: null, firstTurn: false } as never);
-      const res = await createApp(h.deps).fetch(new Request('http://127.0.0.1:7433/api/daemon/providers/x', { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(profile('https://d.example.test/v1')) }));
-      expect(res.status).toBe(403);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    const { h } = withDir();
+    h.deps.listener = 'loopback';
+    const token = await signRunToken(runTokenSecret(h.runtime.ctx.db), { workspaceId: 'ws1', runId: 'run_1', agentId: 'ag_1', agentKind: 'worker', projectId: 'p1', ticketId: null, roleId: null, planId: null, firstTurn: false } as never);
+    const res = await createApp(h.deps).fetch(new Request('http://127.0.0.1:7433/api/daemon/providers/x', { method: 'PUT', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(profile('https://d.example.test/v1')) }));
+    expect(res.status).toBe(403);
   });
 });

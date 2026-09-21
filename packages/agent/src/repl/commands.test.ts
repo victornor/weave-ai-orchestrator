@@ -26,11 +26,10 @@ afterEach(async () => { await mock.close(); await mcp.close(); rmSync(dir, { rec
 
 function config(extra = ''): ReplConfig {
   mkdirSync(join(dir, 'ws'), { recursive: true });
-  writeFileSync(join(dir, 'ws', 'workspace.yaml'), `version: 1
-id: t
-name: T
-ticketPrefix: TT
-providers:
+  // VS-654: providers are daemon-only, and the REPL reads them from the user's agent.yaml or the
+  // daemon — never a workspace.yaml. MCP servers keep their workspace layer.
+  mkdirSync(join(dir, '.config', 'weave'), { recursive: true });
+  writeFileSync(join(dir, '.config', 'weave', 'agent.yaml'), `providers:
   mock:
     baseUrl: ${mock.baseUrl}
     apiKeySecret: WEAVE_LLM_MOCK_KEY
@@ -42,6 +41,11 @@ providers:
   other:
     baseUrl: http://127.0.0.1:9/v1
     auth: none
+`);
+  writeFileSync(join(dir, 'ws', 'workspace.yaml'), `version: 1
+id: t
+name: T
+ticketPrefix: TT
 mcpServers:
   disk:
     type: stdio

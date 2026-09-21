@@ -576,15 +576,15 @@ describe('run engine', () => {
     });
   });
 
-  // VS-619: a run whose model names a provider with a `apiKeySecret` gets that secret's value from
-  // its own workspace store into the turn's redaction values, and carries its workspace id.
-  describe('a provider key held in the workspace store', () => {
+  // VS-619 / VS-654: a run whose model names a daemon provider with an `apiKeySecret` gets that
+  // secret's value from the daemon store into the turn's redaction values, and carries its workspace id.
+  describe('a provider key held in the daemon store', () => {
     const STORE_KEY = 'weave-llm-fake-key-000000';
 
-    it('passes the workspace id and redacts the store-resolved key from what the turn records', async () => {
-      h.ctx.config.providers = { fake: ProviderProfileSchema.parse({ baseUrl: 'https://llm.example.test/v1', apiKeySecret: 'WEAVE_LLM_FAKE_KEY', models: { m: {} } }) };
+    it('passes the workspace id and redacts the daemon-store-resolved key from what the turn records', async () => {
+      h.ctx.daemon.providers = { fake: ProviderProfileSchema.parse({ baseUrl: 'https://llm.example.test/v1', apiKeySecret: 'WEAVE_LLM_FAKE_KEY', models: { m: {} } }) };
       h.ctx.config.models = { weaver: { runtime: 'fake', model: 'fake/m' }, workers: { runtime: 'fake', model: 'fake/m' }, workerOptions: [] };
-      h.services.secrets!.put({ kind: 'human', id: 'victor' }, { name: 'WEAVE_LLM_FAKE_KEY' }, STORE_KEY);
+      daemonSecretStore(h.ctx.daemonConfigDir)!.put('WEAVE_LLM_FAKE_KEY', STORE_KEY);
       class LeakyRuntime extends FakeRuntime {
         override async runTurn(input: TurnInput, sink: TurnSink): Promise<TurnResult> {
           sink.onEvent({ ts: nowIso(), type: 'assistant.text', payload: { text: `the provider key is ${STORE_KEY}` } });

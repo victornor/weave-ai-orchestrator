@@ -663,11 +663,15 @@ export const WorkspaceConfigSchema = withKeyAlias(z.object({
   defaults: WorkspaceDefaultsSchema.default({}),
   /** Model selection, whole and entire: nothing else in this file names a runtime or a model. */
   models: WorkspaceModelsSchema.default({}),
-  /** Model providers for the `weave` runtime, by provider id. */
+  /**
+   * VS-654 DEPRECATED: providers are daemon-only, so nothing resolves a workspace `providers`
+   * map. The field stays in the schema so a legacy block still parses and is never deleted on the
+   * next save; `loadWorkspace` logs one notice when it is non-empty.
+   */
   providers: z.record(z.string().regex(/^[a-z][a-z0-9-]*$/), ProviderProfileSchema).default({}),
   /** User-configured MCP servers for the built-in `weave` runtime (VS-621), by server name. */
   mcpServers: McpServersSchema,
-  /** VS-633: daemon-level provider ids this workspace switches off (a workspace entry of the same id replaces instead). */
+  /** VS-654 DEPRECATED: retained only so a legacy block round-trips; ignored, never deleted. */
   disabledProviders: z.array(z.string()).default([]),
   /** VS-633: daemon-level MCP server names this workspace switches off. */
   disabledMcpServers: z.array(z.string()).default([]),

@@ -653,6 +653,11 @@ describe('providers (VS-607)', () => {
       expect(WorkspaceConfigSchema.safeParse({ ...base, providers: { p: bad } }).success).toBe(false);
     }
   });
+  it('keeps a legacy workspace provider block and disabledProviders (VS-654: ignored, never deleted)', () => {
+    const cfg = WorkspaceConfigSchema.parse({ ...base, providers: { legacy: { baseUrl: 'https://legacy.test/v1' } }, disabledProviders: ['gone'] });
+    expect(Object.keys(cfg.providers)).toEqual(['legacy']);
+    expect(cfg.disabledProviders).toEqual(['gone']);
+  });
 });
 
 describe('MCP servers (VS-621)', () => {

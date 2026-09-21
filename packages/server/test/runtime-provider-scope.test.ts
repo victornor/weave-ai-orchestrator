@@ -1,6 +1,7 @@
 /**
- * VS-619: the runtime host and the models route keep provider profiles and keys to the workspace
- * that names them, so a second workspace defining the same provider id never uses the first's key.
+ * VS-654: providers are daemon-only. The runtime host resolves the daemon's provider profiles and the
+ * daemon secret store whatever workspace a run belongs to; a legacy workspace `providers` block
+ * (VS-619/VS-633 once gave it a per-workspace profile and key) changes nothing.
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,49 +21,36 @@ afterEach(async () => { await harness?.close(); harness = null; });
 const profile = (baseUrl: string): ProviderProfile => ({ baseUrl, auth: 'bearer', headers: {}, apiKeySecret: 'PROVIDER_KEY', models: {} });
 
 /** The parts of a WorkspaceRuntime the host reads; a test names its own workspace this way. */
-const workspace = (id: string, providers: Record<string, ProviderProfile>, key: string | undefined): WorkspaceRuntime =>
-  ({ id, ctx: { config: { providers } }, services: { secrets: { value: (): string | undefined => key } } } as unknown as WorkspaceRuntime);
+const workspace = (id: string, providers: Record<string, ProviderProfile>): WorkspaceRuntime =>
+  ({ id, ctx: { config: { providers } }, services: { secrets: { value: (): string => 'sk-workspace-should-not-win' } } } as unknown as WorkspaceRuntime);
 
 describe('createRuntimeHost', () => {
-  it('resolves a named workspace to its own providers and key, and nothing for an unknown one', () => {
-    const w1 = profile('https://w1.example.test/v1');
-    const w2 = profile('https://w2.example.test/v1');
-    const host = createRuntimeHost(new Map([
-      ['w1', workspace('w1', { or: w1 }, 'sk-w1-000000')],
-      ['w2', workspace('w2', { or: w2 }, 'sk-w2-000000')],
-    ]));
-    expect(host.providers('w2')['or']).toBe(w2);
-    expect(host.providerKey!('or', 'w2')).toBe('sk-w2-000000');
-    expect(host.providers('ghost')).toEqual({});
-    expect(host.providerKey!('or', 'ghost')).toBeUndefined();
-  });
-
-  // VS-633: the daemon's providers reach every workspace; a workspace's own entry replaces one.
-  it('gives every workspace the daemon providers, a workspace entry replacing the same id', () => {
+  it('resolves the daemon providers for any workspace, and a workspace block changes nothing', () => {
     const d = profile('https://daemon.example.test/v1');
     const w = profile('https://w1.example.test/v1');
     const daemon = { providers: { or: d, only: d } } as unknown as DaemonConfig;
     const host = createRuntimeHost(new Map([
-      ['w1', workspace('w1', { or: w }, undefined)],
-      ['w2', workspace('w2', {}, undefined)],
+      ['w1', workspace('w1', { or: w })],
+      ['w2', workspace('w2', {})],
     ]), undefined, daemon);
-    expect(host.providers('w1')['or']).toBe(w);
-    expect(host.providers('w1')['only']).toBe(d);
-    expect(host.providers('w2')['or']).toBe(d);
+    expect(host.providers('w1')['or']).toBe(d);
+    expect(host.providers('w2')['only']).toBe(d);
     expect(host.providers()['or']).toBe(d);
+    // The id is not looked up at all: an unknown workspace is no different.
+    expect(host.providers('ghost')['or']).toBe(d);
   });
 
-  it('finds a provider key in the daemon store when the workspace holds none, and prefers the workspace one', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ws-host-'));
+  it('resolves a provider key from the daemon store only, never a workspace store', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vs654-host-'));
     try {
       daemonSecretStore(dir)!.put('PROVIDER_KEY', 'sk-daemon-000000');
       const daemon = { providers: { or: profile('https://daemon.example.test/v1') } } as unknown as DaemonConfig;
       const host = createRuntimeHost(new Map([
-        ['w1', workspace('w1', {}, undefined)],
-        ['w2', workspace('w2', {}, 'sk-w2-000000')],
+        ['w1', workspace('w1', {})],
+        ['w2', workspace('w2', {})],
       ]), dir, daemon);
       expect(host.providerKey!('or', 'w1')).toBe('sk-daemon-000000');
-      expect(host.providerKey!('or', 'w2')).toBe('sk-w2-000000');
+      expect(host.providerKey!('or', 'w2')).toBe('sk-daemon-000000');
       expect(host.providerKey!('or')).toBe('sk-daemon-000000');
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
@@ -72,15 +60,13 @@ describe('createRuntimeHost', () => {
     expect(createRuntimeHost(new Map())).not.toHaveProperty('configDir');
   });
 
-  it('keeps the aggregate, first workspace defining an id winning, for a caller with no workspace', () => {
-    const w1 = profile('https://w1.example.test/v1');
-    const w2 = profile('https://w2.example.test/v1');
+  it('resolves nothing for a provider the daemon does not define', () => {
+    const daemon = { providers: {} } as unknown as DaemonConfig;
     const host = createRuntimeHost(new Map([
-      ['w1', workspace('w1', { or: w1 }, 'sk-w1-000000')],
-      ['w2', workspace('w2', { or: w2 }, 'sk-w2-000000')],
-    ]));
-    expect(host.providers()['or']).toBe(w1);
-    expect(host.providerKey!('or')).toBe('sk-w1-000000');
+      ['w1', workspace('w1', { or: profile('https://w1.example.test/v1') })],
+    ]), undefined, daemon);
+    expect(host.providers('w1')).toEqual({});
+    expect(host.providerKey!('or', 'w1')).toBeUndefined();
   });
 });
 

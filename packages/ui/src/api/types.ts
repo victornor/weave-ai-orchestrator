@@ -161,8 +161,8 @@ export type ConfigSource = 'daemon' | 'workspace' | 'override';
 export interface ProviderView { id: string; profile: ProviderProfile; secretConfigured: boolean; models: string[]; source?: ConfigSource }
 /** One preset the add-a-provider flow can start from; the daemon owns the id and the description. */
 export interface PresetSummary { id: string; description: string }
-/** `disabled` (workspace scope only): inherited daemon providers this workspace hides. */
-export interface ProvidersPayload { providers: ProviderView[]; disabled?: ProviderView[]; presets: PresetSummary[] }
+/** VS-654: providers are daemon-only, so there is no `disabled` list and every view has `source: 'daemon'`. */
+export interface ProvidersPayload { providers: ProviderView[]; presets: PresetSummary[] }
 /** `POST /providers/:id/discover` (VS-635): the endpoint's model list for the models editor, never a key. */
 export interface ProviderDiscoveredModel { id: string; contextWindow?: number }
 export interface ProviderDiscovery { provider: string; ok: boolean; models: ProviderDiscoveredModel[]; error?: string }

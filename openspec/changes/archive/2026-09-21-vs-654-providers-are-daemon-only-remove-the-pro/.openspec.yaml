@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-21
+goal: "Providers are daemon-only: remove the Providers page from workspace
+  settings (MCP servers stay)"

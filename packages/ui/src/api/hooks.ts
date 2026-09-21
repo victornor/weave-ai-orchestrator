@@ -1263,12 +1263,15 @@ export function useSetModels(): UseMutationResult<T.WorkspaceModels, Error, T.Wo
   });
 }
 
-/* ------------------------------------------------------- providers (VS-610, VS-633) */
+/* ------------------------------------------------------- providers (VS-610, VS-654) */
 
 /**
- * VS-633: providers and MCP servers are configured once in the daemon and may be overridden per
- * workspace. Each hook takes the scope it acts on: `daemon` talks to `/api/daemon/…`, `workspace`
- * (the default) to the selected workspace's merged, marked view.
+ * VS-633: providers and MCP servers are configured once in the daemon; MCP servers may be overridden
+ * per workspace. Each MCP hook takes the scope it acts on: `daemon` talks to `/api/daemon/…`,
+ * `workspace` (the default) to the selected workspace's merged, marked view.
+ *
+ * VS-654: providers are daemon-only, so the provider hooks below never take a scope and always talk
+ * to `/api/daemon/providers`.
  */
 export type AgentConfigScope = 'daemon' | 'workspace';
 
@@ -1282,77 +1285,60 @@ function scopedCall<R>(scope: AgentConfigScope, ws: string, kind: 'providers' | 
 const refreshAgentConfig = (qc: QueryClient, kind: 'providers' | 'mcp'): void => {
   void qc.invalidateQueries({ predicate: (q) => { const k = q.queryKey; return (k[0] === 'daemon' && k[1] === kind) || (k[0] === 'w' && k[2] === kind); } });
 };
-const providersKey = (scope: AgentConfigScope, ws: string) => (scope === 'daemon' ? qk.daemonProviders() : qk.providers(ws));
 const mcpKey = (scope: AgentConfigScope, ws: string) => (scope === 'daemon' ? qk.daemonMcpServers() : qk.mcpServers(ws));
+const providerCall = <R>(path: string, init?: Parameters<typeof api.root>[1]): Promise<R> => api.root<R>(`/daemon/providers${path}`, init);
 
-/** The `weave`-runtime providers a scope resolves, with their secret state, plus the preset catalogue. */
-export function useProviders(scope: AgentConfigScope = 'workspace'): UseQueryResult<T.ProvidersPayload> {
-  const ws = useHookWs();
-  return useQuery({ queryKey: providersKey(scope, ws), queryFn: () => scopedCall<T.ProvidersPayload>(scope, ws, 'providers', ''), enabled: scope === 'daemon' || ws !== '' });
+/** The daemon's `weave`-runtime providers, with their secret state, plus the preset catalogue. */
+export function useProviders(): UseQueryResult<T.ProvidersPayload> {
+  return useQuery({ queryKey: qk.daemonProviders(), queryFn: () => providerCall<T.ProvidersPayload>('') });
 }
 
-/** Create or replace a provider profile; the body is the profile, `id` names the config key. */
-export function useSaveProvider(scope: AgentConfigScope = 'workspace'): UseMutationResult<T.ProviderView, Error, { id: string; profile: T.ProviderProfile }> {
-  const ws = useHookWs();
+/** Create or replace a daemon provider profile; the body is the profile, `id` names the config key. */
+export function useSaveProvider(): UseMutationResult<T.ProviderView, Error, { id: string; profile: T.ProviderProfile }> {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, profile }) => scopedCall<T.ProviderView>(scope, ws, 'providers', `/${encodeURIComponent(id)}`, { method: 'PUT', body: profile }),
+    mutationFn: ({ id, profile }) => providerCall<T.ProviderView>(`/${encodeURIComponent(id)}`, { method: 'PUT', body: profile }),
     onSuccess: () => refreshAgentConfig(qc, 'providers'),
   });
 }
 
-/** Remove a provider entry from the scope (in a workspace: an override or an addition, restoring the daemon's). */
-export function useDeleteProvider(scope: AgentConfigScope = 'workspace'): UseMutationResult<{ ok: boolean }, Error, string> {
-  const ws = useHookWs();
+/** Remove a provider entry from the daemon settings. */
+export function useDeleteProvider(): UseMutationResult<{ ok: boolean }, Error, string> {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id) => scopedCall<{ ok: boolean }>(scope, ws, 'providers', `/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-    onSuccess: () => refreshAgentConfig(qc, 'providers'),
-  });
-}
-
-/** Hide an inherited daemon provider from this workspace (`disabled: true`) or show it again. */
-export function useSetProviderDisabled(): UseMutationResult<{ ok: boolean }, Error, { id: string; disabled: boolean }> {
-  const ws = useHookWs();
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, disabled }) => api.ws<{ ok: boolean }>(ws, `/providers/${encodeURIComponent(id)}/disable`, { method: disabled ? 'POST' : 'DELETE' }),
+    mutationFn: (id) => providerCall<{ ok: boolean }>(`/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     onSuccess: () => refreshAgentConfig(qc, 'providers'),
   });
 }
 
 /** Set or replace the provider's key; only a status comes back, never the value. */
-export function useSetProviderSecret(scope: AgentConfigScope = 'workspace'): UseMutationResult<{ ok: boolean; configured: boolean; secretName: string }, Error, { id: string; value: string }> {
-  const ws = useHookWs();
+export function useSetProviderSecret(): UseMutationResult<{ ok: boolean; configured: boolean; secretName: string }, Error, { id: string; value: string }> {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, value }) => scopedCall<{ ok: boolean; configured: boolean; secretName: string }>(scope, ws, 'providers', `/${encodeURIComponent(id)}/secret`, { method: 'POST', body: { value } }),
+    mutationFn: ({ id, value }) => providerCall<{ ok: boolean; configured: boolean; secretName: string }>(`/${encodeURIComponent(id)}/secret`, { method: 'POST', body: { value } }),
     onSuccess: () => refreshAgentConfig(qc, 'providers'),
   });
 }
 
-export function useClearProviderSecret(scope: AgentConfigScope = 'workspace'): UseMutationResult<{ ok: boolean; configured: boolean; secretName: string | null }, Error, string> {
-  const ws = useHookWs();
+export function useClearProviderSecret(): UseMutationResult<{ ok: boolean; configured: boolean; secretName: string | null }, Error, string> {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id) => scopedCall<{ ok: boolean; configured: boolean; secretName: string | null }>(scope, ws, 'providers', `/${encodeURIComponent(id)}/secret`, { method: 'DELETE' }),
+    mutationFn: (id) => providerCall<{ ok: boolean; configured: boolean; secretName: string | null }>(`/${encodeURIComponent(id)}/secret`, { method: 'DELETE' }),
     onSuccess: () => refreshAgentConfig(qc, 'providers'),
   });
 }
 
 /** Run the on-demand probe; the request itself is the side effect, so nothing is cached. */
-export function useTestProvider(scope: AgentConfigScope = 'workspace'): UseMutationResult<T.ProviderTestReport, Error, { id: string; model?: string }> {
-  const ws = useHookWs();
+export function useTestProvider(): UseMutationResult<T.ProviderTestReport, Error, { id: string; model?: string }> {
   return useMutation({
-    mutationFn: ({ id, model }) => scopedCall<T.ProviderTestReport>(scope, ws, 'providers', `/${encodeURIComponent(id)}/test`, { method: 'POST', body: model ? { model } : {} }),
+    mutationFn: ({ id, model }) => providerCall<T.ProviderTestReport>(`/${encodeURIComponent(id)}/test`, { method: 'POST', body: model ? { model } : {} }),
   });
 }
 
 /** VS-635: fetch a provider's model ids from its endpoint. Read-only; the request is the side effect, so nothing is cached. */
-export function useDiscoverProviderModels(scope: AgentConfigScope = 'workspace'): UseMutationResult<T.ProviderDiscovery, Error, { id: string; profile?: T.ProviderProfile; apiKey?: string }> {
-  const ws = useHookWs();
+export function useDiscoverProviderModels(): UseMutationResult<T.ProviderDiscovery, Error, { id: string; profile?: T.ProviderProfile; apiKey?: string }> {
   return useMutation({
-    mutationFn: ({ id, profile, apiKey }) => scopedCall<T.ProviderDiscovery>(scope, ws, 'providers', `/${encodeURIComponent(id)}/discover`, {
+    mutationFn: ({ id, profile, apiKey }) => providerCall<T.ProviderDiscovery>(`/${encodeURIComponent(id)}/discover`, {
       method: 'POST',
       body: { ...(profile ? { profile } : {}), ...(apiKey ? { apiKey } : {}) },
     }),

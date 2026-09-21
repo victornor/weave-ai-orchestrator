@@ -19,7 +19,7 @@ export { createHistoryReader, HISTORY_GIT_SUBCOMMANDS } from './projects/history
 export { createAuthService, openDaemonDb, DAEMON_DB_FILE } from './auth/index.js';
 export { createSecretStore, type SecretStore } from './secrets/store.js';
 export { daemonSecretStore, resolveScopedSecret, DAEMON_SECRETS_FILE, DAEMON_SECRETS_KEY } from './secrets/daemon.js';
-export { scopedProviders, scopedMcpServers, effectiveProviders, effectiveMcpServers, scopedSecretValue } from './scoped.js';
+export { scopedMcpServers, effectiveProviders, effectiveMcpServers, scopedSecretValue } from './scoped.js';
 export {
   createIncidentsService, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX,
   type IncidentsService, type IncidentCreateInput, type IncidentListQuery, type IncidentResolveInput,

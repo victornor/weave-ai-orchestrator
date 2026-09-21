@@ -1,8 +1,9 @@
 /**
- * Settings → Providers and MCP servers in two scopes (VS-633): configured once in the daemon settings,
- * and in a workspace shown as the merged view — inherited entries marked "from daemon" and read-only,
- * with Override / Hide here, and Remove override for an entry the workspace replaces. Each hook is
- * handed the scope it acts on, so a daemon edit and a workspace edit reach different routes.
+ * Settings → Providers (daemon-only, VS-654) and MCP servers in two scopes (VS-633): providers are
+ * configured once in the daemon settings and have no workspace section, while MCP servers may be
+ * overridden per workspace — inherited entries marked "from daemon" and read-only, with Override /
+ * Hide here, and Remove override for an entry the workspace replaces. Each MCP hook is handed the
+ * scope it acts on; the provider hooks always act on the daemon.
  */
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -34,15 +35,6 @@ vi.mock('../api/context', () => ({
 }));
 vi.mock('../api/hooks', () => {
   const daemonProviders = { providers: [{ id: 'dp', secretConfigured: true, models: ['m1'], source: 'daemon', profile: profile('https://d.example.test/v1') }], presets: [] };
-  const wsProviders = {
-    providers: [
-      { id: 'dp', secretConfigured: true, models: ['m1'], source: 'daemon', profile: profile('https://d.example.test/v1') },
-      { id: 'ov', secretConfigured: false, models: ['m1'], source: 'override', profile: profile('https://w.example.test/v1') },
-      { id: 'own', secretConfigured: false, models: ['m1'], source: 'workspace', profile: profile('https://own.example.test/v1') },
-    ],
-    disabled: [{ id: 'gone', secretConfigured: false, models: [], source: 'daemon', profile: profile('https://gone.example.test/v1') }],
-    presets: [],
-  };
   const daemonMcp = { servers: [{ name: 'docs', secrets: [], source: 'daemon', config: mcp('npx-daemon') }] };
   const wsMcp = {
     servers: [
@@ -64,14 +56,14 @@ vi.mock('../api/hooks', () => {
     useSetModels: () => ({ mutate: () => undefined }),
     useWorkspaceSummary: () => ({ data: { workspace: { id: 'acme', name: 'Acme', ticketPrefix: 'ACME' }, config: {}, plugins: [] } }),
     usePatchConfig: () => ({ mutate: () => undefined, mutateAsync: async () => undefined }),
-    useProviders: (scope = 'workspace') => { state.scopes.push(scope); return { isLoading: false, isError: false, data: scope === 'daemon' ? daemonProviders : wsProviders }; },
-    useSaveProvider: (scope = 'workspace') => ({ mutate: () => undefined, mutateAsync: async (v: { id: string }) => { state.saves.push({ scope, id: v.id }); }, isError: false }),
-    useDeleteProvider: (scope = 'workspace') => ({ mutate: (id: string) => { state.deletes.push({ scope, id }); } }),
-    useSetProviderDisabled: () => ({ mutate: (v: { id: string; disabled: boolean }) => { state.hides.push(v); } }),
-    useSetProviderSecret: (scope = 'workspace') => ({ mutate: (v: { id: string; value: string }) => { state.secrets.push({ scope, ...v }); }, isPending: false }),
+    // VS-654: providers are daemon-only; the provider hooks take no scope.
+    useProviders: () => { state.scopes.push('daemon'); return { isLoading: false, isError: false, data: daemonProviders }; },
+    useSaveProvider: () => ({ mutate: () => undefined, mutateAsync: async (v: { id: string }) => { state.saves.push({ scope: 'daemon', id: v.id }); }, isError: false }),
+    useDeleteProvider: () => ({ mutate: (id: string) => { state.deletes.push({ scope: 'daemon', id }); } }),
+    useSetProviderSecret: () => ({ mutate: (v: { id: string; value: string }) => { state.secrets.push({ scope: 'daemon', ...v }); }, isPending: false }),
     useClearProviderSecret: () => ({ mutate: () => undefined, isPending: false }),
-    useTestProvider: (scope = 'workspace') => ({ mutate: (v: { id: string; model?: string }, o?: { onSuccess?: (r: unknown) => void }) => { state.tests.push({ scope, id: v.id, model: v.model }); o?.onSuccess?.({ ok: true, provider: v.id, model: 'm1', checks: [{ name: 'models list', ok: true, detail: '1 model' }], detected: {} }); }, isPending: false, isError: false, error: null }),
-    useDiscoverProviderModels: (scope = 'workspace') => ({ mutate: (v: { id: string }, o?: { onSuccess?: (r: unknown) => void }) => { state.discoveries.push({ scope, id: v.id }); o?.onSuccess?.({ provider: v.id, ok: true, models: [{ id: 'm1' }] }); }, isPending: false, isError: false, error: null }),
+    useTestProvider: () => ({ mutate: (v: { id: string; model?: string }, o?: { onSuccess?: (r: unknown) => void }) => { state.tests.push({ scope: 'daemon', id: v.id, model: v.model }); o?.onSuccess?.({ ok: true, provider: v.id, model: 'm1', checks: [{ name: 'models list', ok: true, detail: '1 model' }], detected: {} }); }, isPending: false, isError: false, error: null }),
+    useDiscoverProviderModels: () => ({ mutate: (v: { id: string }, o?: { onSuccess?: (r: unknown) => void }) => { state.discoveries.push({ scope: 'daemon', id: v.id }); o?.onSuccess?.({ provider: v.id, ok: true, models: [{ id: 'm1' }] }); }, isPending: false, isError: false, error: null }),
     useMcpServers: (scope = 'workspace') => ({ isLoading: false, isError: false, data: scope === 'daemon' ? daemonMcp : wsMcp }),
     useSaveMcpServer: (scope = 'workspace') => ({ mutate: () => undefined, mutateAsync: async (v: { name: string }) => { state.saves.push({ scope, id: v.name }); }, isError: false }),
     useDeleteMcpServer: (scope = 'workspace') => ({ mutate: (id: string) => { state.deletes.push({ scope, id }); } }),
@@ -105,7 +97,7 @@ describe.each(['light', 'dark'] as const)('in the %s theme', (theme) => {
       expect(screen.getByRole('button', { name: 'MCP servers' })).toBeInTheDocument();
     });
 
-    it('lists a provider unmarked, talks to the daemon routes, and tests and keys it from there', () => {
+    it('lists a daemon provider, talks to the daemon routes, and tests and keys it from there', () => {
       openDaemon('providers');
       expect(state.scopes).toContain('daemon');
       expect(screen.getByText(/configured once here and visible to every workspace/)).toBeInTheDocument();
@@ -132,41 +124,13 @@ describe.each(['light', 'dark'] as const)('in the %s theme', (theme) => {
   });
 
   describe('a workspace scope', () => {
-    it('marks an inherited provider from daemon, read-only, and overrides it with its own profile', () => {
+    it('lists no Providers section, and a stale providers URL renders the workspace home', () => {
       openWorkspace('providers');
-      expect(screen.getAllByText('from daemon').length).toBeGreaterThanOrEqual(1);
-      fireEvent.click(screen.getByRole('button', { name: /dp/ }));
-      expect(screen.queryByLabelText('dp base URL')).toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: 'Override' }));
-      expect(state.saves).toEqual([{ scope: 'workspace', id: 'dp' }]);
-    });
-
-    it('tests an inherited provider, and can hide it from this workspace', () => {
-      openWorkspace('providers');
-      fireEvent.click(screen.getByRole('button', { name: /dp/ }));
-      fireEvent.change(screen.getByLabelText('dp model to test'), { target: { value: 'm1' } });
-      fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
-      expect(state.tests).toEqual([{ scope: 'workspace', id: 'dp', model: 'm1' }]);
-      fireEvent.click(screen.getByRole('button', { name: 'Hide here' }));
-      expect(state.hides).toEqual([{ id: 'dp', disabled: true }]);
-    });
-
-    it('marks an override, edits it, and Remove override restores the daemon entry', () => {
-      openWorkspace('providers');
-      expect(screen.getByText('overrides daemon')).toBeInTheDocument();
-      expect(screen.getByText('this workspace')).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: /^ov / }));
-      expect(screen.getByLabelText('ov base URL')).toHaveValue('https://w.example.test/v1');
-      fireEvent.click(screen.getByRole('button', { name: 'Remove override' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Confirm remove' }));
-      expect(state.deletes).toEqual([{ scope: 'workspace', id: 'ov' }]);
-    });
-
-    it('lists what this workspace hides and shows it again', () => {
-      openWorkspace('providers');
-      expect(screen.getByText('Hidden from this workspace')).toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: 'Show again' }));
-      expect(state.hides).toEqual([{ id: 'gone', disabled: false }]);
+      // The workspace section row has General first and no Providers entry.
+      expect(screen.getByRole('button', { name: 'General' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Providers' })).toBeNull();
+      // The body is the workspace home (General), not a provider list.
+      expect(screen.queryByText(/configured once here and visible to every workspace/)).toBeNull();
     });
 
     it('does the same for MCP servers: inherited is read-only, overridable, hideable, and an override is removable', () => {

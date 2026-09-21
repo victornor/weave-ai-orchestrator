@@ -74,7 +74,6 @@ vi.mock('../api/hooks', () => ({
   useClearProviderSecret: () => ({ mutate: (id: string) => { state.clears.push(id); }, isPending: false }),
   useTestProvider: () => ({ mutate: (vars: { id: string; model?: string }, opts?: { onSuccess?: (r: unknown) => void }) => { state.testCalls.push(vars); opts?.onSuccess?.(state.testReport); }, isPending: false, isError: false, error: null }),
   useDiscoverProviderModels: () => ({ mutate: (vars: { id: string; profile?: Record<string, unknown>; apiKey?: string }, opts?: { onSuccess?: (r: unknown) => void }) => { state.discoveries.push(vars); opts?.onSuccess?.(state.discoveryResult); }, isPending: false, isError: false, error: null }),
-  useSetProviderDisabled: () => ({ mutate: () => undefined }),
 }));
 vi.mock('../settings/sections', () => ({
   UpdatesSection: () => null, SecuritySection: () => null, HostToolsSection: () => null, DictationSection: () => null,
@@ -96,7 +95,8 @@ beforeEach(() => {
 });
 
 function open(): void {
-  state.search = { scope: 'acme', section: 'providers' };
+  // VS-654: providers are daemon-only; the section lives in the daemon scope.
+  state.search = { section: 'providers' };
   render(<V2Settings />);
 }
 

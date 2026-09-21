@@ -14,7 +14,9 @@ import type { Run, ThreadMessage } from '@weave-ai/shared';
 
 export type SessionConversationRow =
   | { kind: 'message'; key: string; at: string; message: ThreadMessage }
-  | { kind: 'turn'; key: string; at: string; run: Run };
+  | { kind: 'turn'; key: string; at: string; run: Run }
+  /** VS-656: a new session began here; `reason` is the retired session's stored token, or null. */
+  | { kind: 'boundary'; key: string; at: string; reason: string | null };
 
 export interface SessionConversation {
   rows: SessionConversationRow[];
@@ -37,6 +39,7 @@ export function sessionConversationRows(
   messages: readonly ThreadMessage[],
   runs: readonly Run[],
   sessionAgentId: string,
+  sessions: readonly { id: string; retiredReason: string | null }[] = [],
 ): SessionConversation {
   const rows: SessionConversationRow[] = [];
   const answersByRun = new Map<string, string>();
@@ -47,8 +50,17 @@ export function sessionConversationRows(
     }
     rows.push({ kind: 'message', key: `m:${message.id}`, at: message.createdAt, message });
   }
+  const retiredReason = new Map(sessions.map((s) => [s.id, s.retiredReason]));
+  let previousSessionId: string | null = null;
   for (const run of runs) {
+    const sessionId = run.sessionId ?? null;
+    // VS-656: a run whose session differs from the previous run's begins a new session; mark it with
+    // the retiring session's own stored reason so the boundary does not have to be re-derived.
+    if (previousSessionId !== null && sessionId !== null && sessionId !== previousSessionId) {
+      rows.push({ kind: 'boundary', key: `b:${run.id}`, at: run.startedAt ?? run.createdAt, reason: retiredReason.get(previousSessionId) ?? null });
+    }
     rows.push({ kind: 'turn', key: `r:${run.id}`, at: run.startedAt ?? run.createdAt, run });
+    if (sessionId !== null) previousSessionId = sessionId;
   }
   rows.sort((a, b) => (a.at === b.at ? a.key.localeCompare(b.key) : a.at.localeCompare(b.at)));
   return { rows, answersByRun };

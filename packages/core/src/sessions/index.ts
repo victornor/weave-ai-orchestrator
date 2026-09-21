@@ -1,5 +1,5 @@
 import { newId, nowIso } from '@weave-ai/db';
-import type { AgentKind, SessionPolicy } from '@weave-ai/shared';
+import type { AgentKind, SessionPolicy, SessionRetiredReason } from '@weave-ai/shared';
 import type { SessionRef } from '@weave-ai/runtime-sdk';
 import type { WorkspaceContext } from '../context.js';
 import { modelSettingFor, modelsFor } from '../models/resolve.js';
@@ -14,9 +14,15 @@ export interface SessionRow {
   lastContextTokens?: number | null;
   /** VS-542: the MCP tool-list fingerprint this session was started under; null on a row predating the column. */
   toolContract: string | null;
+  /** VS-656: why this session was retired; null while it is active or on a row predating the column. */
+  retiredReason: string | null;
 }
 
-export interface TurnSession { session: SessionRow; ref: SessionRef | null; isFirstTurn: boolean; stale: boolean; policy: SessionPolicy }
+export interface TurnSession {
+  session: SessionRow; ref: SessionRef | null; isFirstTurn: boolean; stale: boolean; policy: SessionPolicy;
+  /** VS-656: the reason this turn retired the previous session, when it did. */
+  retireReason: SessionRetiredReason | null;
+}
 
 export interface SessionsService {
   active(agentId: string): SessionRow | null;
@@ -53,7 +59,7 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
   const create = (agentId: string, runtimeId: string, contract: string | null): SessionRow => {
     const id = newId();
     const now = nowIso();
-    ctx.db.insert('agent_sessions', { id, agentId, runtimeId, sessionRefJson: null, displayId: null, status: 'active', turnCount: 0, cumulativeUsageJson: {}, toolContract: contract, createdAt: now, updatedAt: now });
+    ctx.db.insert('agent_sessions', { id, agentId, runtimeId, sessionRefJson: null, displayId: null, status: 'active', turnCount: 0, cumulativeUsageJson: {}, toolContract: contract, retiredReason: null, createdAt: now, updatedAt: now });
     return ctx.db.get<SessionRow>('SELECT * FROM agent_sessions WHERE id = ?', [id])!;
   };
 
@@ -63,23 +69,26 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
     forTurn(agent, policy, contract) {
       let session = get(agent.id);
       let stale = false;
+      let retireReason: SessionRetiredReason | null = null;
       // VS-542: the runtime fixed its tool definitions when this session started, so a contract
       // change since then cannot reach it by resuming. Retire it and start fresh so the next spawn
       // fetches the current definitions. A null (pre-column) fingerprint is treated as different.
       if (session && contract !== undefined && session.toolContract !== contract) {
-        ctx.db.update('agent_sessions', session.id, { status: 'stale', updatedAt: nowIso() });
+        ctx.db.update('agent_sessions', session.id, { status: 'stale', retiredReason: 'tool_contract', updatedAt: nowIso() });
         log.info({ agentId: agent.id, had: session.toolContract, now: contract }, 'tool contract changed; starting a new session');
         session = null;
         stale = true;
+        retireReason = 'tool_contract';
       }
       if (session && policy === 'persistent') {
         const idleDays = (Date.now() - new Date(session.updatedAt).getTime()) / 86_400_000;
         const max = ctx.config.defaults.sessionMaxIdleDays;
         if (session.turnCount > 0 && idleDays > max) {
-          ctx.db.update('agent_sessions', session.id, { status: 'stale', updatedAt: nowIso() });
+          ctx.db.update('agent_sessions', session.id, { status: 'stale', retiredReason: 'idle', updatedAt: nowIso() });
           log.info({ agentId: agent.id, idleDays: Math.round(idleDays) }, 'session went stale; starting a new one');
           session = null;
           stale = true;
+          retireReason = 'idle';
         }
       }
       if (session && policy === 'fresh') {
@@ -90,14 +99,15 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
       // names another runtime cannot resume this one — it is retired and the next turn starts fresh
       // (VS-77). Changing only the model or the effort keeps the session.
       if (session && session.runtimeId !== agent.runtimeId) {
-        ctx.db.update('agent_sessions', session.id, { status: 'stale', updatedAt: nowIso() });
+        ctx.db.update('agent_sessions', session.id, { status: 'stale', retiredReason: 'runtime', updatedAt: nowIso() });
         log.info({ agentId: agent.id, from: session.runtimeId, to: agent.runtimeId }, 'runtime changed; starting a new session');
         session = null;
         stale = true;
+        retireReason = 'runtime';
       }
       if (!session) session = create(agent.id, agent.runtimeId, contract ?? null);
       const ref = policy === 'fresh' ? null : (session.sessionRef ?? null);
-      return { session, ref, isFirstTurn: session.turnCount === 0 || ref === null, stale, policy };
+      return { session, ref, isFirstTurn: session.turnCount === 0 || ref === null, stale, policy, retireReason };
     },
 
     record(sessionId, patch) {
@@ -124,7 +134,7 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
 
     reset(agentId, reason) {
       const cur = get(agentId);
-      if (cur) ctx.db.update('agent_sessions', cur.id, { status: 'closed', lastError: reason, updatedAt: nowIso() });
+      if (cur) ctx.db.update('agent_sessions', cur.id, { status: 'closed', lastError: reason, retiredReason: 'reset', updatedAt: nowIso() });
       const agent = ctx.db.get<{ kind: AgentKind; runtimeId: string }>('SELECT kind, runtime_id FROM agents WHERE id = ?', [agentId]);
       log.info({ agentId, reason }, 'session reset');
       const runtimeId = agent?.runtimeId ?? modelSettingFor(modelsFor(ctx), agent?.kind ?? 'worker').runtime;
@@ -140,7 +150,7 @@ export function createSessions(ctx: WorkspaceContext): SessionsService {
       if (!cur) return false;
       const idleDays = (Date.now() - new Date(cur.updatedAt).getTime()) / 86_400_000;
       if (idleDays <= maxIdleDays) return false;
-      ctx.db.update('agent_sessions', cur.id, { status: 'stale', updatedAt: nowIso() });
+      ctx.db.update('agent_sessions', cur.id, { status: 'stale', retiredReason: 'idle', updatedAt: nowIso() });
       return true;
     },
 

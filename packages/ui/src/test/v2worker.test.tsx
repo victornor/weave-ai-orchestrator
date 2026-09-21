@@ -24,8 +24,16 @@ const state = vi.hoisted(() => ({
   resetOption: vi.fn() as unknown as ReturnType<typeof vi.fn>,
   models: null as { workers: { runtime: string; model: string | null }; weaver: { runtime: string; model: string | null }; workerOptions: Array<{ id: string; description: string; runtime: string | null; model: string | null }>; source: { weaver: string; workers: string; workerOptions: string } } | null,
   sessionTurns: null as number | null,
+  /** VS-656: the agent's sessions, for the conversation's retirement boundaries. */
+  sessions: [] as Array<{ id: string; status: string; turnCount: number; createdAt: string; updatedAt: string; retiredReason: string | null }>,
   /** VS-618: the session agent's runs, and each run's events/partials for its turn transcript. */
   runs: [] as Run[],
+  /** VS-656: what the old workspace-wide window would have returned — must not be what the feed reads. */
+  workspaceRuns: [] as Run[],
+  /** VS-656: the run-page count the feed asked for, one entry per render. */
+  sessionRunPages: [] as number[],
+  hasOlder: false,
+  loadOlder: vi.fn() as ReturnType<typeof vi.fn>,
   runEvents: {} as Record<string, RunEvent[]>,
   runPartials: {} as Record<string, Array<{ partId: string; kind: 'text' | 'thinking' | 'tool_input'; text: string }>>,
 }));
@@ -51,7 +59,7 @@ vi.mock('../api/runStream', () => ({
 vi.mock('../api/hooks', () => ({
   // What the daemon's runtime list declares for each runtime (VS-615).
   usePartialOutput: (id?: string | null) => (({ opencode: 'full', claude: 'full', codex: 'full', cursor: 'text', gemini: 'text', weave: 'full' }) as Record<string, string>)[id ?? ''] ?? 'none',
-  useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: state.noTicket ? null : ticket({ id: 'tk1', identifier: 'ACME-1' }), thread: state.thread, role: state.role, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, sessionTurns: state.sessionTurns, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
+  useWorker: () => ({ data: state.agent ? { agent: state.agent, ticket: state.noTicket ? null : ticket({ id: 'tk1', identifier: 'ACME-1' }), thread: state.thread, role: state.role, project: null, lastRun: null, usage: null, worktree: null, scheduledWake: null, sessionTurns: state.sessionTurns, sessions: state.sessions, input: { midTurn: false, interrupts: false } } : undefined, isLoading: false, isError: false }),
   useWorkerBrief: () => ({ data: { brief: '# The brief' } }),
   useWorkerAction: () => ({ mutate: state.action, error: state.actionError }),
   useWorkerMessage: () => ({ mutateAsync: state.send, error: null }),
@@ -59,8 +67,9 @@ vi.mock('../api/hooks', () => ({
   useCompactWorker: () => ({ mutate: state.compact, isPending: false, error: null }),
   useModels: () => ({ data: state.models }),
   useSetSessionOption: () => ({ mutate: state.setOption, isPending: false, reset: state.resetOption, error: null }),
-  useThreadMessages: () => ({ data: state.threadMessages, isLoading: false, isError: false, error: null }),
-  useRuns: () => ({ data: state.runs }),
+  useThreadMessages: () => ({ data: state.threadMessages, isLoading: false, isError: false, error: null, hasOlder: state.hasOlder, isLoadingOlder: false, loadOlder: state.loadOlder }),
+  useRuns: () => ({ data: state.workspaceRuns }),
+  useSessionRuns: (_agentId: string, pages?: number) => { state.sessionRunPages.push(pages ?? 1); return { data: state.runs }; },
   useHandoverCommand: () => ({ isLoading: false, data: null }),
   useStartHandover: () => ({ mutate: state.start, error: null }),
   useEndHandover: () => ({ mutateAsync: state.end, error: null }),
@@ -131,7 +140,12 @@ beforeEach(() => {
   state.resetOption = vi.fn();
   state.models = null;
   state.sessionTurns = null;
+  state.sessions = [];
   state.runs = [];
+  state.workspaceRuns = [];
+  state.sessionRunPages = [];
+  state.hasOlder = false;
+  state.loadOlder = vi.fn();
   state.runEvents = {};
   state.runPartials = {};
 });
@@ -363,6 +377,58 @@ describe('V2 worker page', () => {
       render(<WorkerBody workerId="a1" />);
       expect(document.querySelector('[data-live-activity]')).not.toBeNull();
       expect(document.querySelector('[data-live-whole-steps]')).not.toBeNull();
+    });
+  });
+
+  // VS-656: a session retired at an upgrade keeps its turns visible, the boundary is marked, and the
+  // turns come from the agent's own runs rather than a window shared with other agents.
+  describe('a session across retired sessions (VS-656)', () => {
+    beforeEach(() => {
+      state.agent = agent({ id: 'a1', kind: 'session', ticketId: null, name: 'Backend Engineer — session', status: 'active', runtimeId: 'opencode' });
+      state.noTicket = true;
+      state.thread = { id: 'th1', agentId: 'a1' };
+    });
+
+    it('shows a retired session’s turns even when the shared workspace window would drop them', () => {
+      state.threadMessages = [
+        message({ id: 'h1', body: 'first question', createdAt: '2026-09-19T00:00:00.000Z' }),
+        message({ id: 'h2', body: 'second question', createdAt: '2026-09-21T00:00:00.000Z' }),
+      ];
+      const retired = sessionRun({ id: 'old1', sessionId: 's1', status: 'succeeded', startedAt: '2026-09-19T00:00:10.000Z', createdAt: '2026-09-19T00:00:10.000Z', finishedAt: '2026-09-19T00:00:20.000Z' });
+      const fresh = sessionRun({ id: 'new1', sessionId: 's2', status: 'succeeded', startedAt: '2026-09-21T00:00:10.000Z', createdAt: '2026-09-21T00:00:10.000Z', finishedAt: '2026-09-21T00:00:20.000Z' });
+      state.runs = [retired, fresh];
+      state.workspaceRuns = [fresh];
+      state.sessions = [
+        { id: 's1', status: 'stale', turnCount: 1, createdAt: '2026-09-19T00:00:00.000Z', updatedAt: '2026-09-21T00:00:00.000Z', retiredReason: 'tool_contract' },
+        { id: 's2', status: 'active', turnCount: 1, createdAt: '2026-09-21T00:00:00.000Z', updatedAt: '2026-09-21T00:00:20.000Z', retiredReason: null },
+      ];
+      render(<WorkerBody workerId="a1" />);
+      expect(document.querySelector('[data-session-turn="old1"]')).not.toBeNull();
+      expect(document.querySelector('[data-session-turn="new1"]')).not.toBeNull();
+      expect(document.querySelector('[data-v2-session-boundary]')?.textContent).toContain("the agent's tools changed at an upgrade");
+    });
+
+    it('draws no boundary for a single session', () => {
+      state.threadMessages = [message({ id: 'h1', body: 'hi', createdAt: '2026-09-21T00:00:00.000Z' })];
+      state.runs = [sessionRun({ id: 'new1', sessionId: 's2', status: 'succeeded', startedAt: '2026-09-21T00:00:10.000Z', createdAt: '2026-09-21T00:00:10.000Z' })];
+      state.sessions = [{ id: 's2', status: 'active', turnCount: 1, createdAt: '2026-09-21T00:00:00.000Z', updatedAt: '2026-09-21T00:00:20.000Z', retiredReason: null }];
+      render(<WorkerBody workerId="a1" />);
+      expect(document.querySelector('[data-v2-session-boundary]')).toBeNull();
+    });
+
+    it('loads earlier history, growing the run window, when the reader scrolls back', () => {
+      state.hasOlder = true;
+      state.threadMessages = [message({ id: 'h1', body: 'newest', createdAt: '2026-09-21T00:00:00.000Z' })];
+      state.runs = [sessionRun({ id: 'new1', sessionId: 's2', status: 'succeeded', startedAt: '2026-09-21T00:00:10.000Z', createdAt: '2026-09-21T00:00:10.000Z' })];
+      render(<WorkerBody workerId="a1" />);
+
+      const scroller = document.querySelector('[data-v2-session-scroll]') as HTMLElement;
+      scroller.scrollTop = 0;
+      fireEvent.scroll(scroller);
+
+      expect(state.loadOlder).toHaveBeenCalled();
+      // The run window grew with the conversation, so the older turns load alongside the messages.
+      expect(state.sessionRunPages).toContain(2);
     });
   });
 

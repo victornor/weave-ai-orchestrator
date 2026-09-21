@@ -7,6 +7,7 @@ import type { WorkspaceContext } from '../context.js';
 import type { CoreServices } from '../api.js';
 import { renderTemplate } from './template.js';
 import { BRIEF_TMPL, CHARTER_TMPL, PLANNER_TMPL, SESSION_TMPL, WEAVER_TMPL, WORKER_TMPL } from './defaults.js';
+import { sessionCarryOverDigest } from './carryover.js';
 import { worktreeState } from '../util/git.js';
 
 export { renderTemplate, truthy } from './template.js';
@@ -308,6 +309,8 @@ export function renderSessionInstructions(ctx: WorkspaceContext, deps: () => Cor
 export interface TurnPromptOptions {
   isFirstTurn?: boolean;
   sessionStale?: boolean;
+  /** VS-656: the reason this turn retired the previous session, when it did. */
+  sessionRetiredReason?: S.SessionRetiredReason | null;
   briefUpdated?: boolean;
   charterChanged?: string | null;
   /** Whether `ensureHomeCurrent` re-rendered AGENTS.md this turn (VS-244): tells the worker
@@ -554,9 +557,38 @@ export async function buildTurnPrompt(
   }
   if (notes.length) { parts.push('\n## Notes'); parts.push(notes.join('\n')); }
 
+  // VS-656: a session retired because its tool contract changed cannot be resumed (VS-542), and one
+  // retired as idle is retired by policy; either way the new runtime starts empty. Carry the earlier
+  // conversation's substance into this first turn as bounded context — never as a message, and never
+  // for a runtime change the human chose (the surface says that history does not carry over).
+  if (agent.kind === 'session' && (opts.sessionRetiredReason === 'tool_contract' || opts.sessionRetiredReason === 'idle')) {
+    const carried = carryOverAccount(deps, agent, currentWakeMessageIds(flat));
+    if (carried) { parts.push('\n## Conversation carried over'); parts.push(carried); }
+  }
+
   parts.push('\n## What to do now');
   parts.push(whatToDoNow(agent, workerTicket));
   return parts.join('\n') + '\n';
+}
+
+/** VS-656: the message ids waking this turn, so the carried account never repeats them. */
+function currentWakeMessageIds(flat: BundledWake[]): string[] {
+  const ids = new Set<string>();
+  for (const w of flat) {
+    const one = w.payload['messageId'];
+    if (typeof one === 'string') ids.add(one);
+    const many = w.payload['messageIds'];
+    if (Array.isArray(many)) for (const id of many) if (typeof id === 'string') ids.add(id);
+  }
+  return [...ids];
+}
+
+/** VS-656: the compact account of the session's own earlier conversation, or '' when there is none. */
+function carryOverAccount(deps: () => CoreServices, agent: S.Agent, excludeIds: readonly string[]): string {
+  const thread = deps().threads.list({ agentId: agent.id })[0];
+  if (!thread) return '';
+  const messages = deps().threads.messages(thread.id, { limit: 200 });
+  return sessionCarryOverDigest(messages, { agentLabel: agent.name, excludeIds });
 }
 
 const WEAVER_NOW = 'Call `weave_inbox` if you need details. Handle human messages first, then ticket events. Reply to the human only through `weave_human_send`. Finish with the structured final report.';

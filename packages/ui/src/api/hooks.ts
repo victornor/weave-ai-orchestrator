@@ -76,6 +76,8 @@ function workerDetail(v: unknown): T.WorkerDetail {
     sessionResumable: Boolean(r['sessionResumable']),
     // VS-526: how many turns the current session has taken; 0 marks a fresh conversation.
     sessionTurns: typeof r['sessionTurns'] === 'number' ? r['sessionTurns'] : null,
+    // VS-656: the agent's sessions, oldest first, for the conversation's retirement boundaries.
+    sessions: Array.isArray(r['sessions']) ? (r['sessions'] as T.WorkerSession[]) : [],
     compacting: Boolean(r['compacting']),
     compactingError: (r['compactingError'] as string | null | undefined) ?? null,
   };
@@ -1870,6 +1872,18 @@ export function useRuns(params: RunQueryParams = {}, wsOverride?: string): UseQu
     queryFn: () => api.ws<Run[] | { runs: Run[] }>(ws, `/runs${qs(params)}`).then((r) => listOf(r, 'runs')),
     enabled: Boolean(ws),
   });
+}
+
+/**
+ * VS-656: a persistent session's own turns. Scoped to the agent (`?agent=`), so a session's older
+ * runs are never pushed out of a window shared with other agents' runs, and paged by the number of
+ * conversation pages the reader has loaded rather than by workspace activity. The page is large
+ * because a session's turns are its conversation; `pages` grows only on an explicit scroll back.
+ */
+export const SESSION_RUNS_PAGE = 200;
+
+export function useSessionRuns(agentId: string, pages = 1): UseQueryResult<Run[]> {
+  return useRuns({ agent: agentId, limit: SESSION_RUNS_PAGE * Math.max(1, pages) });
 }
 
 export function useRunsMany(

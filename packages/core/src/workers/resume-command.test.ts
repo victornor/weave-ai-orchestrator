@@ -30,7 +30,7 @@ function agent(h: TestHarness, over: Partial<Agent> = {}): Agent {
 function session(over: Partial<SessionRow> = {}): SessionRow {
   return {
     id: 's1', agentId: 'a1', runtimeId: 'claude', sessionRef: { sessionId: 'sess-1' }, displayId: null,
-    status: 'active', turnCount: 1, lastRunId: null, lastError: null, cumulativeUsage: null, toolContract: null,
+    status: 'active', turnCount: 1, lastRunId: null, lastError: null, cumulativeUsage: null, toolContract: null, retiredReason: null,
     createdAt: 't0', updatedAt: 't0', ...over,
   };
 }

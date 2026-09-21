@@ -753,6 +753,48 @@ describe('prompt rendering', () => {
     expect(recorded).toEqual([['run-1', worker.id, ticketId, []]]);
   });
 
+  describe('a carried-over conversation (VS-656)', () => {
+    const msg = (id: string, body: string, over: Record<string, unknown> = {}) => ({
+      id, threadId: 'th1', direction: 'inbound', authorKind: 'human', authorId: null, runId: null,
+      projectId: null, blockId: null, replyToMessageId: null, replyToMessageIds: [], replyToExcerpt: null,
+      body, parts: [], externalMessageId: null, deliveryStatus: 'received', createdAt: 't0', ...over,
+    });
+    const sessionAgent = (): Agent => {
+      const id = h.addWorker(null, { kind: 'session', worktreePath: null, branch: null });
+      return h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [id])!;
+    };
+    const stubThread = (agentId: string, messages: unknown[]): void => {
+      h.services.threads = { list: () => [{ id: 'th1', agentId }], messages: () => messages } as never;
+    };
+
+    it('carries the earlier conversation into the first turn of a session retired for its tools', async () => {
+      const session = sessionAgent();
+      stubThread(session.id, [msg('old', 'why did it fail?'), msg('now', 'the current message')]);
+      const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: session.id, source: 'human_message', reason: 'hi', payload: { messageId: 'now', threadId: 'th1' }, status: 'claimed' } as never;
+
+      const prompt = await buildTurnPrompt(h.ctx, h.deps, session, [wake], { sessionRetiredReason: 'tool_contract' });
+      expect(prompt).toContain('## Conversation carried over');
+      expect(prompt).toContain('- you: why did it fail?');
+      // The turn's own waking message is not repeated in the carried account.
+      expect(prompt).not.toContain('the current message');
+    });
+
+    it('carries it when an idle session was retired', async () => {
+      const session = sessionAgent();
+      stubThread(session.id, [msg('old', 'earlier')]);
+      const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: session.id, source: 'system', reason: 'resume', payload: {}, status: 'claimed' } as never;
+      expect(await buildTurnPrompt(h.ctx, h.deps, session, [wake], { sessionRetiredReason: 'idle' })).toContain('## Conversation carried over');
+    });
+
+    it('does not carry a runtime change the human chose, nor a reset', async () => {
+      const session = sessionAgent();
+      stubThread(session.id, [msg('old', 'earlier')]);
+      const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: session.id, source: 'system', reason: 'resume', payload: {}, status: 'claimed' } as never;
+      expect(await buildTurnPrompt(h.ctx, h.deps, session, [wake], { sessionRetiredReason: 'runtime' })).not.toContain('## Conversation carried over');
+      expect(await buildTurnPrompt(h.ctx, h.deps, session, [wake], { sessionRetiredReason: 'reset' })).not.toContain('## Conversation carried over');
+    });
+  });
+
   it('tells the admitted worker it holds the project merge slot and must re-sync', async () => {
     h.db.update('tickets', ticketId, { status: 'merging', mergeQueuedAt: nowIso(), mergeStartedAt: nowIso() });
     const wake = { id: 'w1', workspaceId: h.workspaceId, agentId: worker.id, source: 'merge_approved', reason: 'front of the queue', payload: {}, status: 'claimed' } as never;

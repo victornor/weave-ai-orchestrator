@@ -12,7 +12,7 @@ import { JOB_KINDS } from '@weave-ai/shared';
 import type { JobStreamItem } from '@weave-ai/core';
 import type { AppEnv } from '../types.js';
 import { query } from '../http.js';
-import { HEARTBEAT_MS, Pump, heartbeat } from '../sse.js';
+import { HEARTBEAT_MS, Pump, heartbeat, writeSse } from '../sse.js';
 
 export function jobRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -38,14 +38,14 @@ export function jobRoutes(): Hono<AppEnv> {
       // that is in neither the replay nor the tail.
       const job = jobs.get(jobId);
       let cursor = after;
-      const send = async (item: JobStreamItem): Promise<void> => {
+      const send = async (item: JobStreamItem): Promise<boolean> => {
         cursor = Math.max(cursor, item.seq);
-        await stream.writeSSE({ id: String(item.seq), event: `job.${item.kind}`, data: JSON.stringify(item) });
+        return writeSse(stream, () => stream.writeSSE({ id: String(item.seq), event: `job.${item.kind}`, data: JSON.stringify(item) }));
       };
       try {
         // The replay: every sub-step as it stands, then the retained lines the client has not seen.
-        for (const step of job.steps) await send({ kind: 'step', jobId, step, seq: cursor });
-        for (const line of job.log) if (line.seq > after) await send({ kind: 'log', jobId, line, seq: line.seq });
+        for (const step of job.steps) if (!(await send({ kind: 'step', jobId, step, seq: cursor }))) return;
+        for (const line of job.log) if (line.seq > after) { if (!(await send({ kind: 'log', jobId, line, seq: line.seq }))) return; }
         if (job.state !== 'running') { await send({ kind: 'finished', jobId, job, seq: job.logSeq }); return; }
 
         while (!pump.done) {
@@ -54,10 +54,10 @@ export function jobRoutes(): Hono<AppEnv> {
           if (pending.length) {
             for (const item of pending) {
               if (item.kind === 'log' && item.seq <= cursor) continue;   // already replayed
-              await send(item);
+              if (!(await send(item))) return;
             }
             if (pending.some((i) => i.kind === 'finished')) return;
-          } else if (!pump.done) await heartbeat(stream);
+          } else if (!pump.done) { if (!(await heartbeat(stream))) return; }
         }
       } finally {
         unsubscribe();

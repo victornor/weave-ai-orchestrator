@@ -1,6 +1,7 @@
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GlobalEventStream } from '../api/events';
+import { qk } from '../api/keys';
 import { resetDocumentVisible, setDocumentHidden } from './visibility';
 
 class FakeEventSource {
@@ -39,6 +40,26 @@ describe('global event stream', () => {
     source.onerror!();
     stream.retryNow();
     expect(FakeEventSource.open.at(-1)?.url).toBe('/api/events?after=eyJ3czEiOjN9');
+    stream.stop();
+  });
+
+  it('refreshes every workspace it saw an event for on a reconnect (VS-641)', () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, 'invalidateQueries').mockReturnValue(Promise.resolve());
+    const stream = new GlobalEventStream(qc);
+    stream.start();
+    const first = FakeEventSource.open[0]!;
+    first.emit('ticket.created', { data: JSON.stringify({ seq: 1, workspaceId: 'ws1', type: 'ticket.created', entityId: 't1', createdAt: 'now' }) } as MessageEvent<string>);
+    first.emit('ticket.created', { data: JSON.stringify({ seq: 2, workspaceId: 'ws2', type: 'ticket.created', entityId: 't2', createdAt: 'now' }) } as MessageEvent<string>);
+    first.onopen!();
+    spy.mockClear();
+
+    stream.retryNow();
+    FakeEventSource.open.at(-1)!.onopen!();
+
+    expect(spy).toHaveBeenCalledWith({ queryKey: qk.workers('ws1') });
+    expect(spy).toHaveBeenCalledWith({ queryKey: qk.workers('ws2') });
+    expect(spy).toHaveBeenCalledWith({ queryKey: qk.workspaces() });
     stream.stop();
   });
 

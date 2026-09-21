@@ -219,7 +219,7 @@ export function WorkerFeed({ agentId, runId, ws, global = false, compact = false
   // expandable compact pane) or a 420px cap for the page transcript. `overflow-hidden` on the body
   // then only ever clips what the scroller is already showing, so the last line is reachable.
   const fixedHeight = bodyHeight ?? (compact ? paneHeight : undefined);
-  const dropped = status.state === 'reconnecting' || status.state === 'unreachable' || status.state === 'offline';
+  const dropped = status.state === 'reconnecting' || status.state === 'unreachable' || status.state === 'offline' || status.state === 'stale';
 
   return (
     <div

@@ -7,6 +7,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventStream } from '../api/events';
 import { qk } from '../api/keys';
+import { DEAD_AFTER_MS, STALE_AFTER_MS, WATCHDOG_TICK_MS } from '../api/sseStream';
 import { resetDocumentVisible, setDocumentHidden } from './visibility';
 
 /** A controllable EventSource: enough of the surface `EventStream` uses. */
@@ -99,6 +100,53 @@ describe('EventStream reconnect reconciliation', () => {
     last().connect();
 
     expect(spy).toHaveBeenCalledWith({ queryKey: qk.decisions('ws1') });
+    stream.stop();
+  });
+});
+
+describe('EventStream watchdog and reconnect resync (VS-641)', () => {
+  it('goes stale and reconnects itself when the stream goes silent with no error', () => {
+    const stream = new EventStream('ws1', new QueryClient());
+    stream.start();
+    last().connect();
+    expect(stream.getStatus().state).toBe('connected');
+
+    vi.advanceTimersByTime(STALE_AFTER_MS);
+    expect(stream.getStatus().state).toBe('stale');
+
+    vi.advanceTimersByTime(DEAD_AFTER_MS - STALE_AFTER_MS + WATCHDOG_TICK_MS);
+    expect(stream.getStatus().state).toBe('reconnecting');
+    expect(FakeEventSource.open).toHaveLength(2);
+    stream.stop();
+  });
+
+  it('re-syncs every stream-backed read on a reconnect, not just decisions', () => {
+    const qc = new QueryClient();
+    const spy = vi.spyOn(qc, 'invalidateQueries').mockReturnValue(Promise.resolve());
+    const stream = new EventStream('ws1', qc);
+    stream.start();
+    last().connect();
+    spy.mockClear();
+
+    last().fail();
+    vi.advanceTimersByTime(1000);
+    last().connect();
+
+    for (const key of [qk.workers('ws1'), qk.tickets('ws1'), qk.briefing('ws1'), qk.runs('ws1'), qk.decisions('ws1'), qk.workspaces()]) {
+      expect(spy).toHaveBeenCalledWith({ queryKey: key });
+    }
+    stream.stop();
+  });
+
+  it('treats a long tick gap as a machine wake and reconnects', () => {
+    const stream = new EventStream('ws1', new QueryClient());
+    stream.start();
+    last().connect();
+
+    vi.setSystemTime(new Date(Date.now() + 10 * 60 * 1000));
+    vi.advanceTimersByTime(WATCHDOG_TICK_MS);
+    expect(FakeEventSource.open).toHaveLength(2);
+    expect(stream.getStatus().state).toBe('reconnecting');
     stream.stop();
   });
 });

@@ -65,7 +65,7 @@ export function useRunEventStream(runId: string | null, { live = true, newest = 
   const [tail, setTail] = useState<RunEvent[]>([]);
   /** Highest seq rendered, so a reconnect asks the read for everything after it. */
   const seq = useRef(0);
-  const [status, setStatus] = useState<ConnectionStatus>({ state: 'connecting', capturedAt: null, attempts: 0 });
+  const [status, setStatus] = useState<ConnectionStatus>({ state: 'connecting', capturedAt: null, lastFrameAt: null, attempts: 0 });
   const streamRef = useRef<(EventStream | GlobalEventStream) | null>(null);
   const [partialMap, setPartialMap] = useState<PartialMap>(new Map());
   const [partialClock, setPartialClock] = useState<{ last: number | null; since: number | null }>({ last: null, since: null });

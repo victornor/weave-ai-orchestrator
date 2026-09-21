@@ -31,6 +31,13 @@ export type EventType = (typeof EVENT_TYPES)[number];
  */
 export const EPHEMERAL_EVENT_TYPES = ['worker.activity', 'run.event', 'run.delta', 'session.compaction'] as const;
 export type EphemeralEventType = (typeof EPHEMERAL_EVENT_TYPES)[number];
+
+/**
+ * VS-641: how often a live SSE response sends a keepalive `heartbeat` frame while no event is
+ * pending. One source shared by the daemon (which sends it) and the web app (whose watchdog
+ * derives its stale/dead windows from it), so the two cannot drift.
+ */
+export const HEARTBEAT_MS = 15_000;
 export interface WorkspaceEvent<T = unknown> { seq: number; workspaceId: string; type: EventType; entityType: string; entityId: string; payload: T; createdAt: string }
 
 /** VS-595: one part's partial output in a `run.delta` frame; `offset` is how many characters precede `text`. */

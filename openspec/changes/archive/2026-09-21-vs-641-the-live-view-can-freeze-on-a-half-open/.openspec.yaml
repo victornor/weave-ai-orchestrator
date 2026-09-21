@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-21
+goal: Add a client heartbeat watchdog and a resync on wake so a stale live
+  stream reconnects by itself

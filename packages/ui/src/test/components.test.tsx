@@ -1564,6 +1564,11 @@ describe('ConnectionBanner', () => {
     expect(screen.getByText(/Offline — showing the state from/)).toBeInTheDocument();
     expect(screen.getByText('2 queued')).toBeInTheDocument();
   });
+
+  it('shows the last-frame age while stale, not a fresh connected state (VS-641)', () => {
+    render(<ConnectionBanner state="stale" capturedAt={null} lastFrameAt={Date.parse('2026-09-01T09:38:00.000Z')} />);
+    expect(screen.getByText(/No updates since/)).toBeInTheDocument();
+  });
 });
 
 describe('states', () => {

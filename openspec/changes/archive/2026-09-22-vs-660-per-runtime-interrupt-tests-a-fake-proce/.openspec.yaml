@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-22
+goal: "Per-runtime interrupt tests: a fake-process harness for the claude,
+  codex, opencode and built-in adapters"
+skip_specs: true

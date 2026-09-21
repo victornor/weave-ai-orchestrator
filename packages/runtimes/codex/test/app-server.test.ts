@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { RuntimeEvent, RuntimePartial, TurnHandle, TurnInput } from '@weave-ai/runtime-sdk';
+import { interruptedTurn } from '@weave-ai/runtime-sdk';
 import { buildArgs } from '../src/args.js';
 import { configOverrides, postureFor, runAppServerTurn } from '../src/app-server.js';
 import { adapter } from '../src/adapter.js';
@@ -129,17 +130,15 @@ describe('runAppServerTurn', () => {
     expect(t.events.some((e) => e.type === 'assistant.text')).toBe(false);
   });
 
-  it('cancel interrupts the turn, then ends the process', async () => {
+  it('cancel(interrupt) sends turn/interrupt, stops the turn, and keeps the partials recorded before the cut', async () => {
+    // VS-660: driven through the adapter so the interrupt path under test is the adapter's, and
+    // through the shared harness so the "turn stopped" and "partials kept" claims are uniform.
     const t = setup('hang');
-    let handle: TurnHandle | undefined;
-    const done = t.run((h) => { handle = h; });
-    for (let i = 0; i < 200 && t.partials.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
-    expect(t.partials).toEqual([{ kind: 'text', partId: 'm1', text: 'thinking' }]);
-    await handle!.cancel('interrupt');
-    const turn = await done;
+    const { result, recorded } = await interruptedTurn(adapter, t.input, { until: (r) => r.partials.length > 0, timeoutMs: 10_000 });
     expect(t.client().some((m) => m['method'] === 'turn/interrupt' && m['params'].turnId === 'turn-1')).toBe(true);
-    expect(turn).not.toBeNull();
-    expect(t.events.some((e) => e.type === 'error' && /interrupted/.test(String(e.payload['message'])))).toBe(true);
+    expect(recorded.partials).toEqual([{ kind: 'text', partId: 'm1', text: 'thinking' }]);
+    expect(result.error).toBeDefined();
+    expect(recorded.events.some((e) => e.type === 'error' && /interrupted/.test(String(e.payload['message'])))).toBe(true);
   });
 
   it('replays recorded traffic: stream fixture', async () => {

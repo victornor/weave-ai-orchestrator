@@ -506,11 +506,26 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     await queue.pumpAll();
   }
 
+  /** VS-653: whether an agent's two most recent runs both ended empty (an `empty_turn` failure or an `empty` success). */
+  function lastTurnsEmpty(agentId: string): boolean {
+    const recent = ctx.db.all<{ liveness: string; errorCode: string | null }>(
+      "SELECT liveness, error_code AS errorCode FROM runs WHERE agent_id = ? AND status IN ('succeeded', 'failed') ORDER BY created_at DESC, rowid DESC LIMIT 2",
+      [agentId],
+    );
+    return recent.length === 2 && recent.every((r) => r.liveness === 'empty' || r.errorCode === 'empty_turn');
+  }
+
   function livenessScan(): void {
     let violations: Ticket[] = [];
     try { violations = deps().tickets.livenessViolations(); } catch { return; }
     for (const ticket of violations) {
       const worker = ticket.workerId ? ctx.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [ticket.workerId]) : liveWorkerFor(ticket.id);
+      if (worker && lastTurnsEmpty(worker.id)) {
+        // VS-653: two empty turns in a row mean the worker cannot act (no tools, no report path);
+        // another repair wake only repeats them. A human comment, an answer or steering wakes it.
+        log.warn({ ticket: ticket.identifier, agentId: worker.id }, 'liveness repair withheld: the worker\'s last turns were empty');
+        continue;
+      }
       if (worker) {
         try {
           deps().wake.enqueue(worker.id, { source: 'system', reason: 'liveness_repair', payload: { ticketId: ticket.id }, idempotencyKey: `liveness:${ticket.id}:${ticket.status}`, requestedBy: { kind: 'system', id: null } });

@@ -191,6 +191,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     const toolsByServer = new Map<string, McpTool[]>();
     // VS-621: which wire names belong to a user server, and whether that server is declared read-only.
     const userMcpWire = new Map<string, boolean>();
+    let weaveToolCount = 0;
     // A stdio MCP server gets an explicit, minimal environment: the plain base the shell tools start
     // from (PATH/HOME/LANG/TMPDIR/USER/TERM), never the ambient process env and never the turn's role
     // secrets, which ride in `init.toolEnv`. The server's own `env` is added on top of this base.
@@ -220,6 +221,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
         }
       }
       const nameMap = assignMcpToolNames([...toolsByServer].map(([server, tools]) => ({ server, tools: tools.map((t) => t.name) })), new Set<string>(), WEAVE_MCP_SERVER);
+      weaveToolCount = [...nameMap.values()].filter((r) => r.server === WEAVE_MCP_SERVER).length;
       // `restricted` keeps a user server's tools only when the human marked it read-only; the run-scoped
       // Weave server's tools stay, as they already are gated by the run token and the first-turn list.
       for (const [name, ref] of nameMap) {
@@ -252,6 +254,15 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
         run: async () => ({ text: 'Report received.' }),
       });
     }
+    // VS-653: a run that carries the Weave server must get its tools. An empty list would leave the
+    // model unable to check out, report or ask, so the turn ends here, before any request.
+    if (init.mcpServers[WEAVE_MCP_SERVER] && weaveToolCount === 0) {
+      const err: AgentError = { code: 'tools_missing', family: 'tooling', message: 'The Weave tool server listed no tools, so the turn cannot report, ask or read its ticket; not starting it.' };
+      emit('error', { code: err.code, family: err.family, message: err.message });
+      return finish(result({ exitCode: 1, error: err }), true);
+    }
+    // VS-653: what the model is actually offered, on the run, so a missing tool is visible.
+    emit('tools.offered', { names: [...tools.keys()], weaveServerTools: weaveToolCount, submitResult: tools.has('submit_result') });
     const modeAllows = (name: string): boolean => restrictedDropsMcp(name) ? false : (!coreNames.has(name) || modeNames.has(name));
     const toolList = toolSpecs([...tools.values()]);
     const ledger = new ReadLedger();

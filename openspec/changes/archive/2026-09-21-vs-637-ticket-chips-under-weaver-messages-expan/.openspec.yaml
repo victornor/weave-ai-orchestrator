@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-21
+goal: Ticket chips under weaver messages expand in place to show the ticket's
+  live feed, and collapse when the ticket is done

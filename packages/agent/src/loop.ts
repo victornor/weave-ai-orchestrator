@@ -14,6 +14,7 @@ import { createMcpClient, type McpClient, type McpTool } from './mcp/client.js';
 import { assignMcpToolNames } from './mcp/naming.js';
 import { bashDenial, isAllowedByLists, modeToolNames, toolDenial, type PermissionConfig } from './permission.js';
 import { dirname, join, resolve } from 'node:path';
+import { detectTextToolCalls } from './textToolCalls.js';
 import { chatCompletionsUrl, requestHeaders, requestOptions, shellEnv } from './profile.js';
 import type { ChildEvent, ChildPartial, ChildResult, InitMessage } from './protocol.js';
 import { retentionDays, sweepSessions } from './retention.js';
@@ -265,6 +266,7 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
     emit('tools.offered', { names: [...tools.keys()], weaveServerTools: weaveToolCount, submitResult: tools.has('submit_result') });
     const modeAllows = (name: string): boolean => restrictedDropsMcp(name) ? false : (!coreNames.has(name) || modeNames.has(name));
     const toolList = toolSpecs([...tools.values()]);
+    if (!compat.tools.supported && toolList.length > 0) throw new StepFailure(stopError.toolsUnsupported(provider.id, run.model));
     const ledger = new ReadLedger();
     instructions.syncFrom(session.context());
     const rg = rgAvailable();
@@ -349,6 +351,8 @@ export async function runAgentTurn(init: InitMessage, io: LoopIO, signal: AbortS
           session.append({ role: 'user', text: SUBMIT_NUDGE });
           continue;
         }
+        // Tool calls written as message text are a failure, never an empty success; nothing in the text is run.
+        if (toolList.length > 0 && step.text && detectTextToolCalls(step.text)) throw new StepFailure(stopError.textToolCalls(provider.id, model ?? run.model));
         // Live input that arrived while this step was in flight keeps the turn going (S7).
         if (steering && steering.pending > 0) continue;
         finalText = step.text || null; return finish(result({}), false);

@@ -90,6 +90,16 @@ export function openspecChangeName(ticket: Ticket): string { return `${ticket.id
 /** VS-398: a planner's disposable worktree never commits or opens a pull request, so its branch name only needs to be valid and unique — never pushed, never read back. */
 export function planBranch(plan: Plan): string { return `plan/${plan.id.toLowerCase()}`; }
 
+/**
+ * VS-636: does this agent owe a checkout? A worker — or a persistent session that has taken a ticket —
+ * whose `branch` is set. `spawn`/`takeTicketForSession` set the branch before provisioning, so a row
+ * whose provisioning a restart cut off still answers yes. A no-worktree knowledge-curation worker and
+ * a ticketless session have `branch` null and are left alone.
+ */
+export function agentNeedsCheckout(agent: { kind: string; projectId: string | null; branch: string | null }): boolean {
+  return (agent.kind === 'worker' || agent.kind === 'session') && agent.projectId !== null && agent.branch !== null;
+}
+
 export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServices): WorkersService {
   const log = ctx.log('daemon');
   const sessions = createSessions(ctx);
@@ -175,6 +185,59 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       await provider.remove({ repoPath: project.clonePath, path: join(home, 'work'), branch, deleteBranch: true, force: true, configPath: ctx.paths.wtConfig }).catch(() => undefined);
     } catch { /* best effort */ }
     if (worktreeRowId) ctx.db.run('DELETE FROM worktrees WHERE id = ?', [worktreeRowId]);
+  }
+
+  /** VS-636: in-flight `ensureWorktree` calls, keyed by agent, so a repair racing a spawn creates one worktree, not two. */
+  const worktreeEnsures = new Map<string, Promise<{ path: string; branch: string; provisioned: boolean }>>();
+
+  /**
+   * VS-636: see `WorkersService.ensureWorktree`. A worker whose provisioning a daemon restart cut off
+   * keeps a null `worktreePath`; the run engine, `relaunch` and the supervisor's boot sweep all call
+   * this so such a worker is repaired rather than run checkoutless. Serialised per agent and
+   * idempotent, and it never resets, cleans or switches an existing worktree.
+   */
+  async function ensureWorktree(agentId: string): Promise<{ path: string; branch: string; provisioned: boolean }> {
+    const pending = worktreeEnsures.get(agentId);
+    if (pending) return pending;
+    const attempt = (async () => {
+      const agent = get(agentId);
+      if (!agentNeedsCheckout(agent)) return { path: agent.worktreePath ?? agent.homePath, branch: agent.branch ?? '', provisioned: false };
+      if (agent.worktreePath && existsSync(agent.worktreePath)) return { path: agent.worktreePath, branch: agent.branch ?? '', provisioned: false };
+
+      const project = projectOf(agent.projectId!);
+      const ticket = agent.ticketId ? ticketOf(agent.ticketId) : null;
+      const branch = agent.branch ?? (ticket ? ticketBranch(ticket) : null);
+      if (!branch) throw new OcError('internal', `${agent.name} needs a worktree but has no branch to create it on`);
+
+      const targetPath = join(agent.homePath, 'work');
+      const identity = await requireGitIdentity(project.clonePath);
+      const provider = providerFor(project);
+      const info = await provider.create({
+        repoPath: project.clonePath, branch, base: landingBranchOf(project, ticket), targetPath,
+        setupCommand: project.setupCommand ?? undefined, warmPaths: (project as unknown as { warmPaths?: string[] }).warmPaths ?? [],
+        configPath: ctx.paths.wtConfig,
+      });
+      await configureGitWorktreeIdentity(project.clonePath, info.path, identity);
+      const resolvedBranch = info.branch || branch;
+      const now = nowIso();
+      const existing = ctx.db.get<{ id: string }>('SELECT id FROM worktrees WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1', [agentId]);
+      if (existing) ctx.db.update('worktrees', existing.id, { path: info.path, branch: resolvedBranch, status: 'active', provider: provider.id, lastVerifiedAt: now });
+      else {
+        ctx.db.insert('worktrees', {
+          id: newId(), projectId: project.id, ticketId: ticket?.id ?? null, agentId, provider: provider.id,
+          path: info.path, branch: resolvedBranch, status: 'active', createdAt: now, lastVerifiedAt: now,
+        });
+      }
+      ctx.db.update('agents', agentId, { worktreePath: info.path, branch: resolvedBranch, updatedAt: now });
+      recordActivity(
+        ctx.db, ctx.workspaceId, { kind: 'system', id: null }, 'worker.worktree_provisioned', 'agent', agentId,
+        { path: info.path, branch: resolvedBranch, ticketId: ticket?.id ?? null }, ticket?.id ?? agent.ticketId,
+      );
+      log.warn({ agentId, ticketId: ticket?.id ?? null, path: info.path }, 'provisioned a missing worktree outside spawn');
+      return { path: info.path, branch: resolvedBranch, provisioned: true };
+    })();
+    worktreeEnsures.set(agentId, attempt);
+    try { return await attempt; } finally { worktreeEnsures.delete(agentId); }
   }
 
   async function spawn(actor: Actor, ticketId: string, opts: { noWorktree?: boolean; spawnReason?: string } = {}): Promise<Agent> {
@@ -323,6 +386,8 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     },
 
     spawnForTicket(actor: Actor, ticketId: string): Promise<Agent> { return spawn(actor, ticketId); },
+
+    ensureWorktree,
 
     async ensurePlanner(actor: Actor, planId: string, opts: { agentId?: string } = {}): Promise<Agent> {
       const plan = deps().planning.get(planId);
@@ -494,7 +559,9 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       if (!role) throw new OcError('not_found', `role ${session.roleId} not found`);
       const project = projectOf(session.projectId);
       const branch = ticketBranch(ticket);
-      ctx.db.update('agents', session.id, { ticketId: ticket.id, updatedAt: nowIso() });
+      // VS-636: record the branch before provisioning, so a take-ticket cut off by a restart is
+      // recognisable as an agent that owes a checkout and the boot sweep can finish it.
+      ctx.db.update('agents', session.id, { ticketId: ticket.id, branch, updatedAt: nowIso() });
 
       let worktreeRowId: string | null = null;
       try {
@@ -732,9 +799,14 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) ?? null : null;
       const active = ctx.db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [workerId]);
       if (active) { try { await deps().runs.cancel(actor, active.id, 'kill'); } catch { /* already gone */ } }
-      const derived = await progressNote(agent, ticket);
+      // VS-636: a worker that owes a checkout is repaired before it goes back to work — a relaunch
+      // must never mark it active with a null (or vanished) worktree path. A failure propagates, so
+      // the caller sees the cause instead of a silently checkoutless worker.
+      if (agentNeedsCheckout(agent) && !(agent.worktreePath && existsSync(agent.worktreePath))) await ensureWorktree(workerId);
+      const current = get(workerId);
+      const derived = await progressNote(current, ticket);
       const relaunchNote = [note, derived].filter(Boolean).join(' ');
-      ctx.db.update('agents', workerId, { briefRevision: agent.briefRevision + 1, status: 'active', errorText: null, updatedAt: nowIso() });
+      ctx.db.update('agents', workerId, { briefRevision: current.briefRevision + 1, status: 'active', errorText: null, updatedAt: nowIso() });
       // VS-625: a relaunch is the other way a worker goes back to work (a parked worker took the
       // resume branch above); its stop cards are just as stale. Best effort, like the resume path.
       try {

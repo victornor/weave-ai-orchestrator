@@ -478,6 +478,48 @@ describe('workers', () => {
     expect(wake.calls[0]).toMatchObject({ agentId: worker.id, input: expect.objectContaining({ source: 'system', reason: 'relaunch' }) });
   });
 
+  // VS-636: a worker whose provisioning a daemon restart cut off keeps its row and its ticket binding
+  // but a null worktree. `ensureWorktree` is the one step that repairs it, and it leaves a worker
+  // whose worktree is present untouched.
+  it('provisions a missing worktree for a worker that owes one, and leaves a healthy one untouched', async () => {
+    const broken = h.addWorker(seedTicket().id, { branch: 'ac/tst-1-add-dark-mode', worktreePath: null, status: 'provisioning' });
+    const healthy = await workers.spawnForTicket(SYSTEM, seedTicket({ number: 2, identifier: 'TST-2' }).id);
+
+    const repaired = await workers.ensureWorktree(broken);
+    expect(repaired.provisioned).toBe(true);
+    expect(repaired.path).toBe(join(h.ctx.paths.workers, broken, 'work'));
+    expect(existsSync(repaired.path)).toBe(true);
+    expect(h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [broken])!.worktreePath).toBe(repaired.path);
+    expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM activity WHERE action = 'worker.worktree_provisioned' AND entity_id = ?", [broken])!.n).toBe(1);
+
+    const untouched = await workers.ensureWorktree(healthy.id);
+    expect(untouched).toMatchObject({ provisioned: false, path: healthy.worktreePath });
+    expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM activity WHERE action = 'worker.worktree_provisioned' AND entity_id = ?", [healthy.id])!.n).toBe(0);
+  });
+
+  it('relaunching a worker with a missing worktree provisions it before marking it active (VS-636)', async () => {
+    const worker = h.addWorker(seedTicket({ status: 'in_progress' }).id, { branch: 'ac/tst-1-add-dark-mode', worktreePath: null, status: 'provisioning' });
+    wake.calls.length = 0;
+
+    const relaunched = await workers.relaunch(SYSTEM, worker, 'recover after restart');
+
+    expect(relaunched.status).toBe('active');
+    expect(relaunched.worktreePath).toBe(join(relaunched.homePath, 'work'));
+    expect(existsSync(relaunched.worktreePath!)).toBe(true);
+    expect(wake.calls.some((c) => c.agentId === worker && (c.input as { reason: string }).reason === 'relaunch')).toBe(true);
+  });
+
+  it('does not mark a worker active when its missing worktree cannot be provisioned (VS-636)', async () => {
+    const worker = h.addWorker(seedTicket({ status: 'in_progress' }).id, { branch: 'ac/tst-1-add-dark-mode', worktreePath: null, status: 'error' });
+    h.db.update('projects', h.projectId, { clonePath: join(h.root, 'no-such-clone') });
+
+    await expect(workers.relaunch(SYSTEM, worker, 'recover after restart')).rejects.toThrow();
+
+    const after = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [worker])!;
+    expect(after.status).toBe('error');
+    expect(after.worktreePath).toBeNull();
+  });
+
   // VS-56: resume used to flip the column and stop there, so the endpoint, the CLI verb and the web
   // button all did nothing. It has to queue the turn and unblock the ticket.
   describe('resuming a paused worker', () => {

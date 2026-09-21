@@ -8,6 +8,9 @@ import { createSupervisor } from './index.js';
 import { createKnowledgeService } from '../knowledge/service.js';
 import { createDecisionsService } from '../decisions/service.js';
 import { createWakeService } from '../wake/index.js';
+import { createWorkersService } from '../workers/index.js';
+import { GitWorktreeProvider } from '../worktrees/git.js';
+import { git } from '../util/git.js';
 import { runState } from '../runs/active.js';
 import { isWorkerStalled } from './stall-state.js';
 import type { Supervisor } from '../api.js';
@@ -29,6 +32,7 @@ describe('supervisor', () => {
   let wake: ReturnType<typeof fakeWake>;
   let spawnForTicket: ReturnType<typeof vi.fn>;
   let retireIfLanded: ReturnType<typeof vi.fn>;
+  let ensureWorktree: ReturnType<typeof vi.fn>;
   let refreshAccounts: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
@@ -36,8 +40,9 @@ describe('supervisor', () => {
     wake = fakeWake();
     spawnForTicket = vi.fn(async () => ({ id: 'w1' }));
     retireIfLanded = vi.fn(async () => ({ retired: true }));
+    ensureWorktree = vi.fn(async (id: string) => ({ path: join(h.ctx.paths.workers, id, 'work'), branch: 'ac/test', provisioned: true }));
     h.services.wake = wake as never;
-    h.services.workers = { spawnForTicket, retireIfLanded, conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.workers = { spawnForTicket, retireIfLanded, ensureWorktree, conductor: () => ({ id: h.conductorId }) } as never;
     h.services.tickets = { livenessViolations: () => [] } as never;
     h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
@@ -85,6 +90,44 @@ describe('supervisor', () => {
     const ticketId = seedTicket(h);
     await supervisor.tick();
     expect(spawnForTicket).toHaveBeenCalledWith({ kind: 'system', id: null }, ticketId);
+  });
+
+  // VS-636: a worker left without a worktree by a restart has a row and a ticket binding, so
+  // spawnPending never revisits it. The boot sweep must provision it and leave a healthy worker alone.
+  it('provisions a worker left without a worktree on boot, and leaves a healthy one untouched (VS-636)', async () => {
+    const broken = h.addWorker(seedTicket(h), { branch: 'ac/tst-1-do-the-thing', worktreePath: null, status: 'provisioning' });
+    const healthyPath = join(h.ctx.paths.workers, 'healthy', 'work');
+    mkdirSync(healthyPath, { recursive: true });
+    const healthy = h.addWorker(seedTicket(h, { number: 2, identifier: 'TST-2' }), { branch: 'ac/tst-2-do-the-thing', worktreePath: healthyPath });
+
+    await supervisor.tick();
+
+    expect(ensureWorktree).toHaveBeenCalledTimes(1);
+    expect(ensureWorktree).toHaveBeenCalledWith(broken);
+    expect(ensureWorktree).not.toHaveBeenCalledWith(healthy);
+  });
+
+  // The boot sweep must produce a real checkout, not merely call the repair: this is the incident's
+  // acceptance — a worker created while the daemon restarted gets its worktree on the next boot.
+  it('the boot sweep actually creates the missing worktree (VS-636)', async () => {
+    const clone = join(h.root, 'projects', 'api');
+    mkdirSync(clone, { recursive: true });
+    await git(['init', '-b', 'main'], clone);
+    await git(['config', 'user.email', 'test@example.com'], clone);
+    await git(['config', 'user.name', 'Test'], clone);
+    writeFileSync(join(clone, 'README.md'), '# api\n', 'utf8');
+    await git(['add', '.'], clone);
+    await git(['commit', '-m', 'init'], clone);
+    h.ctx.registries.worktreeProviders.set('git', new GitWorktreeProvider());
+    h.services.workers = createWorkersService(h.ctx, h.deps) as never;
+    const broken = h.addWorker(seedTicket(h), { branch: 'ac/tst-1-do-the-thing', worktreePath: null, status: 'provisioning' });
+
+    await supervisor.tick();
+
+    const after = h.db.get<{ worktreePath: string | null }>('SELECT worktree_path AS worktreePath FROM agents WHERE id = ?', [broken])!;
+    expect(after.worktreePath).toBe(join(h.ctx.paths.workers, broken, 'work'));
+    expect(existsSync(after.worktreePath!)).toBe(true);
+    expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM activity WHERE action = 'worker.worktree_provisioned' AND entity_id = ?", [broken])!.n).toBe(1);
   });
 
   it('spawns no worker for a ticket that is waiting in the merge queue, and one once it is admitted', async () => {

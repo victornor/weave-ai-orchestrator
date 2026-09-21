@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-21
+goal: "A worker created during a daemon upgrade restart must get its worktree:
+  repair and relaunch must provision it, not only mark the worker active"

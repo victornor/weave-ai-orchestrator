@@ -134,7 +134,10 @@ export function makeHarness(opts: HarnessOptions = {}): TestHarness {
     db.insert('agents', {
       id, workspaceId, kind: 'worker', projectId: projectId || null, roleId: roleId || null, roleRevision: 1, ticketId,
       name: 'Backend Engineer #1', runtimeId: 'claude', status: 'active', homePath: join(paths.workers, id),
-      worktreePath: join(paths.workers, id, 'work'), branch: 'ac/test', turnEpoch: 0, turnCount: 0, spawnedBy: 'system',
+      // VS-636: the default is a worker that owes no checkout (`branch` null), so a suite that means
+      // "an ordinary worker running a turn" is not silently provisioned a worktree by the run engine.
+      // A suite that needs a checkout passes an explicit `branch` and a real path.
+      worktreePath: join(paths.workers, id, 'work'), branch: null, turnEpoch: 0, turnCount: 0, spawnedBy: 'system',
       briefRevision: 1, createdAt: ts, updatedAt: ts, ...over,
     });
     if (ticketId) db.update('tickets', ticketId, { workerId: id, updatedAt: ts });

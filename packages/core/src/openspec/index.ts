@@ -18,6 +18,7 @@ import { recordActivity } from '../events.js';
 import { git } from '../util/git.js';
 import { landLock } from '../util/land-lock.js';
 import { scratchBranchFrom } from '../tickets/scratch.js';
+import { agentNeedsCheckout } from '../workers/index.js';
 import * as cli from './cli.js';
 import { fillArchivedCapabilityPurposes } from './purpose.js';
 import { findUndeclaredCapabilityRetirements } from './retirement.js';
@@ -40,6 +41,30 @@ export function ticketWorktree(db: Db, workspaceId: string, ticketId: string): s
   );
   const p = row?.worktreePath ?? null;
   return p && existsSync(p) ? p : null;
+}
+
+/**
+ * VS-636: the message a bound ticket reports when the reason its OpenSpec change cannot be read is a
+ * missing worker checkout, not a plan problem. The worker can act on a plan gap; it cannot act on a
+ * checkout the daemon has not provisioned, so the two must not be conflated.
+ */
+export const MISSING_WORKTREE_MESSAGE = 'this worker has no worktree; it is being repaired';
+
+/**
+ * VS-636: has the ticket's live worker not got the checkout its OpenSpec change lives in? A worker
+ * bound to the ticket that owes a checkout (`agentNeedsCheckout`) whose recorded path is null or whose
+ * directory is gone. False when there is no live worker — the weaver can still validate against the
+ * project's primary clone.
+ */
+export function workerCheckoutMissing(db: Db, workspaceId: string, ticketId: string): boolean {
+  const row = db.get<{ worktreePath: string | null; branch: string | null; kind: string; projectId: string | null }>(
+    `SELECT worktree_path AS worktreePath, branch, kind, project_id AS projectId FROM agents
+      WHERE workspace_id = ? AND kind IN ('worker','session') AND ticket_id = ? AND status <> 'retired'
+      ORDER BY created_at DESC LIMIT 1`,
+    [workspaceId, ticketId],
+  );
+  if (!row || !agentNeedsCheckout(row)) return false;
+  return !row.worktreePath || !existsSync(row.worktreePath);
 }
 
 /**
@@ -122,6 +147,15 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
   return {
     async statusFor(ticketId) {
       const t0 = deps().tickets.get(ticketId);
+      // VS-636: the change lives in the worker's worktree; when the daemon has not (yet) provisioned
+      // it, say so instead of reading the primary clone as if the worker's planning were incomplete.
+      if (workerCheckoutMissing(ctx.db, ctx.workspaceId, t0.id)) {
+        const status = { ...zeroStatus(t0.openspecChangeName ?? '', t0.openspecChangeName != null), validation: { ok: false, issues: [{ level: 'error' as const, message: MISSING_WORKTREE_MESSAGE }] } };
+        if (canonicalJson(t0.openspecState ?? null) === canonicalJson(status)) return status;
+        ctx.db.update('tickets', t0.id, { openspecStateJson: status, updatedAt: nowIso() });
+        ctx.events.emit('ticket.updated', 'ticket', t0.id, { openspecState: status });
+        return status;
+      }
       const r = resolve(ticketId);
       if (!r) {
         // VS-578: a ticket with no bound change is off the OpenSpec path (an OpenSpec-off project,
@@ -158,6 +192,12 @@ export function createOpenSpecService(ctx: WorkspaceContext, deps: () => CoreSer
     },
 
     async validateForProposed(ticketId) {
+      const t0 = deps().tickets.get(ticketId);
+      // VS-636: a missing checkout is not a plan problem. Say which it is, so the worker does not try
+      // to fix a plan that was never the reason the change could not be read.
+      if (workerCheckoutMissing(ctx.db, ctx.workspaceId, t0.id)) {
+        return { ok: false, issues: [{ level: 'error', message: MISSING_WORKTREE_MESSAGE }] };
+      }
       const r = resolve(ticketId);
       if (!r) return { ok: false, issues: [{ level: 'error', message: 'the ticket has no OpenSpec change to validate' }] };
       const { changeName, cwd } = r;

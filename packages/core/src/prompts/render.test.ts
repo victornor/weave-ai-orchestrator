@@ -585,6 +585,35 @@ describe('prompt rendering', () => {
     expect(prompt).toContain(body);
   });
 
+  it('shows a composer-selected roadmap block in the turn text the weaver reads (VS-638)', async () => {
+    const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
+    const wake = {
+      id: 'w-block', workspaceId: h.workspaceId, agentId: conductor.id, source: 'human_message',
+      reason: 'message from Victor about api',
+      payload: { threadId: 't1', messageId: 'm1', body: 'add a friendly empty state', projectId: h.projectId, projectSlug: 'api', blockId: 'blk_1', blockTitle: 'UI polish #3' },
+      status: 'claimed',
+    } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [wake], {});
+    expect(prompt).toContain('## What was said');
+    expect(prompt).toContain('UI polish #3');
+    expect(prompt).toContain('Sent with roadmap block selected');
+    expect(prompt).toContain('weave_roadmap_item_add');
+    expect(prompt).toMatch(/Do not file a ticket for it/i);
+  });
+
+  it('renders a project-only message exactly as before (VS-638)', async () => {
+    const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
+    const wake = {
+      id: 'w-proj', workspaceId: h.workspaceId, agentId: conductor.id, source: 'human_message',
+      reason: 'message from Victor about api',
+      payload: { threadId: 't2', messageId: 'm2', body: 'ship the selector', projectId: h.projectId, projectSlug: 'api', blockId: null, blockTitle: null },
+      status: 'claimed',
+    } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [wake], {});
+    expect(prompt).toContain('Message from the human about `api`');
+    expect(prompt).not.toContain('roadmap block selected');
+  });
+
   it('puts a human ticket comment body in the prompt too', async () => {
     const body = 'Follow-up: also cover the expired-token edge case.';
     const wake = { id: 'w-cmt', workspaceId: h.workspaceId, agentId: worker.id, source: 'ticket_comment', reason: 'new comment on TST-42', payload: { ticketId, commentId: 'c1', body }, status: 'claimed' } as never;
@@ -916,5 +945,14 @@ describe('prompt rendering', () => {
     expect(skill).toMatch(/check whether the human already resumed the worker/i);
     expect(skill).toMatch(/stated want is not a question/i);
     expect(skill).toContain('asks that arrive together belong in one ticket');
+  });
+
+  // VS-638: the selected-block rule is stated once, in the skill's block-building guidance, and the
+  // older sentence that repeated it is gone.
+  it('states the selected-block rule once in the weaver skill (VS-638)', () => {
+    const skill = readFileSync(SHIPPED_WEAVER_SKILL, 'utf8');
+    expect(skill).toContain('A selected block means the ask is a roadmap item');
+    expect(skill).toContain('weave_roadmap_item_add');
+    expect(skill).not.toContain('the human picked that block in the composer');
   });
 });

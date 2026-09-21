@@ -33,7 +33,7 @@ export { registerBuiltinWorktreeProviders, GitWorktreeProvider, WorktrunkProvide
 export { listScratchTrees, sweepScratchWorktrees, activeScratchWorktrees, scratchRoot, SCRATCH_STALE_MS, type ScratchTarget, type ScratchLand, type ScratchTreeInfo, type ScratchClone } from './tickets/scratch.js';
 export { registerBuiltinForges, GhForge } from './forge/index.js';
 export { createPromotionService } from './promotion/index.js';
-export { humanName, buildTurnPrompt, renderTemplate, renderCharter, renderBrief, renderWorkerInstructions, renderConductorInstructions, flattenWakes, type TurnPromptOptions } from './prompts/index.js';
+export { humanName, buildTurnPrompt, renderTemplate, renderCharter, renderBrief, renderWorkerInstructions, renderConductorInstructions, humanSelectionNotice, flattenWakes, type TurnPromptOptions } from './prompts/index.js';
 export { createSessions, type SessionsService, type SessionRow } from './sessions/index.js';
 export { createModelsService, modelSettingFor, workerOptionRuntimes, deriveModelSettings, hasModelSettings, migrationSummary, MIGRATION_SETTINGS_KEY, WORKERS_RUNTIME_CORRELATION, type ModelMigration, type RoleRuntimeRow } from './models/index.js';
 export { ticketBranch, openspecChangeName, skillsFor } from './workers/index.js';

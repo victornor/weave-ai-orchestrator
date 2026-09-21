@@ -20,7 +20,7 @@ import {
 } from '@weave-ai/shared';
 import {
   flattenWakes, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX, ARTIFACT_KIT_CSS, ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks,
-  resolveOutboundAttachments, readAttachmentBytes, type OutboundAttachmentInput,
+  resolveOutboundAttachments, readAttachmentBytes, recordActivity, humanSelectionNotice, type OutboundAttachmentInput,
   type Actor, type CoreServices, type IncidentsService, type KnowledgeMirror,
 } from '@weave-ai/core';
 import type { RunTokenClaims } from './runtoken.js';
@@ -311,6 +311,22 @@ function defaultReplyToMessageIds(ctx: ToolCtx): string[] {
   return [...ids];
 }
 
+/**
+ * VS-638: the roadmap block the human selected in the composer on the message that woke this turn,
+ * or null. A dispatched run carries its own `wakeupIds`, so this is exactly the wake that triggered
+ * the turn — a later turn, a worker, a routine and a human caller see nothing to guard.
+ */
+function blockSelectionForTurn(ctx: ToolCtx): { blockId: string; blockTitle: string | null } | null {
+  for (const w of flattenWakes(bundledWakes(ctx))) {
+    if (w.source !== 'human_message') continue;
+    const p = w.payload as { blockId?: unknown; blockTitle?: unknown } | null;
+    const blockId = typeof p?.blockId === 'string' ? p.blockId : '';
+    if (!blockId) continue;
+    return { blockId, blockTitle: typeof p?.blockTitle === 'string' ? p.blockTitle : null };
+  }
+  return null;
+}
+
 // ---------- input schemas ----------
 
 const ticketId = z.string().min(1).describe('ticket id or identifier (e.g. ACME-42)');
@@ -404,6 +420,10 @@ export const TOOLS: ToolDef[] = [
         switch (w.source) {
           case 'human_message': {
             entry.attachments = attachmentsForWake(ctx, w, images);
+            // VS-638: the composer's block selection rides on the payload; surface it in the rendered
+            // entry too, so the weaver cannot miss a structured choice by not opening the payload.
+            const selection = humanSelectionNotice((w.payload ?? {}) as Record<string, unknown>);
+            if (selection) entry.selection = selection;
             bucket.messages.push(entry);
             break;
           }
@@ -865,9 +885,28 @@ export const TOOLS: ToolDef[] = [
       assigneeRoleId: z.string().nullish(), autoMerge: z.boolean().optional(), originKind: z.string().optional(), originFingerprint: z.string().optional(),
       landingBranch: z.string().nullish(),
       workerModelId: z.string().nullish(),
+      blockOverride: z.string().min(1).nullish().describe('VS-638: required to file a ticket in a turn woken by a human message that carried a roadmap block; the reason the ask is its own ticket after all. Recorded on the ticket as an activity entry.'),
     }),
-    description: "Create a ticket. Set autoMerge only when the human asked for it in the same request. Set landingBranch only when the human asked this ticket's work to land somewhere other than its project's own landing branch (VS-119) — never inferred from a PR base. Set summary to a one-line why (VS-146) shown on plan-approval cards. Set workerModelId to a catalog option from weave_worker_models (VS-162) — when the workspace's catalog has a configured option this is required (VS-514), and omitting it is refused with every configured option listed; it may be omitted only when the catalog is empty or every option is unconfigured, and then the workspace workers default is used. Workers may only create tickets in their own project.",
-    handler: (ctx, i) => svc(ctx).tickets.create(ctx.actor, { ...i, workerModelId: chooseWorkerModel(ctx, i.workerModelId), projectId: isConductor(ctx) ? (i.projectId ?? null) : ctx.claims.projectId }),
+    description: "Create a ticket. Set autoMerge only when the human asked for it in the same request. Set landingBranch only when the human asked this ticket's work to land somewhere other than its project's own landing branch (VS-119) — never inferred from a PR base. Set summary to a one-line why (VS-146) shown on plan-approval cards. Set workerModelId to a catalog option from weave_worker_models (VS-162) — when the workspace's catalog has a configured option this is required (VS-514), and omitting it is refused with every configured option listed; it may be omitted only when the catalog is empty or every option is unconfigured, and then the workspace workers default is used. Workers may only create tickets in their own project. When this turn was woken by a message sent with a roadmap block selected, the call is refused unless blockOverride names why the ask is its own ticket — add it to the block with weave_roadmap_item_add, or start the block with weave_roadmap_block_start, instead.",
+    handler: (ctx, i) => {
+      const { blockOverride, ...input } = i;
+      // VS-638: a message sent with a roadmap block selected means the ask belongs in that block;
+      // refuse to file it as a ticket unless the caller names why it is its own ticket after all.
+      const selection = ctx.actor.kind === 'human' ? null : blockSelectionForTurn(ctx);
+      if (selection && !blockOverride) {
+        const title = selection.blockTitle ?? selection.blockId;
+        throw new OcError(
+          'validation',
+          `this turn was woken by a message sent with the roadmap block "${title}" selected — add the ask to that block with weave_roadmap_item_add, or start the whole block with weave_roadmap_block_start if the message asked to start it, instead of filing a ticket. If the message really does ask for its own ticket, call weave_ticket_create again with blockOverride naming why.`,
+          { blockId: selection.blockId, blockTitle: selection.blockTitle },
+        );
+      }
+      const created = svc(ctx).tickets.create(ctx.actor, { ...input, workerModelId: chooseWorkerModel(ctx, input.workerModelId), projectId: isConductor(ctx) ? (input.projectId ?? null) : ctx.claims.projectId });
+      if (selection && blockOverride) {
+        recordActivity(ctx.ws.ctx.db, ctx.ws.id, ctx.actor, 'ticket.create_block_override', 'ticket', created.id, { blockId: selection.blockId, blockTitle: selection.blockTitle, reason: blockOverride }, created.id);
+      }
+      return created;
+    },
   },
   {
     name: 'weave_ticket_assign', scope: 'weaver', input: z.object({ id: ticketId, roleId: z.string().nullable(), workerModelId: z.string().nullish() }),

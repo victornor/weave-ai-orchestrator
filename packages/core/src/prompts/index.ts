@@ -375,6 +375,20 @@ function bounded<T>(items: T[], max: number, render: (t: T) => string, more: str
   return head.length ? head.join('\n') : '- (none)';
 }
 
+/**
+ * VS-638: the human picked a roadmap block in the composer, and that structured choice must be
+ * visible in the text the weaver reads — the turn prompt and `weave_inbox` both render from this
+ * one string, so the wording cannot drift between them. Null when the message carried no block, so
+ * a message with only a project renders exactly as before.
+ */
+export function humanSelectionNotice(payload: Record<string, unknown>): string | null {
+  const blockTitle = typeof payload.blockTitle === 'string' ? payload.blockTitle.trim() : '';
+  if (!blockTitle) return null;
+  const slug = typeof payload.projectSlug === 'string' ? payload.projectSlug.trim() : '';
+  const project = slug ? ` (project ${slug})` : '';
+  return `Sent with roadmap block selected: "${blockTitle}"${project}. Add this to that block with \`weave_roadmap_item_add\`. Do not file a ticket for it unless the message explicitly says to start the block.`;
+}
+
 export async function buildTurnPrompt(
   ctx: WorkspaceContext,
   deps: () => CoreServices,
@@ -414,7 +428,10 @@ export async function buildTurnPrompt(
       const attachments = Array.isArray(w.payload.attachmentIds) && w.payload.attachmentIds.length > 0
         ? `\n\n_${w.payload.attachmentIds.length} attachment(s) — read them with \`weave_inbox\`._`
         : '';
-      parts.push(`\n### ${label}\n\n${String(w.payload.body)}${attachments}`);
+      // VS-638: a composer-selected roadmap block is a structured instruction, so its notice is
+      // rendered here rather than left to a payload the weaver may never open.
+      const selection = w.source === 'human_message' ? humanSelectionNotice(w.payload as Record<string, unknown>) : null;
+      parts.push(`\n### ${label}\n\n${selection ? `${selection}\n\n` : ''}${String(w.payload.body)}${attachments}`);
     }
     if (spoken.length > 12) parts.push(`\n(${spoken.length - 12} more — call \`weave_inbox\`)`);
   }

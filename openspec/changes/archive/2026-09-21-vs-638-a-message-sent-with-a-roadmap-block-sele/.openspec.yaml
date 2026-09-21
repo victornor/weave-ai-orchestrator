@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-21
+goal: A message sent with a roadmap block selected must not be filed as a ticket
+  by mistake

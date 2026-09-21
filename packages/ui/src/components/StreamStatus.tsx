@@ -1,5 +1,6 @@
 import type { ConnectionStatus } from '../api/sseStream';
 import { cx } from '../lib/cx';
+import { clock } from '../lib/format';
 
 /**
  * A per-stream connection notice — the run event stream, the job stream — rendered inline next to
@@ -18,6 +19,12 @@ export function StreamStatusNotice({
 }): React.ReactElement | null {
   if (status.state === 'connected' || status.state === 'connecting' || status.state === 'hidden') return null;
   const offline = status.state === 'offline' || status.state === 'unreachable';
+  const stale = status.state === 'stale';
+  const label = offline
+    ? 'Offline — retrying automatically'
+    : stale
+      ? `No updates since ${status.lastFrameAt ? clock(new Date(status.lastFrameAt).toISOString()) : 'the last sync'}`
+      : 'Reconnecting…';
   return (
     <div
       role="status"
@@ -28,7 +35,7 @@ export function StreamStatusNotice({
       )}
     >
       <span className="size-1.5 flex-none rounded-pill bg-current motion-safe:animate-[ac-pulse_1.6s_ease-in-out_infinite]" />
-      <span>{offline ? 'Offline — retrying automatically' : 'Reconnecting…'}</span>
+      <span>{label}</span>
       <button type="button" onClick={onRetry} className="ml-auto text-micro font-medium underline underline-offset-2 hover:no-underline">
         Retry now
       </button>

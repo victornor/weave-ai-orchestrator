@@ -12,16 +12,20 @@ import { cx } from '../lib/cx';
 export function ConnectionBanner({
   state,
   capturedAt,
+  lastFrameAt,
   queuedCount,
   className,
 }: {
   state: ConnectionState;
   capturedAt: string | null;
+  /** VS-641: epoch ms of the last frame or heartbeat, for the `stale` notice's age. */
+  lastFrameAt?: number | null;
   queuedCount?: number;
   className?: string;
 }): React.ReactElement | null {
   if (state === 'connected' || state === 'connecting' || state === 'hidden') return null;
   const offline = state === 'offline' || state === 'unreachable';
+  const stale = state === 'stale';
   return (
     <div
       role="status"
@@ -35,7 +39,9 @@ export function ConnectionBanner({
       <span>
         {offline
           ? `Offline — showing the state from ${capturedAt ? clock(capturedAt) : 'the last sync'}`
-          : 'Reconnecting…'}
+          : stale
+            ? `No updates since ${lastFrameAt ? clock(new Date(lastFrameAt).toISOString()) : 'the last sync'}`
+            : 'Reconnecting…'}
       </span>
       {queuedCount ? <span className="ac-mono ml-auto">{queuedCount} queued</span> : null}
     </div>

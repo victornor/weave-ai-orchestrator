@@ -30,13 +30,13 @@ export function WorkspaceProvider({
   children: ReactNode;
 }): React.ReactElement {
   const qc = useQueryClient();
-  const [connection, setConnection] = useState<ConnectionStatus>({ state: 'connecting', capturedAt: null, lastSeq: 0, attempts: 0 });
+  const [connection, setConnection] = useState<ConnectionStatus>({ state: 'connecting', capturedAt: null, lastFrameAt: null, lastSeq: 0, attempts: 0 });
   const [stream, setStream] = useState<EventStream | null>(null);
 
   useEffect(() => {
     if (remember) setWorkspaceId(ws);
     if (!live) {
-      setConnection({ state: 'connected', capturedAt: null, lastSeq: 0, attempts: 0 });
+      setConnection({ state: 'connected', capturedAt: null, lastFrameAt: null, lastSeq: 0, attempts: 0 });
       setStream(null);
       return;
     }
@@ -77,7 +77,7 @@ export function useHookWs(override?: string): string {
 }
 
 export function useConnection(): ConnectionStatus {
-  return useOptionalWorkspace()?.connection ?? { state: 'connected', capturedAt: null, lastSeq: 0, attempts: 0 };
+  return useOptionalWorkspace()?.connection ?? { state: 'connected', capturedAt: null, lastFrameAt: null, lastSeq: 0, attempts: 0 };
 }
 
 /** Subscribe to raw workspace events (live transcripts, arrival toasts). */

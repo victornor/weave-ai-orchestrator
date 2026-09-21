@@ -66,6 +66,9 @@ export async function followJob(client: ApiClient, jobId: string, opts: FollowOp
       onMessage: (message) => {
         const item = message.json as JobStreamItem | null;
         if (!item) return;
+        // VS-641: the SSE keepalive is a named `heartbeat` frame with an empty-ish body; a stream
+        // that sends it must not be mistaken for the job finishing. Only a recognised item counts.
+        if (item.kind !== 'step' && item.kind !== 'log' && item.kind !== 'finished') return;
         bump();
         if (item.kind === 'step') onStep(item.step);
         else if (item.kind === 'log') onLine(item.line);

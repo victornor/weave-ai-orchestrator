@@ -178,9 +178,9 @@ function LiveSection({
           onTicket={onTicket}
         />
       )}
-      {live && (runStreamStatus.state === 'unreachable' || runStreamStatus.state === 'offline') ? (
+      {live && (runStreamStatus.state === 'unreachable' || runStreamStatus.state === 'offline' || runStreamStatus.state === 'stale') ? (
         <p className="text-nano text-text-3">
-          The live stream dropped.{' '}
+          {runStreamStatus.state === 'stale' ? 'The live stream stalled.' : 'The live stream dropped.'}{' '}
           <button type="button" onClick={onRetry} className="text-text-3 underline">Refresh</button>
         </p>
       ) : null}

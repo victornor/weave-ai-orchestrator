@@ -29,9 +29,9 @@ Auth: `Authorization: Bearer <token>` (CLI/presenter) or the `ac_session` httpOn
 - `GET /llms/api.txt` (agent-readable summary) · `GET /api/openapi.json`
 
 ## Workspace
-- `GET /api/events?after=<base64url cursor map>` SSE stream for all loaded workspaces (`event: <type>`, `id: <base64url workspace cursor map>`, `data: WorkspaceEvent`); one connection per document, heartbeat comment every 15 s; invalid or oversized cursors start at the current tail
+- `GET /api/events?after=<base64url cursor map>` SSE stream for all loaded workspaces (`event: <type>`, `id: <base64url workspace cursor map>`, `data: WorkspaceEvent`); one connection per document, a named `heartbeat` event (no `id`) every 15 s while idle; invalid or oversized cursors start at the current tail
 - `GET /api/w/:ws` → workspace + config summary, plus `workerMemory: { mb, source: 'workspace' | 'derived' }` — the worker memory limit every role inherits and where it came from (VS-579); a role's own `memoryLimitMb` overrides it per role · `PATCH /api/w/:ws/config` (partial `workspace.yaml`; `defaults.workerMemoryMb` takes a whole number of MB (≥1024) or `null` to derive it; a `defaults.yolo` key is refused — YOLO is per project, set through `PATCH /api/w/:ws/projects/:id` as `policies.yolo`, VS-382) · `POST /api/w/:ws/pause` · `POST /api/w/:ws/resume`
-- `GET /api/w/:ws/events?after=<seq>` SSE stream (`event: <type>`, `id: <seq>`, `data: WorkspaceEvent`); heartbeat comment every 15 s
+- `GET /api/w/:ws/events?after=<seq>` SSE stream (`event: <type>`, `id: <seq>`, `data: WorkspaceEvent`); a named `heartbeat` event (no `id`) every 15 s while idle
 - `POST /api/w/:ws/export` `{ out? }` → `{ path, workspace, roles, knowledgeFiles, tickets }` (portable package: `workspace.yaml`, `roles/**`, `knowledge/**`, `tickets/*.md`; no db, no runs, no secrets)
 - `GET /api/w/:ws/briefing`
 - `GET /api/w/:ws/plan-origins` → `{ origins: [{ ticketId, planId, planTitle, planStatus, dispatched }] }` (VS-550) — every ticket in this workspace created from a plan draft, read through `plan_drafts.created_ticket_id`; `dispatched` (VS-517) is true when the draft became the ticket before the plan was submitted, distinguishing a planner-dispatched scout from a ticket the weaver created at plan submission. Workspace-scoped because the work page shows several projects at once.

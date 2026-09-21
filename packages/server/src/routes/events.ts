@@ -3,7 +3,7 @@ import { streamSSE } from 'hono/streaming';
 import { EPHEMERAL_EVENT_TYPES, type WorkspaceEvent } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import type { AppDeps } from '../types.js';
-import { HEARTBEAT_MS, Pump, heartbeat } from '../sse.js';
+import { HEARTBEAT_MS, Pump, heartbeat, writeSse } from '../sse.js';
 
 /** A live-only frame (VS-328): forwarded to clients but never replayed, and it must not move the cursor. */
 const isEphemeral = (type: string): boolean => (EPHEMERAL_EVENT_TYPES as readonly string[]).includes(type);
@@ -26,26 +26,25 @@ export function eventRoutes(): Hono<AppEnv> {
       const unsubscribe = bus.on((ev) => pump.push(ev));
       stream.onAbort(() => pump.close());
       let cursor = after;
-      const send = async (ev: WorkspaceEvent): Promise<void> => {
+      const send = async (ev: WorkspaceEvent): Promise<boolean> => {
         if (isEphemeral(ev.type)) {
           // No `id`: an ephemeral frame carries no position, so a client's replay cursor stays put.
-          await stream.writeSSE({ event: ev.type, data: JSON.stringify(ev) });
-          return;
+          return writeSse(stream, () => stream.writeSSE({ event: ev.type, data: JSON.stringify(ev) }));
         }
         cursor = ev.seq;
-        await stream.writeSSE({ id: String(ev.seq), event: ev.type, data: JSON.stringify(ev) });
+        return writeSse(stream, () => stream.writeSSE({ id: String(ev.seq), event: ev.type, data: JSON.stringify(ev) }));
       };
       try {
         for (;;) {
           const batch = bus.since(cursor, 500);
-          for (const ev of batch) await send(ev);
+          for (const ev of batch) if (!(await send(ev))) return;
           if (batch.length < 500) break;
         }
         while (!pump.done) {
           await pump.wait(HEARTBEAT_MS);
           const pending = pump.drain().filter((ev) => isEphemeral(ev.type) || ev.seq > cursor).sort((a, b) => a.seq - b.seq);
-          if (pending.length) { for (const ev of pending) await send(ev); }
-          else if (!pump.done) await heartbeat(stream);
+          if (pending.length) { for (const ev of pending) if (!(await send(ev))) return; }
+          else if (!pump.done) { if (!(await heartbeat(stream))) return; }
         }
       } finally {
         unsubscribe();
@@ -98,15 +97,14 @@ export function globalEventRoutes(deps: AppDeps): Hono<AppEnv> {
       const pump = new Pump<GlobalFrame>();
       const unsubscribers = workspaces.map((workspace) => workspace.ctx.events.on((event) => pump.push({ workspaceId: workspace.id, event })));
       stream.onAbort(() => pump.close());
-      const send = async ({ workspaceId, event }: GlobalFrame): Promise<void> => {
+      const send = async ({ workspaceId, event }: GlobalFrame): Promise<boolean> => {
         if (isEphemeral(event.type)) {
-          await stream.writeSSE({ event: event.type, data: JSON.stringify(event) });
-          return;
+          return writeSse(stream, () => stream.writeSSE({ event: event.type, data: JSON.stringify(event) }));
         }
         const current = cursor.get(workspaceId) ?? 0;
-        if (event.seq <= current) return;
+        if (event.seq <= current) return true;
         cursor.set(workspaceId, event.seq);
-        await stream.writeSSE({ id: encodeGlobalCursor(cursor), event: event.type, data: JSON.stringify(event) });
+        return writeSse(stream, () => stream.writeSSE({ id: encodeGlobalCursor(cursor), event: event.type, data: JSON.stringify(event) }));
       };
       try {
         // Every bus is subscribed before any replay starts, so an event emitted during replay is
@@ -115,14 +113,14 @@ export function globalEventRoutes(deps: AppDeps): Hono<AppEnv> {
           let batch: WorkspaceEvent[];
           do {
             batch = workspace.ctx.events.since(cursor.get(workspace.id) ?? 0, 500);
-            for (const event of batch) await send({ workspaceId: workspace.id, event });
+            for (const event of batch) if (!(await send({ workspaceId: workspace.id, event }))) return;
           } while (batch.length === 500 && !pump.done);
         }
         while (!pump.done) {
           await pump.wait(HEARTBEAT_MS);
           const pending = pump.drain().filter(({ workspaceId, event }) => isEphemeral(event.type) || event.seq > (cursor.get(workspaceId) ?? 0));
-          for (const frame of pending) await send(frame);
-          if (!pending.length && !pump.done) await heartbeat(stream);
+          for (const frame of pending) if (!(await send(frame))) return;
+          if (!pending.length && !pump.done) { if (!(await heartbeat(stream))) return; }
         }
       } finally {
         for (const unsubscribe of unsubscribers) unsubscribe();

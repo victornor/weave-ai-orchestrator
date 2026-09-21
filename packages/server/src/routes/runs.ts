@@ -5,7 +5,7 @@ import type { RunEvent } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { streamSSE } from 'hono/streaming';
 import { body, csv, query } from '../http.js';
-import { HEARTBEAT_MS, Pump, heartbeat } from '../sse.js';
+import { HEARTBEAT_MS, Pump, heartbeat, writeSse } from '../sse.js';
 
 export function runRoutes(): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
@@ -57,17 +57,17 @@ export function runRoutes(): Hono<AppEnv> {
       const unsubscribe = s.runs.onEvent((id, ev) => { if (id === runId) pump.push(ev); });
       stream.onAbort(() => pump.close());
       let cursor = after;
-      const send = async (ev: RunEvent): Promise<void> => {
+      const send = async (ev: RunEvent): Promise<boolean> => {
         cursor = ev.seq;
-        await stream.writeSSE({ id: String(ev.seq), event: ev.type, data: JSON.stringify(ev) });
+        return writeSse(stream, () => stream.writeSSE({ id: String(ev.seq), event: ev.type, data: JSON.stringify(ev) }));
       };
       try {
-        for (const ev of s.runs.events(runId, cursor)) await send(ev);
+        for (const ev of s.runs.events(runId, cursor)) if (!(await send(ev))) return;
         while (!pump.done) {
           await pump.wait(HEARTBEAT_MS);
           const pending = pump.drain().filter((ev) => ev.seq > cursor).sort((a, b) => a.seq - b.seq);
-          if (pending.length) { for (const ev of pending) await send(ev); }
-          else if (!pump.done) await heartbeat(stream);
+          if (pending.length) { for (const ev of pending) if (!(await send(ev))) return; }
+          else if (!pump.done) { if (!(await heartbeat(stream))) return; }
         }
       } finally {
         unsubscribe();

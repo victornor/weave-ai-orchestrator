@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useLiveStream } from '../api/sseStream';
+import { HEARTBEAT_MS } from '@weave-ai/shared';
+import { DEAD_AFTER_MS, STALE_AFTER_MS, WATCHDOG_TICK_MS, useLiveStream } from '../api/sseStream';
 import { resetDocumentVisible, setDocumentHidden } from './visibility';
 
 /** A controllable EventSource, driving `onopen`/`onerror` as well as named frames. */
@@ -180,6 +181,82 @@ describe('useLiveStream', () => {
       vi.advanceTimersByTime(20000);
     });
     expect(FakeEventSource.open).toHaveLength(1);
+  });
+});
+
+describe('useLiveStream watchdog (VS-641)', () => {
+  it('goes stale, then reconnects a silent stream with no error, resuming at after=', () => {
+    let after = 0;
+    const onResync = vi.fn();
+    const { result } = renderHook(() =>
+      useLiveStream({
+        resetKey: 'a',
+        eventTypes: ['x.frame'],
+        buildUrl: () => `/api/x${after ? `?after=${after}` : ''}`,
+        onFrame: () => {},
+        onResync,
+      }),
+    );
+    act(() => { last().connect(); });
+    expect(result.current.status.state).toBe('connected');
+
+    after = 7;
+    act(() => { last().emit('x.frame', { seq: 7 }); });
+
+    act(() => { vi.advanceTimersByTime(STALE_AFTER_MS); });
+    expect(result.current.status.state).toBe('stale');
+
+    act(() => { vi.advanceTimersByTime(DEAD_AFTER_MS - STALE_AFTER_MS + WATCHDOG_TICK_MS); });
+    expect(result.current.status.state).toBe('reconnecting');
+    expect(FakeEventSource.open).toHaveLength(2);
+    expect(last().url).toBe('/api/x?after=7');
+
+    act(() => { last().connect(); });
+    expect(result.current.status.state).toBe('connected');
+    expect(onResync).toHaveBeenCalledTimes(1);
+  });
+
+  it('never reconnects a stream that keeps receiving heartbeats', () => {
+    const { result } = renderHook(() => useLiveStream({ resetKey: 'a', eventTypes: [], buildUrl: () => '/api/x', onFrame: () => {} }));
+    act(() => { last().connect(); });
+    for (let i = 0; i < 4; i++) {
+      act(() => {
+        vi.advanceTimersByTime(HEARTBEAT_MS - 1000);
+        last().emit('heartbeat', { at: 'now' });
+      });
+    }
+    expect(FakeEventSource.open).toHaveLength(1);
+    expect(result.current.status.state).toBe('connected');
+  });
+
+  it('forces a fresh connection on online even while it reports connected, and re-syncs', () => {
+    const onResync = vi.fn();
+    const { result } = renderHook(() => useLiveStream({ resetKey: 'a', eventTypes: [], buildUrl: () => '/api/x', onFrame: () => {}, onResync }));
+    act(() => { last().connect(); });
+    expect(result.current.status.state).toBe('connected');
+
+    act(() => {
+      setOnline(true);
+      window.dispatchEvent(new Event('online'));
+    });
+    expect(FakeEventSource.open).toHaveLength(2);
+
+    act(() => { last().connect(); });
+    expect(onResync).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a long tick gap as a machine wake and reconnects', () => {
+    const { result } = renderHook(() => useLiveStream({ resetKey: 'a', eventTypes: [], buildUrl: () => '/api/x', onFrame: () => {} }));
+    act(() => { last().connect(); });
+
+    // The machine slept: the wall clock jumps without the interval having run in between.
+    vi.setSystemTime(new Date(Date.now() + 10 * 60 * 1000));
+    act(() => { vi.advanceTimersByTime(WATCHDOG_TICK_MS); });
+    expect(FakeEventSource.open).toHaveLength(2);
+    expect(result.current.status.state).toBe('reconnecting');
+
+    act(() => { last().connect(); });
+    expect(result.current.status.state).toBe('connected');
   });
 });
 

@@ -1,12 +1,29 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { Decision, EphemeralEventType, EventType, WorkspaceEvent } from '@weave-ai/shared';
 import { qk } from './keys';
-import { BACKOFF, documentIsHidden, type ConnectionState, type ConnectionStatus } from './sseStream';
+import { BACKOFF, documentIsHidden, SseWatchdog, type ConnectionState, type ConnectionStatus } from './sseStream';
 
 export type { ConnectionState, ConnectionStatus };
 
 type Listener = (s: ConnectionStatus) => void;
 type EventListener = (e: WorkspaceEvent) => void;
+
+/**
+ * VS-641: what a reconnect must re-read. Durable events replay from `?after=<seq>`, but ephemeral
+ * frames (`worker.activity`, `run.event`, `run.delta`, `session.compaction`) are never persisted and
+ * a resume position the server no longer holds replays nothing — so live counts and worker rows
+ * converge from these authoritative reads instead. Fired only on an actual reconnect; a query that
+ * was never fetched is a no-op.
+ */
+export function resync(qc: QueryClient, workspace: string): void {
+  const inv = (key: readonly unknown[]) => void qc.invalidateQueries({ queryKey: key });
+  inv(qk.workers(workspace));
+  inv(qk.tickets(workspace));
+  inv(qk.briefing(workspace));
+  inv(qk.runs(workspace));
+  inv(qk.decisions(workspace));
+  inv(qk.workspaces());
+}
 
 /**
  * SSE subscription to `GET /api/w/:ws/events?after=<seq>` with backoff and
@@ -18,7 +35,7 @@ export class EventStream {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<Listener>();
   private eventListeners = new Set<EventListener>();
-  private status: ConnectionStatus = { state: 'connecting', capturedAt: null, lastSeq: 0, attempts: 0 };
+  private status: ConnectionStatus = { state: 'connecting', capturedAt: null, lastFrameAt: null, lastSeq: 0, attempts: 0 };
   private stopped = false;
   /** Background tab (VS-227): EventSource is closed so HTTP/1.1 slots stay free for REST. */
   private hidden = false;
@@ -26,6 +43,23 @@ export class EventStream {
   /** Whether an earlier connection has already opened this session — the first onopen is a fresh
    * mount; every one after it is a reconnect. */
   private everConnected = false;
+  /** VS-641: silence watchdog. `onDead` reconnects; `onWake` is a slept machine. */
+  private readonly watchdog = new SseWatchdog({
+    onStale: () => this.set({ state: 'stale', lastFrameAt: this.watchdog.lastFrameAt }),
+    onAlive: () => this.set({ state: 'connected', lastFrameAt: Date.now() }),
+    onDead: () => {
+      this.es?.close();
+      this.es = null;
+      if (this.stopped || this.hidden) return;
+      this.set({ state: 'reconnecting', lastFrameAt: this.watchdog.lastFrameAt });
+      this.open();
+    },
+    onWake: () => {
+      if (this.stopped || this.hidden) return;
+      this.set({ state: 'reconnecting' });
+      this.open();
+    },
+  });
 
   constructor(
     private readonly workspace: string,
@@ -65,6 +99,7 @@ export class EventStream {
   stop(): void {
     this.stopped = true;
     this.hidden = false;
+    this.watchdog.stop();
     this.es?.close();
     this.es = null;
     if (this.timer) {
@@ -88,11 +123,14 @@ export class EventStream {
   }
 
   private onOnline = (): void => {
-    if (this.hidden) return;
-    if (this.status.state === 'offline') this.open();
+    if (this.stopped || this.hidden) return;
+    // Trust nothing about the old socket (VS-641): open fresh and let onopen re-sync.
+    this.set({ state: 'reconnecting' });
+    this.open();
   };
 
   private onOffline = (): void => {
+    this.watchdog.stop();
     this.set({ state: 'offline' });
   };
 
@@ -108,6 +146,7 @@ export class EventStream {
 
   private pauseForHidden(): void {
     this.hidden = true;
+    this.watchdog.stop();
     this.es?.close();
     this.es = null;
     if (this.timer) {
@@ -131,14 +170,17 @@ export class EventStream {
     if (this.status.state === 'hidden') this.set({ state: 'connecting' });
 
     es.onopen = () => {
-      this.set({ state: 'connected', attempts: 0, capturedAt: new Date().toISOString() });
-      // Whatever caused the previous connection to end — a clean drop or one that stalled silently
-      // and was never seen as an error — the decisions list may have moved on without us. Reconcile
-      // it against the server rather than trusting whatever event replay already caught (VS-140).
-      if (this.everConnected) void this.qc.invalidateQueries({ queryKey: qk.decisions(this.workspace) });
+      this.set({ state: 'connected', attempts: 0, capturedAt: new Date().toISOString(), lastFrameAt: Date.now() });
+      this.watchdog.start();
+      // VS-641: whatever the previous connection missed — a clean drop, a silent stall, a slept
+      // machine — the reads this stream keeps fresh are refetched rather than trusting replay
+      // alone (a missed ephemeral frame, a cursor the server no longer holds). Supersedes VS-140's
+      // decisions-only reconcile; `resync` covers decisions among the rest.
+      if (this.everConnected) resync(this.qc, this.workspace);
       this.everConnected = true;
     };
     es.onerror = () => {
+      this.watchdog.stop();
       es.close();
       if (this.stopped || this.hidden) return;
       const attempts = this.status.attempts + 1;
@@ -151,9 +193,12 @@ export class EventStream {
     // The daemon sends `event: <type>`; a named-event listener is required
     // because onmessage only receives unnamed frames.
     for (const type of TRACKED) es.addEventListener(type, (m) => this.handle(m as MessageEvent));
+    // The keepalive (VS-641) is a named event, unlike an SSE comment, so a silent stream is visible.
+    es.addEventListener('heartbeat', () => this.watchdog.touch());
   }
 
   private handle(m: MessageEvent<string>): void {
+    this.watchdog.touch();
     let evt: WorkspaceEvent;
     try {
       evt = JSON.parse(m.data) as WorkspaceEvent;
@@ -182,11 +227,32 @@ export class GlobalEventStream {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<Listener>();
   private eventListeners = new Set<EventListener>();
-  private status: ConnectionStatus = { state: 'connecting', capturedAt: null, attempts: 0 };
+  private status: ConnectionStatus = { state: 'connecting', capturedAt: null, lastFrameAt: null, attempts: 0 };
   private stopped = false;
   private hidden = false;
   private listening = false;
   private cursor = '';
+  /** Whether an earlier connection has already opened — every later onopen is a reconnect. */
+  private everConnected = false;
+  /** Workspaces this connection has seen an event for, so a reconnect can re-sync each of them. */
+  private readonly seen = new Set<string>();
+  /** VS-641: silence watchdog. `onDead` reconnects; `onWake` is a slept machine. */
+  private readonly watchdog = new SseWatchdog({
+    onStale: () => this.set({ state: 'stale', lastFrameAt: this.watchdog.lastFrameAt }),
+    onAlive: () => this.set({ state: 'connected', lastFrameAt: Date.now() }),
+    onDead: () => {
+      this.es?.close();
+      this.es = null;
+      if (this.stopped || this.hidden) return;
+      this.set({ state: 'reconnecting', lastFrameAt: this.watchdog.lastFrameAt });
+      this.open();
+    },
+    onWake: () => {
+      if (this.stopped || this.hidden) return;
+      this.set({ state: 'reconnecting' });
+      this.open();
+    },
+  });
 
   constructor(private readonly qc: QueryClient) {}
 
@@ -213,6 +279,7 @@ export class GlobalEventStream {
   stop(): void {
     this.stopped = true;
     this.hidden = false;
+    this.watchdog.stop();
     this.es?.close();
     this.es = null;
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
@@ -231,8 +298,13 @@ export class GlobalEventStream {
     this.open();
   }
 
-  private onOnline = (): void => { if (!this.hidden && this.status.state !== 'connected') this.open(); };
-  private onOffline = (): void => { this.set({ state: 'offline' }); };
+  private onOnline = (): void => {
+    if (this.stopped || this.hidden) return;
+    // Trust nothing about the old socket (VS-641): open fresh and let onopen re-sync.
+    this.set({ state: 'reconnecting' });
+    this.open();
+  };
+  private onOffline = (): void => { this.watchdog.stop(); this.set({ state: 'offline' }); };
   private onVisibility = (): void => {
     if (documentIsHidden()) { this.pauseForHidden(); return; }
     if (!this.hidden || this.stopped) return;
@@ -241,6 +313,7 @@ export class GlobalEventStream {
   };
   private pauseForHidden(): void {
     this.hidden = true;
+    this.watchdog.stop();
     this.es?.close();
     this.es = null;
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
@@ -259,11 +332,17 @@ export class GlobalEventStream {
     this.es = source;
     if (this.status.state === 'hidden') this.set({ state: 'connecting' });
     source.onopen = () => {
-      this.set({ state: 'connected', attempts: 0, capturedAt: new Date().toISOString() });
+      this.set({ state: 'connected', attempts: 0, capturedAt: new Date().toISOString(), lastFrameAt: Date.now() });
+      this.watchdog.start();
+      // VS-641: re-read what the missed window could not replay, per workspace this stream saw.
+      if (this.everConnected) { for (const ws of this.seen) resync(this.qc, ws); }
+      this.everConnected = true;
     };
     source.onmessage = (m) => this.handle(m as MessageEvent<string>);
     for (const type of TRACKED) source.addEventListener(type, (m) => this.handle(m as MessageEvent<string>));
+    source.addEventListener('heartbeat', () => this.watchdog.touch());
     source.onerror = () => {
+      this.watchdog.stop();
       source.close();
       if (this.stopped || this.hidden) return;
       const attempts = this.status.attempts + 1;
@@ -274,8 +353,10 @@ export class GlobalEventStream {
     };
   }
   private handle(m: MessageEvent<string>): void {
+    this.watchdog.touch();
     let evt: WorkspaceEvent;
     try { evt = JSON.parse(m.data) as WorkspaceEvent; } catch { return; }
+    this.seen.add(evt.workspaceId);
     if (evt.seq > 0 && m.lastEventId) this.cursor = m.lastEventId;
     const patch: Partial<ConnectionStatus> = { capturedAt: evt.createdAt ?? new Date().toISOString() };
     if (this.status.state !== 'connected') patch.state = 'connected';

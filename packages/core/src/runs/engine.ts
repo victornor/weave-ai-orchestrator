@@ -1,6 +1,6 @@
 import { credentialReaderFor, reconcileRuntimeCredential } from '../workspace/loader.js';
 import { gateRuntimeForLogin, ungateRuntime } from './authgate.js';
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
 import {
@@ -19,6 +19,7 @@ import type { CoreServices } from '../api.js';
 import { createSessions, type SessionsService } from '../sessions/index.js';
 import { buildTurnPrompt, flattenWakes, type TurnPromptOptions } from '../prompts/index.js';
 import { ensureHomeCurrent } from '../workers/home.js';
+import { agentNeedsCheckout } from '../workers/index.js';
 import { recordUsage } from '../usage/index.js';
 import { git, readGitIdentity } from '../util/git.js';
 import { emitRunEvent, runState } from './active.js';
@@ -495,10 +496,26 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     });
 
     // 2. prepare worktree (never reset, clean or switch branches)
-    if (agent.worktreePath) {
+    // VS-636: a worker that owes a checkout is provisioned here when its worktree is missing — a
+    // spawn cut off by a daemon restart leaves a null path — so no turn ever runs checkoutless. A
+    // failure is a retryable transient fault, surfaced on the run rather than run without one.
+    if (agentNeedsCheckout(agent) || agent.worktreePath) {
       await phase('prepare_worktree', async () => {
-        const fetched = await git(['fetch', 'origin'], agent.worktreePath!, 120_000);
-        if (!fetched.ok) record('error', { phase: 'prepare_worktree', message: fetched.stderr.trim().slice(0, 300) }, 'system', 'warn');
+        if (agentNeedsCheckout(agent) && !(agent.worktreePath && existsSync(agent.worktreePath))) {
+          try {
+            const wt = await deps().workers.ensureWorktree(agent.id);
+            Object.assign(agent, { worktreePath: wt.path, branch: wt.branch });
+          } catch (e) {
+            throw Object.assign(
+              new Error(`could not provision a worktree for ${agent.name}: ${e instanceof Error ? e.message : String(e)}`),
+              { ocFamily: 'transient_upstream' as RunErrorFamily, ocCode: 'worktree_provision_failed' },
+            );
+          }
+        }
+        if (agent.worktreePath) {
+          const fetched = await git(['fetch', 'origin'], agent.worktreePath, 120_000);
+          if (!fetched.ok) record('error', { phase: 'prepare_worktree', message: fetched.stderr.trim().slice(0, 300) }, 'system', 'warn');
+        }
       });
     }
 

@@ -242,6 +242,40 @@ describe('OpenSpecService.validateForProposed', () => {
     const r = await createOpenSpecService(harness.ctx, harness.deps).validateForProposed(ticketId);
     expect(r.ok).toBe(true);
   });
+
+  // VS-636: a worker whose worktree a restart cut off cannot have its change read from the primary
+  // clone; the gate must say so, not blame the plan.
+  it('names a missing worker checkout rather than incomplete planning (VS-636)', async () => {
+    const { harness, ticketId, clone } = setup(READY_CASES);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': 'p\n' });
+    harness.addWorker(ticketId, { branch: `ac/${CHANGE}`, worktreePath: null, status: 'provisioning' });
+
+    const svc = createOpenSpecService(harness.ctx, harness.deps);
+    const r = await svc.validateForProposed(ticketId);
+    expect(r.ok).toBe(false);
+    expect((r as { issues: Array<{ level: string; message: string }> }).issues).toEqual([
+      { level: 'error', message: 'this worker has no worktree; it is being repaired' },
+    ]);
+
+    const status = await svc.statusFor(ticketId);
+    expect(status.changeName).toBe(CHANGE);
+    expect(status.planningComplete).toBe(false);
+    expect(status.validation?.issues.map((i) => i.message)).toContain('this worker has no worktree; it is being repaired');
+  });
+
+  it('reads the change from the worker worktree, not the clone, once the checkout exists (VS-636)', async () => {
+    const { harness, ticketId, clone } = setup(READY_CASES);
+    writeChange(join(clone, 'openspec', 'changes', CHANGE), { 'proposal.md': '## Why\nfrom the clone\n' });
+    const workerId = harness.addWorker(ticketId, { branch: `ac/${CHANGE}`, worktreePath: null, status: 'active' });
+    const worktree = join(harness.ctx.paths.workers, workerId, 'work');
+    harness.db.update('agents', workerId, { worktreePath: worktree });
+    writeChange(join(worktree, 'openspec', 'changes', CHANGE), { 'proposal.md': '## Why\nfrom the worktree\n' });
+
+    const r = await createOpenSpecService(harness.ctx, harness.deps).validateForProposed(ticketId);
+    expect(r.ok).toBe(true);
+    expect((r as { plan: string }).plan).toContain('from the worktree');
+    expect((r as { plan: string }).plan).not.toContain('from the clone');
+  });
 });
 
 describe('OpenSpecService.archiveAfterMerge', () => {

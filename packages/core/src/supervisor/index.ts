@@ -187,6 +187,29 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     ctx.db.run('INSERT INTO run_events (run_id, seq, ts, type, stream, level, payload_json) VALUES (?,?,?,?,?,?,?)', [runId, seq, nowIso(), 'supervisor.action', 'system', 'warn', JSON.stringify({ action, ...detail })]);
   };
 
+  /**
+   * VS-636: a worker whose creation a drain or restart cut off keeps its row and its ticket binding
+   * but never got a worktree; `spawnPending` only acts on tickets with no worker, so nothing else
+   * resumes it and a relaunch would leave it active with a null path. Provision every such worker on
+   * boot. The workers service owns creation and idempotency, so a healthy worker is left untouched.
+   */
+  async function reprovisionMissingWorktrees(): Promise<void> {
+    const rows = ctx.db.all<{ id: string; worktreePath: string | null }>(
+      `SELECT id, worktree_path AS worktreePath FROM agents
+        WHERE workspace_id = ? AND kind IN ('worker','session') AND branch IS NOT NULL
+          AND status IN ('provisioning','active')`,
+      [ctx.workspaceId],
+    );
+    for (const row of rows) {
+      if (row.worktreePath && existsSync(row.worktreePath)) continue;
+      try {
+        await deps().workers.ensureWorktree(row.id);
+      } catch (e) {
+        log.warn({ agentId: row.id, err: String(e) }, 'boot sweep could not provision a missing worktree');
+      }
+    }
+  }
+
   async function bootRecovery(): Promise<void> {
     const running = ctx.db.all<Run>("SELECT * FROM runs WHERE workspace_id = ? AND status = 'running'", [ctx.workspaceId]);
     for (const run of running) {
@@ -1447,6 +1470,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         if (!bootRecovered) {
           bootRecovered = true;
           await bootRecovery().catch((e) => log.error({ err: String(e) }, 'boot recovery failed'));
+          await reprovisionMissingWorktrees().catch((e) => log.error({ err: String(e) }, 'worktree reprovision at boot failed'));
           await sweepScratch().catch((e) => log.error({ err: String(e) }, 'scratch sweep at boot failed'));
           try { nudgeIdleConductor(); } catch (e) { log.warn({ err: String(e) }, 'idle conductor nudge failed'); }
         }

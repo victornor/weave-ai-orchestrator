@@ -168,6 +168,48 @@ describe('run engine', () => {
     expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('done');
   });
 
+  // VS-636: a worker whose provisioning a daemon restart cut off keeps a null worktree path. The
+  // prepare step must create it (and the turn run in it), or fail the run retryably — never run
+  // without a checkout.
+  it('provisions a missing worktree on the prepare step and runs the turn in it (VS-636)', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const branch = 'ac/tst-1-add-a-readme-badge';
+    const ensured: string[] = [];
+    const worktree = (id: string): string => join(h.ctx.paths.workers, id, 'work');
+    h.services.workers = {
+      ensureWorktree: async (id: string) => {
+        mkdirSync(worktree(id), { recursive: true });
+        h.db.update('agents', id, { worktreePath: worktree(id), branch });
+        ensured.push(id);
+        return { path: worktree(id), branch, provisioned: true };
+      },
+    } as never;
+    const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null, branch });
+    h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+    runtime.queue.push({ structured: { state: 'working', summary: 'planning', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+
+    const run = await runOnce(workerId);
+
+    expect(run.status).toBe('succeeded');
+    expect(ensured).toEqual([workerId]);
+    expect(runtime.inputs[0]!.worktree).toEqual({ path: worktree(workerId), branch });
+  });
+
+  it('fails the run retryably when a missing worktree cannot be provisioned (VS-636)', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    h.services.workers = { ensureWorktree: async () => { throw new Error('disk on fire'); } } as never;
+    const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null, branch: 'ac/tst-1-add-a-readme-badge' });
+    h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
+
+    const run = await runOnce(workerId);
+
+    expect(run.status).toBe('failed');
+    expect(run.errorFamily).toBe('transient_upstream');
+    expect(run.errorCode).toBe('worktree_provision_failed');
+    expect(runtime.inputs).toHaveLength(0);
+    expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM wakeups WHERE agent_id = ? AND status = 'queued'", [workerId])!.n).toBeGreaterThan(0);
+  });
+
   it('times exactly the phases RECORDED_RUN_PHASES declares, in that order', async () => {
     // Anything deriving "which phase is this run in" from `run.phase.timing` walks that list, so a
     // phase added to or dropped from the engine has to move the list with it. `RUN_PHASES` is wider:
@@ -564,7 +606,7 @@ describe('run engine', () => {
 
   it('describes the worker ticket and worktree state in the turn prompt', async () => {
     const ticketId = seedTicket(h, { status: 'in_progress' });
-    const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null, branch: 'ac/tst-1-add-a-readme-badge' });
+    const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
     h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1: Add a README badge' });
     const run = await runOnce();
     const prompt = readFileSync(join(h.ctx.paths.runs, run.id, 'prompt.md'), 'utf8');

@@ -464,6 +464,15 @@ export interface WorkersService {
    * `notice: 'already queued; waiting for a run slot'` and nothing is re-rendered or enqueued.
    */
   relaunch(actor: Actor, workerId: string, note: string): Promise<S.Agent & { notice?: string }>;
+  /**
+   * VS-636: the checkout a worker that owes one must have before its turn runs, created when absent.
+   * Shared by the run engine's prepare step, `relaunch` and the supervisor's boot sweep, so a worker
+   * whose provisioning was cut off by a daemon restart is repaired rather than run checkoutless.
+   * Idempotent: a worktree already on disk is returned untouched, and an agent that owes no checkout
+   * is returned as it is. Throws when it cannot create the worktree, so the caller can surface a
+   * retryable failure rather than run without one.
+   */
+  ensureWorktree(agentId: string): Promise<{ path: string; branch: string; provisioned: boolean }>;
   cancel(actor: Actor, workerId: string, reason: string): Promise<S.Agent>;
   pause(actor: Actor, id: string, reason: string): S.Agent; resume(actor: Actor, id: string): S.Agent;
   retireIfLanded(actor: Actor, workerId: string): Promise<{ retired: boolean; reason?: string }>;

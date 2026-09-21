@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { agentEntryPath, forkSessionFile, headersWithExtras, listProviderModels, loadPreset, resolveProvider, type ChildResult } from '@weave-ai/agent';
-import { childEnv, installBundleFiles, spawnLines, type AgentHome, type CompactSessionInput, type CompactSessionResult, type InstructionBundle, type JsonSchema, type RuntimeAdapter, type RuntimeCapabilities, type RuntimeDetection, type RuntimeEvent, type RuntimeHost, type RuntimeModel, type SessionRef, type TurnHandle, type TurnInput, type TurnResult, type TurnSink } from '@weave-ai/runtime-sdk';
+import { childEnv, containmentWrapperEnv, installBundleFiles, spawnLines, type AgentHome, type CompactSessionInput, type CompactSessionResult, type InstructionBundle, type JsonSchema, type RuntimeAdapter, type RuntimeCapabilities, type RuntimeDetection, type RuntimeEvent, type RuntimeHost, type RuntimeModel, type SessionRef, type SpawnProc, type TurnHandle, type TurnInput, type TurnResult, type TurnSink } from '@weave-ai/runtime-sdk';
 import type { ProviderProfile } from '@weave-ai/shared';
 import { buildCompactInit, buildInit, childBaseEnv, layoutFor, splitModel, toolEnvFor } from './child.js';
 import { parseChildLine } from './events.js';
@@ -51,6 +51,10 @@ export interface WeaveAdapterOptions {
   /** For discovery; defaults to the global fetch. */
   fetch?: typeof fetch;
   now?: () => number;
+  /** VS-640: the spawner, injected in tests so no test spawns a real `systemd-run`. */
+  spawnProc?: SpawnProc;
+  /** VS-640: the containment availability decision, injected in tests so none reaches the live user manager. */
+  scopeAvailable?: boolean;
 }
 
 const DISCOVERY_TTL_MS = 10 * 60_000;
@@ -212,6 +216,9 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
       const prior = input.session.ref && typeof input.session.ref['id'] === 'string' && typeof input.session.ref['path'] === 'string' ? input.session.ref : null;
       const session = prior ? { id: String(prior['id']), path: String(prior['path']) } : (() => { const id = randomUUID(); return { id, path: join(layout.sessionsDir, `${id}.jsonl`) }; })();
       const base = childEnv();
+      // VS-640: the wrapper needs the user bus, the agent does not. The variables ride in a separate
+      // `containmentEnv` overlay; `spawnLines` strips them back out inside the scope.
+      const containmentEnv = containmentWrapperEnv(base);
       const init = buildInit(input, { ...parts, profile, apiKey, session, layout, toolEnv: toolEnvFor(input, base, keyVar), resolved, headers: extra.headers, protectedPaths: host?.configDir ? [host.configDir] : [] });
 
       // At most `maxConcurrentRuns` children per provider; a run cancelled while it waits never takes a slot.
@@ -257,6 +264,9 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
           // The child stops itself 30 s before the limit; this is the backstop.
           timeoutMs: input.limits.timeoutMs + 60_000,
           ...(input.containment ? { containment: input.containment } : {}),
+          ...(Object.keys(containmentEnv).length > 0 ? { containmentEnv } : {}),
+          ...(opts.scopeAvailable !== undefined ? { scopeAvailable: opts.scopeAvailable } : {}),
+          ...(opts.spawnProc ? { spawnProc: opts.spawnProc } : {}),
           onSpawn: (pid) => sink.onSpawn({ pid, pgid: pid }),
           onLine: (stream, line) => {
             if (stream === 'stderr') { lastStderr = line; sink.onRaw('stderr', line); return; }
@@ -277,10 +287,19 @@ export function createAdapter(opts: WeaveAdapterOptions = {}): RuntimeAdapter {
   };
 }
 
-function finish(result: ChildResult | null, outcome: { exitCode: number | null; signal: string | null; timedOut: boolean }, stderrTail: string, input: TurnInput, providerId: string): TurnResult {
+function finish(result: ChildResult | null, outcome: { exitCode: number | null; signal: string | null; timedOut: boolean; containmentFailed?: boolean }, stderrTail: string, input: TurnInput, providerId: string): TurnResult {
   if (result) {
     const { error, usage, ...rest } = result;
     return { ...rest, timedOut: result.timedOut || outcome.timedOut, ...(usage ? { usage } : {}), ...(error ? { error } : {}), provider: providerId, ...(result.session ? { session: result.session as unknown as SessionRef } : {}) };
+  }
+  // VS-640: the containment wrapper died before it started the agent (it could not reach the user
+  // manager). Say so in plain words rather than reporting the wrapper's bus text as a crash.
+  if (outcome.containmentFailed) {
+    return {
+      exitCode: outcome.exitCode ?? 1, signal: outcome.signal, timedOut: outcome.timedOut,
+      session: input.session.ref, finalText: null, provider: providerId,
+      error: { code: 'containment_unavailable', family: 'tooling', message: 'Containment is unavailable: the systemd user manager could not be reached, so the agent was not started.' },
+    };
   }
   // The child died before it could report: classify by how it died.
   const killed = outcome.signal === 'SIGKILL' || outcome.exitCode === 137;

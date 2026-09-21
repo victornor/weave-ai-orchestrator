@@ -1,5 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { containCommand, containmentPrefix, parseScopeMemoryPeak, readScopeMemoryPeak, scopeShowArgs, scopeStopArgs, scopeUnitName, systemdScopeAvailable, TEST_GUARD_ENV } from './containment.js';
+import { containCommand, containmentPrefix, containmentStartFailure, containmentWrapperEnv, parseScopeMemoryPeak, readScopeMemoryPeak, scopeShowArgs, scopeStopArgs, scopeUnitName, systemdScopeAvailable, TEST_GUARD_ENV } from './containment.js';
+
+const fixture = (name: string): string =>
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', name), 'utf8').trim();
 
 describe('worker memory containment', () => {
   it('is available only on Linux with both systemd-run and a user manager', () => {
@@ -54,5 +60,18 @@ describe('worker memory containment', () => {
       if (prev === undefined) delete process.env[TEST_GUARD_ENV];
       else process.env[TEST_GUARD_ENV] = prev;
     }
+  });
+
+  it('picks the user-bus variables a wrapper needs, and nothing else (VS-640)', () => {
+    expect(containmentWrapperEnv({ XDG_RUNTIME_DIR: '/run/user/1000', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus', HOME: '/home/user' })).toEqual({
+      XDG_RUNTIME_DIR: '/run/user/1000', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+    });
+    expect(containmentWrapperEnv({ XDG_RUNTIME_DIR: '/run/user/1000' })).toEqual({ XDG_RUNTIME_DIR: '/run/user/1000' });
+    expect(containmentWrapperEnv({ PATH: '/usr/bin' })).toEqual({});
+  });
+
+  it('recognises systemd-run\'s user-bus failure from its real stderr, and not an ordinary crash (VS-640)', () => {
+    expect(containmentStartFailure(fixture('vs-639-systemd-run-user-bus.txt'))).toBe(true);
+    expect(containmentStartFailure('boom: something broke')).toBe(false);
   });
 });

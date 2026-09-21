@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { RuntimeEvent, RuntimePartial, TurnHandle } from '@weave-ai/runtime-sdk';
+import type { RuntimeEvent, RuntimePartial } from '@weave-ai/runtime-sdk';
+import { interruptedTurn } from '@weave-ai/runtime-sdk';
 import { adapter } from '../src/adapter.js';
 
 // VS-595: a turn driven through `opencode serve`. A fake `opencode` on PATH replays recorded server
@@ -13,24 +14,29 @@ const tmp = (p: string) => { const d = mkdtempSync(join(tmpdir(), p)); dirs.push
 afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 const path = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url));
 
-interface Opts { fixture: string; cut?: number; hang?: boolean; mode?: 'auto' | 'restricted'; session?: string; cancelAfterMs?: number }
+interface Opts { fixture: string; cut?: number; hang?: boolean; mode?: 'auto' | 'restricted'; session?: string; interrupt?: boolean }
 async function turn(o: Opts) {
   const bin = tmp('ac-bin-'); const cwd = tmp('ac-cwd-'); const configHome = tmp('ac-cfg-'); const logDir = tmp('ac-log-');
   const log = join(logDir, 'requests.log');
   writeFileSync(log, '');
   writeFileSync(join(bin, 'opencode'), `#!/bin/sh\nexec ${process.execPath} ${path('./fake-opencode.mjs')} "$@"\n`);
   chmodSync(join(bin, 'opencode'), 0o755);
-  const events: RuntimeEvent[] = []; const partials: RuntimePartial[] = [];
-  let handle: TurnHandle | undefined;
-  const p = adapter.runTurn({
+  const input = {
     runId: 'r', turnEpoch: 1, cwd, worktree: null, session: { policy: 'reuse', ref: o.session ? { sessionId: o.session } : null, isFirstTurn: !o.session },
     systemPrompt: { text: '', mode: 'skip' }, prompt: 'list files', mcpServers: {},
     env: { PATH: `${bin}:${process.env['PATH'] ?? ''}`, FAKE_FIXTURE: path(`../fixtures/${o.fixture}.jsonl`), FAKE_LOG: log, ...(o.cut ? { FAKE_CUT: String(o.cut) } : {}), ...(o.hang ? { FAKE_HANG: '1' } : {}) },
     options: {}, limits: { timeoutMs: 30_000 }, permission: { mode: o.mode ?? 'auto' }, model: 'mock/m', configHome,
-  } as never, { onSpawn() {}, onEvent: (e) => events.push(e), onRaw() {}, onPartial: (x) => partials.push(x) }, (h) => { handle = h; });
-  if (o.cancelAfterMs) setTimeout(() => void handle?.cancel('interrupt'), o.cancelAfterMs);
-  const result = await p;
-  return { result, events, partials, requests: readFileSync(log, 'utf8').split('\n').filter(Boolean) };
+  } as never;
+  const requests = (): string[] => readFileSync(log, 'utf8').split('\n').filter(Boolean);
+  // VS-660: the interrupt case is driven through the shared harness — the adapter-level path, with
+  // the turn stopped and the partials recorded before the cut kept.
+  if (o.interrupt) {
+    const { result, recorded } = await interruptedTurn(adapter, input, { until: (r) => r.partials.length > 0, timeoutMs: 10_000 });
+    return { result, events: recorded.events, partials: recorded.partials, requests: requests() };
+  }
+  const events: RuntimeEvent[] = []; const partials: RuntimePartial[] = [];
+  const result = await adapter.runTurn(input, { onSpawn() {}, onEvent: (e) => events.push(e), onRaw() {}, onPartial: (x) => partials.push(x) });
+  return { result, events, partials, requests: requests() };
 }
 
 describe('opencode serve turn', () => {
@@ -71,8 +77,8 @@ describe('opencode serve turn', () => {
     expect(result.error).toMatchObject({ code: 'incomplete_turn', family: 'transient_upstream' });
   });
 
-  it('cancels mid-stream: aborts the session, ends the turn, and leaves no run hanging', async () => {
-    const { result, requests, partials } = await turn({ fixture: 'serve-turn-tool', cut: 12, hang: true, cancelAfterMs: 400 });
+  it('cancels mid-stream: aborts the session, stops the turn, and keeps the partials recorded before the cut', async () => {
+    const { result, requests, partials } = await turn({ fixture: 'serve-turn-tool', cut: 12, hang: true, interrupt: true });
     expect(requests.some((r) => /^POST \/session\/ses_fake_new\/abort/.test(r))).toBe(true);
     expect(result.error).toBeDefined();
     expect(partials.length).toBeGreaterThan(0);

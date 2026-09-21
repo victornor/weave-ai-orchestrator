@@ -285,4 +285,5 @@ export * from './launch.js';
 export * from './process.js';
 export * from './containment.js';
 export * from './testkit.js';
+export * from './fakeProcess.js';
 export * from './fsutil.js';

@@ -226,6 +226,19 @@ describe('V2 worker page', () => {
       expect(state.postThread).toHaveBeenCalledWith({ threadId: 'th1', body: 'hello there' });
       expect(state.send).not.toHaveBeenCalled();
     });
+    it('sends a pasted image and a browsed file on the session message (VS-657)', () => {
+      render(<WorkerBody workerId="a1" />);
+      const box = screen.getByPlaceholderText('Talk to this session…');
+      fireEvent.change(box, { target: { value: 'here is the spec' } });
+      const pasted = new File(['x'], 'clipboard.png', { type: 'image/png' });
+      fireEvent.paste(box, { clipboardData: { items: [{ kind: 'file', getAsFile: () => pasted }] } });
+      const browsed = new File(['y'], 'spec.md', { type: 'text/markdown' });
+      fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [browsed] } });
+
+      fireEvent.click(screen.getByLabelText('Send'));
+      expect(state.postThread).toHaveBeenCalledWith(expect.objectContaining({ threadId: 'th1', body: 'here is the spec', files: [pasted, browsed] }));
+    });
+
     it('names each author of the session conversation (VS-553)', () => {
       state.role = { id: 'r1', name: 'Full-stack Engineer' };
       state.threadMessages = [

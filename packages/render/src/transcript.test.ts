@@ -277,6 +277,29 @@ describe('runEventsToTranscript', () => {
     expect((blocks[3] as StatusBlock).tone).toBe('error');
   });
 
+  it('marks a cut-off tool call `not completed` when the run ended interrupted, while a failed one stays failed (VS-657)', () => {
+    reset();
+    const blocks = runEventsToTranscript([
+      ev('tool.call', { name: 'Bash', id: 'c1', input: { command: 'pnpm build' } }),
+      ev('tool.call', { name: 'Read', id: 'c2', input: { file_path: 'a.ts' } }),
+      ev('tool.result', { id: 'c2', output: 'nope', isError: true }),
+      ev('run.finalized', { status: 'interrupted' }),
+    ]);
+    const [cut, failed] = blocks as ToolBlock[];
+    expect(cut!.status).toBe('interrupted');
+    expect(cut!.collapsed).toContain('not completed');
+    expect(failed!.status).toBe('error');
+  });
+
+  it('leaves a pending tool call alone when the run succeeded (VS-657)', () => {
+    reset();
+    const blocks = runEventsToTranscript([
+      ev('tool.call', { name: 'Bash', id: 'c1', input: { command: 'pnpm build' } }),
+      ev('run.finalized', { status: 'succeeded' }),
+    ]);
+    expect((blocks[0] as ToolBlock).status).toBe('pending');
+  });
+
   it('renders a human message as its own attributed block, carrying its delivery (VS-99)', () => {
     reset();
     const blocks = runEventsToTranscript([

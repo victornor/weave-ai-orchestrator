@@ -3,6 +3,7 @@ import { OcError, projectLabel, type Attachment, type AttachmentPart, type Chann
 import type { Actor, CoreServices, ThreadsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
+import { runState, type ActiveRun } from '../runs/active.js';
 import { ftsQuery } from '../search/ftsQuery.js';
 import { tx } from '../tickets/tx.js';
 import { readAttachmentBytes, sanitizeAttachmentFilename, writeAttachment, writeGeneratedAttachment } from './attachmentStorage.js';
@@ -102,6 +103,21 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
 
   function row(r: Record<string, unknown>): ThreadRow {
     return threadRow(r) as unknown as ThreadRow;
+  }
+
+  /**
+   * VS-657: is this addressee a ticketless persistent session? Only a session is interrupted by a
+   * new message; the weaver, a planner and a ticket-bound worker keep their existing delivery.
+   */
+  function ticketlessSession(agentId: string): boolean {
+    const a = db.get<{ kind: string; ticketId: string | null }>('SELECT kind, ticket_id AS ticketId FROM agents WHERE id = ?', [agentId]);
+    return a?.kind === 'session' && !a.ticketId;
+  }
+
+  /** The run currently executing for this agent in this process, if any. */
+  function activeRunFor(agentId: string): ActiveRun | null {
+    for (const active of runState(ctx).active.values()) if (active.agentId === agentId) return active;
+    return null;
   }
 
   function excerpt(body: string): string {
@@ -325,7 +341,9 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       // — and therefore a workspace — boundary. It is also the read that produces the excerpt.
       const repliedTo = opts.replyToMessageId ? repliedToMessage(t.id, opts.replyToMessageId) : null;
       const idempotencyKey = opts.idempotencyKey || undefined;
-      return tx(db, () => {
+      // VS-657: set inside the transaction (synchronous reads only), acted on after it commits.
+      let interruptRunId: string | null = null;
+      const result = tx(db, () => {
         // A client retry after a lost response carries the same key; return the stored message
         // without a second row, event, or wake (VS-148).
         if (idempotencyKey) {
@@ -367,10 +385,20 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
         ctx.events.emit('thread.message', 'thread_message', msg.id, { ...msg, ticketId: t.ticketId });
         if (t.ticketId) {
           // A thread bound to a ticket lands as a human ticket comment; that wakes the ticket's worker (PLAN §11.7).
-          deps().tickets.comment(human, t.ticketId, body, 'comment', 'trusted');
+          if (opts.dictated) deps().tickets.comment(human, t.ticketId, body, 'comment', 'trusted', { dictated: true });
+          else deps().tickets.comment(human, t.ticketId, body, 'comment', 'trusted');
         } else {
+          const addresseeId = liveAddressee(t);
+          // VS-657: a message to a ticketless persistent session whose turn is executing stops that
+          // turn now, so the wake below becomes the session's next turn instead of queueing behind
+          // it. Skipped once the run is already marked cancelled for a message, so two rapid messages
+          // coalesce into the one resumed turn rather than starting two.
+          if (ticketlessSession(addresseeId)) {
+            const active = activeRunFor(addresseeId);
+            if (active && active.cancelled?.cause !== 'message') interruptRunId = active.runId;
+          }
           try {
-            deps().wake.enqueue(liveAddressee(t), {
+            deps().wake.enqueue(addresseeId, {
               source: 'human_message',
               reason: `message from ${t.humanLabel ?? 'the human'}${project ? ` about ${projectLabel(project)}` : ''}`,
               payload: {
@@ -378,6 +406,8 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
                 projectId: project?.id ?? null, projectSlug: project?.slug ?? null,
                 blockId: block?.id ?? null, blockTitle: block?.title ?? null,
                 replyToMessageId: msg.replyToMessageId, replyToExcerpt: msg.replyToExcerpt,
+                ...(opts.dictated ? { dictated: true } : {}),
+                ...(interruptRunId ? { interruptedRunId: interruptRunId } : {}),
                 ...(attachmentParts.length ? { attachmentIds: attachmentParts.map((p) => p.id) } : {}),
               },
               requestedBy: human,
@@ -388,6 +418,14 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
         }
         return msg;
       });
+      // Done outside the transaction: `tx` must not await and `runs.cancel` is async. Issued in the
+      // same turn as the enqueue, so the message is already queued for the resumed turn when the
+      // turn being stopped finalizes.
+      if (interruptRunId) {
+        const runId = interruptRunId;
+        void deps().runs.cancel(human, runId, 'interrupt', 'message').catch((e) => log.warn({ err: e, threadId: t.id, runId }, 'interrupting the session turn failed'));
+      }
+      return result;
     },
 
     async outbound(actor, threadId, body, opts = {}) {

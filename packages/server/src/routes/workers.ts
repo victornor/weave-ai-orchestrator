@@ -142,8 +142,8 @@ export function workerRoutes(): Hono<AppEnv> {
   app.get('/:id/brief', (c) => c.text(c.get('ws').services.workers.brief(c.req.param('id'))));
 
   app.post('/:id/message', async (c) => {
-    const { body: text, live } = await body(c, z.object({ body: z.string().min(1), live: z.boolean().optional() }));
-    const outcome = await c.get('ws').services.workers.message(c.get('actor'), c.req.param('id'), text, { live });
+    const { body: text, live, dictated } = await body(c, z.object({ body: z.string().min(1), live: z.boolean().optional(), dictated: z.boolean().optional() }));
+    const outcome = await c.get('ws').services.workers.message(c.get('actor'), c.req.param('id'), text, { live, dictated });
     return c.json({ delivery: outcome.delivery, runId: outcome.runId, wakeId: outcome.wake?.id ?? null }, 202);
   });
 

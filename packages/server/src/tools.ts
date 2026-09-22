@@ -20,7 +20,7 @@ import {
 } from '@weave-ai/shared';
 import {
   flattenWakes, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX, ARTIFACT_KIT_CSS, ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks,
-  resolveOutboundAttachments, readAttachmentBytes, recordActivity, humanSelectionNotice, type OutboundAttachmentInput,
+  resolveOutboundAttachments, readAttachmentBytes, recordActivity, humanSelectionNotice, dictatedNotice, type OutboundAttachmentInput,
   type Actor, type CoreServices, type IncidentsService, type KnowledgeMirror,
 } from '@weave-ai/core';
 import type { RunTokenClaims } from './runtoken.js';
@@ -424,10 +424,19 @@ export const TOOLS: ToolDef[] = [
             // entry too, so the weaver cannot miss a structured choice by not opening the payload.
             const selection = humanSelectionNotice((w.payload ?? {}) as Record<string, unknown>);
             if (selection) entry.selection = selection;
+            // VS-657: a dictated message is marked the same way the turn prompt marks it.
+            const dictated = dictatedNotice((w.payload ?? {}) as Record<string, unknown>);
+            if (dictated) entry.dictated = dictated;
             bucket.messages.push(entry);
             break;
           }
-          case 'ticket_assigned': case 'ticket_comment': case 'blockers_resolved': case 'children_completed': case 'merge_approved': bucket.tickets.push(entry); break;
+          case 'ticket_comment': {
+            const dictated = dictatedNotice((w.payload ?? {}) as Record<string, unknown>);
+            if (dictated) entry.dictated = dictated;
+            bucket.tickets.push(entry);
+            break;
+          }
+          case 'ticket_assigned': case 'blockers_resolved': case 'children_completed': case 'merge_approved': bucket.tickets.push(entry); break;
           case 'decision_answered': {
             const id = (w.payload as { decisionId?: unknown } | null)?.decisionId;
             if (typeof id === 'string') { try { entry.decision = svc(ctx).decisions.get(id); } catch { /* answered then removed */ } }

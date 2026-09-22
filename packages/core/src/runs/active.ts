@@ -97,14 +97,20 @@ export interface LiveInputStatus { midTurn: boolean; interrupts?: boolean; reaso
  * turn for this agent is executing at all — a runtime without `streamingInput` never has `.send`, so
  * that running turn is always a candidate to interrupt rather than queue behind (VS-254). Read-only;
  * never spawns anything, never blocks.
+ *
+ * VS-657: a ticketless persistent session always interrupts, even on a runtime that carries `send` —
+ * the ask is that a message stops the running turn and resumes with it, not that it injects text.
  */
-export function describeLiveInput(ctx: WorkspaceContext, agent: Pick<Agent, 'id' | 'runtimeId'>): LiveInputStatus {
+export function describeLiveInput(ctx: WorkspaceContext, agent: Pick<Agent, 'id' | 'runtimeId' | 'kind' | 'ticketId'>): LiveInputStatus {
+  const running = [...runState(ctx).active.values()].some((r) => r.agentId === agent.id);
+  if (agent.kind === 'session' && !agent.ticketId) {
+    return running ? { midTurn: false, interrupts: true } : { midTurn: false, reason: 'no turn is currently running for this agent' };
+  }
   const runtime = ctx.registries.runtimes.get(agent.runtimeId);
   if (!runtime?.capabilities.streamingInput) {
-    for (const active of runState(ctx).active.values()) {
-      if (active.agentId === agent.id) return { midTurn: false, interrupts: true };
-    }
-    return { midTurn: false, reason: `${runtime?.displayName ?? agent.runtimeId} does not support delivering input to a turn that is already running` };
+    return running
+      ? { midTurn: false, interrupts: true }
+      : { midTurn: false, reason: `${runtime?.displayName ?? agent.runtimeId} does not support delivering input to a turn that is already running` };
   }
   for (const active of runState(ctx).active.values()) {
     if (active.agentId === agent.id && active.send) return { midTurn: true };

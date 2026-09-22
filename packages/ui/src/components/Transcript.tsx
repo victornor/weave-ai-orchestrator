@@ -219,9 +219,10 @@ export function TranscriptLine({ block, onTicket }: { block: TranscriptBlock; on
   const targetLabel = block.targetPath ? targetBaseName(block.targetPath) : block.target;
   const head = (
     <div className={cx('flex items-center gap-2.5 px-2.5 py-1.5', expandable ? 'bg-bg-2' : 'rounded-r4 border border-line-1 bg-bg-2')}>
-      <span className="ac-mono text-nano text-text-3">{block.pending ? <StatusGlyph status="working" size="xs" pulse className="inline-block" title="running" /> : expandable ? (open ? '▾' : '▸') : '▸'}</span>
+      <span className="ac-mono text-nano text-text-3">{block.interrupted ? <StatusGlyph status="stalled" size="xs" className="inline-block" title="not completed" /> : block.pending ? <StatusGlyph status="working" size="xs" pulse className="inline-block" title="running" /> : expandable ? (open ? '▾' : '▸') : '▸'}</span>
       <span className={cx('ac-mono text-micro', block.denied ? 'text-needs-you' : block.error ? 'text-failed' : block.pending ? 'text-text-3' : 'text-text-2')}>{block.tool}</span>
       <span className="ac-mono ac-truncate flex-1 text-micro text-text-soft" title={block.targetPath ?? undefined}>{targetLabel}</span>
+      {block.interrupted ? <span className="ac-mono text-nano text-text-4">not completed</span> : null}
       {block.adds != null || block.dels != null ? (
         <span className="ac-mono text-nano">
           {block.adds != null ? <span className="text-done">+{block.adds}</span> : null}{' '}

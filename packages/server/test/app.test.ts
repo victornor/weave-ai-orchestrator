@@ -528,6 +528,21 @@ describe('routes', () => {
     expect(seen.map((o) => o?.['projectId'])).toEqual(['p_api', undefined]);
   });
 
+  it('forwards whether a chat message was dictated (VS-657)', async () => {
+    const { h, fetch } = app();
+    const seen: Array<Record<string, unknown> | undefined> = [];
+    h.impls['threads']!['inbound'] = (_a: unknown, _t: unknown, body: string, opts?: Record<string, unknown>) => {
+      seen.push(opts);
+      return { id: 'tm_1', body };
+    };
+
+    const res = await fetch('/api/w/ws1/threads/th_1/messages', {
+      method: 'POST', headers: authed({ 'content-type': 'application/json' }), body: JSON.stringify({ body: 'ship it', dictated: true }),
+    });
+    expect(res.status).toBe(201);
+    expect(seen[0]?.['dictated']).toBe(true);
+  });
+
   it('surfaces an unknown project on a chat message as not_found', async () => {
     const { h, fetch } = app();
     h.impls['threads']!['inbound'] = () => { throw new OcError('not_found', 'project nope not found'); };

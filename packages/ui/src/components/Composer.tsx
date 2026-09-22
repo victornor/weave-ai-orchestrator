@@ -3,6 +3,7 @@ import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYP
 import { useDictation, isDictationTooShort } from '../lib/dictation';
 import { useDictationHotkey } from '../lib/dictationHotkey';
 import { useDictationAutoSend } from '../lib/dictationAutoSend';
+import { useMarkAllDictated } from '../lib/markAllDictated';
 import { dictationShortcut } from '../lib/dictationHint';
 import { cx } from '../lib/cx';
 import { StatusGlyph } from './StatusGlyph';
@@ -39,7 +40,7 @@ export interface ComposerProps {
   autoFocus?: boolean;
   value?: string;
   onChange?: (v: string) => void;
-  onSubmit: (text: string, files?: File[], idempotencyKey?: string) => void | Promise<void>;
+  onSubmit: (text: string, files?: File[], idempotencyKey?: string, opts?: { dictated?: boolean }) => void | Promise<void>;
   /** rendered above the input; used by "Revise…" to show what it is scoped to. */
   scope?: React.ReactNode;
   rows?: number;
@@ -139,6 +140,8 @@ export function Composer({
    * `sessionRan` marks a session in flight so the settle effect only acts on a real attempt.
    */
   const discarded = useRef(false);
+  /** VS-657: true once a dictation landed in this draft, until the send consumes it. */
+  const dictatedForSend = useRef(false);
   const sessionTranscript = useRef('');
   const sessionRan = useRef(false);
   const listeningRef = useRef(false);
@@ -174,6 +177,8 @@ export function Composer({
         return;
       }
       set(`${base.current}${base.current && !base.current.endsWith(' ') ? ' ' : ''}${piece}`);
+      // VS-657: the draft now holds dictated words; the send site reads this to mark the message.
+      dictatedForSend.current = true;
     },
   );
 
@@ -183,6 +188,8 @@ export function Composer({
   // Opt-in, per browser (VS-435, restored by VS-494): a keybinding-ended session sends the settled
   // draft, through the same queued path the send arrow uses.
   const autoSend = useDictationAutoSend();
+  // VS-657: "mark all my messages as voice dictated" forces the mark on every send.
+  const markAllDictated = useMarkAllDictated();
 
   const startMic = useCallback(() => {
     if (dictation.mode === 'unavailable') {
@@ -267,8 +274,15 @@ export function Composer({
     // Cleared only once the send is confirmed: a rejected send (attachment or plain text) leaves
     // the composer exactly as the human left it so the attempt can be retried (VS-148). `onSubmit`
     // is expected to report the failure itself (a toast); this only decides what to keep on screen.
-    Promise.resolve(onSubmit(t, files.length > 0 ? files : undefined, reused)).then(() => {
+    const filesArg = files.length > 0 ? files : undefined;
+    // VS-657: only a dictated (or mark-all) send carries the fourth argument, so the shape every
+    // existing typed-send caller sees is unchanged.
+    const send = dictatedForSend.current || markAllDictated
+      ? onSubmit(t, filesArg, reused, { dictated: true })
+      : onSubmit(t, filesArg, reused);
+    Promise.resolve(send).then(() => {
       lastFailed.current = null;
+      dictatedForSend.current = false;
       set('');
       base.current = '';
       setFiles([]);

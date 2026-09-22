@@ -465,8 +465,35 @@ describe('prompt rendering', () => {
 
     const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
     expect(prompt).toContain('live_interrupt: stop, wrong direction');
-    expect(prompt).toContain('Your previous turn was interrupted to deliver the live message above');
+    expect(prompt).toContain('Your previous turn was interrupted to deliver the message above');
     expect(prompt).toContain("index.lock");
+  });
+
+  it('tells a resumed session turn it was interrupted when its human_message wake carries an interrupted run (VS-657)', async () => {
+    const session = { ...worker, id: 'session-1', kind: 'session', ticketId: null } as never;
+    const wake = {
+      id: 'w-hm', workspaceId: h.workspaceId, agentId: 'session-1', source: 'human_message',
+      reason: 'message from the human', payload: { threadId: 'th-1', messageId: 'm-1', body: 'wrong direction, stop', interruptedRunId: 'run-9' }, status: 'queued',
+    } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, session, [wake], {});
+    expect(prompt).toContain('wrong direction, stop');
+    expect(prompt).toContain('Your previous turn was interrupted to deliver the message above');
+  });
+
+  it('delivers a dictated human message with the (voice dictated) line and a typed one without it (VS-657)', async () => {
+    const dictated = {
+      id: 'w-d', workspaceId: h.workspaceId, agentId: 'session-1', source: 'human_message',
+      reason: 'message from the human', payload: { threadId: 'th-1', messageId: 'm-1', body: 'shipp it now', dictated: true }, status: 'queued',
+    } as never;
+    const typed = {
+      id: 'w-t', workspaceId: h.workspaceId, agentId: 'session-1', source: 'human_message',
+      reason: 'message from the human', payload: { threadId: 'th-1', messageId: 'm-2', body: 'ship it now' }, status: 'queued',
+    } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [dictated, typed], {});
+    expect(prompt).toContain('(voice dictated)\n\nshipp it now');
+    expect(prompt).not.toContain('(voice dictated)\n\nship it now');
   });
 
   it('adds no interrupted-by-message note when no `live_interrupt` wake is present', async () => {

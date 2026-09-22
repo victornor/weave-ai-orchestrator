@@ -18,6 +18,7 @@ import { clearDraft, draftKey, patchDraft, useDraft } from '../lib/drafts';
 import { enqueue } from '../lib/queue';
 import { useDictationHotkey } from '../lib/dictationHotkey';
 import { useDictationController, type DictationController } from '../lib/dictationController';
+import { useMarkAllDictated } from '../lib/markAllDictated';
 import { DictationBar } from './DictationBar';
 
 export interface DictationTarget {
@@ -71,6 +72,8 @@ export function DictationSessionProvider({ children }: { children: ReactNode }):
   const [attachmentsDropped, setAttachmentsDropped] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
   const [hotkeyAllowed, setHotkeyAllowedState] = useState(false);
+  // VS-657: "mark all my messages as voice dictated" applies to a floating-bar send too.
+  const markAllDictated = useMarkAllDictated();
   const composerGetter = useRef<(() => ComposerRegistration | null) | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -91,12 +94,13 @@ export function DictationSessionProvider({ children }: { children: ReactNode }):
   useEffect(() => () => { if (noticeTimer.current !== null) clearTimeout(noticeTimer.current); }, []);
 
   /** Post a text-only draft to the target thread, as the chat's send does (VS-282/VS-450). */
-  const postToTarget = useCallback(async (to: DictationTarget, text: string): Promise<void> => {
+  const postToTarget = useCallback(async (to: DictationTarget, text: string, dictated: boolean): Promise<void> => {
     const body = {
       body: text,
       ...(to.projectId ? { projectId: to.projectId } : {}),
       ...(to.replyToMessageId ? { replyToMessageId: to.replyToMessageId } : {}),
       idempotencyKey: crypto.randomUUID(),
+      ...(dictated ? { dictated: true } : {}),
     };
     const queueThis = (): void => {
       enqueue({ kind: 'thread', path: `/threads/${to.threadId}/messages`, body, label: text.slice(0, 60) });
@@ -123,7 +127,7 @@ export function DictationSessionProvider({ children }: { children: ReactNode }):
     submit: (text) => {
       const c = composerGetter.current?.() ?? null;
       if (c && target && sameTarget(c.target, target)) return c.submit(text);
-      return target ? postToTarget(target, text) : undefined;
+      return target ? postToTarget(target, text, controller.dictatedForSend.current || markAllDictated) : undefined;
     },
     canSubmit: () => {
       const c = composerGetter.current?.() ?? null;

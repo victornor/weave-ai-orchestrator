@@ -11,9 +11,9 @@ export type EditPayload =
 
 export type TranscriptBlock =
   | { id: string; type: 'text'; text: string; thinking?: boolean; thinkingDurationMs?: number | null }
-  | { id: string; type: 'tool'; tool: string; target: string; targetPath: string | null; durationMs: number | null; adds: number | null; dels: number | null; diff: string | null; error?: boolean; pending?: boolean; denied?: boolean; editPayload?: EditPayload | null; /** A subagent's blocks (VS-615): the events that named this call as their `parentId`. */ children?: TranscriptBlock[] }
+  | { id: string; type: 'tool'; tool: string; target: string; targetPath: string | null; durationMs: number | null; adds: number | null; dels: number | null; diff: string | null; error?: boolean; pending?: boolean; denied?: boolean; /** VS-657: the run ended before this call produced a result. */ interrupted?: boolean; editPayload?: EditPayload | null; /** A subagent's blocks (VS-615): the events that named this call as their `parentId`. */ children?: TranscriptBlock[] }
   | { id: string; type: 'phase'; phase: string; durationMs: number | null; tokens: number | null }
-  | { id: string; type: 'status'; text: string; status: 'needs-you' | 'blocked' | 'failed' | 'done' | 'working' }
+  | { id: string; type: 'status'; text: string; status: 'needs-you' | 'blocked' | 'failed' | 'done' | 'working' | 'stalled' }
   | { id: string; type: 'command'; command: string; exitCode: number | null; output: string | null }
   | { id: string; type: 'human'; text: string; delivery: 'mid_turn' | 'queued' }
   | { id: string; type: 'report'; report: RunReport; text: string }
@@ -172,6 +172,8 @@ export function runEventsToTranscript(all: readonly RunEvent[]): TranscriptBlock
   /** Kept after a tool.result folds, so a trailing `command.executed` (Claude/Gemini/Cursor send
    * one per shell call, on top of tool.call/tool.result) can still find the row it belongs to. */
   const closedTools = new Map<string, number>();
+  // VS-657: the run's final status, so tool calls left pending by an interrupt can be marked.
+  let finalStatus: string | null = null;
 
   for (let idx = 0; idx < events.length; idx++) {
     const e = events[idx];
@@ -318,6 +320,16 @@ export function runEventsToTranscript(all: readonly RunEvent[]): TranscriptBlock
         out.push({ id: e.id, type: 'phase', phase: 'turn complete', durationMs: num(p['durationMs']), tokens: t });
         break;
       }
+      case 'run.finalized': {
+        // VS-657: a turn that ended interrupted is marked, so a stopped turn is not mistaken for one
+        // still running. Succeeded/failed turns are left as they were.
+        const st = str(p['status'] ?? p['state'], 'finished');
+        finalStatus = st;
+        if (st === 'interrupted' || st === 'cancelled') {
+          out.push({ id: e.id, type: 'status', text: 'run interrupted', status: 'stalled' });
+        }
+        break;
+      }
       case 'supervisor.action': {
         out.push({ id: e.id, type: 'status', text: str(p['action'], 'supervisor acted'), status: 'working' });
         break;
@@ -346,6 +358,17 @@ export function runEventsToTranscript(all: readonly RunEvent[]): TranscriptBlock
     const at = openTools.get(parent) ?? closedTools.get(parent);
     const owner = at != null ? out[at] : undefined;
     if (owner?.type === 'tool') owner.children = runEventsToTranscript(children);
+  }
+  // VS-657: a tool call an interrupted/cancelled run never returned from reads as not completed.
+  if (finalStatus === 'interrupted' || finalStatus === 'cancelled') {
+    const markInterrupted = (blocks: TranscriptBlock[]): void => {
+      for (const block of blocks) {
+        if (block.type !== 'tool') continue;
+        if (block.pending) { block.pending = false; block.interrupted = true; }
+        if (block.children) markInterrupted(block.children);
+      }
+    };
+    markInterrupted(out);
   }
   for (let i = out.length - 1; i >= 0; i--) {
     const block = out[i];

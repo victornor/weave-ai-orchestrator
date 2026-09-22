@@ -11,7 +11,7 @@ import type { Actor, CoreServices, HandoverEndResult, HandoverStartResult, Ticke
 import { recordActivity } from '../events.js';
 import { recordHumanInputEvent, runState } from '../runs/active.js';
 import { renderHome } from './home.js';
-import { renderBrief } from '../prompts/index.js';
+import { renderBrief, withDictatedNotice } from '../prompts/index.js';
 import { createSessions } from '../sessions/index.js';
 import { effectiveModels, modelSettingFor, modelsFor, resolveWorkerModelId as resolveWorkerModelOption } from '../models/resolve.js';
 import { landedWorkTest, worktreeChanges } from '../worktrees/landed.js';
@@ -718,7 +718,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       return spawn(actor, ticket.id);
     },
 
-    async message(actor: Actor, workerId: string, body: string, opts: { live?: boolean } = {}): Promise<WorkerMessageOutcome> {
+    async message(actor: Actor, workerId: string, body: string, opts: { live?: boolean; dictated?: boolean } = {}): Promise<WorkerMessageOutcome> {
       const agent = get(workerId);
       if (!agent.ticketId) throw new OcError('validation', `${agent.name} has no ticket to talk on`);
       // A retired worker will never take another turn: recording a comment and queuing a wake for
@@ -736,7 +736,8 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       }
       // Attribution first (VS-99): the human's words are on the ticket before any delivery is
       // attempted, so a failed or throwing send still leaves a durable record.
-      deps().tickets.comment(actor, agent.ticketId, body, 'relay', actor.kind === 'human' ? 'trusted' : 'agent');
+      if (opts.dictated) deps().tickets.comment(actor, agent.ticketId, body, 'relay', actor.kind === 'human' ? 'trusted' : 'agent', { dictated: true });
+      else deps().tickets.comment(actor, agent.ticketId, body, 'relay', actor.kind === 'human' ? 'trusted' : 'agent');
 
       let delivery: 'mid_turn' | 'queued' | 'interrupted' = 'queued';
       let runId: string | null = null;
@@ -745,7 +746,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
           if (active.agentId !== workerId) continue;
           if (active.send) {
             runId = active.runId;
-            try { if ((await active.send(body)) === 'delivered') delivery = 'mid_turn'; }
+            try { if ((await active.send(withDictatedNotice(body, opts.dictated))) === 'delivered') delivery = 'mid_turn'; }
             catch { /* the runtime could not take it; falls through to queued */ }
           } else if (actor.kind === 'human') {
             // The runtime cannot take mid-turn input, but a human explicitly asked for live
@@ -774,11 +775,11 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         // the same untruncated body as a ticket comment, whatever becomes of this delivery.
         wake = deps().wake.enqueue(workerId, {
           source: 'live_interrupt', reason: body,
-          payload: { ticketId: agent.ticketId, message: body, interruptedRunId: runId },
+          payload: { ticketId: agent.ticketId, message: body, interruptedRunId: runId, ...(opts.dictated ? { dictated: true } : {}) },
           requestedBy: actor,
         });
       } else if (delivery === 'queued') {
-        wake = deps().wake.enqueue(workerId, { source: 'conductor_request', reason: body.slice(0, 160), payload: { ticketId: agent.ticketId, message: body }, requestedBy: actor });
+        wake = deps().wake.enqueue(workerId, { source: 'conductor_request', reason: body.slice(0, 160), payload: { ticketId: agent.ticketId, message: body, ...(opts.dictated ? { dictated: true } : {}) }, requestedBy: actor });
       }
       recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.message', 'agent', workerId, { length: body.length, delivery }, agent.ticketId);
       return { delivery, runId, wake };

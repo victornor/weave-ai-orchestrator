@@ -17,6 +17,7 @@ import type { Project } from '@weave-ai/shared';
 import { ATTACHMENT_IMAGE_TYPES, ATTACHMENT_MAX_PER_MESSAGE, ATTACHMENT_TEXT_TYPES } from '@weave-ai/shared';
 import { projectLabel } from '@weave-ai/shared';
 import { useDictationController, type DictationController } from '../lib/dictationController';
+import { useMarkAllDictated } from '../lib/markAllDictated';
 import { useDictationHotkey } from '../lib/dictationHotkey';
 import { dictationHint } from '../lib/dictationHint';
 import { projectColorVar } from '../lib/projectColor';
@@ -64,7 +65,7 @@ export interface ChatComposerProps {
   replyToExcerpt?: string | null;
   replyToMessageId?: string | null;
   onDismissReply?: () => void;
-  onSubmit: (text: string, files: File[], opts: { projectId: string | null; blockId: string | null; replyToMessageId: string | null; idempotencyKey: string }) => void | Promise<void>;
+  onSubmit: (text: string, files: File[], opts: { projectId: string | null; blockId: string | null; replyToMessageId: string | null; idempotencyKey: string; dictated: boolean }) => void | Promise<void>;
   /** The search affordance is chat-only; it hides when its handler is absent (a plan tab passes none). */
   onOpenSearch?: () => void;
   /** The project scope selector is chat-only; the plan modal is already bound to one project and hides it. */
@@ -142,6 +143,9 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
     hasFiles: () => filesRef.current.length > 0,
   });
   const ctl: DictationController = shared ?? local;
+  // VS-657: a message goes out marked when the draft was dictated or the human asked for all their
+  // messages to be marked.
+  const markAllDictated = useMarkAllDictated();
 
   // Whether the shared session is live in *this* composer. A local session always is; a shared one
   // only when it targets this thread, so a session running in another thread cannot paint its
@@ -204,8 +208,12 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
     setSubmitting(true);
     setSubmitError(null);
     const idempotencyKey = crypto.randomUUID();
-    Promise.resolve(onSubmit(t, files, { projectId, blockId, replyToMessageId, idempotencyKey }))
+    // VS-657: read the provenance at send time; clear it once the send is confirmed so the next
+    // typed message is not marked.
+    const dictated = ctl.dictatedForSend.current || markAllDictated;
+    Promise.resolve(onSubmit(t, files, { projectId, blockId, replyToMessageId, idempotencyKey, dictated }))
       .then(() => {
+        ctl.dictatedForSend.current = false;
         setFiles([]);
         setAttachError(null);
       })

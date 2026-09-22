@@ -1115,11 +1115,11 @@ export function useStartHandoverFor(): UseMutationResult<T.HandoverCommandResult
 }
 
 /** Steer a worker (VS-99): posts the ticket comment server-side and attempts mid-turn delivery when `live`. */
-export function useWorkerMessage(): UseMutationResult<T.WorkerMessageOutcome, Error, { id: string; ticketId: string; body: string; live?: boolean }> {
+export function useWorkerMessage(): UseMutationResult<T.WorkerMessageOutcome, Error, { id: string; ticketId: string; body: string; live?: boolean; dictated?: boolean }> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body, live }) => api.ws<T.WorkerMessageOutcome>(ws, `/workers/${id}/message`, { method: 'POST', body: { body, live } }),
+    mutationFn: ({ id, body, live, dictated }) => api.ws<T.WorkerMessageOutcome>(ws, `/workers/${id}/message`, { method: 'POST', body: { body, live, ...(dictated ? { dictated: true } : {}) } }),
     onSuccess: (_d, v) => {
       void qc.invalidateQueries({ queryKey: qk.worker(ws, v.id) });
       void qc.invalidateQueries({ queryKey: qk.ticketComments(ws, v.ticketId) });
@@ -2361,11 +2361,11 @@ export function useThreadMessages(id: string | null): ThreadHistory {
   };
 }
 
-export function usePostThreadMessage(): UseMutationResult<unknown, Error, { threadId: string; body: string; projectId?: string | null; blockId?: string | null; replyToMessageId?: string | null; files?: File[]; idempotencyKey?: string }> {
+export function usePostThreadMessage(): UseMutationResult<unknown, Error, { threadId: string; body: string; projectId?: string | null; blockId?: string | null; replyToMessageId?: string | null; files?: File[]; idempotencyKey?: string; dictated?: boolean }> {
   const ws = useWs();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ threadId, body, projectId, blockId, replyToMessageId, files, idempotencyKey }) => {
+    mutationFn: ({ threadId, body, projectId, blockId, replyToMessageId, files, idempotencyKey, dictated }) => {
       // Attached files go as multipart/form-data, in the same request as the text (VS-133) — never
       // a separate upload step, so a failed send never leaves an orphaned upload behind.
       if (files?.length) {
@@ -2375,10 +2375,11 @@ export function usePostThreadMessage(): UseMutationResult<unknown, Error, { thre
         if (blockId) form.set('blockId', blockId);
         if (replyToMessageId) form.set('replyToMessageId', replyToMessageId);
         if (idempotencyKey) form.set('idempotencyKey', idempotencyKey);
+        if (dictated) form.set('dictated', 'true');
         for (const f of files) form.append('files', f);
         return api.ws(ws, `/threads/${threadId}/messages`, { method: 'POST', raw: form });
       }
-      return api.ws(ws, `/threads/${threadId}/messages`, { method: 'POST', body: { body, ...(projectId ? { projectId } : {}), ...(blockId ? { blockId } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(idempotencyKey ? { idempotencyKey } : {}) } });
+      return api.ws(ws, `/threads/${threadId}/messages`, { method: 'POST', body: { body, ...(projectId ? { projectId } : {}), ...(blockId ? { blockId } : {}), ...(replyToMessageId ? { replyToMessageId } : {}), ...(idempotencyKey ? { idempotencyKey } : {}), ...(dictated ? { dictated: true } : {}) } });
     },
     onSettled: (_d, _e, v) => void qc.invalidateQueries({ queryKey: qk.threadMessages(ws, v.threadId) }),
   });

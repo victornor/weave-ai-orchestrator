@@ -46,14 +46,15 @@ export function threadRoutes(): Hono<AppEnv> {
     if (ct.includes('multipart/form-data')) {
       return c.json(await sendWithAttachments(c), 201);
     }
-    const { body: text, projectId, blockId, replyToMessageId, idempotencyKey } = await body(c, z.object({
+    const { body: text, projectId, blockId, replyToMessageId, idempotencyKey, dictated } = await body(c, z.object({
       body: z.string().min(1),
       projectId: z.string().nullish(),
       blockId: z.string().nullish(),
       replyToMessageId: z.string().nullish(),
       idempotencyKey: z.string().min(1).optional(),
+      dictated: z.boolean().optional(),
     }));
-    return c.json(await c.get('ws').services.threads.inbound(c.get('actor'), c.req.param('id'), text, { projectId, blockId, replyToMessageId, idempotencyKey }), 201);
+    return c.json(await c.get('ws').services.threads.inbound(c.get('actor'), c.req.param('id'), text, { projectId, blockId, replyToMessageId, idempotencyKey, dictated }), 201);
   });
 
   app.get('/:threadId/attachments/:attachmentId', (c) => {
@@ -92,6 +93,7 @@ async function sendWithAttachments(c: Context<AppEnv, '/:id/messages'>) {
   const blockId = asNullableString(form.get('blockId'));
   const replyToMessageId = asNullableString(form.get('replyToMessageId'));
   const idempotencyKey = asNullableString(form.get('idempotencyKey')) ?? undefined;
+  const dictated = form.get('dictated') === 'true';
 
   const fileParts = form.getAll('files').filter((f): f is File => typeof f !== 'string');
   if (fileParts.length > ATTACHMENT_MAX_PER_MESSAGE) {
@@ -110,7 +112,7 @@ async function sendWithAttachments(c: Context<AppEnv, '/:id/messages'>) {
     return { filename: file.name, mediaType: declaredType as AttachmentMediaType, bytes };
   }));
 
-  return c.get('ws').services.threads.inbound(c.get('actor'), c.req.param('id'), text, { projectId, blockId, replyToMessageId, idempotencyKey, attachments });
+  return c.get('ws').services.threads.inbound(c.get('actor'), c.req.param('id'), text, { projectId, blockId, replyToMessageId, idempotencyKey, dictated, attachments });
 }
 
 function asNullableString(v: string | File | null): string | null {

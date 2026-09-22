@@ -27,6 +27,13 @@ export interface DictationController {
   pendingNotice: string | null;
   /** Set when a dictated insert lands; the textarea consumes it to scroll and place the caret (VS-416). */
   dictated: React.MutableRefObject<boolean>;
+  /**
+   * VS-657: true once a dictation has landed in the draft, until the composer sends and clears it —
+   * so the send can tell the daemon the text was dictated. Distinct from `dictated`, which the
+   * textarea consumes for its one-shot scroll. `markAllDictated` folds in the "mark all my messages"
+   * setting at the send site.
+   */
+  dictatedForSend: React.MutableRefObject<boolean>;
   start: () => void;
   /**
    * The Stop control's ending: end the session and leave the transcript in the composer. Never
@@ -81,6 +88,7 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
   const [reveal, setReveal] = useState<DictationReveal | null>(null);
   const revealTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const dictated = useRef(false);
+  const dictatedForSend = useRef(false);
   const [pendingSend, setPendingSend] = useState(false);
   const pendingSendRef = useRef(false);
   const [pendingNotice, setPendingNotice] = useState<string | null>(null);
@@ -115,6 +123,8 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
     // Commit the whole draft immediately: the reveal is display only, so a send queued while
     // dictating submits every last word (VS-416), not the prefix on screen mid-animation.
     writeValue.current(full);
+    // VS-657: this draft now holds dictated words; the send site reads this to mark the message.
+    dictatedForSend.current = true;
     if (!final || reducedMotion || typeof setInterval !== 'function' || discarded.current) {
       stopReveal();
       return;
@@ -243,5 +253,5 @@ export function useDictationController(opts: DictationControllerOptions): Dictat
     void submit.current(t);
   }, [pendingSend, dictation.settled, dictation.error, opts.value]);
 
-  return { dictation, reveal, pendingSend, pendingNotice, dictated, start, stop, stopByChord, cancel, requestSend };
+  return { dictation, reveal, pendingSend, pendingNotice, dictated, dictatedForSend, start, stop, stopByChord, cancel, requestSend };
 }

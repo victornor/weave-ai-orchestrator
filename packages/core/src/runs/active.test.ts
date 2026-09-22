@@ -46,14 +46,14 @@ describe('describeLiveInput (VS-99)', () => {
 
   it('names the runtime as the reason when it does not support mid-turn input at all', () => {
     runtime.streamingInput = false;
-    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake' });
+    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake', kind: 'worker', ticketId: null });
     expect(status.midTurn).toBe(false);
     expect(status.reason).toMatch(/does not support/);
   });
 
   it('says no turn is running when the runtime is capable but nothing is executing', () => {
     runtime.streamingInput = true;
-    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake' });
+    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake', kind: 'worker', ticketId: null });
     expect(status.midTurn).toBe(false);
     expect(status.reason).toMatch(/no turn is currently running/);
   });
@@ -64,7 +64,7 @@ describe('describeLiveInput (VS-99)', () => {
       runId: 'run-1', agentId: 'agent-1', startedAt: Date.now(), pid: 1,
       cancel: async () => undefined, send: async () => 'delivered',
     });
-    expect(describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake' })).toEqual({ midTurn: true });
+    expect(describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake', kind: 'worker', ticketId: null })).toEqual({ midTurn: true });
   });
 
   it('does not report mid-turn for a different agent’s active run', () => {
@@ -73,34 +73,60 @@ describe('describeLiveInput (VS-99)', () => {
       runId: 'run-1', agentId: 'someone-else', startedAt: Date.now(), pid: 1,
       cancel: async () => undefined, send: async () => 'delivered',
     });
-    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake' });
+    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake', kind: 'worker', ticketId: null });
     expect(status.midTurn).toBe(false);
   });
 
   it('does not report mid-turn for an active run with no send (the turn opened no channel)', () => {
     runtime.streamingInput = true;
     runState(h.ctx).active.set('run-1', { runId: 'run-1', agentId: 'agent-1', startedAt: Date.now(), pid: 1, cancel: async () => undefined });
-    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake' });
+    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake', kind: 'worker', ticketId: null });
     expect(status.midTurn).toBe(false);
   });
 
   it('reports `interrupts: true` when the runtime cannot take mid-turn input but a turn is running (VS-254)', () => {
     runtime.streamingInput = false;
     runState(h.ctx).active.set('run-1', { runId: 'run-1', agentId: 'agent-1', startedAt: Date.now(), pid: 1, cancel: async () => undefined });
-    expect(describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake' })).toEqual({ midTurn: false, interrupts: true });
+    expect(describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake', kind: 'worker', ticketId: null })).toEqual({ midTurn: false, interrupts: true });
   });
 
   it('does not report `interrupts` for a different agent’s running turn on a non-streaming runtime (VS-254)', () => {
     runtime.streamingInput = false;
     runState(h.ctx).active.set('run-1', { runId: 'run-1', agentId: 'someone-else', startedAt: Date.now(), pid: 1, cancel: async () => undefined });
-    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake' });
+    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake', kind: 'worker', ticketId: null });
     expect(status.interrupts).toBeUndefined();
     expect(status.reason).toMatch(/does not support/);
   });
 
   it('keeps the plain "does not support" reason for a non-streaming runtime with no turn running (VS-254)', () => {
     runtime.streamingInput = false;
-    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake' });
+    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake', kind: 'worker', ticketId: null });
     expect(status).toEqual({ midTurn: false, reason: expect.stringMatching(/does not support/) });
+  });
+
+  it('reports `interrupts` for a ticketless session on a streaming runtime with a turn running (VS-657)', () => {
+    runtime.streamingInput = true;
+    runState(h.ctx).active.set('run-1', {
+      runId: 'run-1', agentId: 'agent-1', startedAt: Date.now(), pid: 1,
+      cancel: async () => undefined, send: async () => 'delivered',
+    });
+    expect(describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake', kind: 'session', ticketId: null }))
+      .toEqual({ midTurn: false, interrupts: true });
+  });
+
+  it('says no turn is running for a ticketless session with nothing executing (VS-657)', () => {
+    runtime.streamingInput = true;
+    const status = describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake', kind: 'session', ticketId: null });
+    expect(status).toEqual({ midTurn: false, reason: expect.stringMatching(/no turn is currently running/) });
+  });
+
+  it('keeps mid-turn delivery for a session that holds a ticket (VS-657)', () => {
+    runtime.streamingInput = true;
+    runState(h.ctx).active.set('run-1', {
+      runId: 'run-1', agentId: 'agent-1', startedAt: Date.now(), pid: 1,
+      cancel: async () => undefined, send: async () => 'delivered',
+    });
+    expect(describeLiveInput(h.ctx, { id: 'agent-1', runtimeId: 'fake', kind: 'session', ticketId: 'ticket-1' }))
+      .toEqual({ midTurn: true });
   });
 });

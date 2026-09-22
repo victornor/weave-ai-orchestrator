@@ -59,6 +59,7 @@ import { readShowSilentTurns, writeShowSilentTurns } from '../lib/chatPrefs';
 import { useShowLiveRunOutput, writeShowLiveRunOutput } from '../lib/liveRunPrefs';
 import { useDictationDiagnosticsEnabled, writeDictationDiagnosticsEnabled } from '../lib/dictationDiagnostics';
 import { useDictationAutoSend, writeDictationAutoSend } from '../lib/dictationAutoSend';
+import { useMarkAllDictated, writeMarkAllDictated } from '../lib/markAllDictated';
 import { UPGRADE_STAGE_LABEL, inFlight, isCancellableUpgrade, isRestarting, runningVersionLabel, shortSha } from '../lib/upgrade';
 import { cx } from '../lib/cx';
 import { isWorkerConflict, liveWorkerCount, liveWorkersReason, MoveProjectError } from '../lib/moveProject';
@@ -1444,6 +1445,7 @@ export function DictationSection(): React.ReactElement {
   const models = (tx.data?.voxtype.models ?? []).filter((m) => m.installed);
   const model = tx.data?.model ?? models[0]?.id ?? '';
   const autoSend = useDictationAutoSend();
+  const markAllDictated = useMarkAllDictated();
 
   return (
     <section className="flex flex-col gap-4">
@@ -1508,6 +1510,30 @@ export function DictationSection(): React.ReactElement {
             )}
           >
             <span className={cx('size-3.5 rounded-pill', autoSend ? 'bg-accent-on' : 'bg-text-nav')} />
+          </button>
+        </label>
+      </div>
+
+      <div className="ac-card">
+        <label className="flex items-center gap-3 px-3.5 py-3">
+          <span className="min-w-0 flex-1">
+            <span className="block text-meta text-text-1">Mark all my messages as voice dictated</span>
+            <span className="block text-micro text-text-3">
+              When on, every message you send is delivered with the note that it may contain dictation misspellings — even one you typed. Off, only messages you actually dictated are marked. Stored in this browser, not on the daemon.
+            </span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={markAllDictated}
+            aria-label="Mark all my messages as voice dictated"
+            onClick={() => writeMarkAllDictated(!markAllDictated)}
+            className={cx(
+              'flex h-5 w-9 flex-none items-center rounded-pill border px-0.5 transition-colors duration-(--dur-fast) ease-ac',
+              markAllDictated ? 'justify-end border-accent bg-accent' : 'justify-start border-line-2 bg-bg-3',
+            )}
+          >
+            <span className={cx('size-3.5 rounded-pill', markAllDictated ? 'bg-accent-on' : 'bg-text-nav')} />
           </button>
         </label>
       </div>

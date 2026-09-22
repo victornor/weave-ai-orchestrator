@@ -384,6 +384,22 @@ function bounded<T>(items: T[], max: number, render: (t: T) => string, more: str
  * one string, so the wording cannot drift between them. Null when the message carried no block, so
  * a message with only a project renders exactly as before.
  */
+/** The literal line a voice-dictated human message is delivered with (VS-657). */
+export const VOICE_DICTATED_NOTICE = '(voice dictated)';
+
+/**
+ * VS-657: the `(voice dictated)` line for a wake payload that carries the dictation flag, or null.
+ * One helper so the turn prompt and `weave_inbox` cannot render the mark differently.
+ */
+export function dictatedNotice(payload: Record<string, unknown>): string | null {
+  return payload['dictated'] === true ? VOICE_DICTATED_NOTICE : null;
+}
+
+/** Prepend the dictated line to delivered text, for a path that hands text straight to a runtime. */
+export function withDictatedNotice(text: string, dictated: boolean | undefined): string {
+  return dictated ? `${VOICE_DICTATED_NOTICE}\n\n${text}` : text;
+}
+
 export function humanSelectionNotice(payload: Record<string, unknown>): string | null {
   const blockTitle = typeof payload.blockTitle === 'string' ? payload.blockTitle.trim() : '';
   if (!blockTitle) return null;
@@ -408,7 +424,9 @@ export async function buildTurnPrompt(
   // VS-361: a decision-review wake carries its decision id, and the weaver reviews a card by id, so
   // name it in the line. Worker wakes (a `decision_answered` carries one too) render as before.
   const wakeLine = (w: BundledWake): string => {
-    const base = `- ${w.source}: ${w.reason || '(no reason given)'}`;
+    // VS-657: a `live_interrupt` reason is the human's message itself, so a dictated one is marked here.
+    const dictated = w.source === 'live_interrupt' ? dictatedNotice(w.payload) : null;
+    const base = `- ${w.source}: ${dictated ? `${dictated}\n\n` : ''}${w.reason || '(no reason given)'}`;
     const decisionId = agent.kind === 'weaver' && typeof w.payload.decisionId === 'string' ? w.payload.decisionId : null;
     return decisionId ? `${base} (decision ${decisionId})` : base;
   };
@@ -434,7 +452,9 @@ export async function buildTurnPrompt(
       // VS-638: a composer-selected roadmap block is a structured instruction, so its notice is
       // rendered here rather than left to a payload the weaver may never open.
       const selection = w.source === 'human_message' ? humanSelectionNotice(w.payload as Record<string, unknown>) : null;
-      parts.push(`\n### ${label}\n\n${selection ? `${selection}\n\n` : ''}${String(w.payload.body)}${attachments}`);
+      // VS-657: a dictated message is delivered with the mark, whatever surface it is delivered to.
+      const dictated = dictatedNotice(w.payload as Record<string, unknown>);
+      parts.push(`\n### ${label}\n\n${selection ? `${selection}\n\n` : ''}${dictated ? `${dictated}\n\n` : ''}${String(w.payload.body)}${attachments}`);
     }
     if (spoken.length > 12) parts.push(`\n(${spoken.length - 12} more — call \`weave_inbox\`)`);
   }
@@ -498,8 +518,14 @@ export async function buildTurnPrompt(
     [ctx.workspaceId, agent.id, agent.id],
   );
   if (answered.length) {
+    // VS-657: a dictated free-text answer is marked where the answer is read.
+    const dictatedDecisions = new Set(
+      flat.filter((w) => w.source === 'decision_answered' && w.payload['dictated'] === true)
+        .map((w) => w.payload['decisionId'])
+        .filter((id): id is string => typeof id === 'string'),
+    );
     parts.push('\n## Answered decisions');
-    parts.push(bounded(answered, 8, (d) => `- ${d.id}${d.ticketId ? ` (${ticket(ctx, d.ticketId)?.identifier ?? d.ticketId})` : ''}: "${d.title}" — answered ${d.answerKey ?? ''}${d.answerText ? `: "${d.answerText}"` : ''}`, 'call `weave_inbox`'));
+    parts.push(bounded(answered, 8, (d) => `- ${d.id}${d.ticketId ? ` (${ticket(ctx, d.ticketId)?.identifier ?? d.ticketId})` : ''}: "${d.title}" — answered ${d.answerKey ?? ''}${d.answerText ? `: "${dictatedDecisions.has(d.id) ? `${VOICE_DICTATED_NOTICE} ` : ''}${d.answerText}"` : ''}`, 'call `weave_inbox`'));
   }
 
   const notes: string[] = [];
@@ -509,13 +535,14 @@ export async function buildTurnPrompt(
   if (opts.interrupted) notes.push('- Your previous turn was interrupted; verify what you had already done before redoing it.');
   // VS-254: a human's live message on a runtime that cannot take mid-turn input interrupted the
   // previous turn instead of queuing behind it — the message itself is already the `live_interrupt`
-  // wake's reason, above under "Why you were woken". Established by testing real interrupts against
-  // scratch git repos (design.md): the process group unwinds cleanly, but a `git` command that fails
-  // with "Unable to create '.../index.lock'" is a stale lock the interrupt left behind, not a real
-  // conflict — `git status` alone will not show it.
-  if (flat.some((w) => w.source === 'live_interrupt')) {
+  // wake's reason, above under "Why you were woken". VS-657: the same holds for a message to a
+  // ticketless session, whose resume wake is a `human_message` carrying `interruptedRunId`.
+  // Established by testing real interrupts against scratch git repos (design.md): the process group
+  // unwinds cleanly, but a `git` command that fails with "Unable to create '.../index.lock'" is a
+  // stale lock the interrupt left behind, not a real conflict — `git status` alone will not show it.
+  if (flat.some((w) => w.source === 'live_interrupt' || (w.source === 'human_message' && typeof w.payload['interruptedRunId'] === 'string'))) {
     notes.push(
-      '- Your previous turn was interrupted to deliver the live message above; verify what you had already done before redoing it or acting on the message. If a `git` command now fails with "Unable to create \'.../index.lock\': File exists", that is a stale lock left by the interrupt — remove it and retry, it is not a real conflict.',
+      '- Your previous turn was interrupted to deliver the message above; verify what you had already done before redoing it or acting on the message. If a `git` command now fails with "Unable to create \'.../index.lock\': File exists", that is a stale lock left by the interrupt — remove it and retry, it is not a real conflict.',
     );
   }
   // VS-398: a submitted draft plan. The payload carries only the plan id (never the drafts

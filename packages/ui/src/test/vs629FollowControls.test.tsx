@@ -79,6 +79,13 @@ describe('the session conversation follow control (VS-629)', () => {
     render(<SessionThreadFeed threadId="th1" label="Conversation" sessionAgentId="a1" roleName="Backend Engineer" sessions={[]} />);
     expect(screen.queryByRole('button', { name: /Scroll to bottom/ })).toBeNull();
   });
+
+  it('shows an attachment on the human message (VS-657)', () => {
+    (message as { parts: unknown[] }).parts = [{ type: 'attachment', id: 'att1', filename: 'shot.png', mediaType: 'image/png', byteSize: 1234 }];
+    render(<SessionThreadFeed threadId="th1" label="Conversation" sessionAgentId="a1" roleName="Backend Engineer" sessions={[]} />);
+    expect(screen.getByAltText('shot.png')).toBeInTheDocument();
+    (message as { parts: unknown[] }).parts = [];
+  });
 });
 
 describe('the ticket modal feed follow control (VS-629)', () => {

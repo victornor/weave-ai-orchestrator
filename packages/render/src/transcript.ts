@@ -154,6 +154,9 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
   const completedTools = new Map<string, number>();
   let lastText: TextBlock | null = null;
   let tokensSinceLastPhase = 0;
+  // VS-657: the run's final status, so tool calls still pending at the end can be marked as cut off
+  // by an interrupt rather than left looking like they are still running.
+  let finalStatus: string | null = null;
 
   const push = (block: TranscriptBlock): TranscriptBlock => {
     blocks.push(block);
@@ -360,6 +363,7 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
 
       case 'run.finalized': {
         const st = str(p, 'status', 'state') ?? 'finished';
+        finalStatus = st;
         const summary = scrub(str(p, 'summary'));
         const tone: StatusBlock['tone'] = st === 'failed' || st === 'timed_out' ? 'error' : st === 'cancelled' || st === 'interrupted' ? 'warn' : 'info';
         push(status(ev, `run ${st.replace(/_/g, ' ')}${summary ? ` — ${oneLine(summary, 120)}` : ''}`, tone, summary));
@@ -438,8 +442,25 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
     if (owner?.kind === 'tool') owner.children = runEventsToTranscript(events, options);
   }
 
+  // VS-657: a run that ended interrupted or cancelled leaves its in-flight tool calls without a
+  // result. Mark each as cut off, not as failed and not as still running, so the transcript reads
+  // as what actually happened.
+  if (finalStatus === 'interrupted' || finalStatus === 'cancelled') markInterruptedTools(blocks);
+
   // A tool that never got a result still reads correctly: it is simply still pending.
   return blocks;
+}
+
+/** Mark every tool call still `pending` (recursively, through subagent blocks) as `interrupted`. */
+function markInterruptedTools(blocks: TranscriptBlock[]): void {
+  for (const block of blocks) {
+    if (block.kind !== 'tool') continue;
+    if (block.status === 'pending') {
+      block.status = 'interrupted';
+      block.collapsed = collapsedToolLine(block.name, block.target, block.durationMs, 'interrupted', block.diffStat);
+    }
+    if (block.children) markInterruptedTools(block.children);
+  }
 }
 
 /** `Conversation compacted · 184k → 11.8k tok` (VS-454) — one line, tokens only when reported. */
@@ -486,6 +507,7 @@ function collapsedToolLine(name: string, target: string | null, durationMs: numb
   if (extra) parts.push(extra);
   if (status === 'denied') parts.push('denied');
   else if (status === 'error') parts.push('failed');
+  else if (status === 'interrupted') parts.push('not completed');
   if (durationMs !== null && durationMs !== undefined) parts.push(formatDuration(durationMs));
   return parts.join(' ');
 }

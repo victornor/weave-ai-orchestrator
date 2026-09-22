@@ -2402,6 +2402,38 @@ describe('run engine', () => {
       expect(links.map((l) => l.repliedToMessageId)).toEqual([inbound.id]);
     });
 
+    it("links the resumed turn's answer to the human message that interrupted the previous turn (VS-657)", async () => {
+      seedSession();
+      // A running turn for the session, woken by the human's first message.
+      const runningId = await seededHumanRun();
+      h.db.update('runs', runningId, { status: 'running' });
+      runState(h.ctx).active.set(runningId, { runId: runningId, agentId: sessionId, startedAt: Date.now(), pid: null, cancel: async () => undefined });
+
+      // The human's second message interrupts the running turn and queues the resume wake.
+      const interrupting = await h.services.threads!.inbound(HUMAN, threadId, 'stop, wrong direction');
+      const resumeWake = h.db.get<{ payloadJson: string; source: string }>(
+        "SELECT payload_json AS payloadJson, source FROM wakeups WHERE agent_id = ? AND source = 'human_message' ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        [sessionId],
+      )!;
+      expect(resumeWake.source).toBe('human_message');
+      expect(JSON.parse(resumeWake.payloadJson)).toMatchObject({ messageId: interrupting.id, body: 'stop, wrong direction', interruptedRunId: runningId });
+
+      // The interrupted turn finalizes; the dispatcher then claims the queued resume.
+      h.db.update('runs', runningId, { status: 'interrupted', errorCode: 'interrupted_by_message', finishedAt: nowIso() });
+      runState(h.ctx).active.delete(runningId);
+      runtime.queue.push({ finalText: 'stopped and answering the new message', structured: undefined } as never);
+      const resumed = await runOnce(sessionId);
+
+      expect(resumed.status).toBe('succeeded');
+      const answer = outbound().at(-1)!;
+      expect(answer).toMatchObject({ body: 'stopped and answering the new message', authorId: sessionId, runId: resumed.id });
+      const links = h.db.all<{ repliedToMessageId: string }>(
+        'SELECT replied_to_message_id AS repliedToMessageId FROM thread_message_replies WHERE message_id = ?',
+        [answer.id],
+      ).map((l) => l.repliedToMessageId);
+      expect(links).toEqual([interrupting.id]);
+    });
+
     it('does not double-post when a reply tool already wrote to the thread in the same run', async () => {
       seedSession();
       await h.services.threads!.inbound(HUMAN, threadId, 'are you there?');

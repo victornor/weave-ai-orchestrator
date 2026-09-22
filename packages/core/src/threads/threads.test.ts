@@ -4,6 +4,7 @@ import { createProjectsService } from '../projects/index.js';
 import { createRoadmapService } from '../roadmap/index.js';
 import { createTicketsService } from '../tickets/service.js';
 import { createThreadsService, REPLY_EXCERPT_CHARS } from './service.js';
+import { runState } from '../runs/active.js';
 import type { Actor, RoadmapService, ThreadsService, TicketsService } from '../api.js';
 
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
@@ -112,6 +113,64 @@ describe('threads', () => {
     ]);
     await tick();
     expect(h.events.some((e) => e.type === 'thread.message')).toBe(true);
+  });
+
+  it('interrupts a running ticketless session and resumes it with the message, not queued (VS-657)', async () => {
+    h.db.insert('agents', {
+      id: 'sess-1', workspaceId: h.workspaceId, kind: 'session', name: 'Backend', runtimeId: 'claude',
+      homePath: '/tmp/sess-1', createdAt: 't0', updatedAt: 't0',
+    });
+    const t = threads.createOwned('sess-1');
+    const cancel = vi.fn(async () => undefined);
+    h.services.runs = { cancel } as never;
+    runState(h.ctx).active.set('run-9', {
+      runId: 'run-9', agentId: 'sess-1', startedAt: Date.now(), pid: 1,
+      cancel: async () => undefined, send: async () => 'delivered',
+    });
+
+    await threads.inbound(HUMAN, t.id, 'stop, wrong direction');
+
+    expect(cancel).toHaveBeenCalledWith(HUMAN, 'run-9', 'interrupt', 'message');
+    expect(wake.calls[0]).toMatchObject({
+      agentId: 'sess-1',
+      input: expect.objectContaining({
+        source: 'human_message',
+        payload: expect.objectContaining({ body: 'stop, wrong direction', interruptedRunId: 'run-9', threadId: t.id, messageId: expect.any(String) }),
+      }),
+    });
+  });
+
+  it('does not interrupt a second time while the session turn is already stopping; the message coalesces (VS-657)', async () => {
+    h.db.insert('agents', {
+      id: 'sess-2', workspaceId: h.workspaceId, kind: 'session', name: 'Backend', runtimeId: 'claude',
+      homePath: '/tmp/sess-2', createdAt: 't0', updatedAt: 't0',
+    });
+    const t = threads.createOwned('sess-2');
+    const cancel = vi.fn(async () => undefined);
+    h.services.runs = { cancel } as never;
+    runState(h.ctx).active.set('run-10', {
+      runId: 'run-10', agentId: 'sess-2', startedAt: Date.now(), pid: 1,
+      cancel: async () => undefined, cancelled: { mode: 'interrupt', cause: 'message' },
+    });
+
+    await threads.inbound(HUMAN, t.id, 'and also this');
+
+    expect(cancel).not.toHaveBeenCalled();
+    expect((wake.calls[0]!.input.payload as Record<string, unknown>).interruptedRunId).toBeUndefined();
+  });
+
+  it('leaves the weaver alone: a message while its turn runs still queues (VS-657)', async () => {
+    const primary = threads.bindOrGet('web', 'web-weaver', null, 'Victor');
+    const cancel = vi.fn(async () => undefined);
+    h.services.runs = { cancel } as never;
+    runState(h.ctx).active.set('run-c', {
+      runId: 'run-c', agentId: h.conductorId, startedAt: Date.now(), pid: 1,
+      cancel: async () => undefined, send: async () => 'delivered',
+    });
+
+    await threads.inbound(HUMAN, primary.id, 'one more thing');
+
+    expect(cancel).not.toHaveBeenCalled();
   });
 
   it('indexes an inbound and an outbound message into thread_message_search as they are written (VS-320)', async () => {

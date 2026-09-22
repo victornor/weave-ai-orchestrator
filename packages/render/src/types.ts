@@ -27,7 +27,9 @@ export interface ToolBlock extends TranscriptBlockBase {
   name: string;
   /** The one thing the tool acted on: a path, a command, a pattern, a url. */
   target: string | null;
-  status: 'pending' | 'ok' | 'error' | 'denied';
+  /** `pending` while the call is in flight; `interrupted` when the run ended before it produced a
+   * result (VS-657), which is not the same as a failure. */
+  status: 'pending' | 'ok' | 'error' | 'denied' | 'interrupted';
   durationMs: number | null;
   /** One line shown when collapsed, without the leading glyph: `Read src/theme/tokens.ts 0.4s`. */
   collapsed: string;

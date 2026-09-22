@@ -590,7 +590,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const conversationRef = useRef<ChatConversationHandle>(null);
   const toBottom = useCallback((): void => { conversationRef.current?.toBottom(); }, []);
   const send = useCallback(
-    (text: string, files: File[], opts: { projectId: string | null; blockId: string | null; replyToMessageId: string | null; idempotencyKey: string }): void | Promise<void> => {
+    (text: string, files: File[], opts: { projectId: string | null; blockId: string | null; replyToMessageId: string | null; idempotencyKey: string; dictated: boolean }): void | Promise<void> => {
       if (!fetchId) return;
       const body = {
         body: text,
@@ -598,6 +598,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
         ...(opts.blockId ? { blockId: opts.blockId } : {}),
         ...(opts.replyToMessageId ? { replyToMessageId: opts.replyToMessageId } : {}),
         ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
+        ...(opts.dictated ? { dictated: true } : {}),
       };
       const queueThisMessage = (): void => {
         enqueue({ kind: 'thread', path: `/threads/${fetchId}/messages`, body, label: text.slice(0, 60) });
@@ -607,7 +608,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
         if (offline) return Promise.reject(new Error('Attachments cannot be queued offline — reconnect and try again.'));
         setSending(true);
         return withTimeout(
-          post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, blockId: opts.blockId, files, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId }),
+          post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, blockId: opts.blockId, files, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId, dictated: opts.dictated }),
           SEND_TIMEOUT_MS,
         )
           .then(() => { setSending(false); clear(); toBottom(); })
@@ -616,7 +617,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
       if (offline) { queueThisMessage(); clear(); return; }
       setSending(true);
       return withTimeout(
-        post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, blockId: opts.blockId, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId }),
+        post.mutateAsync({ threadId: fetchId, body: text, projectId: opts.projectId, blockId: opts.blockId, idempotencyKey: opts.idempotencyKey, replyToMessageId: opts.replyToMessageId, dictated: opts.dictated }),
         SEND_TIMEOUT_MS,
       )
         .then(() => { setSending(false); clear(); toBottom(); })

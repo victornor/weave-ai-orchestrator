@@ -25,6 +25,7 @@ import {
   useWorkerMessage,
 } from '../api/hooks';
 import { useWs } from '../api/context';
+import { AttachmentRows } from './ChatMessage';
 import { useGo } from '../app/link';
 import { Button } from '../components/Button';
 import { Composer } from '../components/Composer';
@@ -93,6 +94,7 @@ export function sessionAuthorLabel(
  */
 export function SessionThreadFeed({ threadId, label, sessionAgentId, roleName, sessions }: { threadId: string; label: string; sessionAgentId: string; roleName: string; sessions: readonly { id: string; retiredReason: string | null }[] }): React.ReactElement {
   const onTicket = useTicketLink();
+  const ws = useWs();
   const history = useThreadMessages(threadId);
   // VS-656: the session's own runs, scoped to the agent and paged with the conversation. A shared
   // workspace window let other agents' activity push a retired session's turns (and so their
@@ -160,6 +162,8 @@ export function SessionThreadFeed({ threadId, label, sessionAgentId, roleName, s
                   <li key={row.key} className={cx('flex flex-col gap-1', row.message.direction === 'outbound' ? 'items-start' : 'items-end')}>
                     <div className={cx('max-w-[85%] rounded-r6 px-3 py-2 text-meta', row.message.direction === 'outbound' ? 'bg-bg-2 text-text-1' : 'bg-accent-tint text-text-1')}>
                       <Markdown source={row.message.body} />
+                      {/* VS-657: attachments the human sent ride on their message, as in the weaver chat. */}
+                      <AttachmentRows ws={ws} threadId={threadId} parts={row.message.parts} />
                     </div>
                     <span className="ac-mono text-nano text-text-4">{sessionAuthorLabel(row.message, sessionAgentId, roleName)}</span>
                   </li>
@@ -208,6 +212,8 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
   const endHandover = useEndHandover();
   const [lastOutcome, setLastOutcome] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  // VS-657: files staged on the session composer, sent through the existing multipart thread route.
+  const [sessionFiles, setSessionFiles] = useState<File[]>([]);
 
   // Every action on this page is a mutation; surface whichever one failed so a rejected Resume,
   // Relaunch, Cancel or handover is not mistaken for a no-op.
@@ -438,8 +444,8 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
               queuedReason={steerLabel}
               value={draft.text}
               onChange={(text) => patch({ text })}
-              onSubmit={async (body) => {
-                const outcome = await message.mutateAsync({ id: workerId, ticketId: ticket.id, body, live: true });
+              onSubmit={async (body, _files, _key, opts) => {
+                const outcome = await message.mutateAsync({ id: workerId, ticketId: ticket.id, body, live: true, dictated: opts?.dictated });
                 setLastOutcome(
                   outcome.delivery === 'mid_turn'
                     ? 'Delivered to the running turn.'
@@ -462,7 +468,12 @@ export function WorkerBody({ workerId }: { workerId: string }): React.ReactEleme
             <Composer
               placeholder="Talk to this session…"
               submitLabel="Send"
-              onSubmit={async (body) => { await postThreadMessage.mutateAsync({ threadId: thread.id, body }); }}
+              allowAttachments
+              attachments={sessionFiles}
+              onAttachmentsChange={setSessionFiles}
+              onSubmit={async (body, files, _key, opts) => {
+                await postThreadMessage.mutateAsync({ threadId: thread.id, body, files, dictated: opts?.dictated });
+              }}
             />
           </div>
         </div>

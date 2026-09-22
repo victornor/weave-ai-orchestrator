@@ -1216,7 +1216,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       });
     },
 
-    comment(actor, id, body, kind: CommentKind = 'comment', sourceTrust?: SourceTrust) {
+    comment(actor, id, body, kind: CommentKind = 'comment', sourceTrust?: SourceTrust, opts?: { dictated?: boolean }) {
       const t = get(id);
       const trust: SourceTrust = sourceTrust ?? (actor.kind === 'human' ? 'trusted' : actor.kind === 'agent' ? 'agent' : 'trusted');
       const c: TicketComment = {
@@ -1228,7 +1228,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         recordActivity(db, ws, actor, 'ticket.comment', 'ticket_comment', c.id, { kind }, t.id);
         ctx.events.emit('ticket.comment', 'ticket', t.id, c);
         if (actor.kind === 'human' && t.workerId) {
-          wake(t.workerId, 'ticket_comment', `new comment on ${t.identifier}`, { ticketId: t.id, commentId: c.id, body }, actor);
+          // VS-657: the stored comment keeps exactly what the human wrote; the dictation mark rides
+          // in the wake payload only.
+          wake(t.workerId, 'ticket_comment', `new comment on ${t.identifier}`, { ticketId: t.id, commentId: c.id, body, ...(opts?.dictated ? { dictated: true } : {}) }, actor);
         } else if (actor.kind === 'human' && kind === 'comment') {
           // A reply with nobody listening: reopen a finished ticket, bring a worker back, or tell the conductor.
           const followUp = { ticketId: t.id, commentId: c.id, body };

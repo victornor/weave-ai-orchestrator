@@ -42,7 +42,7 @@ export interface TicketsService {
    */
   resumeIfBlocked(actor: Actor, id: string, reason: string): Promise<S.Ticket>;
   cancel(actor: Actor, id: string, reason: string): S.Ticket;
-  comment(actor: Actor, id: string, body: string, kind?: S.CommentKind, sourceTrust?: S.SourceTrust): S.TicketComment;
+  comment(actor: Actor, id: string, body: string, kind?: S.CommentKind, sourceTrust?: S.SourceTrust, opts?: { dictated?: boolean }): S.TicketComment;
   /** Relaunch the ticket's worker (or spawn one) after a failure or a pause; blocked tickets go back to work. */
   retry(actor: Actor, id: string, note?: string): Promise<S.Ticket>;
   comments(id: string, after?: string): S.TicketComment[];
@@ -228,7 +228,7 @@ export interface DecisionsService {
    * caller must be the workspace weaver, the decision must be human-owned, and the message must be an
    * inbound human message in this workspace's thread.
    */
-  answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean; inputs?: S.DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string; relayFromMessageId?: string }): Promise<S.Decision>;
+  answer(actor: Actor, id: string, answer: { key?: string; text?: string; remember?: boolean; inputs?: S.DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string; relayFromMessageId?: string; dictated?: boolean }): Promise<S.Decision>;
   /**
    * Asserted conductor review of a plan/merge/action card (VS-223). Actor must be the workspace
    * conductor. `reviewedHead` (VS-365) is the head the mark was made against, recorded so a held
@@ -457,7 +457,7 @@ export interface WorkersService {
    * turn; otherwise (and whenever delivery fails) the message is queued as a `conductor_request`
    * wake, exactly as before VS-99. Never both, never neither.
    */
-  message(actor: Actor, workerId: string, body: string, opts?: { live?: boolean }): Promise<WorkerMessageOutcome>;
+  message(actor: Actor, workerId: string, body: string, opts?: { live?: boolean; dictated?: boolean }): Promise<WorkerMessageOutcome>;
   /**
    * VS-375: when a shutdown cut this worker's turn off, its wake is preserved `queued` and the
    * dispatcher will resume it. Relaunching then is a no-op: the returned agent carries
@@ -797,7 +797,7 @@ export interface ThreadsService {
   list(filter?: { channelKind?: string; agentId?: string; ticketId?: string }): S.ChannelThread[];
   bindTicket(actor: Actor, threadId: string, ticketId: string | null): S.ChannelThread;
   /** `attachments` bytes are already validated (type/size) by the caller; `inbound` only stores and links them. Rejected with `validation` if the thread is ticket-bound (VS-133 — out of scope there). */
-  inbound(actor: Actor, threadId: string, body: string, opts?: { externalMessageId?: string; parts?: unknown[]; projectId?: string | null; blockId?: string | null; replyToMessageId?: string | null; idempotencyKey?: string; attachments?: Array<{ filename: string; mediaType: S.AttachmentMediaType; bytes: Buffer }> }): Promise<S.ThreadMessage>;  // stores + wakes; a repeated idempotencyKey on this thread returns the existing message
+  inbound(actor: Actor, threadId: string, body: string, opts?: { externalMessageId?: string; parts?: unknown[]; projectId?: string | null; blockId?: string | null; replyToMessageId?: string | null; idempotencyKey?: string; dictated?: boolean; attachments?: Array<{ filename: string; mediaType: S.AttachmentMediaType; bytes: Buffer }> }): Promise<S.ThreadMessage>;  // stores + wakes; a repeated idempotencyKey on this thread returns the existing message
   /**
    * `attachments` (VS-273 — the weaver's reply path only) are already resolved and size-checked by the caller via `resolveOutboundAttachments`; `outbound` only stores and links them, the same posture `inbound` takes for its own attachments.
    *

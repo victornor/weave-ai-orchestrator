@@ -60,6 +60,29 @@ describe('runEventsToTranscript', () => {
     expect(blocks[0]).toMatchObject({ type: 'tool', tool: 'Bash', target: 'pnpm test', pending: true });
   });
 
+  it('marks a cut-off call not completed and adds a run-interrupted line when the run ended interrupted (VS-657)', () => {
+    const blocks = runEventsToTranscript([
+      ev({ id: 'e1', type: 'tool.call', payload: { id: 't1', name: 'Bash', input: { command: 'pnpm test' } } }),
+      ev({ id: 'e2', type: 'tool.call', payload: { id: 't2', name: 'Read', input: { file_path: 'a.ts' } } }),
+      ev({ id: 'e3', type: 'tool.result', payload: { id: 't2', isError: true, content: 'nope' } }),
+      ev({ id: 'e4', type: 'run.finalized', payload: { status: 'interrupted' } }),
+    ]);
+    const cut = blocks.find((b) => b.type === 'tool' && b.tool === 'Bash');
+    const failed = blocks.find((b) => b.type === 'tool' && b.tool === 'Read');
+    expect(cut).toMatchObject({ type: 'tool', interrupted: true, pending: false });
+    expect(failed).toMatchObject({ type: 'tool', error: true });
+    expect(blocks).toContainEqual(expect.objectContaining({ type: 'status', text: 'run interrupted', status: 'stalled' }));
+  });
+
+  it('leaves pending calls alone when the run succeeded (VS-657)', () => {
+    const blocks = runEventsToTranscript([
+      ev({ id: 'e1', type: 'tool.call', payload: { id: 't1', name: 'Bash', input: { command: 'pnpm test' } } }),
+      ev({ id: 'e2', type: 'run.finalized', payload: { status: 'succeeded' } }),
+    ]);
+    expect(blocks[0]).toMatchObject({ type: 'tool', pending: true });
+    expect(blocks.some((b) => b.type === 'status')).toBe(false);
+  });
+
   it('marks an errored result and a denied call', () => {
     const [errored] = runEventsToTranscript([
       ev({ id: 'e1', type: 'tool.call', payload: { id: 't1', name: 'Bash' } }),

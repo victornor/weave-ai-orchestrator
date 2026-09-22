@@ -610,7 +610,7 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
   async function answer(
     actor: Actor,
     id: string,
-    ans: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string; relayFromMessageId?: string },
+    ans: { key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string; relayFromMessageId?: string; dictated?: boolean },
   ): Promise<Decision> {
     const d = get(id);
     if (d.status !== 'open') {
@@ -717,6 +717,9 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     if (answered.askedByAgentId) {
       wake(answered.askedByAgentId, 'decision_answered', `decision answered: ${answered.title}`, {
         decisionId: answered.id, answer: { key, text }, ticketId: answered.ticketId,
+        // VS-657: a free-text answer entered by dictation is delivered with the mark; the stored
+        // answer text is unchanged.
+        ...(ans.dictated ? { dictated: true } : {}),
         // Already settled: a secret's entry here is the name it was stored under, never the value.
         ...(answerInputs ? { answerInputs } : {}),
       });

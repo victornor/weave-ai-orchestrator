@@ -57,6 +57,36 @@ describe('spawnLines stdin modes', () => {
   });
 });
 
+/**
+ * VS-657: every runtime adapter stops a running turn by delegating to `spawnLines.cancel`. This
+ * pins the primitive: an interrupt is a SIGINT to the process group (the CLI's own Escape), a kill is
+ * an immediate SIGKILL. Claude, gemini and cursor rely on exactly this; codex and opencode add a
+ * protocol-level interrupt first and still end on this.
+ */
+describe('spawnLines cancel (VS-657)', () => {
+  const longLived = "setInterval(() => {}, 1000)";
+  const spawnLongLived = () => spawnLines({
+    cmd: process.execPath, args: ['-e', longLived], cwd: process.cwd(), env: process.env as Record<string, string>,
+    timeoutMs: 30_000, onLine: () => {},
+  });
+
+  it('interrupt ends the child with SIGINT, the CLI-stop signal', async () => {
+    const run = spawnLongLived();
+    expect(run.child.pid).toBeTruthy();
+    await run.cancel('interrupt');
+    const outcome = await run.done;
+    expect(outcome.signal).toBe('SIGINT');
+  });
+
+  it('kill ends the child with SIGKILL', async () => {
+    const run = spawnLongLived();
+    expect(run.child.pid).toBeTruthy();
+    await run.cancel('kill');
+    const outcome = await run.done;
+    expect(outcome.signal).toBe('SIGKILL');
+  });
+});
+
 describe('classifyError', () => {
   it('preserves a realistically long, structured message intact (VS-201)', () => {
     const models = Array.from({ length: 60 }, (_, i) => `gpt-5.${i}-sol-high`).join(', ');

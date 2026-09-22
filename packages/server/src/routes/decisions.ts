@@ -19,6 +19,8 @@ export function decisionRoutes(): Hono<AppEnv> {
       // VS-266: only consulted when the answer would otherwise be refused for a concern-held
       // approving option; a deliberate, distinct pair, never a second click on the same key.
       overrideHold: z.boolean().optional(), overrideReason: z.string().optional(),
+      // VS-657: the free text was entered by dictation; delivered with the mark, stored unchanged.
+      dictated: z.boolean().optional(),
     }));
     return c.json(await c.get('ws').services.decisions.answer(c.get('actor'), c.req.param('id'), answer));
   });

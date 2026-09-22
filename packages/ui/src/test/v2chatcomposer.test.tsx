@@ -779,3 +779,39 @@ describe('the V2 composer chord stop with a focused control (VS-441)', () => {
     expect(dict.stops).toBe(1);
   });
 });
+
+/**
+ * VS-657: the send carries whether the draft was dictated, so the daemon can deliver the message with
+ * the `(voice dictated)` line. Typed sends are unmarked; the "mark all my messages" setting marks them
+ * too.
+ */
+describe('the V2 composer voice-dictated provenance (VS-657)', () => {
+  afterEach(() => localStorage.removeItem('conductor.markAllDictated'));
+
+  it('leaves a typed send unmarked', () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'typed words here' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onSubmit).toHaveBeenCalledWith('typed words here', [], expect.objectContaining({ dictated: false }));
+  });
+
+  it('marks a dictated send', () => {
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+    dictate();
+    act(() => dict.onText?.('spoken words from me', true));
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    finishSpeech('spoken words from me');
+    expect(onSubmit).toHaveBeenCalledWith('spoken words from me', [], expect.objectContaining({ dictated: true }));
+  });
+
+  it('marks a typed send when "mark all my messages as voice dictated" is on', () => {
+    localStorage.setItem('conductor.markAllDictated', 'on');
+    const onSubmit = vi.fn();
+    render(<Harness onSubmit={onSubmit} />);
+    fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'typed but marked' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(onSubmit).toHaveBeenCalledWith('typed but marked', [], expect.objectContaining({ dictated: true }));
+  });
+});

@@ -755,6 +755,35 @@ describe('workers', () => {
       expect(events[0]!.payload).toMatchObject({ text: 'check the failing test', authorKind: 'human', authorId: 'victor', delivery: 'mid_turn' });
     });
 
+    it('prefixes a dictated mid-turn delivery with the (voice dictated) line (VS-657)', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      const sent: string[] = [];
+      runState(h.ctx).active.set(runId, {
+        runId, agentId: worker.id, startedAt: Date.now(), pid: 1,
+        cancel: async () => undefined,
+        send: async (text: string) => { sent.push(text); return 'delivered'; },
+      });
+
+      await workers.message(HUMAN, worker.id, 'ship the release', { live: true, dictated: true });
+      expect(sent).toEqual(['(voice dictated)\n\nship the release']);
+      // The stored comment keeps exactly what the human wrote; only the delivery text is marked.
+      expect(h.services.tickets!.comment).toHaveBeenCalledWith(HUMAN, ticket.id, 'ship the release', 'relay', 'trusted', { dictated: true });
+    });
+
+    it('carries the dictated flag on the queued wake when it is not delivered mid-turn (VS-657)', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      seedRun(worker);
+
+      const outcome = await workers.message(HUMAN, worker.id, 'typed by voice', { live: true, dictated: true });
+      expect(outcome.delivery).toBe('queued');
+      expect(wake.calls[0]!.input).toMatchObject({ source: 'conductor_request', payload: expect.objectContaining({ dictated: true, message: 'typed by voice' }) });
+    });
+
     it('queues when `live` is not asked for, even though the runtime could take it mid-turn', async () => {
       const ticket = seedTicket();
       const worker = await workers.spawnForTicket(SYSTEM, ticket.id);

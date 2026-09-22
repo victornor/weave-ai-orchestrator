@@ -319,7 +319,7 @@ describe('dictation — speech mode', () => {
 
     fireEvent.click(screen.getByLabelText('Send'));
 
-    expect(onSubmit).toHaveBeenCalledWith('ship the release', undefined, expect.any(String));
+    expect(onSubmit).toHaveBeenCalledWith('ship the release', undefined, expect.any(String), { dictated: true });
     expect(rec.stop).toHaveBeenCalled();
     expect(screen.getByLabelText('Dictate')).toBeInTheDocument();
     expect(screen.queryByLabelText('Stop dictation')).not.toBeInTheDocument();
@@ -337,7 +337,7 @@ describe('dictation — speech mode', () => {
 
     fireEvent.keyDown(box, { key: 'Enter' });
 
-    expect(onSubmit).toHaveBeenCalledWith('ship the release', undefined, expect.any(String));
+    expect(onSubmit).toHaveBeenCalledWith('ship the release', undefined, expect.any(String), { dictated: true });
     expect(rec.stop).toHaveBeenCalled();
     expect(screen.getByLabelText('Dictate')).toBeInTheDocument();
     expect(screen.queryByText('Listening…')).not.toBeInTheDocument();
@@ -862,7 +862,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
     fireEvent.click(screen.getByLabelText('Send'));
 
     await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledWith('ship it to the release train', undefined, expect.any(String));
+    expect(onSubmit).toHaveBeenCalledWith('ship it to the release train', undefined, expect.any(String), { dictated: true });
     expect(screen.getByLabelText('Message…')).toHaveValue('');
   });
 
@@ -884,7 +884,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
 
     d.settle(ok('late words from the host here'));
     await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledWith('late words from the host here', undefined, expect.any(String));
+    expect(onSubmit).toHaveBeenCalledWith('late words from the host here', undefined, expect.any(String), { dictated: true });
     expect(getUserMedia).not.toHaveBeenCalled(); // no second recording was started
   });
 
@@ -1004,7 +1004,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
 
     d.settle(ok('once and then again here now'));
     await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledWith('once and then again here now', undefined, expect.any(String));
+    expect(onSubmit).toHaveBeenCalledWith('once and then again here now', undefined, expect.any(String), { dictated: true });
   });
 
   it('streaming (speech-mode) send stays immediate and unqueued', async () => {
@@ -1019,7 +1019,7 @@ describe('dictation — send finishes the upload dictation (VS-282)', () => {
 
     fireEvent.click(screen.getByLabelText('Send'));
     await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledWith('live words', undefined, expect.any(String));
+    expect(onSubmit).toHaveBeenCalledWith('live words', undefined, expect.any(String), { dictated: true });
     expect(screen.queryByText(/Waiting for the transcript/)).not.toBeInTheDocument();
   });
 });
@@ -1156,7 +1156,7 @@ describe('dictation — how a session ends decides whether it sends (VS-489, VS-
       fireEvent.keyUp(window, { key: ' ', code: 'Space' });
 
       expect(onSubmit).toHaveBeenCalledTimes(1);
-      expect(onSubmit).toHaveBeenCalledWith('held words that will be sent here', undefined, expect.any(String));
+      expect(onSubmit).toHaveBeenCalledWith('held words that will be sent here', undefined, expect.any(String), { dictated: true });
     } finally {
       clock.mockRestore();
     }
@@ -1174,7 +1174,7 @@ describe('dictation — how a session ends decides whether it sends (VS-489, VS-
     fireEvent.keyDown(window, { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true });
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith('toggle words that will be sent now', undefined, expect.any(String));
+    expect(onSubmit).toHaveBeenCalledWith('toggle words that will be sent now', undefined, expect.any(String), { dictated: true });
   });
 
   it('does not send on the mic button even with the setting on', () => {
@@ -1213,7 +1213,7 @@ describe('dictation — how a session ends decides whether it sends (VS-489, VS-
 
       d.settle(ok('spoken words that will be sent now'));
       await settleMicrotasks(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-      expect(onSubmit).toHaveBeenCalledWith('typed first spoken words that will be sent now', undefined, expect.any(String));
+      expect(onSubmit).toHaveBeenCalledWith('typed first spoken words that will be sent now', undefined, expect.any(String), { dictated: true });
     } finally {
       clock.mockRestore();
     }

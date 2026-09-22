@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-21
+goal: A message sent to a persistent session interrupts its running turn and
+  resumes with the new message; dictated messages tell the agent they may
+  contain misspellings.

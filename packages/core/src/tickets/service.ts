@@ -1018,6 +1018,12 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         if (input.projectId && role.projectId !== input.projectId) {
           throw new OcError('validation', 'role belongs to a different project', { roleId: input.assigneeRoleId, projectId: input.projectId });
         }
+        // VS-668: every role is project-scoped, so naming one is how a caller says which project the
+        // work is in. Derive it here rather than storing a null the ticket's later readers trip over.
+        if (!input.projectId) {
+          if (!role.projectId) throw new OcError('validation', `role ${input.assigneeRoleId} is not scoped to a project; pass projectId explicitly`, { roleId: input.assigneeRoleId });
+          input = { ...input, projectId: role.projectId };
+        }
       }
       const workerModelId = resolveWorkerModelId(input.workerModelId);
       return tx(db, () => {
@@ -1099,11 +1105,15 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
 
     assign(actor, id, roleId, workerModelId) {
       const t = get(id);
+      // VS-668: a ticket created before creation derived its project can be corrected by assigning
+      // the role it is meant for; a role is always project-scoped, so assignment implies the project.
+      let adoptedProjectId: string | null = null;
       if (roleId) {
         const role = db.get<{ id: string; projectId: string; status: string }>('SELECT id, project_id, status FROM roles WHERE id = ?', [roleId]);
         if (!role) throw new OcError('not_found', `role ${roleId} not found`);
         if (role.status === 'retired') throw new OcError('validation', 'cannot assign a retired role');
         if (t.projectId && role.projectId !== t.projectId) throw new OcError('validation', 'role belongs to a different project', { roleId, projectId: t.projectId });
+        if (!t.projectId) adoptedProjectId = role.projectId || null;
       }
       if (workerModelId !== undefined && t.workerId) {
         throw new OcError('validation', 'cannot change a ticket\'s worker model after its worker has spawned');
@@ -1111,6 +1121,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       const resolvedModelId = workerModelId === undefined ? undefined : resolveWorkerModelId(workerModelId);
       return tx(db, () => {
         const patch: Record<string, unknown> = { assigneeRoleId: roleId, assigneeHuman: false };
+        if (adoptedProjectId) patch.projectId = adoptedProjectId;
         if (roleId && t.status === 'backlog') patch.status = 'todo';
         if (!roleId) patch.workerId = null;
         if (resolvedModelId !== undefined) patch.workerModelId = resolvedModelId;

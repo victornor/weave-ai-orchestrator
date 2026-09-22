@@ -289,6 +289,54 @@ describe('tickets', () => {
     expect(() => tickets.setBlockers(HUMAN, a.id, [b.id])).toThrow(/cycle/);
   });
 
+  describe('project derivation from the assignee role (VS-668)', () => {
+    const otherProject = (): { projectId: string; roleId: string } => {
+      const projectId = newId();
+      const roleId = newId();
+      const now = nowIso();
+      h.db.insert('projects', {
+        id: projectId, workspaceId: h.workspaceId, slug: 'other', name: 'Other', gitUrl: 'git@example.com:acme/other.git',
+        defaultBranch: 'main', clonePath: join(h.root, 'other'), maxWorkers: 4, worktreeProvider: 'git',
+        openspecEnabled: 1, policiesJson: {}, status: 'ready', createdAt: now, updatedAt: now,
+      });
+      h.db.insert('roles', {
+        id: roleId, workspaceId: h.workspaceId, projectId, slug: 'other-role', name: 'Other Backend', charterSummary: 'Owns the other service.',
+        scopeText: 'Other.', sessionPolicy: 'per_ticket', maxWorkers: 1, status: 'active', specRevision: 1, createdBy: 'weaver', createdAt: now, updatedAt: now,
+      });
+      return { projectId, roleId };
+    };
+
+    it('derives the project from the role when no project is given', () => {
+      expect(make({ projectId: null }).projectId).toBe(h.projectId);
+    });
+
+    it('keeps a matching explicit project and refuses a conflicting one without storing a ticket', () => {
+      expect(make({ projectId: h.projectId }).projectId).toBe(h.projectId);
+      const other = otherProject();
+      const before = tickets.list({}).total;
+      expect(() => make({ projectId: other.projectId })).toThrow(/different project/);
+      expect(tickets.list({}).total).toBe(before);
+    });
+
+    it('leaves a ticket with no role project-less', () => {
+      expect(tickets.create(HUMAN, { kind: 'task', title: 'No role', projectId: null, assigneeRoleId: null }).projectId).toBeNull();
+    });
+
+    it('adopts the role\'s project when a project-less ticket is assigned', () => {
+      const t = tickets.create(HUMAN, { kind: 'task', title: 'Legacy null project', projectId: null, assigneeRoleId: null });
+      expect(t.projectId).toBeNull();
+      expect(tickets.assign(HUMAN, t.id, h.roleId).projectId).toBe(h.projectId);
+      expect(tickets.get(t.id).projectId).toBe(h.projectId);
+    });
+
+    it('still refuses a role from a different project, leaving the project unchanged', () => {
+      const other = otherProject();
+      const t = make();
+      expect(() => tickets.assign(HUMAN, t.id, other.roleId)).toThrow(/different project/);
+      expect(tickets.get(t.id).projectId).toBe(h.projectId);
+    });
+  });
+
   describe('state machine', () => {
     it('matches the shared transition table exactly when every guard is satisfied', async () => {
       for (const kind of TICKET_KINDS) {
@@ -1955,6 +2003,17 @@ describe('tickets', () => {
       expect(create).toHaveBeenCalledWith('/tmp/clone', expect.objectContaining({ branch: 'ac/tst-1-add-dark-mode', base: 'edge', title: 'TST-1: Add dark mode', draft: true }));
       const wp = tickets.workProducts(t.id).find((w) => w['type'] === 'pull_request');
       expect(wp).toMatchObject({ url: 'https://example.com/pr/7', title: 'TST-1: Add dark mode' });
+    });
+
+    it('opens against a ticket whose project was derived from its role rather than stored null (VS-668)', async () => {
+      const create = vi.fn(async () => ({ url: 'https://example.com/pr/9', number: 9 }));
+      h.ctx.registries.forges.set('github', forgeWith({ createPullRequest: create }));
+      setProject();
+      const t = make({ projectId: null });
+      expect(t.projectId).toBe(h.projectId);
+
+      const pr = await tickets.openPullRequest(AGENT, t.id, { title: 'TST-1: Add dark mode' });
+      expect(pr).toEqual({ url: 'https://example.com/pr/9', number: 9 });
     });
 
     it('reuses an open pull request on the branch, opens no second one, and never flips its draft state', async () => {

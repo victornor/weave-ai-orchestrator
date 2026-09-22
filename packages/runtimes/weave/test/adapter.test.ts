@@ -47,6 +47,7 @@ async function runFake(prompt: string, over: Partial<TurnInput> = {}, adapter = 
 describe('declaration', () => {
   it('declares what S1 delivers, partial output included', () => {
     expect(capabilities).toMatchObject({ resumableSessions: true, streamingInput: true, mcp: true, usageReporting: 'per_turn', costReporting: false, partialOutput: 'full', structuredOutput: true });
+    expect(capabilities.imageInput).toBe('model');
     expect(adapterWith().capabilities).toBe(capabilities);
   });
   it('offers the webFetch option in its config schema', () => {

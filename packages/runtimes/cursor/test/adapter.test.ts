@@ -21,6 +21,7 @@ describe('cursor adapter', () => {
       systemPromptInjection: 'file_only', structuredOutput: false, mcp: true,
       usageReporting: 'none', costReporting: false,
     });
+    expect(adapter.capabilities.imageInput).toBe('path');
   });
 
   it('declares text partial output and pins it to the page coverage table (VS-600)', () => {

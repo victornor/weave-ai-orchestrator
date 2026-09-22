@@ -11,8 +11,10 @@ export class FakeRuntime implements RuntimeAdapter {
   workerDeniedTools?: string[];
   /** VS-398: matches every built-in adapter's declared set; set to e.g. `['auto']` to simulate one that cannot enforce a tool allowlist. */
   permissionModes = ['auto', 'restricted', 'bypass'];
+  /** VS-659: the form an image attachment reaches this runtime. Defaults to the safe `path`; set to `native` to simulate a vision runtime. */
+  imageInput: 'native' | 'path' | 'model' = 'path';
   get capabilities() {
-    return { resumableSessions: this.resumableSessions, forkSessions: false, streamingInput: this.streamingInput, systemPromptInjection: 'system_prompt' as const, structuredOutput: true, mcp: true, usageReporting: 'per_turn' as const, costReporting: false, permissionModes: this.permissionModes };
+    return { resumableSessions: this.resumableSessions, forkSessions: false, streamingInput: this.streamingInput, systemPromptInjection: 'system_prompt' as const, structuredOutput: true, mcp: true, usageReporting: 'per_turn' as const, costReporting: false, permissionModes: this.permissionModes, imageInput: this.imageInput };
   }
   inputs: TurnInput[] = [];
   queue: Array<Partial<TurnResult> | ((input: TurnInput) => Partial<TurnResult> | Promise<Partial<TurnResult>>)> = [];

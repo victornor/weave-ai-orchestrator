@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-22
+goal: "Give each runtime the attachment form it can take: declare a runtime
+  image-input capability, and write a readable path named in the prompt for
+  runtimes that cannot take an image"

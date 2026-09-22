@@ -42,6 +42,14 @@ function cappedFileList(files: string[]): { files: string[]; more: number } {
   return { files: files.slice(0, ARCHIVE_LIST_CAP), more: Math.max(0, files.length - ARCHIVE_LIST_CAP) };
 }
 
+/** VS-659: ensure a `.gitignore` holds a line, creating the file if absent (idempotent). */
+function ensureIgnored(ignorePath: string, line: string): void {
+  const current = existsSync(ignorePath) ? readFileSync(ignorePath, 'utf8') : '';
+  if (current.split('\n').includes(line)) return;
+  const prefix = current === '' || current.endsWith('\n') ? current : `${current}\n`;
+  writeFileSync(ignorePath, `${prefix}${line}\n`);
+}
+
 function archivedComment(archivePath: string, workerId: string, files: string[]): string {
   const { files: shown, more } = cappedFileList(files);
   return [
@@ -165,10 +173,14 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
    */
   async function ensureSessionRepo(home: string): Promise<void> {
     mkdirSync(home, { recursive: true });
-    if (existsSync(join(home, '.git'))) return;
+    if (existsSync(join(home, '.git'))) {
+      // VS-659: an existing session home still ignores the daemon's own readable-attachment directory.
+      ensureIgnored(join(home, '.gitignore'), '.weave-attachments/');
+      return;
+    }
     const init = await git(['init'], home, 30_000);
     if (!init.ok) throw new OcError('internal', `could not initialise the session directory as a Git repository: ${init.stderr.trim() || init.stdout.trim()}`);
-    writeFileSync(join(home, '.gitignore'), 'AGENTS.md\n.ac-render.json\n');
+    writeFileSync(join(home, '.gitignore'), 'AGENTS.md\n.ac-render.json\n.weave-attachments/\n');
     const add = await git(['add', '.gitignore'], home, 30_000);
     if (!add.ok) throw new OcError('internal', `could not stage the session directory's initial commit: ${add.stderr.trim()}`);
     const commit = await git(

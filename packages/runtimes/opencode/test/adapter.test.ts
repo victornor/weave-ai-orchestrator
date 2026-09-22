@@ -24,6 +24,7 @@ describe('opencode adapter', () => {
     expect(adapter.skillsDir()).toBe('.opencode/skills');
     expect(adapter.instructionFiles()).toEqual(['AGENTS.md']);
     expect(adapter.capabilities).toMatchObject({ structuredOutput: false, systemPromptInjection: 'file_only', mcp: true });
+    expect(adapter.capabilities.imageInput).toBe('path');
   });
 
   it('declares the partial output the page is told about (VS-595)', () => {

@@ -45,6 +45,7 @@ describe('claude adapter', () => {
     expect(adapter.skillsDir()).toBe('.claude/skills');
     expect(adapter.instructionFiles()).toEqual(['CLAUDE.md', 'AGENTS.md']);
     expect(adapter.capabilities).toMatchObject({ resumableSessions: true, forkSessions: true, structuredOutput: true, mcp: true, costReporting: true, usageReporting: 'per_turn' });
+    expect(adapter.capabilities.imageInput).toBe('native');
   });
 
   it('declares full partial output and the shared table agrees (VS-599)', () => {

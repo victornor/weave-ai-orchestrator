@@ -14,6 +14,7 @@ describe('gemini adapter', () => {
     expect(adapter.skillsDir()).toBe('.gemini/skills');
     expect(adapter.instructionFiles()).toEqual(['GEMINI.md']);
     expect(adapter.capabilities).toMatchObject({ forkSessions: false, structuredOutput: false, systemPromptInjection: 'file_only' });
+    expect(adapter.capabilities.imageInput).toBe('path');
     expect(adapter.forkSession).toBeUndefined();
   });
 

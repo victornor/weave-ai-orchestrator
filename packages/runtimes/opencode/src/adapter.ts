@@ -118,6 +118,9 @@ export const capabilities: RuntimeCapabilities = {
   costReporting: true,
   permissionModes: ['auto', 'restricted', 'bypass'],
   partialOutput: 'full',
+  // VS-659: our MCP-tool-result delivery of an image to the model is not established by our code;
+  // the daemon gives a readable path instead.
+  imageInput: 'path',
 };
 
 /** Used only when `opencode models` cannot be run (binary missing, no providers configured). */

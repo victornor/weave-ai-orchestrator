@@ -321,6 +321,10 @@ export interface TurnPromptOptions {
   turnEpoch?: number;
   /** The run this prompt is being built for (VS-110): lets the bootstrap digest record its knowledge context against the right run. */
   runId?: string;
+  /** VS-659: how an image attachment reaches this run's model — `path` names a readable file instead of the inbox's image block. */
+  imageInput?: 'native' | 'path';
+  /** VS-659: attachment id → the absolute readable path its bytes were written to (a `path`-form run). */
+  attachmentPaths?: Record<string, string>;
 }
 
 interface BundledWake { source: string; reason: string; payload: Record<string, unknown>; requestedByKind: string; requestedById: string | null }
@@ -446,9 +450,18 @@ export async function buildTurnPrompt(
       const label = w.source === 'human_message'
         ? `Message from the human${typeof w.payload.projectSlug === 'string' ? ` about \`${w.payload.projectSlug}\`` : ''}`
         : `Comment on ${w.payload.ticketId ? (ticket(ctx, String(w.payload.ticketId))?.identifier ?? String(w.payload.ticketId)) : 'a ticket'}`;
-      const attachments = Array.isArray(w.payload.attachmentIds) && w.payload.attachmentIds.length > 0
-        ? `\n\n_${w.payload.attachmentIds.length} attachment(s) — read them with \`weave_inbox\`._`
-        : '';
+      const attachmentIds = Array.isArray(w.payload.attachmentIds) ? w.payload.attachmentIds.filter((id): id is string => typeof id === 'string') : [];
+      // VS-659: a runtime that cannot be shown an image inline gets the file's readable path named
+      // here instead of the inbox pointer alone, so the image is never silently dropped.
+      let attachments = '';
+      if (attachmentIds.length > 0) {
+        if (opts.imageInput === 'path') {
+          const named = attachmentIds.map((id) => opts.attachmentPaths?.[id]).filter((p): p is string => typeof p === 'string');
+          attachments = `\n\n_${attachmentIds.length} attachment(s); an image among them is saved where you can read it${named.length ? `: ${named.map((p) => `\`${p}\``).join(', ')}` : ''} — text documents are inlined by \`weave_inbox\`._`;
+        } else {
+          attachments = `\n\n_${attachmentIds.length} attachment(s) — read them with \`weave_inbox\`._`;
+        }
+      }
       // VS-638: a composer-selected roadmap block is a structured instruction, so its notice is
       // rendered here rather than left to a payload the weaver may never open.
       const selection = w.source === 'human_message' ? humanSelectionNotice(w.payload as Record<string, unknown>) : null;

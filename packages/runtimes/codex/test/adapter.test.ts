@@ -15,6 +15,7 @@ describe('codex adapter', () => {
     expect(adapter.skillsDir()).toBe('.agents/skills');
     expect(adapter.instructionFiles()).toEqual(['AGENTS.md']);
     expect(adapter.capabilities).toMatchObject({ systemPromptInjection: 'file_only', structuredOutput: true, costReporting: false, forkSessions: true });
+    expect(adapter.capabilities.imageInput).toBe('path');
   });
 
   it('lists static gpt-5 family and o-series models when no binary is given', async () => {

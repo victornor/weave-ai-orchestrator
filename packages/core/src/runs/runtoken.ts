@@ -24,6 +24,14 @@ export interface RunTokenClaims {
    * an allowlist, so it survives a runtime that ignores one.
    */
   firstTurn?: boolean;
+  /**
+   * VS-659: the form an image attachment takes on this run, decided once by the engine. `path` means
+   * the agent's inbox reports a readable file path instead of an MCP `image` content block; `native`
+   * (or absent) keeps the image block.
+   */
+  imageInput?: 'native' | 'path';
+  /** VS-659: the absolute directory this run's readable attachment files live under, for a `path` form. */
+  attachmentDir?: string;
 }
 
 export const RUN_TOKEN_PREFIX = 'rt_';
@@ -43,6 +51,7 @@ export async function signRunToken(secret: Uint8Array, claims: RunTokenClaims, t
   const jwt = await new SignJWT({
     wid: claims.workspaceId, rid: claims.runId, aid: claims.agentId, kind: claims.agentKind,
     pid: claims.projectId, tid: claims.ticketId, plid: claims.planId, rlid: claims.roleId, ft: claims.firstTurn,
+    img: claims.imageInput, adir: claims.attachmentDir,
   })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
     .setSubject(claims.agentId)
@@ -73,6 +82,8 @@ export async function verifyRunToken(secret: Uint8Array, token: string): Promise
       workspaceId: payload.wid, runId: payload.rid, agentId: payload.aid, agentKind: kind,
       projectId: str(payload.pid), ticketId: str(payload.tid), planId: str(payload.plid), roleId: str(payload.rlid),
       firstTurn: payload.ft === true,
+      imageInput: payload.img === 'path' ? 'path' : payload.img === 'native' ? 'native' : undefined,
+      attachmentDir: str(payload.adir) ?? undefined,
     };
   } catch (e) {
     if (e instanceof OcError) throw e;

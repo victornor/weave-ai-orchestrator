@@ -54,6 +54,9 @@ export const capabilities: RuntimeCapabilities = {
   // VS-599: `--include-partial-messages` stream_events are translated into text, thinking and
   // tool-input partials (see `events.ts`); the completed events are unchanged.
   partialOutput: 'full',
+  // VS-659: an MCP tool-result `image` content block becomes a real Anthropic `tool_result` vision
+  // block — established from the installed binary's strings in ADR 0015, never by launching it.
+  imageInput: 'native',
 };
 
 /** Aliases plus pinned ids. Claude Code has no machine-readable model list, so this is `static`. */

@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-22
+goal: Surface a weaver turn's error to captain in chat instead of a silent gap
+  when the model adapter fails

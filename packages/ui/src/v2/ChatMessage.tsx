@@ -117,7 +117,25 @@ export interface ChatMessageProps {
   highlighted?: boolean;
 }
 
+/**
+ * VS-663: a system notice (the engine's plain reason a turn failed or was stopped) is a state, not a
+ * message from either party — centred, muted and attributed to the system, the same shape the
+ * persistent-session conversation uses (`WorkerPage`). A `system`-authored message never renders as a
+ * weaver reply bubble, whatever its direction.
+ */
+export function SystemNotice({ message }: { message: ThreadMessage }): React.ReactElement {
+  return (
+    <div className="flex flex-col items-center gap-1" data-chat-message="system">
+      <div className="max-w-[85%] rounded-r6 border border-line-1 px-3 py-2 text-center text-meta text-text-3">
+        <Markdown source={message.body} />
+      </div>
+      <span className="ac-mono text-nano text-text-4">System</span>
+    </div>
+  );
+}
+
 export function ChatMessage({ message, ws, spent, projectName, blockName, onTicket, onReply, reveal = false, responseIds, jumpBackTo, onJumpTo, highlighted = false }: ChatMessageProps): React.ReactElement {
+  if (message.authorKind === 'system') return <SystemNotice message={message} />;
   const mine = message.direction === 'inbound';
   const body = useStreamReveal(message.body, reveal);
   // VS-549: the roadmap block the message carried, named by its title. An unresolvable block shows

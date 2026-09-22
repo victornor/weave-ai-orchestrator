@@ -799,6 +799,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   });
   await afterTurnHooks(ctx, deps, agent, ticket);
   await deliverSessionAnswer(ctx, deps, { agent, ticket, wakes, result, run: finished });
+  await deliverConductorTurnNotice(ctx, deps, { agent, ticket, wakes, result, run: finished });
   return finished;
 }
 
@@ -994,6 +995,60 @@ function plainFailureReason(run: Run, errorText: string | null): string {
   if (first && first !== run.errorCode) return truncate(first, 240);
   if (run.errorFamily === 'transient_upstream') return 'the model provider kept failing';
   return run.errorCode ?? 'an unexpected error';
+}
+
+/**
+ * VS-663: a weaver turn that ends without an answer leaves a system notice in its own conversation,
+ * so a turn that dies at the model adapter is not a silent gap the human mistakes for an idle chat.
+ * The weaver's only delivery is its reply tool, which a dead turn never reaches, so nothing else
+ * writes to its thread. Session-shaped targeting and wording are reused, but the target is the thread
+ * that woke the turn when there is one, else the primary human thread; and an authentication outage
+ * is left to `gateRuntimeForLogin`, which already announces it once for the runtime, rather than
+ * posted a second time here. Runs after finalize, and never fails the finished run.
+ */
+async function deliverConductorTurnNotice(
+  ctx: WorkspaceContext,
+  deps: () => CoreServices,
+  input: { agent: Agent; ticket: Ticket | null; wakes: Wakeup[]; result: TurnResult | null; run: Run },
+): Promise<void> {
+  const log = ctx.log('run').child({ runId: input.run.id });
+  if (input.agent.kind !== 'weaver' || input.ticket) return;
+  try {
+    // Re-read the run: finalize schedules a retry after it read the row its snapshot came from, so
+    // the run handed back does not yet know whether this outcome is terminal.
+    const run = ctx.db.get<Run>('SELECT * FROM runs WHERE id = ?', [input.run.id]) ?? input.run;
+    if (run.status === 'succeeded') return;
+    if (run.errorFamily === 'auth') return;
+    const threadId = conductorNoticeThreadId(deps, input.agent, input.wakes);
+    if (!threadId) return;
+    // A reply tool that carried this run id already answered; do not also tell the human it failed.
+    if (deps().threads.hasOutboundForRun(threadId, input.run.id)) return;
+    const errorText = ctx.db.get<{ errorText: string | null }>('SELECT error_text FROM agents WHERE id = ?', [input.agent.id])?.errorText ?? null;
+    const retryScheduled = !!run.scheduledRetryAt;
+    const resumesPending = input.wakes.some((w) => ctx.db.get<{ status: string }>('SELECT status FROM wakeups WHERE id = ?', [w.id])?.status === 'queued');
+    const notice = sessionOutcomeNotice(run, errorText, retryScheduled, resumesPending);
+    if (notice === null) return;
+    await deps().threads.outbound({ kind: 'system', id: null }, threadId, notice, { runId: input.run.id });
+  } catch (e) {
+    log.warn({ err: String(e), agentId: input.agent.id }, 'failed to deliver a conductor turn notice to its thread');
+  }
+}
+
+/**
+ * VS-663: the conversation a conductor failure notice belongs in — the thread that woke the turn
+ * when the weaver owns it, otherwise the primary human thread. Never posts into another agent's
+ * thread; a stale or forged wake payload falls back rather than writing where the human is not.
+ */
+function conductorNoticeThreadId(deps: () => CoreServices, agent: Agent, wakes: Wakeup[]): string | null {
+  const isString = (v: unknown): v is string => typeof v === 'string';
+  const fromWake = flattenWakes(wakes).map((w) => w.payload['threadId']).find(isString) ?? null;
+  if (fromWake) {
+    try {
+      const t = deps().threads.get(fromWake);
+      if (t.agentId === agent.id) return t.id;
+    } catch { /* the wake named a thread this daemon no longer has; fall back below */ }
+  }
+  return deps().threads.primaryThread()?.id ?? null;
 }
 
 /**

@@ -1864,4 +1864,52 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0062_ticket_role_project_backfill (VS-668)', () => {
+    function seedWorkspace(db: Db): void {
+      db.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      db.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at)
+         VALUES ('p1', 'w1', 'api', 'API', 'git@example.com:acme/api.git', 'main', '/tmp/api', 4, 'git', 1, '{}', 'ready', 't0', 't0')`);
+      db.run(
+        `INSERT INTO roles (id, workspace_id, project_id, slug, name, charter_summary, scope_text, session_policy, max_workers, status, spec_revision, created_by, created_at, updated_at)
+         VALUES ('r1', 'w1', 'p1', 'backend', 'Backend', 'x', 'x', 'per_ticket', 1, 'active', 1, 'weaver', 't0', 't0')`);
+    }
+
+    function seedTicketRow(db: Db, id: string, number: number, projectId: string | null, assigneeRoleId: string | null): void {
+      db.run(
+        `INSERT INTO tickets (id, workspace_id, project_id, number, identifier, kind, title, assignee_role_id, created_by_kind, created_at, updated_at)
+         VALUES (?, 'w1', ?, ?, ?, 'change', 'Add dark mode', ?, 'human', 't0', 't0')`,
+        [id, projectId, number, `TST-${number}`, assigneeRoleId],
+      );
+    }
+
+    it('backfills a project-less ticket from its assignee role', () => {
+      const path = join(dir, 'vs668-backfill.sqlite');
+      const before = openDbAsOf(path, '0061_session_retired_reason.sql');
+      seedWorkspace(before);
+      seedTicketRow(before, 't1', 1, null, 'r1');
+      before.close();
+
+      const db = openDb(path);
+      expect(db.get<{ projectId: string }>('SELECT project_id AS projectId FROM tickets WHERE id = ?', ['t1'])?.projectId).toBe('p1');
+      db.close();
+    });
+
+    it('leaves a ticket with no role and a project that is already set unchanged', () => {
+      const path = join(dir, 'vs668-noop.sqlite');
+      const before = openDbAsOf(path, '0061_session_retired_reason.sql');
+      seedWorkspace(before);
+      seedTicketRow(before, 't1', 1, null, null);
+      seedTicketRow(before, 't2', 2, 'p1', 'r1');
+      before.close();
+
+      const db = openDb(path);
+      expect(db.get<{ projectId: string | null }>('SELECT project_id AS projectId FROM tickets WHERE id = ?', ['t1'])?.projectId).toBeNull();
+      expect(db.get<{ projectId: string | null }>('SELECT project_id AS projectId FROM tickets WHERE id = ?', ['t2'])?.projectId).toBe('p1');
+      db.close();
+    });
+  });
 });

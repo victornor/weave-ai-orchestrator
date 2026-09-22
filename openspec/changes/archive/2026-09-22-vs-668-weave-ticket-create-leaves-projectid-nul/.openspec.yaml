@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-22
+goal: weave_ticket_create derives projectId from a project-scoped
+  assigneeRoleId, and a correction path and backfill fix tickets already left
+  null

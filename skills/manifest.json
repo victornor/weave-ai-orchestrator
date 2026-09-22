@@ -10,7 +10,7 @@
     { "name": "weave-ai-planning",  "audience": "weaver",    "description": "Minimal ticket graphs, qualifying split reasons, acceptance criteria." },
     { "name": "weave-ai-briefing",  "audience": "weaver",    "description": "Four-section briefing, one decision at a time." },
     { "name": "weave-ai-knowledge", "audience": "all",       "description": "Knowledge placement, entry rules, curation procedure." },
-    { "name": "weave-ai-artifacts", "audience": "all",       "description": "When and how to publish a self-contained HTML artifact with the AC Artifact Kit; diagram, table, comparison, plan, code and change playbooks." }
+    { "name": "weave-ai-artifacts", "audience": "all",       "description": "When and how to publish a self-contained HTML artifact with the AC Artifact Kit; diagram, table, comparison, plan, code, change and gallery playbooks." }
   ],
   "runtimes": {
     "claude":   { "path": ".claude/skills/<name>/SKILL.md" },

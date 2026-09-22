@@ -19,6 +19,12 @@ or anything a paragraph says just as well — that goes in a ticket comment, whi
 to write and cheaper for the human to read inline. When genuinely unsure, prefer the comment: an
 artifact nobody needed is friction, not help.
 
+**Many images.** When four or more images belong together — a delivery's before/after captures, one
+screen at several widths, a sequence of states — build **one gallery artifact** (`references/gallery.md`)
+rather than attaching the images separately or zipping them. Group a large set into labelled sections
+and caption every image. One or two captures do not change: a single screenshot, or a before/after
+pair, stays a ticket attachment or an inline `.card` pair.
+
 ## Format rules
 
 An artifact is exactly one HTML file, and it has to stand on its own:
@@ -29,11 +35,14 @@ An artifact is exactly one HTML file, and it has to stand on its own:
   start rather than discovering it after.
 - **No JavaScript.** An artifact is a document, not an app. Interactivity you're tempted to add
   (a toggle, a collapsible section) is usually a sign the content wants splitting into sections
-  instead.
+  instead. The one sanctioned exception is the gallery's CSS-only viewer state — a `:target` cell and
+  a checkbox zoom, see `references/gallery.md` — because a served artifact's CSP has no `script-src`
+  and a script would never run anyway.
 - **Use the AC Artifact Kit** for every visual choice — colors, spacing, radii, type. Call
   `weave_artifact_kit()` to get its CSS, token values, semantic component classes
-  (`.page`/`.card`/`.panel`/`.btn`/`.badge`/`.table`/`.steps`/`.timeline`/the nine `.status-*`
-  utilities — see the tool result's `components` field for the full list with descriptions) and
+  (`.page`/`.card`/`.panel`/`.btn`/`.badge`/`.table`/`.steps`/`.timeline`/`.gallery`/the nine
+  `.status-*` utilities — see the tool result's `components` field for the full list with
+  descriptions) and
   the playbook text below, in one call, at the point you're about to write the artifact — not
   carried in every turn's prompt. Inline the returned `css` into the document's `<style>`.
 - Support both themes: default (dark) at the document root, `[data-theme='light']` on an ancestor
@@ -84,7 +93,7 @@ that sentence is a caption below the diagram, not text crammed inside a shape. S
 
 ## Playbooks
 
-Six original playbooks, read on demand via `weave_artifact_kit()`'s `playbooks` field or directly from
+Seven original playbooks, read on demand via `weave_artifact_kit()`'s `playbooks` field or directly from
 `references/`:
 
 | Playbook | For |
@@ -95,6 +104,7 @@ Six original playbooks, read on demand via `weave_artifact_kit()`'s `playbooks` 
 | `references/plan.md` | A sequence of steps or phases — `.steps`/`.timeline`. |
 | `references/code.md` | A code walkthrough or excerpt worth annotating, not a raw paste. |
 | `references/change.md` | Before/after, files changed, and impact — the change-ticket shape. |
+| `references/gallery.md` | Many related images — a labelled grid that opens, pans and zooms. |
 
 Each playbook is short: what the shape is for, the kit classes it leans on, and one worked skeleton.
 None of them are copied from another project's docs — they're written for AC's own kit and tone.
@@ -102,4 +112,4 @@ None of them are copied from another project's docs — they're written for AC's
 ## References
 
 - `references/diagram.md`, `references/table.md`, `references/comparison.md`, `references/plan.md`,
-  `references/code.md`, `references/change.md` — the six playbooks.
+  `references/code.md`, `references/change.md`, `references/gallery.md` — the seven playbooks.

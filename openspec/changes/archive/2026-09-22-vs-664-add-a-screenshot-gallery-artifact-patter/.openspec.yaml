@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-22
+goal: Add a screenshot-gallery artifact pattern so a worker's before/after image
+  set becomes an openable, zoomable artifact instead of a zip attachment

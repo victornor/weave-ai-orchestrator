@@ -46,7 +46,7 @@ import {
 } from '../api/hooks';
 import { ChatMessage } from './ChatMessage';
 import { ChatComposer } from './ChatComposer';
-import { ChatConversation, useLiveRunSettle } from './ChatConversation';
+import { ChatConversation, TurnRetryNotice, useLiveRunSettle } from './ChatConversation';
 import type { ChatConversationHandle } from './ChatConversation';
 import { V2TicketStrip, V2WorkerChip } from './ChatChips';
 import { V2DecisionCard, type V2Answer } from './DecisionCard';
@@ -441,6 +441,15 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
 
   const working = sending || (live?.running ?? false);
 
+  // VS-663: a retryable failure of the weaver's own turn posts no thread message (no per-attempt
+  // spam), but it is not a silent gap either — the run's recorded retry instant drives a transient
+  // "retrying" line, so the human sees recovery in progress and it survives a reload.
+  const lastRun = weaver.data?.lastRun ?? null;
+  const retrying = Boolean(
+    lastRun && !working && !isActiveRun(lastRun.status) && lastRun.status === 'failed' &&
+    lastRun.scheduledRetryAt && Date.parse(lastRun.scheduledRetryAt) > Date.now(),
+  );
+
   const projectName = useCallback(
     (id: string | null) => (id ? projectLabel(projects.data?.find((p) => p.id === id) ?? { slug: id, name: id }) : null),
     [projects.data],
@@ -825,6 +834,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
               renderDecisionMessage={renderDecisionMessage}
               renderAfterTrace={renderAfterTrace}
               footer={footer}
+              {...(retrying && lastRun ? { turnNotice: <TurnRetryNotice family={lastRun.errorFamily} /> } : {})}
             />
           )}
 

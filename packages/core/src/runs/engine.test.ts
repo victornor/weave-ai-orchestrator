@@ -2820,10 +2820,135 @@ describe('run engine', () => {
         const rows = outbound();
         expect(rows).toHaveLength(1);
         expect(rows[0]!.body).toMatch(/log in again/);
-        expect(rows[0]!.body).toMatch(/resumes once the login is renewed/);
-      });
+      expect(rows[0]!.body).toMatch(/resumes once the login is renewed/);
     });
   });
+
+  describe('a conductor turn that fails leaves a notice in its chat (VS-663)', () => {
+    const HUMAN: Actor = { kind: 'human', id: 'victor' };
+    let threadId: string;
+
+    beforeEach(() => {
+      h.services.threads = createThreadsService(h.ctx, h.deps);
+      threadId = h.services.threads.bindOrGet('web', 'web-conductor', null, 'Web').id;
+    });
+
+    function outbound(): Array<{ id: string; body: string; authorKind: string; authorId: string | null; runId: string | null }> {
+      return h.db.all(
+        "SELECT id, body, author_kind AS authorKind, author_id AS authorId, run_id AS runId FROM thread_messages WHERE thread_id = ? AND direction = 'outbound' ORDER BY created_at, rowid",
+        [threadId],
+      );
+    }
+
+    /** A human-woken conductor run seeded directly, so an outcome the dispatcher would re-run (auth) can be scripted. */
+    async function seededConductorRun(): Promise<string> {
+      await h.services.threads!.inbound(HUMAN, threadId, 'are you there?');
+      const wake = h.db.get<{ id: string }>(
+        "SELECT id FROM wakeups WHERE agent_id = ? AND source = 'human_message' ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        [h.conductorId],
+      )!;
+      const runId = newId();
+      h.db.insert('runs', {
+        id: runId, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: [wake.id], runtimeId: 'fake',
+        status: 'queued', turnEpoch: 1, cwd: h.ctx.paths.weaver, createdAt: nowIso(),
+      });
+      h.db.run('UPDATE wakeups SET run_id = ?, status = ? WHERE id = ?', [runId, 'claimed', wake.id]);
+      return runId;
+    }
+
+    it('posts one system notice naming the reason when the adapter fails', async () => {
+      await h.services.threads!.inbound(HUMAN, threadId, 'any update?');
+      runtime.queue.push({ error: { code: 'exit_1', family: 'unknown', message: 'Request failed with status code 500' } } as never);
+      const run = await runOnce(h.conductorId);
+
+      expect(run.status).toBe('failed');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ authorKind: 'system', body: 'The turn failed: Request failed with status code 500.' });
+      expect(rows[0]!.body).not.toContain(run.id);
+    });
+
+    it('does not post a second notice when the turn already replied', async () => {
+      await h.services.threads!.inbound(HUMAN, threadId, 'any update?');
+      runtime.queue.push(async (input) => {
+        await h.services.threads!.outbound({ kind: 'agent', id: h.conductorId, runId: input.runId }, threadId, 'here is the answer', { runId: input.runId });
+        return { error: { code: 'exit_1', family: 'unknown', message: 'the adapter died after replying' } } as never;
+      });
+      const run = await runOnce(h.conductorId);
+
+      expect(run.status).toBe('failed');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.body).toBe('here is the answer');
+    });
+
+    it('posts nothing for a retryable first failure, and the retry that succeeds leaves only its answer', async () => {
+      await h.services.threads!.inbound(HUMAN, threadId, 'any update?');
+      runtime.queue.push({ error: { code: 'upstream_5xx', family: 'transient_upstream', message: 'upstream unavailable' } } as never);
+      const first = await runOnce(h.conductorId);
+
+      expect(first.status).toBe('failed');
+      expect(h.db.get<{ scheduledRetryAt: string | null }>('SELECT scheduled_retry_at FROM runs WHERE id = ?', [first.id])!.scheduledRetryAt).toBeTruthy();
+      expect(outbound()).toHaveLength(0);
+
+      h.db.run("UPDATE wakeups SET status = 'queued', run_id = NULL, not_before = '2000-01-01T00:00:00.000Z' WHERE agent_id = ? AND source = 'retry'", [h.conductorId]);
+      runtime.queue.push(async (input) => {
+        await h.services.threads!.outbound({ kind: 'agent', id: h.conductorId, runId: input.runId }, threadId, 'the answer', { runId: input.runId });
+        return { finalText: 'the answer', structured: undefined } as never;
+      });
+      const second = await runOnce(h.conductorId);
+
+      expect(second.status).toBe('succeeded');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ authorKind: 'agent', body: 'the answer' });
+    });
+
+    it('posts exactly one terminal notice when the retry ladder is spent', async () => {
+      const runId = await seededConductorRun();
+      // Three prior attempts in the chain, so the ladder is spent and no further retry is scheduled.
+      let link: string | null = null;
+      for (let i = 0; i < 3; i += 1) {
+        const id = newId();
+        h.db.insert('runs', {
+          id, workspaceId: h.workspaceId, agentId: h.conductorId, wakeupIdsJson: [], runtimeId: 'fake',
+          status: 'failed', turnEpoch: 1, cwd: h.ctx.paths.weaver, retryOfRunId: link, createdAt: nowIso(),
+        });
+        link = id;
+      }
+      h.db.update('runs', runId, { retryOfRunId: link });
+      runtime.queue.push({ error: { code: 'upstream_5xx', family: 'transient_upstream', message: 'upstream unavailable' } } as never);
+      const run = await executeRun(h.ctx, h.deps, runId);
+
+      expect(run.status).toBe('failed');
+      expect(h.db.get<{ scheduledRetryAt: string | null }>('SELECT scheduled_retry_at FROM runs WHERE id = ?', [runId])!.scheduledRetryAt).toBeNull();
+      const rows = outbound().filter((r) => r.runId === runId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ authorKind: 'system', body: 'The turn failed: upstream unavailable.' });
+    });
+
+    it('reports a stopped turn', async () => {
+      await h.services.threads!.inbound(HUMAN, threadId, 'any update?');
+      runtime.queue.push({ timedOut: true } as never);
+      const run = await runOnce(h.conductorId);
+
+      expect(run.status).toBe('timed_out');
+      const rows = outbound();
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.authorKind).toBe('system');
+      expect(rows[0]!.body).toMatch(/took too long and was stopped/);
+    });
+
+    it('leaves an authentication outage to the login gate', async () => {
+      const runId = await seededConductorRun();
+      runtime.queue.push({ error: { code: 'auth_expired', family: 'auth', message: 'login expired' } } as never);
+      const run = await executeRun(h.ctx, h.deps, runId);
+
+      expect(run.status).toBe('failed');
+      expect(outbound()).toHaveLength(0);
+    });
+  });
+});
 
 describe('MCP servers (VS-621)', () => {
   /** A fake that is registered under the `weave` runtime id, so the engine's weave-only wiring runs. */

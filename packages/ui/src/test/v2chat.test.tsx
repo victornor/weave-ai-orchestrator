@@ -33,7 +33,7 @@ const state = vi.hoisted(() => ({
   weaverRuntimeId: 'claude' as string,
   runStreams: [] as Array<{ id: string | null; live: boolean }>,
   runState: 'connected' as 'connected' | 'offline' | 'unreachable',
-  lastRun: null as { id: string; status: string } | null,
+  lastRun: null as { id: string; status: string; errorFamily?: string | null; scheduledRetryAt?: string | null } | null,
   compacting: false,
   answer: vi.fn(),
   post: vi.fn(),
@@ -961,6 +961,34 @@ describe('the V2 Chat screen', () => {
     const bubble = screen.getByText('unknown block').closest('[data-chat-message]') as HTMLElement;
     expect(bubble.querySelector('[data-block-tag]')).toBeNull();
     expect(bubble.textContent).not.toContain('bX');
+  });
+
+  it('renders a system notice centred and attributed to the system, not as a weaver reply (VS-663)', async () => {
+    state.messages = [message({ id: 'm1', direction: 'outbound', authorKind: 'system', body: 'The turn failed: the model provider returned an error.' })];
+    render(<V2ChatPage />);
+    await screen.findByText(/The turn failed/);
+
+    const notice = document.querySelector('[data-chat-message="system"]') as HTMLElement;
+    expect(notice).not.toBeNull();
+    expect(notice.textContent).toContain('System');
+    // It never renders as an outbound weaver bubble.
+    expect(document.querySelector('[data-chat-message="outbound"]')).toBeNull();
+  });
+
+  it('shows that a failed weaver turn is being retried, and only while a retry is pending (VS-663)', async () => {
+    state.lastRun = { id: 'r9', status: 'failed', errorFamily: 'transient_upstream', scheduledRetryAt: new Date(Date.now() + 60_000).toISOString() };
+    const pending = render(<V2ChatPage />);
+    expect(await screen.findByText(/retrying automatically/)).toBeInTheDocument();
+    expect(document.querySelector('[data-v2-turn-retrying]')?.textContent).toContain('model provider is unavailable');
+    // It is a transient state, not a thread message: nothing was written to the conversation.
+    expect(document.querySelectorAll('[data-chat-message]')).toHaveLength(0);
+    pending.unmount();
+
+    // A terminal failure with no scheduled retry is not shown as retrying.
+    state.lastRun = { id: 'r10', status: 'failed', errorFamily: 'unknown', scheduledRetryAt: null };
+    render(<V2ChatPage />);
+    await screen.findByLabelText('Message the weaver');
+    expect(document.querySelector('[data-v2-turn-retrying]')).toBeNull();
   });
 });
 

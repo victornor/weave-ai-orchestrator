@@ -77,6 +77,18 @@ describe('RunsService.list ordering (VS-410)', () => {
     expect(runs.list({ sort: 'duration', dir: 'asc' }).items.map((r) => r.id)).toEqual([quick, slow, running, neverStarted]);
   });
 
+  it('exposes a scheduled retry instant on the run, and null when it is not retried (VS-663)', () => {
+    h = makeHarness();
+    const runs = createRunsService(h.ctx, () => h!.deps());
+    const due = '2026-09-22T02:00:30.000Z';
+    const retrying = seed(h, { status: 'failed', scheduledRetryAt: due });
+    const terminal = seed(h, { status: 'failed' });
+    const byId = new Map(runs.list().items.map((r) => [r.id, r]));
+
+    expect(byId.get(retrying)!.scheduledRetryAt).toBe(due);
+    expect(byId.get(terminal)!.scheduledRetryAt).toBeNull();
+  });
+
   it('pages a sorted list with limit and offset', () => {
     h = makeHarness();
     const runs = createRunsService(h.ctx, () => h!.deps());

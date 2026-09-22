@@ -204,6 +204,7 @@ export function run(over: Partial<Run> = {}): Run {
     errorCode: null,
     errorFamily: null,
     retryOfRunId: null,
+    scheduledRetryAt: null,
     usage: null,
     costCents: null,
     result: null,

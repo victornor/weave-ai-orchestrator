@@ -109,6 +109,28 @@ export interface ChatConversationProps {
   renderAfterTrace?: (entry: ChatEntry) => React.ReactNode;
   /** Weaver-only: the live workers no message accounts for, below the conversation. */
   footer?: React.ReactNode;
+  /**
+   * VS-663: a non-persisted state line below the conversation — currently that a failed conductor
+   * turn is being retried. Not a thread message, so a blip that a retry resolves leaves no trace.
+   */
+  turnNotice?: React.ReactNode;
+}
+
+/**
+ * VS-663: while an automatic retry of the conductor's failed turn is scheduled, the chat says so —
+ * plainly, in the same muted system style as a persisted notice, but not written to the thread. A
+ * transient provider failure names the provider; any other retryable failure is just "the turn".
+ */
+export function TurnRetryNotice({ family }: { family: string | null }): React.ReactElement {
+  const reason = family === 'transient_upstream' ? 'The model provider is unavailable' : 'The turn failed';
+  return (
+    <div className="flex flex-col items-center gap-1" data-v2-turn-retrying>
+      <div className="max-w-[85%] rounded-r6 border border-line-1 px-3 py-2 text-center text-meta text-text-3">
+        {reason} — retrying automatically.
+      </div>
+      <span className="ac-mono text-nano text-text-4">System</span>
+    </div>
+  );
 }
 
 /** The live turning section: the activity row and streaming partials, the dropped-stream retry and
@@ -214,6 +236,7 @@ export function ChatConversation({
   renderPlanArtifactMessage,
   renderAfterTrace,
   footer,
+  turnNotice,
 }: ChatConversationProps): React.ReactElement {
   const runId = live?.id ?? null;
   const { events: runEvents, status: runStreamStatus, retryNow, partials, lastPartialAt, partialSince } = useRunEventStream(runId, { live: focused && (live?.running ?? false) });
@@ -342,6 +365,7 @@ export function ChatConversation({
             />
           ) : null}
 
+          {turnNotice}
           {footer}
           <div ref={stick.bottomRef} />
         </div>

@@ -25,6 +25,15 @@ export interface RuntimeCapabilities {
    * deltas. `full`: text, reasoning and tool-input deltas. The run page says so in words for `none`.
    */
   partialOutput?: 'none' | 'text' | 'full';
+  /**
+   * VS-659: the form in which an image attachment can reach this runtime's model. `native`: an MCP
+   * `image` content block returned from the agent's inbox is rendered to the model (Claude, ADR 0015).
+   * `model`: that depends on the run's model or provider profile — `native` only when the profile
+   * declares image input (the built-in `weave` runtime; its `compat.image.input` decides). `path`: the
+   * runtime cannot take an image block, so the daemon writes the bytes to a readable file and names
+   * that path. Omitted means `path` — the safe form that never silently drops an image (VS-659).
+   */
+  imageInput?: 'native' | 'path' | 'model';
 }
 export interface RuntimeDetection { status: 'available' | 'missing_binary' | 'broken' | 'unsupported'; version?: string; path?: string; notes?: string }
 /** `contextWindowTokens` is the model's own window; a variant with a larger window is its own entry.

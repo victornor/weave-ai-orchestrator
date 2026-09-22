@@ -612,6 +612,21 @@ describe('prompt rendering', () => {
     expect(prompt).toContain(body);
   });
 
+  it('names a readable path for an image attachment on a path-form run (VS-659)', async () => {
+    const wake = { id: 'w-path', workspaceId: h.workspaceId, agentId: worker.id, source: 'human_message', reason: 'message from Victor', payload: { threadId: 't1', messageId: 'm1', body: 'look at this', attachmentIds: ['att_1'] }, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], { imageInput: 'path', attachmentPaths: { att_1: '/home/agent/.weave-attachments/run-1/att_1-shot.png' } });
+    expect(prompt).toContain('/home/agent/.weave-attachments/run-1/att_1-shot.png');
+    expect(prompt).toContain('saved where you can read it');
+    expect(prompt).not.toContain('read them with `weave_inbox`');
+  });
+
+  it('keeps the inbox pointer for a native run (VS-659)', async () => {
+    const wake = { id: 'w-native', workspaceId: h.workspaceId, agentId: worker.id, source: 'human_message', reason: 'message from Victor', payload: { threadId: 't1', messageId: 'm1', body: 'look at this', attachmentIds: ['att_1'] }, status: 'claimed' } as never;
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], { imageInput: 'native' });
+    expect(prompt).toContain('read them with `weave_inbox`');
+    expect(prompt).not.toContain('saved where you can read it');
+  });
+
   it('shows a composer-selected roadmap block in the turn text the weaver reads (VS-638)', async () => {
     const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
     const wake = {

@@ -20,7 +20,7 @@ import {
 } from '@weave-ai/shared';
 import {
   flattenWakes, INCIDENT_LIST_MAX, INCIDENT_RESOLUTION_MAX, ARTIFACT_KIT_CSS, ARTIFACT_KIT_COMPONENTS, artifactKitTokens, readArtifactPlaybooks,
-  resolveOutboundAttachments, readAttachmentBytes, recordActivity, humanSelectionNotice, dictatedNotice, type OutboundAttachmentInput,
+  resolveOutboundAttachments, readAttachmentBytes, recordActivity, humanSelectionNotice, dictatedNotice, writeAttachmentFile, type OutboundAttachmentInput,
   type Actor, type CoreServices, type IncidentsService, type KnowledgeMirror,
 } from '@weave-ai/core';
 import type { RunTokenClaims } from './runtoken.js';
@@ -260,12 +260,18 @@ function bundledWakes(ctx: ToolCtx): Wakeup[] {
  * document's decoded content is inlined directly in the returned entry — the weaver gets the
  * content, not a filename it would have to fetch separately. A deleted/unreadable attachment is
  * dropped rather than failing the whole `weave_inbox` call.
+ *
+ * VS-659: on a `path`-form run the model cannot be shown an image block, so the bytes are written to
+ * a readable file under the run's attachment directory and the entry carries that path instead —
+ * the same file the turn prompt names, never a silent drop.
  */
 function attachmentsForWake(ctx: ToolCtx, w: Wakeup, images: McpImageBlock[]): unknown[] {
   const payload = w.payload as { threadId?: unknown; attachmentIds?: unknown } | null;
   const threadId = payload?.threadId;
   const ids = payload?.attachmentIds;
   if (typeof threadId !== 'string' || !Array.isArray(ids)) return [];
+  const imageForm = ctx.claims.imageInput;
+  const attachmentDir = ctx.claims.attachmentDir;
   const out: unknown[] = [];
   for (const id of ids) {
     if (typeof id !== 'string') continue;
@@ -273,8 +279,12 @@ function attachmentsForWake(ctx: ToolCtx, w: Wakeup, images: McpImageBlock[]): u
       const { attachment, bytes } = svc(ctx).threads.attachment(threadId, id);
       const base = { id: attachment.id, filename: attachment.filename, mediaType: attachment.mediaType, byteSize: attachment.byteSize };
       if (isAttachmentImageType(attachment.mediaType)) {
-        images.push({ type: 'image', data: bytes.toString('base64'), mimeType: attachment.mediaType });
-        out.push(base);
+        if (imageForm === 'path' && attachmentDir) {
+          out.push({ ...base, path: writeAttachmentFile(attachmentDir, attachment, bytes) });
+        } else {
+          images.push({ type: 'image', data: bytes.toString('base64'), mimeType: attachment.mediaType });
+          out.push(base);
+        }
       } else if (isAttachmentTextType(attachment.mediaType)) {
         out.push({ ...base, text: bytes.toString('utf8') });
       } else {

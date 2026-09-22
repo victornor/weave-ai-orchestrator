@@ -44,6 +44,9 @@ export const capabilities: RuntimeCapabilities = {
   costReporting: false,
   permissionModes: ['auto', 'restricted', 'bypass'],
   partialOutput: 'full',
+  // VS-659: the app-server protocol carries image input types, but our MCP-tool-result delivery of an
+  // image to the model is not established by our code; the daemon gives a readable path instead.
+  imageInput: 'path',
 };
 
 /** Codex has no `--list-models`; `listModels` tries `codex debug models --bundled` first. */

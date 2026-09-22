@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
 import { FakeRuntime, type RuntimeEvent, type TurnHandle, type TurnInput, type TurnSink, type TurnResult } from '@weave-ai/runtime-sdk';
-import { ProviderProfileSchema, RECORDED_RUN_PHASES, RUN_PHASES, type Decision, type McpServer, type Run, type Wakeup } from '@weave-ai/shared';
+import { ProviderProfileSchema, RECORDED_RUN_PHASES, RUN_PHASES, AC_ENV, type Agent, type Decision, type McpServer, type Run, type Wakeup } from '@weave-ai/shared';
 import { makeHarness, type TestHarness } from '../testing/context.js';
 import type { Actor } from '../api.js';
 import { createDecisionsService } from '../decisions/service.js';
@@ -142,6 +142,35 @@ describe('run engine', () => {
     await tick();
     expect(h.events.filter((e) => e.type === 'run.started')).toHaveLength(1);
     expect(h.events.filter((e) => e.type === 'run.finished')).toHaveLength(1);
+  });
+
+  it('writes an image attachment to a readable path and names it, on a path-form runtime (VS-659)', async () => {
+    h.services.tickets = createTicketsService(h.ctx, h.deps);
+    h.services.threads = createThreadsService(h.ctx, h.deps);
+    (h.services.threads as unknown as { attachment: unknown }).attachment = () => ({
+      attachment: { id: 'att_img', threadId: 'th_1', messageId: 'msg_1', filename: 'shot.png', mediaType: 'image/png', byteSize: 3, storageKey: 'x.png', createdAt: '2026-09-08T00:00:00.000Z' },
+      bytes: Buffer.from([1, 2, 3]),
+    });
+    runtime.imageInput = 'path';
+    runtime.queue.push({ structured: { state: 'working', summary: 'saw it', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+    h.services.wake!.enqueue(workerId, {
+      source: 'human_message', reason: 'message from captain',
+      payload: { threadId: 'th_1', messageId: 'msg_1', body: 'look at this', attachmentIds: ['att_img'] },
+    });
+
+    const run = await runOnce(workerId);
+    const home = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [workerId])!.homePath;
+    const readable = join(home, '.weave-attachments', run.id, 'att_img-shot.png');
+    expect(existsSync(readable)).toBe(true);
+    expect(readFileSync(readable)).toEqual(Buffer.from([1, 2, 3]));
+    expect(readFileSync(join(h.ctx.paths.runs, run.id, 'prompt.md'), 'utf8')).toContain(readable);
+
+    const token = runtime.inputs.at(-1)!.env[AC_ENV.RUN_TOKEN]!;
+    const claims = await verifyRunToken(runTokenSecret(h.ctx.db), token);
+    expect(claims.imageInput).toBe('path');
+    expect(claims.attachmentDir).toBe(join(home, '.weave-attachments', run.id));
   });
 
   it('records a successful run when the worker closes its own ticket (VS-512)', async () => {

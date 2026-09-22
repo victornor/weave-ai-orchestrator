@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -608,6 +608,48 @@ describe('weave_inbox delivers attachment content, not just a reference', () => 
     const image = blocks.find((b) => b.type === 'image');
     expect(image).toEqual({ type: 'image', data: Buffer.from([1, 2, 3]).toString('base64'), mimeType: 'image/png' });
     await client.close();
+  });
+
+  it('reports a readable path instead of an image block on a path-form run (VS-659)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ac-inbox-path-'));
+    try {
+      const { client, h } = await connect({ ...WORKER, imageInput: 'path', attachmentDir: dir });
+      h.impls.wake!['listForAgent'] = () => [wakeup({ payload: { threadId: 'th_1', attachmentIds: ['att_img'] } })];
+      h.impls.threads!['attachment'] = () => ({
+        attachment: { id: 'att_img', threadId: 'th_1', messageId: 'msg_1', filename: 'shot.png', mediaType: 'image/png', byteSize: 3, storageKey: 'x.png', createdAt: '2026-09-08T00:00:00.000Z' },
+        bytes: Buffer.from([1, 2, 3]),
+      });
+
+      const res = await client.callTool({ name: 'weave_inbox', arguments: {} });
+      const blocks = res.content as Array<{ type: string; text?: string }>;
+      expect(blocks.find((b) => b.type === 'image')).toBeUndefined();
+      const payload = JSON.parse(blocks[0]!.text!);
+      const entry = payload.data.messages[0].attachments[0] as { id: string; filename: string; mediaType: string; byteSize: number; path: string };
+      expect(entry).toMatchObject({ id: 'att_img', filename: 'shot.png', mediaType: 'image/png', byteSize: 3 });
+      expect(entry.path.startsWith(dir)).toBe(true);
+      expect(existsSync(entry.path)).toBe(true);
+      expect(readFileSync(entry.path)).toEqual(Buffer.from([1, 2, 3]));
+      await client.close();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('still inlines a text document\'s content on a path-form run (VS-659)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ac-inbox-path-txt-'));
+    try {
+      const { client, h } = await connect({ ...WORKER, imageInput: 'path', attachmentDir: dir });
+      h.impls.wake!['listForAgent'] = () => [wakeup({ payload: { threadId: 'th_1', attachmentIds: ['att_txt'] } })];
+      h.impls.threads!['attachment'] = () => ({
+        attachment: { id: 'att_txt', threadId: 'th_1', messageId: 'msg_1', filename: 'notes.txt', mediaType: 'text/plain', byteSize: 11, storageKey: 'x.txt', createdAt: '2026-09-08T00:00:00.000Z' },
+        bytes: Buffer.from('do the thing'),
+      });
+
+      const res = await client.callTool({ name: 'weave_inbox', arguments: {} });
+      const blocks = res.content as Array<{ type: string; text?: string }>;
+      expect(blocks).toHaveLength(1);
+      const payload = JSON.parse(blocks[0]!.text!);
+      expect(payload.data.messages[0].attachments).toEqual([{ id: 'att_txt', filename: 'notes.txt', mediaType: 'text/plain', byteSize: 11, text: 'do the thing' }]);
+      await client.close();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   it('inlines a text attachment\'s content directly, with no separate image block', async () => {

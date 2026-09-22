@@ -15,6 +15,9 @@ export const capabilities: RuntimeCapabilities = {
   partialOutput: 'full',
   // Below the agent's own trigger (window less max(16384, output cap)) for every window worth running; only the meter reads it.
   contextCompactionAt: 0.85,
+  // VS-659: an MCP tool image reaches this model only when its provider profile declares image
+  // input (`compat.image.input`); `none` drops it, and the run then gets a readable path instead.
+  imageInput: 'model',
 };
 
 const num = (description: string, minimum: number, maximum?: number) => ({ type: 'number', minimum, ...(maximum !== undefined ? { maximum } : {}), description });

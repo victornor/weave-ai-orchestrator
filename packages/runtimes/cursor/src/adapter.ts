@@ -24,6 +24,8 @@ export const capabilities: RuntimeCapabilities = {
   permissionModes: ['auto', 'restricted', 'bypass'],
   // VS-600: text deltas via `--stream-partial-output`; no reasoning or tool-input deltas.
   partialOutput: 'text',
+  // VS-659: no image delivery path in our code; the daemon gives a readable path.
+  imageInput: 'path',
 };
 
 /**

@@ -26,6 +26,8 @@ import { emitRunEvent, runState } from './active.js';
 import { PartialBuffer } from './partials.js';
 import { effectiveModels, modelSettingFor, modelsFor } from '../models/resolve.js';
 import { runTokenSecret, signRunToken } from './runtoken.js';
+import { imageAttachmentForm } from './image-input.js';
+import { materializeRunAttachments, runAttachmentDir } from './attachments.js';
 import { effectiveMcpServers, effectiveProviders, scopedSecretValue } from '../scoped.js';
 import { daemonSecretStore } from '../secrets/daemon.js';
 
@@ -168,12 +170,14 @@ function boundPayload(payload: unknown): Record<string, unknown> {
 // ---------- run token ----------
 
 /** Mint the run's MCP bearer token (PLAN §9.1); the claim shape lives in runtoken.ts. */
-export async function mintRunToken(ctx: WorkspaceContext, claims: { agentId: string; runId: string; ticketId: string | null; planId: string | null; kind: AgentKind; projectId: string | null; roleId: string | null; firstTurn?: boolean }): Promise<string> {
+export async function mintRunToken(ctx: WorkspaceContext, claims: { agentId: string; runId: string; ticketId: string | null; planId: string | null; kind: AgentKind; projectId: string | null; roleId: string | null; firstTurn?: boolean; imageInput?: 'native' | 'path'; attachmentDir?: string }): Promise<string> {
   return signRunToken(runTokenSecret(ctx.db), {
     workspaceId: ctx.workspaceId, runId: claims.runId, agentId: claims.agentId,
     agentKind: claims.kind,
     projectId: claims.projectId, ticketId: claims.ticketId, planId: claims.planId, roleId: claims.roleId,
     firstTurn: claims.firstTurn ?? false,
+    ...(claims.imageInput ? { imageInput: claims.imageInput } : {}),
+    ...(claims.attachmentDir ? { attachmentDir: claims.attachmentDir } : {}),
   });
 }
 
@@ -527,8 +531,14 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     const policy = sessionPolicyFor(agent, role);
     // VS-542: a changed tool contract retires the session so the runtime fetches the current schema.
     const turnSession = sessions.forTurn({ id: agent.id, kind: agent.kind, runtimeId: setting.runtime }, policy, ctx.toolContractHash?.(agent.kind));
-    promptOptions = { ...promptOptions, isFirstTurn: promptOptions.isFirstTurn ?? turnSession.isFirstTurn, sessionStale: turnSession.stale, sessionRetiredReason: turnSession.retireReason, turnEpoch: run.turnEpoch, runId };
+    // VS-659: how an image attachment reaches this run's model, decided once here and used by both the
+    // prompt and — through the run token — `weave_inbox`, so the two cannot disagree.
+    const imageInput = imageAttachmentForm(ctx, setting.runtime, setting.model ?? null);
+    const attachmentDir = runAttachmentDir(agent.homePath, runId);
+    promptOptions = { ...promptOptions, isFirstTurn: promptOptions.isFirstTurn ?? turnSession.isFirstTurn, sessionStale: turnSession.stale, sessionRetiredReason: turnSession.retireReason, turnEpoch: run.turnEpoch, runId, imageInput };
     const prompt = await phase('build_prompt', async () => {
+      // VS-659: a `path`-form run gets its image attachments written to readable files, named below.
+      if (imageInput === 'path') promptOptions.attachmentPaths = materializeRunAttachments(deps(), agent.homePath, runId, wakes).paths;
       const text = await buildTurnPrompt(ctx, deps, agent, wakes, promptOptions);
       writeFileSync(join(runDir, 'prompt.md'), text, 'utf8');
       return text;
@@ -542,7 +552,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     const isFirstInteractiveTurn = Boolean(ticket?.interactiveSession) && agent.turnCount === 0;
 
     // 4. run token + MCP config + env
-    const token = await mintRunToken(ctx, { agentId: agent.id, runId, ticketId: agent.ticketId, planId: agent.planId, kind: agent.kind, projectId: agent.projectId, roleId: agent.roleId, firstTurn: isFirstInteractiveTurn });
+    const token = await mintRunToken(ctx, { agentId: agent.id, runId, ticketId: agent.ticketId, planId: agent.planId, kind: agent.kind, projectId: agent.projectId, roleId: agent.roleId, firstTurn: isFirstInteractiveTurn, imageInput, ...(imageInput === 'path' ? { attachmentDir } : {}) });
     const baseMcpServers: Record<string, McpServerConfig> = {
       [MCP_SERVER_NAME]: { type: 'http', url: `${ctx.loopbackUrl.replace(/\/$/, '')}/mcp/runs/${runId}`, headers: { Authorization: `Bearer ${token}` } },
     };

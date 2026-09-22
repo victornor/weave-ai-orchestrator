@@ -26,6 +26,8 @@ export {
 } from './incidents/index.js';
 export { signRunToken, verifyRunToken, runTokenSecret, peekWorkspaceId, isRunToken, RUN_TOKEN_PREFIX, RUN_TOKEN_TTL_SECONDS, type RunTokenClaims } from './runs/runtoken.js';
 export { describeLiveInput, type LiveInputStatus } from './runs/active.js';
+export { imageAttachmentForm, profileImageInput, type ImageAttachmentForm } from './runs/image-input.js';
+export { attachmentFilePath, writeAttachmentFile, runAttachmentDir, materializeRunAttachments, ATTACHMENTS_DIR, type MaterializedAttachments } from './runs/attachments.js';
 export { baseMemoryMb, effectiveWorkspaceWorkerMemory } from './runs/memory.js';
 export { isWorkerStalled, getWorkerStallState, type WorkerStallState } from './supervisor/stall-state.js';
 export * from './workspace/index.js';

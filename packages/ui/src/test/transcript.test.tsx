@@ -83,6 +83,15 @@ describe('runEventsToTranscript', () => {
     expect(blocks.some((b) => b.type === 'status')).toBe(false);
   });
 
+  it('keeps an interrupted delivery distinct from queued on a human input (VS-662)', () => {
+    const blocks = runEventsToTranscript([
+      ev({ id: 'e1', type: 'human.input', payload: { text: 'stop, wrong direction', authorKind: 'agent', delivery: 'interrupted' } }),
+      ev({ id: 'e2', type: 'human.input', payload: { text: 'later is fine', authorKind: 'human', delivery: 'queued' } }),
+    ]);
+    expect(blocks[0]).toMatchObject({ type: 'human', delivery: 'interrupted' });
+    expect(blocks[1]).toMatchObject({ type: 'human', delivery: 'queued' });
+  });
+
   it('marks an errored result and a denied call', () => {
     const [errored] = runEventsToTranscript([
       ev({ id: 'e1', type: 'tool.call', payload: { id: 't1', name: 'Bash' } }),

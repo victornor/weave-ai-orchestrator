@@ -84,7 +84,8 @@ export interface HumanInputBlock extends TranscriptBlockBase {
   kind: 'human_input';
   text: string;
   authorKind: AuthorKind;
-  delivery: 'mid_turn' | 'queued';
+  /** VS-662: `interrupted` when the send stopped the running turn to deliver the message. */
+  delivery: 'mid_turn' | 'queued' | 'interrupted';
 }
 
 /**

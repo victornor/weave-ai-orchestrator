@@ -10,15 +10,13 @@ a guess about whether it landed in time.
 
 ### Requirement: The conductor's steering asks for mid-turn delivery by default
 
-When the conductor sends a worker a message and does not say otherwise, the system SHALL attempt to
-deliver that message to the worker's currently executing turn before falling back to queuing it for
-the worker's next turn.
+When the conductor sends a worker a message and does not explicitly ask for queued delivery, the system SHALL deliver it immediately under `worker-supervision/running-worker-steering`: into the worker's executing turn where that turn has an open mid-turn channel, and otherwise by interrupting the turn and resuming the same session with the message. The conductor's message SHALL NOT be queued behind a running turn.
+
+Where the worker has no turn executing, the message SHALL be queued for its next turn, and a request not to attempt mid-turn delivery SHALL queue it regardless.
 
 #### Scenario: The conductor steers a worker mid-turn on a capable runtime
 
-- **WHEN** the conductor sends a message to a worker whose runtime supports mid-turn input and whose
-  turn is executing and still able to receive input, and the conductor does not ask for queued
-  delivery
+- **WHEN** the conductor sends a message to a worker whose runtime supports mid-turn input and whose turn is executing and still able to receive input, and the conductor does not ask for queued delivery
 - **THEN** the message is delivered to that turn and the outcome is reported as mid-turn delivery
 
 #### Scenario: The conductor explicitly asks for the message to be queued
@@ -26,11 +24,14 @@ the worker's next turn.
 - **WHEN** the conductor sends a message and explicitly asks not to attempt mid-turn delivery
 - **THEN** the message is queued for the worker's next turn even if a running turn could have taken it
 
+#### Scenario: A running worker with no mid-turn channel is interrupted
+
+- **WHEN** the conductor sends a live message to a ticket-bound worker whose turn is executing without an open mid-turn channel
+- **THEN** the executing turn is interrupted, and the worker's next turn starts on the same session carrying that message, instead of the message waiting behind the running turn
+
 ### Requirement: The conductor is told which delivery happened
 
-Every message the conductor sends to a worker SHALL report its outcome as either mid-turn delivery or
-queued delivery, so the conductor can tell whether a correction landed inside the worker's current
-turn or will apply starting with its next one.
+Every message the conductor sends to a worker SHALL report its outcome as mid-turn delivery, an interrupt, or queued delivery, so the conductor can tell whether the message landed inside the worker's current turn, stopped that turn so the message is delivered on the worker's next turn, or will apply starting with the worker's next turn. The reported outcome SHALL be the one that actually occurred.
 
 #### Scenario: Mid-turn delivery is reported
 
@@ -39,10 +40,13 @@ turn or will apply starting with its next one.
 
 #### Scenario: A worker whose runtime cannot take mid-turn input
 
-- **WHEN** the conductor sends a message to a worker whose runtime does not support mid-turn input, or
-  whose turn is not currently executing, or whose executing turn can no longer receive input
-- **THEN** the message is queued for the worker's next turn and the conductor's tool call reports
-  queued delivery — the conductor is never left to assume the message arrived
+- **WHEN** the conductor sends a message to a worker whose runtime does not support mid-turn input and no turn is currently executing for it
+- **THEN** the message is queued for the worker's next turn and the conductor's tool call reports queued delivery — the conductor is never left to assume the message arrived
+
+#### Scenario: Interrupt delivery is reported
+
+- **WHEN** the conductor's message interrupts the worker's executing turn
+- **THEN** the conductor's tool call reports an interrupt, not a mid-turn delivery and not a queue
 
 ### Requirement: The conductor's steering is attributed as the conductor's, whichever way it is delivered
 
@@ -69,8 +73,7 @@ message is instruction only.
 
 ### Requirement: A message is delivered exactly once
 
-The system SHALL NOT both deliver a conductor message mid-turn and also wake the worker for the same
-message afterwards, and SHALL NOT drop a message that could not be delivered mid-turn.
+The system SHALL NOT both deliver a conductor message mid-turn and also wake the worker for the same message afterwards, and SHALL NOT drop a message that could not be delivered mid-turn. A message delivered by interrupting a turn SHALL be carried by the wake that resumes the worker exactly once, and when several messages arrive while the turn is stopping each SHALL be carried exactly once by the single turn that resumes the worker.
 
 #### Scenario: A mid-turn delivery does not also queue a wake
 
@@ -81,3 +84,8 @@ message afterwards, and SHALL NOT drop a message that could not be delivered mid
 
 - **WHEN** the conductor's message could not be delivered mid-turn, for any reason
 - **THEN** it is queued and wakes the worker at the start of its next turn
+
+#### Scenario: An interrupting steer is delivered once by the resumed turn
+
+- **WHEN** the conductor's message interrupts the worker's turn
+- **THEN** the message is carried by the wake that starts the worker's next turn, exactly once, and no separate queued delivery of it also applies

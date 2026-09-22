@@ -819,19 +819,70 @@ describe('workers', () => {
       expect(events[0]!.payload).toMatchObject({ delivery: 'interrupted' });
     });
 
-    it("does not interrupt a live message on the conductor's behalf — only a human's send can (VS-254)", async () => {
+    it("interrupts a running turn for the conductor's live steer on a runtime with no `send` (VS-662)", async () => {
       const ticket = seedTicket();
       const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
       wake.calls.length = 0;
       const runId = seedRun(worker);
       runState(h.ctx).active.set(runId, { runId, agentId: worker.id, startedAt: Date.now(), pid: 1, cancel: async () => undefined });
 
-      const outcome = await workers.message(CONDUCTOR, worker.id, 'also, when you get a chance', { live: true });
-      expect(outcome.delivery).toBe('queued');
-      expect(outcome.wake).not.toBeNull();
-      expect(h.services.runs!.cancel).not.toHaveBeenCalled();
+      const outcome = await workers.message(CONDUCTOR, worker.id, 'stop, wrong direction', { live: true });
+      expect(outcome.delivery).toBe('interrupted');
+      expect(outcome.runId).toBe(runId);
+      expect(h.services.runs!.cancel).toHaveBeenCalledWith(CONDUCTOR, runId, 'interrupt', 'message');
       expect(wake.calls).toHaveLength(1);
-      expect(wake.calls[0]).toMatchObject({ input: expect.objectContaining({ source: 'conductor_request' }) });
+      expect(wake.calls[0]).toMatchObject({
+        agentId: worker.id,
+        input: expect.objectContaining({
+          source: 'live_interrupt',
+          reason: 'stop, wrong direction',
+          payload: expect.objectContaining({ message: 'stop, wrong direction', interruptedRunId: runId }),
+        }),
+      });
+
+      const events = h.db.all<{ payload: Record<string, unknown> }>('SELECT payload_json FROM run_events WHERE run_id = ?', [runId]);
+      expect(events[0]!.payload).toMatchObject({ text: 'stop, wrong direction', authorKind: 'agent', delivery: 'interrupted' });
+    });
+
+    it('does not interrupt a second time while a steer is already stopping the turn; both messages ride the resume (VS-662)', async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      // A real cancel marks the run synchronously; mirror that so the coalescing guard sees it.
+      const cancel = vi.fn(async (_a: unknown, id: string, mode: 'interrupt' | 'kill', cause?: 'message') => {
+        const entry = runState(h.ctx).active.get(id);
+        if (entry) entry.cancelled = { mode, cause };
+      });
+      h.services.runs = { cancel } as never;
+      runState(h.ctx).active.set(runId, { runId, agentId: worker.id, startedAt: Date.now(), pid: 1, cancel: async () => undefined });
+
+      const first = await workers.message(CONDUCTOR, worker.id, 'first steer', { live: true });
+      const second = await workers.message(CONDUCTOR, worker.id, 'second steer', { live: true });
+
+      expect(first.delivery).toBe('interrupted');
+      expect(second.delivery).toBe('interrupted');
+      expect(cancel).toHaveBeenCalledTimes(1);
+      expect(wake.calls).toHaveLength(2);
+      expect(wake.calls.map((c) => (c.input.payload as { message?: string }).message)).toEqual(['first steer', 'second steer']);
+    });
+
+    it("does not interrupt a live message on a capable runtime; it delivers it mid-turn (VS-662)", async () => {
+      const ticket = seedTicket();
+      const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+      wake.calls.length = 0;
+      const runId = seedRun(worker);
+      const sent: string[] = [];
+      runState(h.ctx).active.set(runId, {
+        runId, agentId: worker.id, startedAt: Date.now(), pid: 1,
+        cancel: async () => undefined, send: async (text: string) => { sent.push(text); return 'delivered'; },
+      });
+
+      const outcome = await workers.message(CONDUCTOR, worker.id, 'fold this in', { live: true });
+      expect(outcome.delivery).toBe('mid_turn');
+      expect(sent).toEqual(['fold this in']);
+      expect(h.services.runs!.cancel).not.toHaveBeenCalled();
+      expect(wake.calls).toHaveLength(0);
     });
 
     it('a live message queues, not interrupts, when the runtime has no `send` and no turn is running', async () => {
@@ -839,10 +890,11 @@ describe('workers', () => {
       const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
       wake.calls.length = 0;
 
-      const outcome = await workers.message(HUMAN, worker.id, 'no turn to interrupt', { live: true });
+      const outcome = await workers.message(CONDUCTOR, worker.id, 'no turn to interrupt', { live: true });
       expect(outcome.delivery).toBe('queued');
       expect(h.services.runs!.cancel).not.toHaveBeenCalled();
       expect(wake.calls).toHaveLength(1);
+      expect(wake.calls[0]).toMatchObject({ input: expect.objectContaining({ source: 'conductor_request' }) });
     });
 
     it("carries a live-interrupt message whole in the wake body (VS-254)", async () => {

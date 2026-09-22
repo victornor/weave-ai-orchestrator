@@ -71,7 +71,7 @@ function lineFor(block: TranscriptBlock, textChars: number, detailChars: number)
 
     case 'human_input': {
       const h = block as HumanInputBlock;
-      return `${h.authorKind}: ${clamp(h.text, textChars)} (${h.delivery === 'mid_turn' ? 'mid-turn' : 'queued'})`;
+      return `${h.authorKind}: ${clamp(h.text, textChars)} (${h.delivery === 'mid_turn' ? 'mid-turn' : h.delivery === 'interrupted' ? 'interrupted' : 'queued'})`;
     }
 
     case 'compaction':

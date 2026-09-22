@@ -1029,7 +1029,7 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_worker_message', scope: 'weaver', input: z.object({ workerId: z.string().min(1), message: z.string().min(1), live: z.boolean().optional() }),
-    description: 'Steer a worker: posts a comment on its ticket, attributed as yours, then tries to deliver it to the worker\'s running turn (default: try). Returns { delivery: "mid_turn" | "queued", runId, wake } — mid_turn means it landed inside the current turn; queued means it will apply at the worker\'s next wake (conductor_request), never both. Never widens what the worker may do and never answers an open decision for it. Set live:false to queue it outright.',
+    description: 'Steer a worker: posts a comment on its ticket, attributed as yours, then delivers it to the worker now (default). Returns { delivery: "mid_turn" | "interrupted" | "queued", runId, wake } — mid_turn means it landed inside the running turn; interrupted means the running turn was stopped and the message will be delivered on the worker\'s next turn, which resumes the same session; queued means it will apply at the worker\'s next wake, never both. A running ticket worker is never left queued behind its turn. Never widens what the worker may do and never answers an open decision for it. Set live:false to queue it outright.',
     handler: (ctx, i) => svc(ctx).workers.message(ctx.actor, i.workerId, i.message, { live: i.live ?? true }),
   },
   {

@@ -902,12 +902,28 @@ describe('run engine', () => {
       expect(['active', 'error']).toContain(agent.status); // IDLE_AGENT_STATUSES — never parked, never a retry-ladder park
       const openDecisions = h.db.all('SELECT id FROM decisions WHERE ticket_id = ? AND status = ?', [ticketId, 'open']);
       expect(openDecisions).toHaveLength(0); // no parkForHuman card was raised for this
+      // The first turn established a session; the resumed turn must reuse it, not start fresh (VS-662).
+      const sessionBefore = h.db.get<{ id: string }>(
+        "SELECT id FROM agent_sessions WHERE agent_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+        [workerId],
+      );
+      expect(sessionBefore?.id).toBeTruthy();
 
       runtime.queue.push({ structured: { state: 'working', summary: 'resumed', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
       h.services.wake!.enqueue(workerId, { source: 'live_interrupt', reason: 'stop, wrong direction', payload: { ticketId, message: 'stop, wrong direction', interruptedRunId: runId } });
       const resumed = await runOnce(workerId);
       expect(resumed.id).not.toBe(runId);
       expect(resumed.status).toBe('succeeded');
+
+      const sessionAfter = h.db.get<{ id: string }>(
+        "SELECT id FROM agent_sessions WHERE agent_id = ? AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+        [workerId],
+      );
+      expect(sessionAfter?.id).toBe(sessionBefore!.id);
+      const resumedInput = runtime.inputs[runtime.inputs.length - 1]!;
+      expect(resumedInput.session.ref).not.toBeNull();
+      expect(resumedInput.prompt).toContain('stop, wrong direction');
+      expect(resumedInput.prompt).toContain('Your previous turn was interrupted');
     });
 
     it("a persistent session's mid-turn interrupt finalizes exactly like a worker's or the weaver's own — no session-specific code path exists (VS-495)", async () => {

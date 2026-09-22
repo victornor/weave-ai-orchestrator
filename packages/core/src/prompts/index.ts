@@ -530,7 +530,30 @@ export async function buildTurnPrompt(
     "SELECT * FROM decisions WHERE workspace_id = ? AND status = 'answered' AND asked_by_agent_id = ? AND answered_at > COALESCE((SELECT MAX(finished_at) FROM runs WHERE agent_id = ? AND status IN ('succeeded','failed','timed_out','interrupted','cancelled')), '') ORDER BY answered_at",
     [ctx.workspaceId, agent.id, agent.id],
   );
-  if (answered.length) {
+  // VS-662: an answer that interrupted the worker's turn is written before the interrupted run
+  // finalizes, so the query above (`answered_at > last finished run`) excludes it — the answer the
+  // wake carried would then be missing from the turn that resumes. Merge the answer carried by a
+  // `decision_answered` wake, keyed by decision id, so the resumed turn is told what it was steered
+  // with even though the row's `finished_at` has already overtaken the answer.
+  const wakeAnswers = new Map<string, { key: string | null; text: string | null; dictated: boolean }>();
+  for (const w of flat) {
+    if (w.source !== 'decision_answered') continue;
+    const id = w.payload['decisionId'];
+    if (typeof id !== 'string') continue;
+    const a = w.payload['answer'] as { key?: unknown; text?: unknown } | undefined;
+    wakeAnswers.set(id, {
+      key: typeof a?.key === 'string' ? a.key : null,
+      text: typeof a?.text === 'string' ? a.text : null,
+      dictated: w.payload['dictated'] === true,
+    });
+  }
+  const answeredIds = new Set(answered.map((d) => d.id));
+  const answeredExtra = [...wakeAnswers.keys()]
+    .filter((id) => !answeredIds.has(id))
+    .map((id) => ctx.db.get<S.Decision>('SELECT * FROM decisions WHERE workspace_id = ? AND id = ?', [ctx.workspaceId, id]))
+    .filter((d): d is S.Decision => d !== undefined);
+  const answeredAll = [...answered, ...answeredExtra];
+  if (answeredAll.length) {
     // VS-657: a dictated free-text answer is marked where the answer is read.
     const dictatedDecisions = new Set(
       flat.filter((w) => w.source === 'decision_answered' && w.payload['dictated'] === true)
@@ -538,7 +561,13 @@ export async function buildTurnPrompt(
         .filter((id): id is string => typeof id === 'string'),
     );
     parts.push('\n## Answered decisions');
-    parts.push(bounded(answered, 8, (d) => `- ${d.id}${d.ticketId ? ` (${ticket(ctx, d.ticketId)?.identifier ?? d.ticketId})` : ''}: "${d.title}" — answered ${d.answerKey ?? ''}${d.answerText ? `: "${dictatedDecisions.has(d.id) ? `${VOICE_DICTATED_NOTICE} ` : ''}${d.answerText}"` : ''}`, 'call `weave_inbox`'));
+    parts.push(bounded(answeredAll, 8, (d) => {
+      const w = wakeAnswers.get(d.id);
+      const key = w?.key ?? d.answerKey ?? '';
+      const text = w?.text ?? d.answerText ?? null;
+      const dictated = w?.dictated === true || dictatedDecisions.has(d.id);
+      return `- ${d.id}${d.ticketId ? ` (${ticket(ctx, d.ticketId)?.identifier ?? d.ticketId})` : ''}: "${d.title}" — answered ${key}${text ? `: "${dictated ? `${VOICE_DICTATED_NOTICE} ` : ''}${text}"` : ''}`;
+    }, 'call `weave_inbox`'));
   }
 
   const notes: string[] = [];
@@ -549,11 +578,13 @@ export async function buildTurnPrompt(
   // VS-254: a human's live message on a runtime that cannot take mid-turn input interrupted the
   // previous turn instead of queuing behind it — the message itself is already the `live_interrupt`
   // wake's reason, above under "Why you were woken". VS-657: the same holds for a message to a
-  // ticketless session, whose resume wake is a `human_message` carrying `interruptedRunId`.
+  // ticketless session, whose resume wake is a `human_message` carrying `interruptedRunId`. VS-662:
+  // any steer whose wake carries `interruptedRunId` — a ticket comment, an answered decision, a
+  // session message — is the same case, so the note keys off the payload, not the wake source.
   // Established by testing real interrupts against scratch git repos (design.md): the process group
   // unwinds cleanly, but a `git` command that fails with "Unable to create '.../index.lock'" is a
   // stale lock the interrupt left behind, not a real conflict — `git status` alone will not show it.
-  if (flat.some((w) => w.source === 'live_interrupt' || (w.source === 'human_message' && typeof w.payload['interruptedRunId'] === 'string'))) {
+  if (flat.some((w) => w.source === 'live_interrupt' || typeof w.payload['interruptedRunId'] === 'string')) {
     notes.push(
       '- Your previous turn was interrupted to deliver the message above; verify what you had already done before redoing it or acting on the message. If a `git` command now fails with "Unable to create \'.../index.lock\': File exists", that is a stale lock left by the interrupt — remove it and retry, it is not a real conflict.',
     );

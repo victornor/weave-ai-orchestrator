@@ -15,7 +15,7 @@ export type TranscriptBlock =
   | { id: string; type: 'phase'; phase: string; durationMs: number | null; tokens: number | null }
   | { id: string; type: 'status'; text: string; status: 'needs-you' | 'blocked' | 'failed' | 'done' | 'working' | 'stalled' }
   | { id: string; type: 'command'; command: string; exitCode: number | null; output: string | null }
-  | { id: string; type: 'human'; text: string; delivery: 'mid_turn' | 'queued' }
+  | { id: string; type: 'human'; text: string; delivery: 'mid_turn' | 'queued' | 'interrupted' }
   | { id: string; type: 'report'; report: RunReport; text: string }
   | { id: string; type: 'compaction'; text: string; trigger: 'auto' | 'manual' | null; preTokens: number | null; postTokens: number | null };
 
@@ -335,7 +335,7 @@ export function runEventsToTranscript(all: readonly RunEvent[]): TranscriptBlock
         break;
       }
       case 'human.input': {
-        out.push({ id: e.id, type: 'human', text: str(p['text']), delivery: p['delivery'] === 'mid_turn' ? 'mid_turn' : 'queued' });
+        out.push({ id: e.id, type: 'human', text: str(p['text']), delivery: p['delivery'] === 'mid_turn' ? 'mid_turn' : p['delivery'] === 'interrupted' ? 'interrupted' : 'queued' });
         break;
       }
       case 'session.compaction.completed': {

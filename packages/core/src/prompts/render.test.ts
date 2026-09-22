@@ -503,6 +503,42 @@ describe('prompt rendering', () => {
     expect(prompt).not.toContain('interrupted to deliver the live message');
   });
 
+  it('tells a resumed turn it was interrupted for a ticket comment, and shows the comment (VS-662)', async () => {
+    const wake = {
+      id: 'w-tc', workspaceId: h.workspaceId, agentId: worker.id, source: 'ticket_comment',
+      reason: 'new comment on TST-42', payload: { ticketId, commentId: 'c1', body: 'fold this into the plan', interruptedRunId: 'run-9' }, status: 'claimed',
+    } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).toContain('fold this into the plan');
+    expect(prompt).toContain('Your previous turn was interrupted to deliver the message above');
+  });
+
+  it('shows the answer an interrupting decision_answered wake carried even after the run it interrupted finalized (VS-662)', async () => {
+    const decId = newId();
+    h.db.insert('decisions', {
+      id: decId, workspaceId: h.workspaceId, ticketId, kind: 'question', owner: 'human', title: 'Which store?',
+      context: '', status: 'answered', answerKey: 'sqlite', answerText: 'use sqlite',
+      askedByAgentId: worker.id, answeredAt: '2020-01-01T00:00:00.000Z', createdAt: '2020-01-01T00:00:00.000Z',
+    });
+    // An interrupted run that finalized after the answer was written: the DB "answered after the last
+    // finished run" query excludes the answer, so the wake's payload is what must carry it.
+    h.db.insert('runs', {
+      id: 'run-done', workspaceId: h.workspaceId, agentId: worker.id, wakeupIdsJson: [], runtimeId: 'claude',
+      status: 'succeeded', turnEpoch: 1, cwd: '/tmp', finishedAt: nowIso(), createdAt: nowIso(),
+    });
+    const wake = {
+      id: 'w-da', workspaceId: h.workspaceId, agentId: worker.id, source: 'decision_answered',
+      reason: 'decision answered: Which store?', payload: { decisionId: decId, answer: { key: 'sqlite', text: 'use sqlite' }, ticketId, interruptedRunId: 'run-9' }, status: 'claimed',
+    } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).toContain('## Answered decisions');
+    expect(prompt).toContain('Which store?');
+    expect(prompt).toContain('answered sqlite: "use sqlite"');
+    expect(prompt).toContain('Your previous turn was interrupted');
+  });
+
   const wakeFor = (id: string) => ({ id, workspaceId: h.workspaceId, agentId: worker.id, source: 'system', reason: 'assigned', payload: {}, status: 'claimed' } as never);
   const promptAt = async (turnCount: number) => {
     h.db.update('agents', worker.id, { turnCount });

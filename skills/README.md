@@ -16,7 +16,7 @@ Always-loaded prompts live in `templates/` (`weaver.AGENTS.md.tmpl`, `worker.AGE
 | `weave-ai-planning` | weaver | Minimal ticket graphs, qualifying split reasons, acceptance criteria. |
 | `weave-ai-briefing` | weaver | The four-section briefing, one decision at a time. |
 | `weave-ai-knowledge` | all | Knowledge placement, entry rules, the curation procedure. |
-| `weave-ai-artifacts` | all | When and how to publish a self-contained HTML artifact with the AC Artifact Kit; diagram, table, comparison, plan, code and change playbooks. |
+| `weave-ai-artifacts` | all | When and how to publish a self-contained HTML artifact with the AC Artifact Kit; diagram, table, comparison, plan, code, change and gallery playbooks. |
 
 `manifest.json` is the machine-readable version of that table: `skills[].{name, audience, description}` where `audience` is `weaver`, `worker` or `all`, plus the per-runtime install paths.
 

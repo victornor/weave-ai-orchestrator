@@ -384,6 +384,142 @@ pre code {
   border-radius: 50%;
   background: var(--accent);
 }
+
+/* -------------------------------------------------------------- * image gallery * ------------ */
+/* A labelled grid of images whose cells open into a full-viewport, pannable, zoomable viewer.
+   Pure CSS state: :target opens a cell, the hidden checkbox + label zooms it, overflow: auto
+   pans. No JavaScript — the served artifact's CSP has no script-src, so a script would never run.
+   Each image is embedded once; the same <img> is the thumbnail and the enlarged view. */
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-5);
+  margin: 0;
+}
+.gallery-figure {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--line-1);
+  border-radius: var(--r6);
+  background: var(--bg-1);
+}
+.gallery .shot {
+  display: block;
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r4);
+  background: var(--bg-2);
+  line-height: 0;
+}
+.gallery .shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.gallery-caption {
+  font-size: var(--fs-meta);
+  color: var(--text-2);
+}
+
+/* Visually hidden but still focusable, so the zoom control is keyboard-reachable. */
+.gallery-zoom {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.gallery-close,
+.gallery-zoom-btn,
+.gallery-nav {
+  display: none;
+}
+
+/* --- the cell, once targeted, becomes the viewer --- */
+.gallery-figure:target {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-5);
+  margin: 0;
+  padding: var(--space-8);
+  border: 0;
+  border-radius: 0;
+  background: var(--overlay);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.gallery-figure:target .shot {
+  margin: auto;
+  border: 0;
+  background: none;
+  overflow: visible;
+}
+.gallery-figure:target .shot img {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 80vh;
+  border-radius: var(--r6);
+  box-shadow: var(--elev-sheet);
+}
+.gallery-figure:target .gallery-caption {
+  color: var(--text-soft);
+  text-align: center;
+}
+/* Zoom to natural size; the auto margins stop centring and the viewer scrolls to pan. */
+.gallery-zoom:checked ~ .shot img {
+  max-width: none;
+  max-height: none;
+}
+.gallery-figure:target .gallery-close,
+.gallery-figure:target .gallery-zoom-btn,
+.gallery-figure:target .gallery-nav {
+  display: inline-flex;
+}
+.gallery-close {
+  position: fixed;
+  top: var(--space-6);
+  right: var(--space-6);
+  z-index: 21;
+}
+.gallery-zoom-btn {
+  position: fixed;
+  top: var(--space-6);
+  right: calc(var(--space-6) + 5rem);
+  z-index: 21;
+  cursor: pointer;
+}
+.gallery-zoom-btn::after {
+  content: 'Zoom';
+}
+.gallery-zoom:checked ~ .gallery-zoom-btn::after {
+  content: 'Fit';
+}
+.gallery-nav {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-6);
+  gap: var(--space-4);
+  z-index: 21;
+  transform: translateX(-50%);
+}
+.gallery-nav a {
+  min-width: 2.5rem;
+  justify-content: center;
+}
 `;
 
 export interface ArtifactKitTokens {
@@ -419,6 +555,12 @@ export const ARTIFACT_KIT_COMPONENTS: readonly ArtifactKitComponent[] = [
   { className: 'code / kbd', description: 'Inline code and keyboard-key styling; wrap `code` in `pre` for a code block.' },
   { className: 'steps', description: 'A numbered vertical list for a plan or procedure.' },
   { className: 'timeline', description: 'A dotted vertical line with entries beside it, for a sequence of events.' },
+  { className: 'gallery', description: 'A responsive grid of labelled image cells; pair with `.gallery-figure`/`.shot`/`.gallery-caption`.' },
+  { className: 'gallery-figure', description: 'One gallery cell: a captioned thumbnail that `:target` promotes to a full-viewport viewer. Give it a unique `id` and link to it with `.shot`.' },
+  { className: 'shot', description: 'The thumbnail link (`<a class="shot" href="#cell-id">` around the `<img>`) that opens its cell full-viewport.' },
+  { className: 'gallery-caption', description: 'A short caption under a gallery image.' },
+  { className: 'gallery-zoom / gallery-zoom-btn', description: 'The hidden checkbox plus its `<label>` that toggles the open image between fit and natural size, with no JavaScript.' },
+  { className: 'gallery-close / gallery-nav', description: 'The fixed Close link (to the grid\'s own id) and the optional prev/next `<nav>` inside an open gallery cell.' },
 ] as const;
 
 /**

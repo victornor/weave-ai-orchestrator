@@ -402,7 +402,7 @@ export function runEventsToTranscript(events: readonly RunEvent[] | null | undef
       case 'human.input': {
         const text = scrub(str(p, 'text')) ?? '';
         const authorKind = (str(p, 'authorKind') ?? 'human') as AuthorKind;
-        const delivery: HumanInputBlock['delivery'] = str(p, 'delivery') === 'mid_turn' ? 'mid_turn' : 'queued';
+        const delivery: HumanInputBlock['delivery'] = str(p, 'delivery') === 'mid_turn' ? 'mid_turn' : str(p, 'delivery') === 'interrupted' ? 'interrupted' : 'queued';
         push({ ...base(ev), kind: 'human_input', text, authorKind, delivery } satisfies HumanInputBlock);
         break;
       }

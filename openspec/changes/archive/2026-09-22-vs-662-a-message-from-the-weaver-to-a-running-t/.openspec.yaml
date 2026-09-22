@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-22
+goal: A message from the weaver to a running ticket worker must interrupt its
+  turn and resume with the message, not sit as queued

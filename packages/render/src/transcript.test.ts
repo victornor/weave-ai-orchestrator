@@ -305,12 +305,16 @@ describe('runEventsToTranscript', () => {
     const blocks = runEventsToTranscript([
       ev('human.input', { text: 'check the failing test', authorKind: 'human', authorId: 'victor', delivery: 'mid_turn' }),
       ev('human.input', { text: 'later is fine', authorKind: 'human', authorId: 'victor', delivery: 'queued' }),
+      ev('human.input', { text: 'stop, wrong direction', authorKind: 'agent', authorId: 'weaver', delivery: 'interrupted' }),
     ]);
-    expect(blocks.map((b) => b.kind)).toEqual(['human_input', 'human_input']);
+    expect(blocks.map((b) => b.kind)).toEqual(['human_input', 'human_input', 'human_input']);
     const mid = blocks[0] as HumanInputBlock;
     expect(mid).toMatchObject({ text: 'check the failing test', authorKind: 'human', delivery: 'mid_turn' });
     const queued = blocks[1] as HumanInputBlock;
     expect(queued.delivery).toBe('queued');
+    // VS-662: an interrupt is its own delivery, never collapsed to `queued`.
+    const interrupted = blocks[2] as HumanInputBlock;
+    expect(interrupted).toMatchObject({ text: 'stop, wrong direction', authorKind: 'agent', delivery: 'interrupted' });
   });
 
   it('redacts a secret in a human message like anything else on the wire', () => {

@@ -9,6 +9,7 @@ import { makeHarness, fakeWake, fakeSpecs, type TestHarness } from '../testing/c
 import { createTicketsService } from './service.js';
 import { GitWorktreeProvider } from '../worktrees/git.js';
 import { git } from '../util/git.js';
+import { runState } from '../runs/active.js';
 import type { Actor, TicketsService } from '../api.js';
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 
@@ -1157,6 +1158,23 @@ describe('tickets', () => {
       tickets.comment(HUMAN, t.id, 'please also add tests');
       expect(wake.calls).toEqual([expect.objectContaining({ agentId: workerId, input: expect.objectContaining({ source: 'ticket_comment' }) })]);
       expect(tickets.comments(t.id)).toHaveLength(2);
+    });
+
+    it("interrupts the worker's running turn when a human comments (VS-662)", () => {
+      const t = make();
+      const workerId = h.addWorker(t.id);
+      const cancel = vi.fn(async () => undefined);
+      h.services.runs = { cancel } as never;
+      runState(h.ctx).active.set('run-live', {
+        runId: 'run-live', agentId: workerId, startedAt: Date.now(), pid: 1, cancel: async () => undefined,
+      });
+
+      tickets.comment(HUMAN, t.id, 'also drop the CSV export');
+
+      expect(cancel).toHaveBeenCalledWith(HUMAN, 'run-live', 'interrupt', 'message');
+      expect(wake.calls).toHaveLength(1);
+      expect(wake.calls[0]!.agentId).toBe(workerId);
+      expect(wake.calls[0]!.input.payload).toMatchObject({ body: 'also drop the CSV export', interruptedRunId: 'run-live' });
     });
 
     // VS-275: a decision held under the weaver's concern (VS-266) is answered by the worker's fix,

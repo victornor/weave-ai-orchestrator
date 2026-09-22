@@ -760,14 +760,14 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
             runId = active.runId;
             try { if ((await active.send(withDictatedNotice(body, opts.dictated))) === 'delivered') delivery = 'mid_turn'; }
             catch { /* the runtime could not take it; falls through to queued */ }
-          } else if (actor.kind === 'human') {
-            // The runtime cannot take mid-turn input, but a human explicitly asked for live
-            // delivery: interrupt the running turn and deliver via the next one instead of queuing
-            // behind it (VS-254). A live send on the conductor's behalf (`weave_worker_message`) leaves
-            // the turn alone, exactly as before this change — see design.md Decision 1.
+          } else {
+            // The runtime has no open mid-turn channel: interrupt the running turn now and deliver
+            // the message via the next turn instead of queuing behind it — VS-254 for a human,
+            // VS-662 for the conductor's steer. A run already stopping for an earlier steer is not
+            // interrupted again; this message coalesces into the resume already on its way.
             runId = active.runId;
             delivery = 'interrupted';
-            await deps().runs.cancel(actor, active.runId, 'interrupt', 'message');
+            if (active.cancelled?.cause !== 'message') await deps().runs.cancel(actor, active.runId, 'interrupt', 'message');
           }
           break;
         }

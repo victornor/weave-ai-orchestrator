@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events';
 import type { InputDelivery } from '@weave-ai/runtime-sdk';
 import { nowIso } from '@weave-ai/db';
 import type { Agent, AuthorKind, RunEvent } from '@weave-ai/shared';
+import type { Actor, CoreServices } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import type { PartialBuffer } from './partials.js';
 
@@ -116,4 +117,41 @@ export function describeLiveInput(ctx: WorkspaceContext, agent: Pick<Agent, 'id'
     if (active.agentId === agent.id && active.send) return { midTurn: true };
   }
   return { midTurn: false, reason: 'no turn is currently running for this agent' };
+}
+
+/** VS-662: the run currently executing for this agent in this process, if any. Read-only. */
+export function activeRunFor(ctx: WorkspaceContext, agentId: string): ActiveRun | null {
+  for (const active of runState(ctx).active.values()) if (active.agentId === agentId) return active;
+  return null;
+}
+
+/**
+ * VS-662: the run a **steer** to this agent should interrupt, or null when nothing should be
+ * interrupted. A steer is the words a human or the conductor sends to direct a ticket-bound worker's
+ * work; interrupting is scoped to such a worker (never the weaver, never a ticketless session) with a
+ * turn executing, and is skipped while that turn is already stopping for an earlier steer — so a
+ * second rapid steer coalesces into the one resumed turn rather than cancelling again.
+ *
+ * Synchronous and read-only, so a caller inside `tx` (which forbids awaiting) can compute the run id
+ * for its wake payload before the transaction commits; `interruptRunForSteer` performs the cancel.
+ */
+export function steerInterruptTarget(ctx: WorkspaceContext, agentId: string): string | null {
+  const agent = ctx.db.get<{ kind: string; ticketId: string | null }>(
+    'SELECT kind, ticket_id AS ticketId FROM agents WHERE id = ? AND workspace_id = ?',
+    [agentId, ctx.workspaceId],
+  );
+  if (!agent || !agent.ticketId || agent.kind === 'weaver') return null;
+  const active = activeRunFor(ctx, agentId);
+  if (!active || active.cancelled?.cause === 'message') return null;
+  return active.runId;
+}
+
+/**
+ * VS-662: interrupt a running ticket worker's turn to deliver a steer. Best effort and never throws:
+ * the steer's wake is already queued by the caller, and `finalize` records the cut as
+ * `interrupted_by_message`, after which the worker resumes on that wake.
+ */
+export function interruptRunForSteer(ctx: WorkspaceContext, deps: () => CoreServices, actor: Actor, runId: string): void {
+  void deps().runs.cancel(actor, runId, 'interrupt', 'message')
+    .catch((e) => ctx.log('run').warn({ runId, err: String(e) }, 'interrupting a turn for a steer failed'));
 }

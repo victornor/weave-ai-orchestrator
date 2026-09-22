@@ -22,6 +22,7 @@ import { effectiveModels, resolveWorkerModelId as resolveWorkerModelOption } fro
 import { existsSync, mkdirSync, writeFileSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { flattenWakes } from '../prompts/index.js';
+import { interruptRunForSteer, steerInterruptTarget } from '../runs/active.js';
 import type { Wakeup } from '@weave-ai/shared';
 import { ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, detectAttachmentMediaType, guessOutboundMediaType } from '@weave-ai/shared';
 import { actingAgentHome, assertAttachablePath, assertNotHiddenUnderHome, resolveOutboundAttachmentRoots } from '../threads/outboundAttachments.js';
@@ -1223,14 +1224,19 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         id: newId(), ticketId: t.id, authorKind: actor.kind, authorId: actor.id, runId: actor.runId ?? null,
         body, kind, sourceTrust: trust, createdAt: nowIso(),
       };
-      return tx(db, () => {
+      // VS-662: read synchronously inside the transaction (which forbids awaiting) so the wake
+      // payload can carry the interrupted run id; the cancel is issued after it commits.
+      let interruptRunId: string | null = null;
+      const saved = tx(db, () => {
         db.insert('ticket_comments', { ...c });
         recordActivity(db, ws, actor, 'ticket.comment', 'ticket_comment', c.id, { kind }, t.id);
         ctx.events.emit('ticket.comment', 'ticket', t.id, c);
         if (actor.kind === 'human' && t.workerId) {
           // VS-657: the stored comment keeps exactly what the human wrote; the dictation mark rides
-          // in the wake payload only.
-          wake(t.workerId, 'ticket_comment', `new comment on ${t.identifier}`, { ticketId: t.id, commentId: c.id, body, ...(opts?.dictated ? { dictated: true } : {}) }, actor);
+          // in the wake payload only. VS-662: a human's comment is a steer — if the worker's turn is
+          // executing, interrupt it so the comment is answered on the resumed turn, not queued behind.
+          interruptRunId = steerInterruptTarget(ctx, t.workerId);
+          wake(t.workerId, 'ticket_comment', `new comment on ${t.identifier}`, { ticketId: t.id, commentId: c.id, body, ...(opts?.dictated ? { dictated: true } : {}), ...(interruptRunId ? { interruptedRunId: interruptRunId } : {}) }, actor);
         } else if (actor.kind === 'human' && kind === 'comment') {
           // A reply with nobody listening: reopen a finished ticket, bring a worker back, or tell the conductor.
           const followUp = { ticketId: t.id, commentId: c.id, body };
@@ -1248,6 +1254,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         }
         return c;
       });
+      // VS-662: outside the transaction — `tx` must not await, and the comment's wake is already
+      // queued when the turn it interrupts finalizes.
+      if (interruptRunId) interruptRunForSteer(ctx, deps, actor, interruptRunId);
+      return saved;
     },
 
     async retry(actor, id, note) {

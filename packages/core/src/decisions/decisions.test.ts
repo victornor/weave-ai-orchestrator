@@ -3,6 +3,7 @@ import { newId } from '@weave-ai/db';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createTicketsService } from '../tickets/service.js';
 import { createDecisionsService } from './service.js';
+import { runState } from '../runs/active.js';
 import type { Actor, DecisionsService, TicketsService } from '../api.js';
 
 const HUMAN: Actor = { kind: 'human', id: 'victor' };
@@ -182,6 +183,23 @@ describe('decisions', () => {
     const w = wake.calls.find((c) => c.input.source === 'decision_answered');
     expect(w?.agentId).toBe(workerId);
     expect(w?.input.payload).toMatchObject({ decisionId: d.id, answer: { key: 'sqlite', text: 'yes, sqlite please' } });
+  });
+
+  it("interrupts the worker's running turn when its decision is answered (VS-662)", async () => {
+    const t = ticket();
+    const workerId = h.addWorker(t.id);
+    const cancel = vi.fn(async () => undefined);
+    h.services.runs = { cancel } as never;
+    runState(h.ctx).active.set('run-worker', {
+      runId: 'run-worker', agentId: workerId, startedAt: Date.now(), pid: 1, cancel: async () => undefined,
+    });
+    const d = decisions.create(AGENT, { ticketId: t.id, kind: 'question', title: 'Which store?', askedByAgentId: workerId, options: [{ key: 'sqlite', label: 'SQLite' }] });
+
+    await decisions.answer(HUMAN, d.id, { key: 'sqlite', text: 'use sqlite' });
+
+    expect(cancel).toHaveBeenCalledWith(HUMAN, 'run-worker', 'interrupt', 'message');
+    const w = wake.calls.find((c) => c.input.source === 'decision_answered');
+    expect(w!.input.payload).toMatchObject({ decisionId: d.id, interruptedRunId: 'run-worker' });
   });
 
   it('rejects an unknown option and a second answer', async () => {

@@ -4,6 +4,7 @@ import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from 
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
+import { interruptRunForSteer, steerInterruptTarget } from '../runs/active.js';
 import { WORKERS_RUNTIME_CORRELATION } from '../models/index.js';
 
 const asDecision = (r: Record<string, unknown>): Decision => decisionRow(r) as unknown as Decision;
@@ -715,6 +716,10 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     }
 
     if (answered.askedByAgentId) {
+      // VS-662: an answered decision is a steer — if the worker's turn is executing, interrupt it so
+      // the answer is delivered on the resumed turn instead of queued behind the running one. The
+      // answer also rides in the wake payload for the prompt (Decision 7 in the change's design).
+      const interruptRunId = steerInterruptTarget(ctx, answered.askedByAgentId);
       wake(answered.askedByAgentId, 'decision_answered', `decision answered: ${answered.title}`, {
         decisionId: answered.id, answer: { key, text }, ticketId: answered.ticketId,
         // VS-657: a free-text answer entered by dictation is delivered with the mark; the stored
@@ -722,7 +727,9 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
         ...(ans.dictated ? { dictated: true } : {}),
         // Already settled: a secret's entry here is the name it was stored under, never the value.
         ...(answerInputs ? { answerInputs } : {}),
+        ...(interruptRunId ? { interruptedRunId: interruptRunId } : {}),
       });
+      if (interruptRunId) interruptRunForSteer(ctx, deps, actor, interruptRunId);
     }
     if (ans.remember) {
       try {

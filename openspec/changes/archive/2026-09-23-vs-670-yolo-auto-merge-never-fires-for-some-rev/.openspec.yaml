@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-23
+goal: Make a reviewed YOLO merge_approval always resolve, and add a
+  decision-centric safety sweep that catches and surfaces a
+  reviewed-but-unanswered YOLO decision instead of letting it sit silently.

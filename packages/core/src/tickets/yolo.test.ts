@@ -358,4 +358,34 @@ describe('YOLO mode', () => {
       expect(only(theirs.id, 'plan_approval')?.status).toBe('open');
     });
   });
+
+  describe('project resolution (VS-670)', () => {
+    it('grants a reviewed merge when the ticket row has a null project but its role names one', async () => {
+      const t = change();
+      h.addWorker(t.id);
+      // The pre-VS-668 row shape: filed with a project-scoped role but stored with a null project.
+      // The auto-approval path must still find the project through the role.
+      h.db.update('tickets', t.id, { projectId: null });
+      await deliver(t);
+      const merge = only(t.id, 'merge_approval')!;
+      await markLooked(merge.id, 'the diff is clean');
+
+      expect(await tickets.autoMergeSweep()).toBe(1);
+      expect(only(t.id, 'merge_approval')).toMatchObject({ status: 'answered', answeredByKind: 'system' });
+      expect(tickets.get(t.id).status).toBe('merging');
+    });
+
+    it('still treats a ticket with neither a project nor a role as mode off', async () => {
+      const t = tickets.create(HUMAN, { kind: 'change', title: 'Workspace-level work', projectId: null, assigneeRoleId: null });
+      h.addWorker(t.id);
+      await deliver(t);
+      const merge = only(t.id, 'merge_approval')!;
+      await markLooked(merge.id, 'the diff is clean');
+
+      expect(await tickets.autoMergeSweep()).toBe(0);
+      expect(only(t.id, 'merge_approval')?.status).toBe('open');
+      expect(tickets.get(t.id).status).toBe('in_review');
+    });
+  });
 });
+

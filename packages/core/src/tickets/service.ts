@@ -62,6 +62,12 @@ const TERMINAL = new Set<TicketStatus>(TERMINAL_TICKET_STATUSES);
 // VS-541: statuses that mean work has begun. `approved` is permission, not work, so it is not here.
 const STARTED_STATUSES = new Set<TicketStatus>(['proposing', 'in_progress', 'in_review', 'merging', 'done']);
 
+/**
+ * VS-670: how long a reviewed auto-approval may sit unresolved before the safety sweep acts. The
+ * mark-time grant and the merge sweep resolve in seconds, so a card still open after this is stuck.
+ */
+const STALE_REVIEWED_APPROVAL_MS = 10 * 60 * 1000;
+
 /** Named in a wake reason when a one-line excerpt was cut, so a worker reading a fragment knows what to call. */
 const FULL_COMMENT_HINT = 'full comment via weave_ticket_comments';
 
@@ -301,12 +307,29 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
   }
 
   /**
+   * VS-670: the project a ticket's work is in, for the readers that decide policy from it — the
+   * ticket's own project when set, otherwise the project of the role it is assigned to (VS-668's
+   * rule that a role-assigned ticket belongs to the role's project). Reading only `t.projectId` made
+   * a stale null row read as "no project": VS-665's reviewed YOLO merge card was invisible to the
+   * whole auto-approval path for exactly that reason.
+   */
+  function projectFor(t: Ticket): ProjectRow | null {
+    const own = project(t.projectId);
+    if (own) return own;
+    if (!t.assigneeRoleId) return null;
+    return db.get<ProjectRow>(
+      'SELECT p.id, p.slug, p.clone_path, p.openspec_enabled, p.policies_json FROM projects p JOIN roles r ON r.project_id = p.id WHERE r.id = ?',
+      [t.assigneeRoleId],
+    ) ?? null;
+  }
+
+  /**
    * YOLO mode for this ticket (PLAN §15): the daemon grants its plan and merge approvals itself.
    * Read at the moment the approval would be granted, never stamped on the decision, so turning the
    * mode off stops every auto-approval that has not happened yet.
    */
   function yolo(t: Ticket): boolean {
-    return yoloEnabled(project(t.projectId)?.policies ?? null);
+    return yoloEnabled(projectFor(t)?.policies ?? null);
   }
 
   /** Answer an approval this ticket is waiting on as the daemon, naming the mode that granted it. */
@@ -384,6 +407,33 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     delete rest['autoMergeHold'];
     touch(t.id, { deliveryJson: rest });
     ctx.events.emit('ticket.updated', 'ticket', t.id, get(t.id));
+  }
+
+  /**
+   * VS-670: the safety sweep's once-per-card surface. A reviewed auto-approval the daemon could not
+   * resolve is anomalous — the mark path or the merge sweep should have answered it — so it is named
+   * on the ticket and the weaver is woken, once. The decision id is recorded in the ticket's
+   * `delivery` JSON so the ~15 s tick cannot flood the thread (the VS-472 lesson).
+   */
+  function surfaceStaleReview(t: Ticket, d: { id: string; kind: string; reviewStatus: string | null; reviewedAt: string | null }): boolean {
+    const delivery = (t.delivery ?? {}) as Record<string, unknown>;
+    const last = delivery['staleReviewedApproval'] as { decisionId?: string } | undefined;
+    if (last?.decisionId === d.id) return false;
+    const reviewedAt = d.reviewedAt ? Date.parse(d.reviewedAt) : NaN;
+    const minutes = Number.isFinite(reviewedAt) ? Math.max(0, Math.round((Date.now() - reviewedAt) / 60_000)) : null;
+    const card = d.kind === 'plan_approval' ? 'plan approval' : 'merge approval';
+    const state = d.reviewStatus === 'concerns' ? 'marked with concerns' : 'marked looked at';
+    const age = minutes === null ? '' : ` ${minutes} min ago`;
+    tx(db, () => {
+      touch(t.id, { deliveryJson: { ...delivery, staleReviewedApproval: { decisionId: d.id, at: nowIso() } } });
+      systemComment(t.id, `auto-merge is stuck: a ${card} (${d.id}) ${state}${age} has not been resolved by the daemon.`, { kind: 'system', id: null });
+      ctx.events.emit('ticket.updated', 'ticket', t.id, get(t.id));
+    });
+    const cid = conductorId();
+    if (cid) {
+      wake(cid, 'system', `${t.identifier}: a reviewed ${card} (${d.id}) has not resolved`, { ticketId: t.id, decisionId: d.id, kind: d.kind, weaverReviewStatus: d.reviewStatus }, { kind: 'system', id: null }, `stale-reviewed-approval:${d.id}`);
+    }
+    return true;
   }
 
   /**
@@ -931,7 +981,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         "SELECT path, branch FROM worktrees WHERE ticket_id = ? AND status != 'removed' ORDER BY created_at DESC LIMIT 1",
         [t.id],
       );
-      const p = project(t.projectId);
+      const p = projectFor(t);
       const wp = db.get<{ url: string }>(
         "SELECT url FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' AND url IS NOT NULL ORDER BY created_at DESC LIMIT 1",
         [t.id],
@@ -977,7 +1027,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     const archive = archiveTargetOf(target);
     if (archive) {
       const t = ticketId ? get(ticketId) : null;
-      const p = t ? project(t.projectId) : null;
+      const p = t ? projectFor(t) : null;
       const forge = ctx.registries.forges.get('github');
       if (!p || !forge) return null;
       const state = await forge.prState(p.clonePath, archive.prUrl).catch(() => null);
@@ -1853,7 +1903,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         // apart from one the worker pushed anew. Resolved in the CI check, or from the delivery head.
         let prHead: string | null = null;
         try {
-          const project = t.projectId ? deps().projects.get(t.projectId) : null;
+          // VS-670: the project is resolved through `projectFor`, so a role-assigned ticket whose own
+          // `projectId` is stale-null still gets its project's CI policy rather than skipping the gate.
+          const resolved = projectFor(t);
+          const project = resolved ? deps().projects.get(resolved.id) : null;
           const policies = (project?.policies ?? {}) as { deliveryMode?: string; requireCi?: boolean };
           const mode = policies.deliveryMode ?? ctx.config.defaults.deliveryMode;
           if (mode === 'pr' && policies.requireCi !== false && project) {
@@ -1896,6 +1949,46 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         }
       }
       return advanced;
+    },
+
+    /**
+     * VS-670: the decision-centric safety net beside `autoMergeSweep`. The auto-approval path is
+     * ticket-centric — VS-665's reviewed merge card was dropped by the sweep before its approval was
+     * ever read, because the ticket's own `projectId` was stale-null. This sweep starts from the
+     * decisions instead, so no ticket-side predicate can hide a reviewed card. It grants a `looked`
+     * card that has no other periodic grant path (a plan, or an archive-backfill merge) and surfaces
+     * anything still open past the threshold once, so the class fails loud rather than silently.
+     * Never throws.
+     */
+    async staleReviewSweep(): Promise<number> {
+      const cutoff = new Date(Date.now() - STALE_REVIEWED_APPROVAL_MS).toISOString();
+      const rows = db.all<{ id: string; ticketId: string | null; kind: string; reviewStatus: string | null; reviewedAt: string | null; target: Record<string, unknown> | null }>(
+        `SELECT id, ticket_id AS ticketId, kind, weaver_review_status AS reviewStatus, weaver_reviewed_at AS reviewedAt, target_json
+           FROM decisions
+          WHERE status = 'open' AND kind IN ('plan_approval', 'merge_approval')
+            AND weaver_review_status IN ('looked', 'concerns')
+            AND weaver_reviewed_at IS NOT NULL AND weaver_reviewed_at < ?`,
+        [cutoff],
+      );
+      let acted = 0;
+      for (const d of rows) {
+        const t = d.ticketId ? find(d.ticketId) : null;
+        if (!t || TERMINAL.has(t.status) || !yolo(t)) continue;
+        if (d.reviewStatus === 'looked') {
+          // A plan, or an archive-backfill merge, has no periodic grant of its own — the mark path is
+          // the only caller. An ordinary merge is the merge sweep's job; if it is still open past the
+          // threshold it is held, not missed, and is surfaced below.
+          const archive = archiveTargetOf(d.target);
+          if (d.kind === 'plan_approval' || archive) {
+            try { await autoApprove(t, d.id); acted++; continue; }
+            catch (e) {
+              if (!(e instanceof OcError && e.code === 'revision_pending')) log.warn({ ticket: t.identifier, decisionId: d.id, err: String(e) }, 'stale-review grant failed');
+            }
+          }
+        }
+        if (surfaceStaleReview(t, d)) acted++;
+      }
+      return acted;
     },
 
     /**

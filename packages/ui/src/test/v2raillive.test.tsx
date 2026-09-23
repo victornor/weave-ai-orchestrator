@@ -115,10 +115,10 @@ const { V2Shell } = await import('../v2/V2Shell');
 const { LiveBody } = await import('../v2/LivePage');
 
 /** Mirrors `v2decisionLive.test.tsx`: deliver an event on the daemon-wide (`/api/events`) stream. */
-function deliver(workspace: string, evt: { type: string; entityId: string; entityType?: string; payload: unknown }): void {
+function deliver(workspace: string, evt: { type: string; entityId: string; entityType?: string; payload: unknown; seq?: number }): void {
   const src = FakeEventSource.open.filter((s) => s.url === '/api/events' || s.url.includes(`/w/${workspace}/events`)).at(-1);
   for (const fn of src?.listeners.get(evt.type) ?? []) {
-    fn({ data: JSON.stringify({ seq: 1, workspaceId: workspace, entityType: 'agent', createdAt: '2026-09-20T00:00:00.000Z', ...evt }) } as MessageEvent<string>);
+    fn({ data: JSON.stringify({ seq: evt.seq ?? 1, workspaceId: workspace, entityType: 'agent', createdAt: '2026-09-20T00:00:00.000Z', ...evt }) } as MessageEvent<string>);
   }
 }
 
@@ -212,6 +212,45 @@ describe('the rail stays live on a workspace page (VS-630)', () => {
     await act(async () => deliver('beta', { type: 'decision.created', entityId: 'd1', entityType: 'decision', payload: asked }));
 
     await waitFor(() => expect(railCount('/needs')).toBe(1));
+  });
+});
+
+describe('the rail reconciles a global page from the live-only worker summary (VS-667)', () => {
+  const liveFrame = (agentId: string): Record<string, unknown> => ({
+    agentId,
+    ticketId: null,
+    activity: { verb: 'thinking', label: 'Thinking', target: null, since: '2026-09-20T00:00:00.000Z' },
+    live: { state: 'working', label: 'Working', since: '2026-09-20T00:00:00.000Z', toolCount: 0, turnMs: 0, sinceLastMs: 0, wholeStepsOnly: false },
+    tests: null,
+  });
+
+  it('moves the Live badge from a seq-0 worker.activity summary with no workspace stream mounted', async () => {
+    // A global page: no WorkspaceProvider, so the rail's per-workspace reads would only hear durable
+    // frames. `/live` is the Everywhere scope and mounts the daemon-wide stream.
+    state.path = '/live';
+    const qc = mount(<V2Shell theme="dark" onTheme={() => undefined} />);
+    await settled(qc, [...qk.workers('alpha'), {}]);
+    expect(railCount('/live')).toBe(0);
+    // The read the rail holds still says a1 is merely active.
+    const idle = agent({ id: 'a1', status: 'active', createdAt: '2026-09-20T00:00:00.000Z' });
+    qc.setQueryData([...qk.workers('alpha'), {}], [idle]);
+    expect(railCount('/live')).toBe(0);
+
+    // a1 starts a turn: the server's read now says running, and a live-only summary frame arrives.
+    state.workers.alpha = [{ ...idle, status: 'running' as const }];
+    await act(async () => deliver('alpha', { type: 'worker.activity', entityId: 'a1', entityType: 'agent', payload: liveFrame('a1'), seq: 0 }));
+    await waitFor(() => expect(railCount('/live')).toBe(1));
+    expect(state.go).not.toHaveBeenCalled();
+  });
+
+  it('does not add a worker for an idle summary frame', async () => {
+    state.path = '/live';
+    const qc = mount(<V2Shell theme="dark" onTheme={() => undefined} />);
+    await settled(qc, [...qk.workers('alpha'), {}]);
+    expect(railCount('/live')).toBe(0);
+    const idleFrame = { agentId: 'ghost', ticketId: null, activity: null, live: null, tests: null };
+    await act(async () => deliver('alpha', { type: 'worker.activity', entityId: 'ghost', entityType: 'agent', payload: idleFrame, seq: 0 }));
+    expect(railCount('/live')).toBe(0);
   });
 });
 

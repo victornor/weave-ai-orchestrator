@@ -193,6 +193,12 @@ disagree by construction. The badge SHALL count the same working set the floor l
 including a worker held in the between-turns handover grace — and SHALL reach that figure from the
 worker events the document receives, without the Live page being opened.
 
+Every change to whether a worker is live SHALL be observable to the document's live connections:
+starting or finishing a turn, being provisioned, resumed, paused, retired, cut off by a daemon
+restart or killed by the watchdog SHALL each reach a subscriber as an event naming that worker's
+workspace. A transition that changes a worker's live-readiness without emitting such an event is a
+defect, because the badge can then only correct itself when another read happens to refresh.
+
 #### Scenario: The badge equals the floor's roster figure
 
 - **WHEN** the Live floor is scoped Everywhere and renders its roster figure
@@ -212,3 +218,18 @@ worker events the document receives, without the Live page being opened.
 
 - **WHEN** a worker starts in a workspace other than the one the app is showing
 - **THEN** the rail's Live badge rises without the Live page being opened
+
+#### Scenario: A turn ending drops the badge
+
+- **WHEN** a worker's turn ends and it does not start another inside the handover grace
+- **THEN** the rail's Live badge drops that worker without the Live page being opened and without a page reload
+
+#### Scenario: A worker recovered without its own status write still counts
+
+- **WHEN** a daemon restart or the watchdog returns a worker to work, and that recovery emits no worker-status event
+- **THEN** the rail's Live badge still converges to the worker's real state from the events the document receives
+
+#### Scenario: A summary frame alone does not inflate the badge
+
+- **WHEN** the document receives a live-only worker summary frame for a workspace while the app is on a global page
+- **THEN** the rail's Live badge counts only workers whose read says they are working, and the extra frame neither invents a worker nor double-counts one

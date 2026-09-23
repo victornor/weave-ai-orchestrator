@@ -142,6 +142,11 @@ describe('run engine', () => {
     await tick();
     expect(h.events.filter((e) => e.type === 'run.started')).toHaveLength(1);
     expect(h.events.filter((e) => e.type === 'run.finished')).toHaveLength(1);
+    // VS-667: a run starting also emits the worker's own live-readiness, naming its workspace, so a
+    // consumer keyed on the worker (the rail's Live badge) moves without a separate read.
+    const startedStatus = h.events.find((e) => e.type === 'worker.status' && e.entityId === h.conductorId);
+    expect(startedStatus?.workspaceId).toBe(h.workspaceId);
+    expect((startedStatus?.payload as { status?: string } | undefined)?.status).toBe('running');
   });
 
   it('writes an image attachment to a readable path and names it, on a path-form runtime (VS-659)', async () => {

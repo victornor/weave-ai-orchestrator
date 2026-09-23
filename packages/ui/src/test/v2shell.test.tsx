@@ -44,6 +44,9 @@ vi.mock('../api/context', () => ({
     state.fanIn.push([...ids]);
     return null;
   },
+  // The global-page reconciliation consumer (VS-667) subscribes to the same stream; it is a no-op in
+  // these shell tests, which drive no frames.
+  useGlobalEvents: () => undefined,
 }));
 
 vi.mock('../app/link', () => ({

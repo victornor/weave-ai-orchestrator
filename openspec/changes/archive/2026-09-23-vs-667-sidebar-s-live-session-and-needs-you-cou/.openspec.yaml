@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-22
+goal: Sidebar's live-session and needs-you counts go stale — not real-time, only
+  correct on click-through

@@ -68,6 +68,22 @@ describe('supervisor', () => {
     expect(events[0]!.payload.action).toBe('boot_recovery');
   });
 
+  // VS-667: the restart changed this worker's live-readiness with no other event; the rail's Live
+  // badge must hear it from the worker itself, naming its workspace.
+  it('emits the recovered worker\'s own status when a daemon restart returns it to active', async () => {
+    const ticketId = seedTicket(h);
+    const workerId = h.addWorker(ticketId, { status: 'running' });
+    h.db.insert('runs', {
+      id: newId(), workspaceId: h.workspaceId, agentId: workerId, ticketId, wakeupIdsJson: [], runtimeId: 'claude',
+      status: 'running', turnEpoch: 1, cwd: '/tmp/w', pid: 999_999, startedAt: nowIso(), createdAt: nowIso(),
+    });
+    await supervisor.tick();
+    const emitted = h.events.filter((e) => e.type === 'worker.status' && e.entityId === workerId);
+    expect(emitted.length).toBeGreaterThan(0);
+    expect(emitted.at(-1)!.workspaceId).toBe(h.workspaceId);
+    expect((emitted.at(-1)!.payload as { status: string }).status).toBe('active');
+  });
+
   // VS-625: a restart puts an interrupted worker back to work, so a card that still says it is
   // stopped is stale and must close before the re-queued turn is claimed.
   it('closes a recovered worker\'s stale parking card on a daemon restart', async () => {
@@ -2125,6 +2141,30 @@ describe('supervisor silence watchdog (VS-461)', () => {
     const runId = seedRunning(workerId, { lastProgressAt: secondsAgo(5), lastEventAt: secondsAgo(5) });
     await supervisor.tick();
     expect(actionEvents(runId).some((p) => p.action === 'silence_interrupt')).toBe(false);
+  });
+
+  // VS-667: the watchdog's kill closes an unowned run out here and returns the worker to active;
+  // that transition must reach the rail as a worker-status event naming its workspace.
+  it('returns a watchdog-killed worker to active with its own event', async () => {
+    // Boot first, so `bootRecovery` does not claim this later-seeded, unowned run.
+    await supervisor.tick();
+    const workerId = h.addWorker(seedTicket(h));
+    const runId = newId();
+    h.db.insert('runs', {
+      id: runId, workspaceId: h.workspaceId, agentId: workerId, wakeupIdsJson: [], runtimeId: 'opencode',
+      status: 'running', turnEpoch: 1, cwd: '/w', startedAt: secondsAgo(120), lastProgressAt: secondsAgo(120),
+      lastEventAt: secondsAgo(120), createdAt: secondsAgo(120),
+    });
+    // First watchdog pass interrupts; the run has no in-process owner, so the kill below closes it.
+    await supervisor.tick();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date(Date.now() + 31_000));
+    await supervisor.tick();
+    vi.useRealTimers();
+    const emitted = h.events.filter((e) => e.type === 'worker.status' && e.entityId === workerId);
+    expect(emitted.some((e) => (e.payload as { status?: string }).status === 'active')).toBe(true);
+    expect(emitted.at(-1)!.workspaceId).toBe(h.workspaceId);
+    expect(h.db.get<Run>('SELECT * FROM runs WHERE id = ?', [runId])!.status).toBe('failed');
   });
 
   it('parks the worker after a second consecutive no-progress silence cut instead of retrying again', async () => {

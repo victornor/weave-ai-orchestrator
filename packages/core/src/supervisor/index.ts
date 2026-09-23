@@ -229,6 +229,10 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       ctx.db.update('runs', run.id, { status: 'interrupted', finishedAt: nowIso(), errorCode: 'interrupted', errorFamily: 'tooling' });
       ctx.db.run("UPDATE wakeups SET status = 'failed', finished_at = ? WHERE run_id = ? AND status IN ('claimed','queued')", [nowIso(), run.id]);
       ctx.db.update('agents', run.agentId, { status: 'active', updatedAt: nowIso() });
+      // VS-667: the restart changed this worker's live-readiness; the other resume paths all emit a
+      // `worker.status: active`, so the rail's Live badge drops it from its own event rather than
+      // waiting for another read to happen to refresh.
+      ctx.events.emit('worker.status', 'agent', run.agentId, { status: 'active' });
       // VS-625: the restart has put this worker back to work; a card that still says it is stopped
       // is stale, so close it before the re-queued turn is claimed. Best effort: recovery stands.
       try {
@@ -340,6 +344,9 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         ctx.db.update('runs', run.id, { status: hardTimedOut ? 'timed_out' : 'failed', finishedAt: nowIso(), errorCode: hardTimedOut ? 'timeout' : 'silence', errorFamily: 'tooling' });
         ctx.db.run("UPDATE wakeups SET status = 'failed', finished_at = ? WHERE run_id = ?", [nowIso(), run.id]);
         ctx.db.update('agents', run.agentId, { status: 'active', updatedAt: nowIso() });
+        // VS-667: the watchdog put this worker back to work, so its live-readiness changed with no
+        // other event; emit the status the other resume paths emit.
+        ctx.events.emit('worker.status', 'agent', run.agentId, { status: 'active' });
       }
       if (!retried.has(run.id)) {
         retried.add(run.id);

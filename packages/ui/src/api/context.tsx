@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { WorkspaceEvent } from '@weave-ai/shared';
 import type { EventStream } from './events';
 import type { ConnectionStatus } from './events';
-import { acquireGlobalStream, acquireWorkspaceStream, releaseGlobalStream, releaseWorkspaceStream } from './streams';
+import { acquireGlobalStream, acquireWorkspaceStream, releaseGlobalStream, releaseWorkspaceStream, useStreamQueryClient } from './streams';
 import { setWorkspaceId } from './client';
 
 interface Ctx {
@@ -89,6 +89,25 @@ export function useWorkspaceEvents(fn: (e: WorkspaceEvent) => void): void {
     if (!stream) return;
     return stream.onEvent((e) => ref.current(e));
   }, [stream]);
+}
+
+/**
+ * Subscribe to raw events from the one daemon-wide stream (VS-667). A global page has no workspace
+ * provider, so `useWorkspaceEvents` has no stream there; this reserves the shared global entry for
+ * the consumer's lifetime, so the document still holds exactly one daemon-wide connection.
+ */
+export function useGlobalEvents(fn: (e: WorkspaceEvent) => void): void {
+  const qc = useStreamQueryClient();
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    const stream = acquireGlobalStream(qc);
+    const off = stream.onEvent((e) => ref.current(e));
+    return () => {
+      off();
+      releaseGlobalStream();
+    };
+  }, [qc]);
 }
 
 /** Opens one daemon-wide stream while a global page is mounted. Workspace ids remain in each event,

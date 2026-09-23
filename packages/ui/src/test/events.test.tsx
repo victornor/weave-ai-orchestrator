@@ -49,6 +49,31 @@ describe('decision events', () => {
   it('leaves the workspace list alone for events that cannot change a Needs-you count', () => {
     expect(invalidated(event('ticket.created', { entityId: 'tk_1' }))).not.toContain(JSON.stringify(qk.workspaces()));
   });
+
+  // VS-667: the rail's and each workspace group's Needs-you figure reads this exact parameterised
+  // list; a decision closing must mark it stale without the Needs you screen being open.
+  const openHumanKey = [...qk.decisions('ws1'), { status: 'open', owner: 'human' }];
+
+  it('marks the rail\'s parameterised open-decision list stale when one is answered', () => {
+    const qc = new QueryClient();
+    qc.setQueryData(openHumanKey, [fakeDecision('dec_1', 'open')]);
+    invalidateFor(qc, 'ws1', event('decision.answered', { entityId: 'dec_1', payload: fakeDecision('dec_1', 'answered') }));
+    expect(qc.getQueryState(openHumanKey)?.isInvalidated).toBe(true);
+  });
+
+  it('does the same when one is superseded', () => {
+    const qc = new QueryClient();
+    qc.setQueryData(openHumanKey, [fakeDecision('dec_1', 'open')]);
+    invalidateFor(qc, 'ws1', event('decision.superseded', { entityId: 'dec_1', payload: fakeDecision('dec_1', 'superseded') }));
+    expect(qc.getQueryState(openHumanKey)?.isInvalidated).toBe(true);
+  });
+
+  it('leaves the open-decision list alone for an event that cannot change it', () => {
+    const qc = new QueryClient();
+    qc.setQueryData(openHumanKey, [fakeDecision('dec_1', 'open')]);
+    invalidateFor(qc, 'ws1', event('worker.status', { entityId: 'ag_1', entityType: 'agent' }));
+    expect(qc.getQueryState(openHumanKey)?.isInvalidated).toBe(false);
+  });
 });
 
 /**

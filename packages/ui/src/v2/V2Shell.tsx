@@ -29,6 +29,7 @@ import {
   type V2Scope,
 } from './nav';
 import { useV2Counts, useV2WorkspaceName, type V2Counts } from './V2Page';
+import { GlobalWorkerSync } from './GlobalWorkerSync';
 import { useDictationSession } from './DictationSession';
 import { readRailCollapsed, writeRailCollapsed } from './prefs';
 import { updateEntry, updateEntryLabel, type UpdateEntry } from '../lib/upgrade';
@@ -665,6 +666,10 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
           by the whole document — never one per workspace — and Global Chats' per-pane providers do
           not duplicate it. */}
       <FanInStreams ids={ids} />
+      {/* VS-667: on a global page there is no workspace provider, so the rail's per-workspace worker
+          reads are reconciled from the live-only `worker.activity` summaries on the daemon-wide
+          stream; a workspace page's own stream and the durable invalidations cover it there. */}
+      {scope.kind === 'everywhere' ? <GlobalWorkerSync /> : null}
       {collapsed ? (
         <aside className="v2-anim-fade hidden w-[48px] flex-none flex-col items-center border-r border-line-1 bg-bg-1 py-2 md:flex">
           <button

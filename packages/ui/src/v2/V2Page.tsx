@@ -5,10 +5,13 @@
 import { useMemo, type ReactNode } from 'react';
 import { useRouterState } from '@tanstack/react-router';
 import { useDecisionsMany, useIncidents, useWorkersMany, useWorkspaces } from '../api/hooks';
+import { OPEN_HUMAN_DECISIONS } from '../api/events';
 import { liveWorkingAgents } from '../lib/board';
-import { agentIsWorking, liveCounts, useRunningWorkerIds } from '../lib/liveOrder';
-import { countsAsNeeds } from './needsCount';
+import { agentIsWorking, useRunningWorkerIds } from '../lib/liveOrder';
+import { deriveV2Counts, type V2Counts } from './v2Counts';
 import { workspaceFromV2Path, type V2Scope } from './nav';
+
+export type { V2Counts } from './v2Counts';
 
 export function useV2Scope(): V2Scope {
   const path = useRouterState({ select: (s) => s.location.pathname });
@@ -23,26 +26,14 @@ export function useV2WorkspaceName(scope: V2Scope): string {
   return found?.name ?? scope.ws;
 }
 
-export interface V2Counts {
-  /** The current scope's Needs-you figure — what the header's pill shows. */
-  needs: number;
-  /** Every workspace's own Needs-you count, keyed by workspace id. */
-  needsByWs: Record<string, number>;
-  /** The daemon-wide Needs-you total. */
-  needsGlobal: number;
-  /** Workers whose card reads working across every workspace — an in-flight run, or one inside the
-   *  handover grace the Live floor applies (VS-415). */
-  live: number;
-  /** Each workspace's own working count, keyed by workspace id. */
-  liveByWs: Record<string, number>;
-  incidents: number;
-}
-
 /**
  * Every count a V2 header or rail row can show, derived from the same hooks the screens use
  * (HANDOFF §15). The shell's rail sits above `V2Workspace`'s `WorkspaceProvider`, so nothing here
  * may resolve a workspace from that provider: the workspace list is read at the root and each
  * per-workspace figure fans out explicitly.
+ *
+ * This wrapper exists only to make the hook calls; the counting rules are the pure
+ * `deriveV2Counts` (VS-667), so they can be tested with plain data.
  */
 export function useV2Counts(scope: V2Scope): V2Counts {
   const workspaces = useWorkspaces();
@@ -56,18 +47,8 @@ export function useV2Counts(scope: V2Scope): V2Counts {
   // until the weaver marks it, so counting it would promise an action captain cannot take (VS-411).
   // Until a query answers, the listed `needsYou` (the daemon's own per-workspace count) stands in, so
   // the badge is present on first paint rather than flashing to zero.
-  const decisionQueries = useDecisionsMany(ids, { status: 'open', owner: 'human' });
+  const decisionQueries = useDecisionsMany(ids, OPEN_HUMAN_DECISIONS);
   const incidents = useIncidents();
-
-  const needsByWs: Record<string, number> = {};
-  let needsGlobal = 0;
-  listed.forEach((w, i) => {
-    const needs = decisionQueries[i]?.data?.filter(countsAsNeeds).length ?? w.needsYou;
-    needsByWs[w.id] = needs;
-    needsGlobal += needs;
-  });
-
-  const needs = scope.kind === 'workspace' ? (needsByWs[scope.ws] ?? 0) : needsGlobal;
 
   // VS-415: the same working set the Live floor renders — an in-flight run, plus the handover grace.
   // One hook call over the union of every workspace's working workers; the grace is per worker id, so
@@ -79,17 +60,20 @@ export function useV2Counts(scope: V2Scope): V2Counts {
     return ids;
   }, [workerLists]);
   const workingIds = useRunningWorkerIds(activeIds);
-  // The same `liveCounts` the Live floor's roster figure uses (VS-630), so the badge and the floor
-  // it points to count one working set through one function.
-  const { total: live, perList: livePerWs } = liveCounts(workerLists, workingIds);
-  const liveByWs: Record<string, number> = {};
-  listed.forEach((w, i) => {
-    liveByWs[w.id] = livePerWs[i] ?? 0;
-  });
+  const decisions = useMemo(() => decisionQueries.map((q) => q.data), [decisionQueries]);
 
-  const openIncidents = (incidents.data?.items ?? []).filter((i) => i.resolvedAt === null).length;
-
-  return { needs, needsByWs, needsGlobal, live, liveByWs, incidents: openIncidents };
+  return useMemo(
+    () =>
+      deriveV2Counts({
+        scope,
+        listed,
+        decisions,
+        workers: workerLists,
+        workingIds,
+        incidents: (incidents.data?.items ?? []).filter((i) => i.resolvedAt === null).length,
+      }),
+    [scope, listed, decisions, workerLists, workingIds, incidents.data],
+  );
 }
 
 function Pill({ tone, label }: { tone: 'working' | 'needs-you' | 'blocked'; label: string }): React.ReactElement {

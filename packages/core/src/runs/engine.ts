@@ -484,6 +484,11 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   Object.assign(agent, { runtimeId: setting.runtime });
   if (ticket) ctx.db.run('UPDATE tickets SET execution_run_id = ?, execution_locked_at = ? WHERE id = ?', [runId, nowIso(), ticket.id]);
   ctx.events.emit('run.started', 'run', runId, { agentId: agent.id, ticketId: agent.ticketId, turnEpoch: run.turnEpoch });
+  // VS-667: a worker starting a turn moves from `active` to `running`, which is its live-readiness.
+  // `run.started` covers the run list; the worker's own status is a separate fact, so emit the
+  // `worker.status` every consumer keyed on the worker itself (the rail's Live badge) can reach it
+  // without waiting for another read to happen by chance.
+  ctx.events.emit('worker.status', 'agent', agent.id, { status: 'running', runtimeId: setting.runtime, ticketId: agent.ticketId });
   record('run.started', { agentId: agent.id, turnEpoch: run.turnEpoch, wakeups: run.wakeupIds ?? [] }, 'system');
 
   let result: TurnResult | null = null;

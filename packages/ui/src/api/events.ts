@@ -9,6 +9,12 @@ type Listener = (s: ConnectionStatus) => void;
 type EventListener = (e: WorkspaceEvent) => void;
 
 /**
+ * The exact parameters the rail's Needs-you read uses (V2Page's `useV2Counts`, VS-667). Spelled once
+ * so the count's query key and the invalidation that must reach it cannot drift apart.
+ */
+export const OPEN_HUMAN_DECISIONS = { status: 'open', owner: 'human' } as const;
+
+/**
  * VS-641: what a reconnect must re-read. Durable events replay from `?after=<seq>`, but ephemeral
  * frames (`worker.activity`, `run.event`, `run.delta`, `session.compaction`) are never persisted and
  * a resume position the server no longer holds replays nothing — so live counts and worker rows
@@ -554,12 +560,18 @@ export function invalidateFor(qc: QueryClient, ws: string, evt: WorkspaceEvent):
     case 'decision.updated':
       patchDecisionCaches(qc, ws, evt.payload as Decision);
       inv(qk.decisions(ws));
+      // VS-667: the rail and each workspace group count Needs-you from this exact parameterised
+      // list (V2Page's `useV2Counts`), so name it explicitly and the count moves on an answer,
+      // supersede, expiry or grant without the Needs you screen being opened.
+      inv([...qk.decisions(ws), OPEN_HUMAN_DECISIONS]);
       inv(qk.decision(ws, id));
       inv(qk.briefing(ws));
       inv(qk.workspaces());
       break;
     case 'decision.created':
       inv(qk.decisions(ws));
+      // VS-667: a decision becoming open raises the rail's count on the same parameterised read.
+      inv([...qk.decisions(ws), OPEN_HUMAN_DECISIONS]);
       inv(qk.decision(ws, id));
       inv(qk.briefing(ws));
       // The sidebar badges every workspace from the workspace list, which carries this workspace's

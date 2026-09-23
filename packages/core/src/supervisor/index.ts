@@ -625,6 +625,11 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
    * `status = 'running'`, so a worker whose turn ended cleanly and was simply never re-woken (the
    * VS-199 shape) falls entirely outside it.
    *
+   * VS-682: also excludes agent `status = 'done'`, alongside `retired`. `done` is itself a standing
+   * terminal-ish state — reached by `weave_worker_cancel` and by a normally-finished worker whose
+   * work has not yet landed (VS-333) — regardless of whether its ticket has also reached a terminal
+   * status. Neither case has any route back through this sweep; both wait on a human action.
+   *
    * VS-498: also excludes a `blocked` ticket explicitly. A block is not always represented by an
    * open `decisions` row — a ticket-level `blockedBy` or an `{owner, action}` unblock can leave a
    * worker legitimately waiting with none of the other exclusions above in play — and this sweep now
@@ -650,7 +655,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     return ctx.db.all<StalledAgentRow>(
       `SELECT a.id AS id, a.ticket_id AS ticket_id, a.last_run_at AS last_run_at, t.identifier AS identifier
          FROM agents a JOIN tickets t ON t.id = a.ticket_id
-        WHERE a.workspace_id = ? AND a.kind = 'worker' AND a.status != 'retired'
+        WHERE a.workspace_id = ? AND a.kind = 'worker' AND a.status NOT IN ('retired', 'done')
           AND t.status NOT IN (${excludedPlaceholders})
           AND t.interactive_session = 0
           AND NOT (t.status = 'merging' AND t.merge_started_at IS NULL)

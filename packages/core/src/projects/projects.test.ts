@@ -368,21 +368,93 @@ describe('projects', () => {
     expect(existsSync(join(project.clonePath, 'edge-only.txt'))).toBe(true);
   });
 
-  it('marks the clone diverged, not just failed, when it cannot be fast-forwarded (VS-131)', async () => {
+  it('recovers from a rewritten remote instead of leaving the clone diverged (VS-673)', async () => {
     const src = await sourceRepo();
     const project = await projects.add(HUMAN, cfg(src));
+    // `add` only clones; it does not call `fetch()`. Establish the watermark with one clean fetch —
+    // the precondition the guard requires to treat what follows as safe to reset.
+    await projects.fetch(project.id);
+    const before = (await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim();
+    expect(h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!.primaryCloneSyncedHead).toBe(before);
+
     // Rewrite the remote's tip in place (an amend) rather than adding on top of it: the clone's HEAD
-    // is then not an ancestor of the new tip at all, the same shape a force-push leaves behind.
+    // is then not an ancestor of the new tip at all, the same shape a force-push leaves behind — a
+    // real amend/rebase on the real git repo, not a mocked git call.
+    writeFileSync(join(src, 'README.md'), '# web (rewritten)\n', 'utf8');
+    await git(['add', '.'], src);
+    await git(['commit', '--amend', '-m', 'init (rewritten)'], src);
+    const remoteHead = (await git(['rev-parse', 'main'], src)).stdout.trim();
+
+    const result = await projects.fetch(project.id);
+    expect(result.fastForwarded).toBe(true);
+    expect(result.head).toBe(remoteHead);
+    expect((await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim()).toBe(remoteHead);
+    expect(readFileSync(join(project.clonePath, 'README.md'), 'utf8')).toBe('# web (rewritten)\n');
+    const row = h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!;
+    expect(row.syncState).toBe('in_sync');
+    expect(row.primaryCloneSyncedHead).toBe(remoteHead);
+    expect(h.events.some((e) => e.type === 'project.updated' && (e.payload as { syncState?: string }).syncState === 'in_sync')).toBe(true);
+  });
+
+  it('does not reset a diverged clone with no recorded watermark yet (VS-673)', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, cfg(src));
+    const before = (await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim();
+    // Simulate a project that predates the watermark column, or whose last fetch never reached
+    // in_sync: no recorded baseline to reason from.
+    h.db.update('projects', project.id, { primaryCloneSyncedHead: null });
+
     writeFileSync(join(src, 'README.md'), '# web (rewritten)\n', 'utf8');
     await git(['add', '.'], src);
     await git(['commit', '--amend', '-m', 'init (rewritten)'], src);
 
-    const before = (await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim();
     const result = await projects.fetch(project.id);
     expect(result.fastForwarded).toBe(false);
     expect((await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim()).toBe(before);
-    expect(h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!.syncState).toBe('diverged');
-    expect(h.events.some((e) => e.type === 'project.updated' && (e.payload as { syncState?: string }).syncState === 'diverged')).toBe(true);
+    const row = h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!;
+    expect(row.syncState).toBe('diverged');
+    expect(row.primaryCloneSyncedHead).toBeNull();
+  });
+
+  it('refuses to reset a clone holding a real, unpushed local commit (VS-673)', async () => {
+    const src = await sourceRepo();
+    const project = await projects.add(HUMAN, cfg(src));
+    // Establish a watermark with a normal, clean fetch first.
+    await projects.fetch(project.id);
+    const synced = h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!.primaryCloneSyncedHead;
+    expect(synced).toBeTruthy();
+
+    // Simulate archiveAfterMerge's local-branch backfill: a commit made straight into the primary
+    // clone, never pushed (design.md Decision 2).
+    writeFileSync(join(project.clonePath, 'local-only.txt'), 'unpushed work', 'utf8');
+    await git(['add', '.'], project.clonePath);
+    await git(['-c', 'user.name=Weave AI', '-c', 'user.email=weave-ai@localhost', 'commit', '-m', 'chore(openspec): archive x'], project.clonePath);
+    const localHead = (await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim();
+    expect(localHead).not.toBe(synced);
+
+    // The remote also moves independently, so a fast-forward is no longer even theoretically possible.
+    writeFileSync(join(src, 'upstream.txt'), 'real upstream work', 'utf8');
+    await git(['add', '.'], src);
+    await git(['commit', '-m', 'upstream work'], src);
+
+    const result = await projects.fetch(project.id);
+    expect(result.fastForwarded).toBe(false);
+    expect((await git(['rev-parse', 'HEAD'], project.clonePath)).stdout.trim()).toBe(localHead);
+    expect(existsSync(join(project.clonePath, 'local-only.txt'))).toBe(true);
+    const row = h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!;
+    expect(row.syncState).toBe('diverged');
+    expect(row.primaryCloneSyncedHead).toBe(synced); // unchanged: the refused attempt never updates it
+
+    // Bring the local-only commit into the remote's history (a human pushing it upstream, or folding
+    // it into a merge, after noticing the stray commit) so it becomes reachable, then fetch again: it
+    // recovers and records a fresh watermark.
+    await git(['fetch', project.clonePath, 'main'], src);
+    await git(['-c', 'user.email=t@e.com', '-c', 'user.name=T', 'merge', 'FETCH_HEAD', '-m', 'fold in the unpushed archive commit'], src);
+    const result2 = await projects.fetch(project.id);
+    expect(result2.fastForwarded).toBe(true);
+    const row2 = h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!;
+    expect(row2.syncState).toBe('in_sync');
+    expect(row2.primaryCloneSyncedHead).toBe(result2.head);
   });
 
   it('marks the clone in_sync once fetch fast-forwards it', async () => {

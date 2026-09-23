@@ -2105,7 +2105,7 @@ describe('run engine', () => {
       expect(ticket.status).toBe('blocked');
       expect(ticket.unblock?.owner).toBe('weaver');
       expect(ticket.unblock?.action).toContain(h.projectSlug);
-      expect(ticket.unblock?.action).toContain('diverged');
+      expect(ticket.unblock?.action).toContain('not confirmed to be a stale copy of the remote');
     });
 
     it('blocks the ticket and never runs the turn when fetching origin fails', async () => {
@@ -2154,6 +2154,32 @@ describe('run engine', () => {
       expect(runtime.inputs).toHaveLength(1); // still just the one input from the first, fresh turn
       const ticket = h.services.tickets!.get(ticketId);
       expect(ticket.status).toBe('blocked');
+    });
+
+    it('self-heals and runs normally when the clone only diverged because the remote was rewritten (VS-673)', async () => {
+      const { remoteDir, clonePath } = await seedRemoteAndClone();
+      const { ticketId, workerId } = seedCuration();
+
+      runtime.queue.push({ structured: { state: 'working', summary: 'first pass', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'curate' });
+      const first = await runOnce(workerId);
+      expect(first.status).toBe('succeeded');
+      expect(runtime.inputs).toHaveLength(1);
+
+      // Rewrite the remote's last commit in place (an amend) rather than adding on top of it, with no
+      // local write to the primary clone — the same shape a force-push or rebase upstream leaves.
+      await git(['commit', '--amend', '-m', 'init (rewritten)'], remoteDir, 10_000);
+
+      runtime.queue.push({ structured: { state: 'done', summary: 'second pass', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      h.services.wake!.enqueue(workerId, { source: 'human_message', reason: 'one more pass' });
+      const second = await runOnce(workerId);
+
+      expect(second.status).toBe('succeeded');
+      expect(runtime.inputs).toHaveLength(2); // the second turn actually dispatched, unlike the guard-refused case
+      const ticket = h.services.tickets!.get(ticketId);
+      expect(ticket.status).not.toBe('blocked');
+      const project = h.db.get<{ syncState: string }>('SELECT sync_state AS syncState FROM projects WHERE id = ?', [h.projectId]);
+      expect(project?.syncState).toBe('in_sync');
     });
 
     it('never gates a non-curation, no-worktree ticket', async () => {

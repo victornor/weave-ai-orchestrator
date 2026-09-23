@@ -420,13 +420,16 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   // remove a knowledge entry as "contradicted" by evidence that was simply behind (VS-255). Checked
   // on every turn, not only the first, so a relaunch or a later turn on the same ticket is covered
   // the same way (design.md Decision 3 of vs-256-curation-fact-checks-against-a-stale-che).
+  // VS-673: `fetch()` now self-heals a fast-forward failure caused only by a rewritten remote, so a
+  // `diverged` row here always means its guard refused the reset — a commit sits in the clone that
+  // isn't confirmed to be a disposable copy of the rewritten remote, and needs a human.
   if (ticket?.originKind === 'curation' && project) {
     let freshnessError: string | null = null;
     try {
       await deps().projects.fetch(project.id);
       const row = ctx.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id]);
       if (!row || row.syncState !== 'in_sync') {
-        freshnessError = `primary clone for ${project.slug} has diverged from origin/${landingBranchOf(row ?? project, ticket)} and could not be fast-forwarded`;
+        freshnessError = `primary clone for ${project.slug} could not be safely brought in sync with origin/${landingBranchOf(row ?? project, ticket)}: it holds a commit not confirmed to be a stale copy of the remote, so it was left untouched`;
       } else {
         Object.assign(project, row);
       }

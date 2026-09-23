@@ -71,6 +71,7 @@ export function project(over: Partial<Project> = {}): Project {
     policies: {},
     status: 'ready',
     syncState: 'in_sync',
+    primaryCloneSyncedHead: null,
     lastFetchedAt: null,
     errorText: null,
     ...over,

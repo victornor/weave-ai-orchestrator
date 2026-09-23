@@ -416,15 +416,34 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       // clone on the repository's actual default branch, which differs from the landing branch.
       const landing = await fetchLanding(project);
       const before = await git(['rev-parse', 'HEAD'], project.clonePath, 15_000);
+      const beforeHead = before.stdout.trim();
       await git(['checkout', landing], project.clonePath, 30_000);
-      const merged = await git(['merge', '--ff-only', `origin/${landing}`], project.clonePath, 120_000);
+      let merged = await git(['merge', '--ff-only', `origin/${landing}`], project.clonePath, 120_000);
+      // VS-673: a fast-forward failure means the clone's branch is not an ancestor of the new
+      // origin/<landing> tip — indistinguishable, by reachability alone, from "the remote was
+      // rewritten" (disposable) or "something committed straight into the clone" (real, unpushed
+      // work — see design.md Decision 2, confirmed for archiveAfterMerge's local-branch backfill).
+      // The guard is provenance, not content: only self-heal when nothing has moved the clone's
+      // branch since the last time this same function left it matching origin.
+      let recovered = false;
+      if (!merged.ok && project.primaryCloneSyncedHead && project.primaryCloneSyncedHead === beforeHead) {
+        const reset = await git(['reset', '--hard', `origin/${landing}`], project.clonePath, 30_000);
+        if (reset.ok) { merged = reset; recovered = true; }
+      }
       const after = await git(['rev-parse', 'HEAD'], project.clonePath, 15_000);
-      const head = after.ok ? after.stdout.trim() : before.stdout.trim();
-      const fastForwarded = merged.ok && before.stdout.trim() !== head;
+      const head = after.ok ? after.stdout.trim() : beforeHead;
+      const fastForwarded = merged.ok && beforeHead !== head;
       const syncState: ProjectSyncState = merged.ok ? 'in_sync' : 'diverged';
-      ctx.db.update('projects', project.id, { syncState, lastFetchedAt: nowIso(), updatedAt: nowIso() });
+      ctx.db.update('projects', project.id, {
+        syncState, lastFetchedAt: nowIso(), updatedAt: nowIso(),
+        ...(merged.ok ? { primaryCloneSyncedHead: head } : {}),
+      });
       ctx.events.emit('project.updated', 'project', project.id, { slug: project.slug, syncState });
-      if (!merged.ok) log.warn({ project: project.slug, stderr: merged.stderr.trim().slice(0, 200) }, 'primary clone could not be fast-forwarded');
+      if (recovered) {
+        log.info({ project: project.slug }, 'primary clone had diverged from a rewritten remote; reset to match it (VS-673)');
+      } else if (!merged.ok) {
+        log.warn({ project: project.slug, stderr: merged.stderr.trim().slice(0, 200) }, 'primary clone could not be safely brought in sync: it holds a commit not confirmed to be a stale copy of the remote, so it was left untouched');
+      }
       if (fastForwarded) { try { await deps().specs.index(project.id); } catch (e) { log.debug({ err: String(e) }, 'spec reindex after fetch failed'); } }
       return { head, fastForwarded };
     },

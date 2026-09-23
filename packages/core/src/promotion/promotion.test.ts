@@ -153,7 +153,7 @@ describe('promotion', () => {
     const project = (): Project => ({
       id: h.projectId, workspaceId: h.workspaceId, slug: 'api', name: 'API', gitUrl: 'x', defaultBranch: 'main', landingBranch: 'edge', clonePath: clone,
       maxWorkers: 4, setupCommand: null, worktreeProvider: 'git', openspecEnabled: false, openspecVersion: null, knowledgeRepoEnabled: false, knowledgeSwitch: null,
-      policies: { promotionNotes: ['push to main deploys prod'] }, status: 'ready', syncState: 'in_sync', lastFetchedAt: null, errorText: null,
+      policies: { promotionNotes: ['push to main deploys prod'] }, status: 'ready', syncState: 'in_sync', primaryCloneSyncedHead: null, lastFetchedAt: null, errorText: null,
     } as Project);
     h.services.projects = { get: project } as never;
     tickets = createTicketsService(h.ctx, h.deps);

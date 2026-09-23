@@ -1,14 +1,16 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
-import { estimateTokens, type Run, type Ticket } from '@weave-ai/shared';
+import { estimateTokens, type Project, type Run, type Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createSupervisor } from './index.js';
 import { createKnowledgeService } from '../knowledge/service.js';
 import { createDecisionsService } from '../decisions/service.js';
 import { createWakeService } from '../wake/index.js';
 import { createWorkersService } from '../workers/index.js';
+import { createProjectsService } from '../projects/index.js';
 import { GitWorktreeProvider } from '../worktrees/git.js';
 import { git } from '../util/git.js';
 import { runState } from '../runs/active.js';
@@ -2317,6 +2319,46 @@ describe('supervisor silence watchdog (VS-461)', () => {
       vi.useRealTimers();
       expect(stage0()).toHaveLength(1);
       expect(decisions.get(approval.id).weaverReviewStatus).toBe('looked');
+    });
+  });
+
+  // VS-673: the hourly reconcile sweep (VS-131) calls `projects.fetch()` for every ready project and
+  // used to just log a fast-forward failure and move on, leaving a diverged clone stuck until a human
+  // noticed. `fetch()` now self-heals a clone diverged only by a rewritten remote — this exercises
+  // that through the real reconcile pass, with a real git repo, not the fake `projects.fetch` the rest
+  // of this file stubs in `beforeEach`.
+  describe('primary clone recovery via the reconcile sweep (VS-673)', () => {
+    const dirs: string[] = [];
+    afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+
+    it('resets a diverged clone to a rewritten remote on the reconcile pass', async () => {
+      const remoteDir = mkdtempSync(join(tmpdir(), 'ac-vs673-remote-'));
+      dirs.push(remoteDir);
+      await git(['init', '-b', 'main'], remoteDir, 30_000);
+      await git(['config', 'user.email', 'test@example.com'], remoteDir, 10_000);
+      await git(['config', 'user.name', 'Test'], remoteDir, 10_000);
+      writeFileSync(join(remoteDir, 'README.md'), '# api\n', 'utf8');
+      await git(['add', '.'], remoteDir, 10_000);
+      await git(['commit', '-m', 'init'], remoteDir, 10_000);
+
+      const clonePath = h.db.get<{ clonePath: string }>('SELECT clone_path FROM projects WHERE id = ?', [h.projectId])!.clonePath;
+      await git(['clone', remoteDir, clonePath], h.root, 30_000);
+      await git(['config', 'user.email', 'test@example.com'], clonePath, 10_000);
+      await git(['config', 'user.name', 'Test'], clonePath, 10_000);
+
+      const projects = createProjectsService(h.ctx, h.deps);
+      h.services.projects = projects;
+      await projects.fetch(h.projectId); // establishes the watermark, same as any earlier reconcile tick would have
+
+      // Rewrite the remote's history in place — no local write to the clone — the same shape a
+      // force-push or rebase upstream leaves.
+      await git(['commit', '--amend', '-m', 'init (rewritten)'], remoteDir, 10_000);
+
+      await supervisor.tick(); // `due()` returns true the first time a key is unset, so this reconciles immediately
+
+      const row = h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [h.projectId])!;
+      expect(row.syncState).toBe('in_sync');
+      expect((await git(['rev-parse', 'HEAD'], clonePath)).stdout.trim()).toBe((await git(['rev-parse', 'main'], remoteDir)).stdout.trim());
     });
   });
 });

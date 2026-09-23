@@ -1912,4 +1912,28 @@ describe('migrations', () => {
       db.close();
     });
   });
+
+  describe('0063_project_primary_clone_synced_head (VS-673)', () => {
+    const cols = (db: Db): string[] => db.all<{ name: string }>('PRAGMA table_info(projects)').map((c) => c.name);
+
+    it('adds a nullable watermark column, NULL on existing rows', () => {
+      const path = join(dir, 'vs673-watermark.sqlite');
+      const before = openDbAsOf(path, '0062_ticket_role_project_backfill.sql');
+      expect(cols(before)).not.toContain('primary_clone_synced_head');
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      before.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, worktree_provider, openspec_enabled, policies_json, status, created_at, updated_at)
+         VALUES ('p1', 'w1', 'api', 'API', 'git@e:a/b.git', 'main', '/tmp/p', 4, 'git', 1, '{}', 'ready', 't0', 't0')`);
+      before.close();
+
+      const db = openDb(path);
+      expect(cols(db)).toContain('primary_clone_synced_head');
+      expect(db.get<{ primaryCloneSyncedHead: string | null }>('SELECT primary_clone_synced_head AS primaryCloneSyncedHead FROM projects WHERE id = ?', ['p1'])!.primaryCloneSyncedHead).toBeNull();
+      db.run("UPDATE projects SET primary_clone_synced_head = 'deadbeef' WHERE id = 'p1'");
+      expect(db.get<{ primaryCloneSyncedHead: string | null }>('SELECT primary_clone_synced_head AS primaryCloneSyncedHead FROM projects WHERE id = ?', ['p1'])!.primaryCloneSyncedHead).toBe('deadbeef');
+      db.close();
+    });
+  });
 });

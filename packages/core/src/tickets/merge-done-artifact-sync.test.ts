@@ -66,7 +66,7 @@ describe('mergeDone syncs ticket artifacts for an opted-in project (VS-360)', ()
         id: h.projectId, workspaceId: h.workspaceId, slug: 'api', name: 'API', gitUrl: 'git@example.com:acme/api.git',
         defaultBranch: 'main', landingBranch: null, clonePath: clone, maxWorkers: 4, setupCommand: null,
         worktreeProvider: 'git', openspecEnabled: false, openspecVersion: null, knowledgeRepoEnabled, knowledgeSwitch: null, policies: { deliveryMode: 'pr' },
-        status: 'ready', syncState: 'in_sync', lastFetchedAt: null, errorText: null,
+        status: 'ready', syncState: 'in_sync', primaryCloneSyncedHead: null, lastFetchedAt: null, errorText: null,
       } satisfies Project),
     } as never;
 

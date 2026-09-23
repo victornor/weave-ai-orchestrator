@@ -1492,6 +1492,9 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         await watchdog().catch((e) => log.error({ err: String(e) }, 'watchdog failed'));
         await spawnPending().catch((e) => log.error({ err: String(e) }, 'spawn pass failed'));
         { const sweep = deps().tickets.autoMergeSweep; if (typeof sweep === 'function') await sweep.call(deps().tickets).catch((e: unknown) => log.error({ err: String(e) }, 'auto-merge sweep failed')); }
+        // VS-670: the decision-centric safety net, so a reviewed card the merge sweep cannot see is
+        // still caught and surfaced rather than sitting silently for hours.
+        { const sweep = deps().tickets.staleReviewSweep; if (typeof sweep === 'function') await sweep.call(deps().tickets).catch((e: unknown) => log.error({ err: String(e) }, 'stale-review sweep failed')); }
         await pumpMergeQueues().catch((e) => log.error({ err: String(e) }, 'merge queue pump failed'));
         if (due('supervisor:merge_ci_at', MERGE_POLL_EVERY_MS)) {
           await wakeMergingOnProgress().catch((e) => log.error({ err: String(e) }, 'merge-slot progress wake failed'));

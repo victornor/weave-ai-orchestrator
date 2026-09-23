@@ -289,6 +289,17 @@ describe('supervisor scheduled passes', () => {
   const pendingOf = (id: string): number =>
     h.db.get<{ curationPending: number }>('SELECT curation_pending FROM knowledge_files WHERE id = ?', [id])!.curationPending;
 
+  it('runs the stale-review sweep on the tick beside the auto-merge sweep (VS-670)', async () => {
+    const autoMergeSweep = vi.fn(async () => 0);
+    const staleReviewSweep = vi.fn(async () => 0);
+    h.services.tickets = { livenessViolations: () => [], autoMergeSweep, staleReviewSweep } as never;
+
+    await supervisor.tick();
+
+    expect(autoMergeSweep).toHaveBeenCalled();
+    expect(staleReviewSweep).toHaveBeenCalledTimes(1);
+  });
+
   describe('curation', () => {
     it('requests curation for a file whose last curation is older than 14 days', async () => {
       const requestCuration = vi.fn(async () => ({}));

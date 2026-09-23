@@ -125,6 +125,14 @@ export interface TicketsService {
   /** Move `in_review` tickets with auto_merge on to `merging` once their delivery is ready (local-branch: immediately; pr: CI green or no CI). Returns how many advanced. */
   autoMergeSweep(): Promise<number>;
   /**
+   * VS-670: the decision-centric safety net beside `autoMergeSweep`. Scans open `plan_approval`/
+   * `merge_approval` decisions that carry the weaver's review and have been open past a short
+   * threshold on a YOLO project, grants a `looked` card that has no other periodic grant path (a
+   * plan, or an archive-backfill merge), and surfaces anything still unresolved once (a system
+   * comment and a weaver wake). Returns how many it resolved or surfaced. Never throws.
+   */
+  staleReviewSweep(): Promise<number>;
+  /**
    * VS-389/VS-570: land an archive-backfill pull request under the project's landing lock, reusing
    * the archive-then-merge machinery (rebase when stale, respect required checks). Records the
    * outcome on the ticket and never throws; `landed` says whether it merged, `closed` that the pull

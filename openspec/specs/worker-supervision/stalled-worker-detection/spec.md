@@ -11,7 +11,7 @@ hung or currently executing.
 
 The system SHALL periodically identify every worker agent that meets all of the following at once:
 
-- the agent's status is not `retired`,
+- the agent's status is not `retired` and not `done`,
 - the agent's ticket status is not a terminal status,
 - the ticket has no decision in `open` status,
 - the agent has no wakeup that is an action path: a wakeup in `claimed` status; a wakeup in `queued`
@@ -29,6 +29,13 @@ its own: nothing in the system will ever wake it. The system SHALL raise this co
 same fault-surfacing pattern used for a stuck live run (a `worker.stalled` event, visible to the
 conductor through its digest), and SHALL additionally attempt bounded automatic recovery as defined
 below, rather than leaving the worker stalled indefinitely.
+
+An agent's own `status` of `done` is a standing terminal-ish state on its own, independent of its
+ticket's status: a cancelled worker (`weave_worker_cancel`) and a normally-finished worker whose work
+has not yet landed (VS-333) both park at `status: 'done'` with their ticket possibly still open, and
+neither is waiting on a future wake it can act on — it is waiting on a human decision (relaunch,
+cancel the ticket, or approve landing) that arrives through a different path entirely, never through
+this detection. It SHALL be excluded on the same terms as `retired`.
 
 #### Scenario: A worker whose last turn ended cleanly with nothing left to wake it is flagged
 
@@ -65,6 +72,22 @@ below, rather than leaving the worker stalled indefinitely.
   exceeds the threshold
 - **THEN** the worker is detected as stalled on the same terms as any other worker, and the bounded
   automatic recovery requirement applies to it
+
+#### Scenario: A cancelled worker parked at status done is not flagged
+
+- **WHEN** a worker was cancelled and its agent `status` is `done`, its ticket is still open, no
+  wakeup is queued for it, no run is running for it, and the time since its last run exceeds the
+  threshold
+- **THEN** the worker is not detected as stalled, no `worker.stalled` event is raised for it, no
+  automatic recovery wake is enqueued for it, and no `gate_finding` escalation is raised for it —
+  whatever the ticket's own status
+
+#### Scenario: A normally-finished worker parked at status done pending landing is not flagged
+
+- **WHEN** a worker's work finished but has not yet landed, its agent `status` is `done`, its ticket
+  is still open, no wakeup is queued for it, no run is running for it, and the time since its last
+  run exceeds the threshold
+- **THEN** the worker is not detected as stalled and no `worker.stalled` event is raised for it
 
 ### Requirement: A worker that could still make progress on its own is never flagged
 

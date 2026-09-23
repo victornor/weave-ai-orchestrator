@@ -1616,6 +1616,20 @@ describe('stalled worker detection (VS-202)', () => {
     expect(stalledEventsFor(agentId)).toHaveLength(0);
   });
 
+  it('does not flag a normally-finished worker parked at status done with its ticket still open (VS-333, VS-682)', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { status: 'done', lastRunAt: oldTimestamp() });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(0);
+  });
+
+  it('does not flag a cancelled worker (status done, ticket left open) (VS-682)', async () => {
+    const ticketId = seedTicket(h, { status: 'in_progress' });
+    const agentId = h.addWorker(ticketId, { status: 'done', errorText: 'worker cancelled: broken sandbox git mount', lastRunAt: oldTimestamp() });
+    await supervisor.tick();
+    expect(stalledEventsFor(agentId)).toHaveLength(0);
+  });
+
   it('does not flag a worker whose last run finished less than the threshold ago', async () => {
     const ticketId = seedTicket(h, { status: 'in_progress' });
     const agentId = h.addWorker(ticketId, { lastRunAt: nowIso() });

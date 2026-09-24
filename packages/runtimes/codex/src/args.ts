@@ -4,7 +4,17 @@ import type { BuiltCommand, McpServerConfig, ResumeCommand, ResumeCommandInput, 
 import { runTmpDir } from '@weave-ai/runtime-sdk';
 import { asCodexSession } from './session.js';
 
-export interface CodexBuildOpts { tmpDir?: string; configExists?: boolean; modelContextWindowTokens?: number }
+export interface CodexBuildOpts {
+  tmpDir?: string;
+  configExists?: boolean;
+  modelContextWindowTokens?: number;
+  /**
+   * VS-685: extra `workspace-write` sandbox roots — the checkout's git common dir, so a git
+   * worktree can write `index.lock`/`HEAD` outside the turn's cwd. Resolved by the adapter (this
+   * function stays pure); applied only when the resolved sandbox is `workspace-write`.
+   */
+  writableRoots?: string[];
+}
 /**
  * `mcp_servers.<name>.default_tools_approval_mode` (Rust `AppToolApproval`) is a different key from
  * `approval_policy`. Its variants are `auto`, `prompt`, `writes`, `approve`; `never` is an
@@ -129,6 +139,12 @@ export function buildArgs(input: TurnInput, opts: CodexBuildOpts = {}): CodexBui
     const sandbox = input.permission.mode === 'restricted' ? 'read-only' : 'workspace-write';
     if (mode === 'new') args.push('--sandbox', sandbox);
     else args.push('-c', `sandbox_mode=${toml(sandbox)}`);
+    // VS-685: a git worktree's metadata (`index.lock`, `HEAD`) lives in the main clone's
+    // `.git/worktrees/<name>/`, outside the sandbox's default (cwd) writable root, so `git commit`
+    // from the checkout is denied as EROFS. Grant the resolved roots explicitly.
+    if (sandbox === 'workspace-write' && (opts.writableRoots?.length ?? 0) > 0) {
+      args.push('-c', `sandbox_workspace_write.writable_roots=${JSON.stringify(opts.writableRoots)}`);
+    }
     // Codex defaults headless invocations to approval_policy="never".  `auto` is
     // the sandboxed worker posture, not the bypass posture, so it also needs the
     // matching automatic approval policy to let its run-scoped MCP server answer.

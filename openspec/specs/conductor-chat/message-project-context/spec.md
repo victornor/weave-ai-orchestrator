@@ -302,7 +302,7 @@ the information ambiguously, and every other field SHALL be unchanged.
 
 The web conductor chat SHALL, when its project selector names a project that has at least one block
 that is still open to new pending tickets — a block whose reported status is `open` — offer those
-blocks beside its input as a second, horizontal, single-select strip: a leading **Any block** option
+blocks beside its input as a second, horizontal, single-select strip: a leading **No block** option
 meaning "no block", followed by one tag per such block, in the project's block order. The strip SHALL
 be exposed to assistive technology as a single-select group with an accessible label equivalent to
 "Roadmap block for this message", every option reachable and operable by keyboard.
@@ -329,7 +329,7 @@ onto additional lines and never by reflowing or displacing the message input or 
 #### Scenario: A project with open blocks offers them in order
 
 - **WHEN** the human selects a project that has two or more `open` blocks
-- **THEN** a block strip appears with an **Any block** option followed by the project's `open` blocks
+- **THEN** a block strip appears with a **No block** option followed by the project's `open` blocks
   in block order
 
 #### Scenario: A project with no open block offers nothing
@@ -345,7 +345,7 @@ onto additional lines and never by reflowing or displacing the message input or 
 
 #### Scenario: Sending with no block chosen
 
-- **WHEN** the human has **Any block** active and sends a message with a project selected
+- **WHEN** the human has **No block** active and sends a message with a project selected
 - **THEN** the message is sent exactly as a message with a project and no block was sent before this
   capability existed
 
@@ -362,7 +362,7 @@ onto additional lines and never by reflowing or displacing the message input or 
 
 #### Scenario: Clearing the block choice
 
-- **WHEN** the human has a block active and activates **Any block**
+- **WHEN** the human has a block active and activates **No block**
 - **THEN** the block selection is cleared and a following send carries no block
 
 #### Scenario: Changing the project clears the block choice
@@ -378,7 +378,7 @@ onto additional lines and never by reflowing or displacing the message input or 
 #### Scenario: A send clears the block choice
 
 - **WHEN** the human sends a message with a block chosen
-- **THEN** the message carries that block, and afterwards the strip's choice is **Any block**
+- **THEN** the message carries that block, and afterwards the strip's choice is **No block**
 
 #### Scenario: More blocks than fit at phone width
 

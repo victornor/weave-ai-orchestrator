@@ -15,7 +15,7 @@ const fixture = (name: string): string => join(import.meta.dirname, 'fixtures', 
 
 type Sent = Record<string, any>;
 
-function setup(scenario: AppServerScenario, o: { mode?: TurnInput['permission']['mode']; ref?: TurnInput['session']['ref']; replay?: string } = {}) {
+function setup(scenario: AppServerScenario, o: { mode?: TurnInput['permission']['mode']; ref?: TurnInput['session']['ref']; replay?: string; roots?: string[] } = {}) {
   const fake = writeFakeAppServer(scenario, { replay: o.replay });
   const cwd = mkdtempSync(join(tmpdir(), 'ac-app-server-cwd-'));
   dirs.push(fake.dir, cwd);
@@ -29,7 +29,7 @@ function setup(scenario: AppServerScenario, o: { mode?: TurnInput['permission'][
   const events: RuntimeEvent[] = [];
   const partials: RuntimePartial[] = [];
   const sink = { onSpawn: () => undefined, onEvent: (e: RuntimeEvent) => events.push(e), onRaw: () => undefined, onPartial: (p: RuntimePartial) => partials.push(p) };
-  const built = buildArgs(input, { tmpDir: join(cwd, 'tmp') });
+  const built = buildArgs(input, { tmpDir: join(cwd, 'tmp'), ...(o.roots ? { writableRoots: o.roots } : {}) });
   let seq = 0;
   const run = (onHandle?: (h: TurnHandle) => void) => runAppServerTurn(input, sink, onHandle, built, () => seq++, { resumed: built.mode === 'resume', baseline: built.mode === 'new' ? undefined : { inputTokens: 200, outputTokens: 40, cachedInputTokens: 0 }, model: null });
   const client = (): Sent[] => (existsSync(fake.log) ? readFileSync(fake.log, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Sent) : []);
@@ -68,6 +68,13 @@ describe('runAppServerTurn', () => {
     expect(argv[0]).toBe('app-server');
     expect(argv.join(' ')).toContain('mcp_servers.weave-ai.default_tools_approval_mode="approve"');
     expect(argv).not.toContain('exec');
+  });
+
+  it('forwards the sandbox writable roots to app-server startup (VS-685)', async () => {
+    const t = setup('stream', { roots: ['/srv/clone/.git'] });
+    await t.run();
+    const argv = JSON.parse(readFileSync(join(t.fake.dir, 'argv.json'), 'utf8')) as string[];
+    expect(argv.join(' ')).toContain('-c sandbox_workspace_write.writable_roots=["/srv/clone/.git"]');
   });
 
   it.each([

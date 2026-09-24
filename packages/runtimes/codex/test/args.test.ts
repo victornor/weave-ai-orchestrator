@@ -57,6 +57,23 @@ describe('codex buildArgs', () => {
     expect(bypass).not.toContain('--sandbox');
   });
 
+  it.each([
+    ['new', { policy: 'per_ticket', ref: null, isFirstTurn: true }],
+    ['resume', { policy: 'per_ticket', ref: { threadId: 't' }, isFirstTurn: false }],
+    ['fork', { policy: 'per_ticket', ref: { threadId: 't', fork: true }, isFirstTurn: false }],
+  ] as const)('adds the git common dir as a workspace-write root on a %s turn (VS-685)', (_mode, session) => {
+    const b = buildArgs(input({ session }), { writableRoots: ['/srv/clone/.git'] });
+    expect(s(b.args)).toContain('-c sandbox_workspace_write.writable_roots=["/srv/clone/.git"]');
+  });
+
+  it('gives restricted and bypass turns no writable roots (VS-685)', () => {
+    const restricted = buildArgs(input({ permission: { mode: 'restricted' } }), { writableRoots: ['/srv/clone/.git'] }).args;
+    expect(s(restricted)).not.toContain('writable_roots');
+    const bypass = buildArgs(input({ permission: { mode: 'bypass' } }), { writableRoots: ['/srv/clone/.git'] }).args;
+    expect(s(bypass)).not.toContain('writable_roots');
+    expect(s(buildArgs(input()).args)).not.toContain('writable_roots');
+  });
+
   it('passes model, effort and the output schema file', () => {
     const b = buildArgs(input({ model: 'gpt-5.1-codex', effort: 'high', outputSchema: { type: 'object' } }), { tmpDir: '/tmp/ac' });
     expect(s(b.args)).toContain('-m gpt-5.1-codex');

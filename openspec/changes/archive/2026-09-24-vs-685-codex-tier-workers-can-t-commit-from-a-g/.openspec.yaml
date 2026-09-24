@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-24
+goal: Let a codex-tier worker commit from its git worktree checkout without the
+  workspace-write sandbox blocking the commondir

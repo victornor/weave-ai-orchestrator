@@ -930,6 +930,46 @@ describe('supervisor scheduled passes', () => {
       expect(mergeDone).toHaveBeenCalledWith({ kind: 'system', id: null }, ticketId, { mergeCommit: 'cafe1234', method: 'forge' });
     });
 
+    describe('a finished ticket\'s false merge claim (VS-683)', () => {
+      function seedIncompleteDelivery(prState: 'open' | 'merged' | 'closed'): string {
+        const ticketId = seedTicket(h, {
+          status: 'done', kind: 'task',
+          deliveryJson: { prUrl: 'https://github.com/acme/api/pull/534', prState: 'draft', merged: true, mergeCommit: null },
+        });
+        mkdirSync(join(h.ctx.paths.projects, h.projectSlug), { recursive: true });
+        h.db.update('projects', h.projectId, { status: 'ready' });
+        h.ctx.registries.forges.set('github', {
+          id: 'github', detect: async () => true,
+          prState: async () => (prState === 'merged' ? { state: 'merged' as const, mergeCommit: 'deadbeefcafe' } : { state: prState }),
+          mergePr: async () => ({}),
+        });
+        return ticketId;
+      }
+
+      it('corrects the record once the forge confirms the pull request merged', async () => {
+        h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+        h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, transition: vi.fn(async () => ({})) } as never;
+        const ticketId = seedIncompleteDelivery('merged');
+
+        await supervisor.tick();
+
+        const after = h.db.get<{ status: string; delivery: { merged: boolean; mergeCommit: string } }>('SELECT status, delivery_json FROM tickets WHERE id = ?', [ticketId]);
+        expect(after?.status).toBe('done');
+        expect(after?.delivery).toMatchObject({ merged: true, mergeCommit: 'deadbeefcafe' });
+      });
+
+      it('leaves the record alone while the pull request is still open', async () => {
+        h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
+        h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0, transition: vi.fn(async () => ({})) } as never;
+        const ticketId = seedIncompleteDelivery('open');
+
+        await supervisor.tick();
+
+        const after = h.db.get<{ delivery: { mergeCommit: string | null } }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId]);
+        expect(after?.delivery.mergeCommit).toBeNull();
+      });
+    });
+
     it('archives an OpenSpec change left un-archived under a done ticket', async () => {
       h.services.projects = { fetch: vi.fn(async () => ({ head: 'a', fastForwarded: false })) } as never;
       const archiveAfterMerge = vi.fn(async () => ({ archivedAs: '2026-09-04-add-dark-mode', skipped: null }));

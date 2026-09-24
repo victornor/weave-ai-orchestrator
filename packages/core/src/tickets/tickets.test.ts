@@ -1637,6 +1637,23 @@ describe('tickets', () => {
       const t = make();
       await expect(tickets.mergeDone(AGENT, t.id, {})).rejects.toMatchObject({ code: 'wrong_status' });
     });
+
+    it('refuses to complete a project-less ticket that still has a pull request to land (VS-665/VS-683)', async () => {
+      const t = make({ projectId: null, assigneeRoleId: null });
+      tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'https://example.com/pr/534' });
+      h.db.update('tickets', t.id, { status: 'merging' });
+      await expect(tickets.mergeDone(AGENT, t.id, {})).rejects.toMatchObject({ code: 'merge_unverified' });
+      const after = tickets.get(t.id);
+      expect(after.status).toBe('merging');
+      expect(after.delivery).not.toMatchObject({ merged: true });
+    });
+
+    it('still completes a project-less ticket that has nothing to land', async () => {
+      const t = make({ projectId: null, assigneeRoleId: null });
+      h.db.update('tickets', t.id, { status: 'merging' });
+      const next = await tickets.mergeDone(AGENT, t.id, {});
+      expect(next.status).toBe('done');
+    });
   });
 
   describe('post-merge follow-up work', () => {

@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
-import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, SELF_WAKE_STALL_GRACE_MS, type Agent, type KnowledgeScope, type Run, type Ticket } from '@weave-ai/shared';
+import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, SELF_WAKE_STALL_GRACE_MS, incompleteDelivery, type Agent, type KnowledgeScope, type Run, type Ticket } from '@weave-ai/shared';
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 import { scopeUnitName, stopScope, systemdScopeAvailable } from '@weave-ai/runtime-sdk';
 import { formatAge } from '@weave-ai/render';
@@ -1095,6 +1095,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     }
     const byId = new Map(projects.map((p) => [p.id, p]));
     await reconcilePullRequests(byId);
+    await reconcileIncompleteDeliveries(byId);
     await reconcileOpenSpecArchives(byId);
     await reconcileKnowledgeRepoSwitches(byId);
   }
@@ -1180,6 +1181,40 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
           log.info({ ticket: row.identifier, mergeCommit: pr.mergeCommit }, 'reconciliation completed a merge with no live worker');
         } catch (e) { log.warn({ ticket: row.identifier, err: String(e) }, 'reconciliation mergeDone failed'); }
       }
+    }
+  }
+
+  /**
+   * VS-683: a `done` ticket whose delivery claims `merged: true` with no `mergeCommit` (VS-227/
+   * VS-250's `incompleteDelivery()` shape) is not necessarily wrong forever — VS-665 hit this because
+   * `mergeDone` used to complete a project-less ticket without landing its pull request at all. Once
+   * that pull request is actually merged (here, once the daemon lands it for real), this corrects the
+   * stale record from the forge's own state — no status change, no re-triggered follow-up, since the
+   * ticket already finished once. A pull request the forge still shows as open, draft or closed
+   * without merging is left exactly as it was: still visibly incomplete, never guessed at.
+   */
+  async function reconcileIncompleteDeliveries(projects: Map<string, ProjectRow>): Promise<void> {
+    const forge = ctx.registries.forges.get('github');
+    if (!forge) return;
+    const rows = ctx.db.all<{ id: string; identifier: string; projectId: string | null; delivery: Record<string, unknown> | null }>(
+      "SELECT id, identifier, project_id, delivery_json FROM tickets WHERE workspace_id = ? AND status = 'done' AND json_extract(delivery_json, '$.merged') = 1 AND json_extract(delivery_json, '$.prUrl') IS NOT NULL",
+      [ctx.workspaceId],
+    );
+    for (const t of rows) {
+      const delivery = t.delivery ?? {};
+      if (!incompleteDelivery({ status: 'done', delivery })) continue;
+      const prUrl = delivery['prUrl'];
+      if (typeof prUrl !== 'string') continue;
+      const project = t.projectId ? projects.get(t.projectId) : undefined;
+      if (!project || !existsSync(project.clonePath)) continue;
+      const pr = await forge.prState(project.clonePath, prUrl).catch((e: unknown) => {
+        log.warn({ ticket: t.identifier, url: prUrl, err: String(e) }, 'incomplete-delivery PR state check failed');
+        return null;
+      });
+      if (!pr || pr.state !== 'merged' || !pr.mergeCommit) continue;
+      log.info({ ticket: t.identifier, mergeCommit: pr.mergeCommit }, 'correcting a finished ticket\'s delivery once the forge confirmed the merge');
+      ctx.db.update('tickets', t.id, { deliveryJson: { ...delivery, merged: true, mergeCommit: pr.mergeCommit, prState: pr.state, method: delivery['method'] ?? 'forge' }, updatedAt: nowIso() });
+      ctx.events.emit('ticket.updated', 'ticket', t.id, { ticketId: t.id });
     }
   }
 

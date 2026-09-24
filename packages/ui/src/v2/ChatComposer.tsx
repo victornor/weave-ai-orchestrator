@@ -333,7 +333,7 @@ function ChatComposerBody({ shared, ...props }: ChatComposerProps & { shared: Di
             aria-pressed={blockId === null}
             className={cx('v2-tag flex-none', blockId === null ? 'bg-bg-3 text-text-1' : 'text-text-2')}
           >
-            Any block
+            No block
           </button>
           {blocks.map((b) => (
             <button

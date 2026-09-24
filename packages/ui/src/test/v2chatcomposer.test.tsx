@@ -207,7 +207,7 @@ describe('the V2 chat composer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'web' }));
 
     const strip = screen.getByRole('group', { name: 'Roadmap block for this message' });
-    expect(within(strip).getByRole('button', { name: 'Any block' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(strip).getByRole('button', { name: 'No block' })).toHaveAttribute('aria-pressed', 'true');
     fireEvent.click(within(strip).getByRole('button', { name: 'UI polish' }));
     expect(within(strip).getByRole('button', { name: 'UI polish' })).toHaveAttribute('aria-pressed', 'true');
 
@@ -216,12 +216,20 @@ describe('the V2 chat composer', () => {
     expect(onSubmit).toHaveBeenLastCalledWith('x', [], expect.objectContaining({ projectId: 'p1', blockId: 'b1' }));
   });
 
-  it('sends no block when Any block is active (VS-491)', () => {
+  it('labels the unset block choice "No block", never "Any block" (VS-665)', () => {
+    render(<Harness onSubmit={vi.fn()} blocks={[{ id: 'b1', title: 'UI polish' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'web' }));
+    const strip = screen.getByRole('group', { name: 'Roadmap block for this message' });
+    expect(within(strip).queryByRole('button', { name: 'Any block' })).not.toBeInTheDocument();
+    expect(within(strip).getByRole('button', { name: 'No block' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('sends no block when No block is active (VS-491, VS-665)', () => {
     const onSubmit = vi.fn();
     render(<Harness onSubmit={onSubmit} blocks={[{ id: 'b1', title: 'UI polish' }]} />);
     fireEvent.click(screen.getByRole('button', { name: 'web' }));
     fireEvent.click(screen.getByRole('button', { name: 'UI polish' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Any block' }));
+    fireEvent.click(screen.getByRole('button', { name: 'No block' }));
     fireEvent.change(screen.getByLabelText('Message the weaver'), { target: { value: 'x' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(onSubmit).toHaveBeenLastCalledWith('x', [], expect.objectContaining({ projectId: 'p1', blockId: null }));

@@ -1827,6 +1827,20 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           });
           recordActivity(db, ws, actor, 'ticket.delivery_landed', 'ticket', t.id, { ...landInfo }, t.id);
         } else log.warn({ ticketId: t.id }, 'mergeDone: no project clone available; skipping delivery landing');
+      } else {
+        // VS-683: a ticket with no project can never actually land anything here — the block above
+        // never even runs. That is fine for a ticket that has nothing to land, but silently falling
+        // through to the terminal `done` write below while a pull-request work product still sits
+        // unlanded is exactly the VS-665 incident: `merged: true` recorded for a PR that is still
+        // open. Fail loudly instead, the same way every other landing failure in this function does.
+        const pendingPr = db.get<{ id: string }>("SELECT id FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' LIMIT 1", [t.id]);
+        if (pendingPr) {
+          const action = 'ticket has no project to land its pull request against; resolve the project and retry merge-done';
+          systemComment(t.id, action, actor);
+          recordActivity(db, ws, actor, 'ticket.merge_archive_failed', 'ticket', t.id, { error: action }, t.id);
+          throw new OcError('merge_unverified', action, { ticketId: t.id });
+        }
+        log.warn({ ticketId: t.id }, 'mergeDone: ticket has no project; skipping delivery landing');
       }
       let archivedAs: string | null = archivedByNewFlow ? newFlowArchivedAs : null;
       let skipped: string | null = null;

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
@@ -19,6 +19,7 @@ import { LOGIN_PAUSE_CODE, loginCorrelationKey, ungateRuntime } from './authgate
 import { createRunsService } from './index.js';
 import { createDispatcher, type CoreDispatcher } from './dispatcher.js';
 import { countRetries, executeRun } from './engine.js';
+import { setSshViewDepsForTest } from './sshConfigView.js';
 import { makeRedactor } from './engine.js';
 import { runTokenSecret, verifyRunToken } from './runtoken.js';
 import { git } from '../util/git.js';
@@ -2993,6 +2994,35 @@ describe('run engine', () => {
 
       expect(run.status).toBe('failed');
       expect(outbound()).toHaveLength(0);
+    });
+  });
+
+  describe('ssh config view (VS-704)', () => {
+    const ssh = '/usr/bin/ssh';
+    afterEach(() => setSshViewDepsForTest(null));
+
+    async function turnPath(deps: { platform?: NodeJS.Platform; systemConfigRoot?: string; sshBinary?: string | null }): Promise<string | undefined> {
+      setSshViewDepsForTest(deps);
+      runtime.queue.push({ structured: { state: 'done', summary: 'ok', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'ssh view' });
+      await runOnce(h.conductorId);
+      return runtime.inputs.at(-1)!.env.PATH;
+    }
+
+    it('prepends the view bin on Linux and leaves PATH alone when the config cannot be read or the host is not Linux', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'ssh-engine-'));
+      try {
+        mkdirSync(join(root, 'ssh_config.d'), { recursive: true });
+        writeFileSync(join(root, 'ssh_config'), 'Host *\n');
+        const installed = await turnPath({ platform: 'linux', systemConfigRoot: root, sshBinary: ssh });
+        expect(installed?.split(delimiter)[0]).toMatch(/ssh-view\/bin$/);
+        const unread = await turnPath({ platform: 'linux', systemConfigRoot: join(root, 'missing'), sshBinary: ssh });
+        expect(unread ?? '').not.toContain('ssh-view');
+        const other = await turnPath({ platform: 'darwin', systemConfigRoot: root, sshBinary: ssh });
+        expect(other ?? '').not.toContain('ssh-view');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
   });
 });

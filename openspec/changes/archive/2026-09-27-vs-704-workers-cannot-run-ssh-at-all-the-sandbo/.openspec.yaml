@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-27
+goal: "Workers cannot run ssh at all: the sandbox makes /etc/ssh config look
+  wrongly owned"

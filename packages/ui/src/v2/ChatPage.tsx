@@ -29,7 +29,6 @@ import {
   useCompactWeaver,
   useCreateThread,
   useDecisions,
-  useMessageContext,
   usePostThreadMessage,
   useProjects,
   useRoadmapBlocks,
@@ -44,7 +43,6 @@ import {
   useWeaver,
   useWorkers,
 } from '../api/hooks';
-import { ChatMessage } from './ChatMessage';
 import { ChatComposer } from './ChatComposer';
 import { ChatConversation, TurnRetryNotice, useLiveRunSettle } from './ChatConversation';
 import type { ChatConversationHandle } from './ChatConversation';
@@ -277,45 +275,6 @@ function DecisionsPane({
   );
 }
 
-/** The window a search result opened, standing in for the tailing list until "back to latest". */
-function JumpView({
-  ws,
-  messages,
-  targetId,
-  loading,
-  projectName,
-  blockName,
-  onTicket,
-  onReply,
-  onBack,
-}: {
-  ws: string;
-  messages: ThreadMessage[];
-  targetId: string;
-  loading: boolean;
-  projectName: (id: string | null) => string | null;
-  blockName: (id: string | null) => string | null;
-  onTicket: (id: string) => void;
-  onReply: (id: string) => void;
-  onBack: () => void;
-}): React.ReactElement {
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-none items-center justify-between gap-2 border-b border-line-1 bg-bg-2 px-4 py-1.5">
-        <span className="text-micro text-text-3">Jumped to a message in the conversation</span>
-        <button type="button" onClick={onBack} className="rounded-r4 border border-line-2 px-2.5 py-1 text-micro text-text-2 hover:text-text-1">Back to latest</button>
-      </div>
-      <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-4 py-5">
-        {loading ? <p className="text-micro text-text-3">Loading…</p> : messages.map((m) => (
-          <div key={m.id} className={cx('rounded-r4', m.id === targetId && 'bg-accent/10')}>
-            <ChatMessage message={m} ws={ws} spent={null} projectName={projectName(m.projectId)} blockName={blockName} onTicket={onTicket} {...(m.direction === 'outbound' ? { onReply: () => onReply(m.id) } : {})} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): React.ReactElement {
   const ws = useWs();
   const go = useGo();
@@ -329,7 +288,10 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   const fetchId = listed || (threadId !== null && threadId === createdId) ? threadId : null;
 
   const { draft, patch, clear } = useDraft(fetchId ? draftKey(ws, `thread:${fetchId}`) : null);
-  const messages = useThreadMessages(fetchId);
+  // The message a search result seeded (VS-714): null is the ordinary tailing view, unchanged; a
+  // message id re-seeds the same history hook around that message, paged in both directions.
+  const [anchor, setAnchor] = useState<string | null>(null);
+  const messages = useThreadMessages(fetchId, anchor);
   const post = usePostThreadMessage();
   const blocks = useRoadmapBlocks(draft.projectId ?? null);
   const decisions = useDecisions({ status: 'open', owner: 'human', limit: 200 });
@@ -375,7 +337,6 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // planner chat (PlanTab) passes nothing and keeps streaming.
   const showStreamedOutput = useShowLiveRunOutput();
   const [searchOpen, setSearchOpen] = useState(false);
-  const [anchor, setAnchor] = useState<string | null>(null);
   const [answerError, setAnswerError] = useState<string | null>(null);
   // A decision answered from this screen's own inline card, so the conversation swaps the card for
   // its note in place before the answered list refetches (VS-369's live update, in the conversation).
@@ -586,7 +547,6 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
     [answer, offline, openDecisions],
   );
 
-  const jump = useMessageContext(fetchId, anchor);
   // Only a weaver reply that arrived after this thread opened streams in; history never re-animates
   // and the human's own messages do not reveal.
   const revealIds = useNewOutboundMessageIds(messages.data, fetchId);
@@ -598,6 +558,36 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // the shared conversation view (VS-442), so this reaches it through its imperative handle.
   const conversationRef = useRef<ChatConversationHandle>(null);
   const toBottom = useCallback((): void => { conversationRef.current?.toBottom(); }, []);
+  // Which anchor `jumpTo` has already been called for (VS-714): a search result already present in
+  // `messages.data` jumps immediately; one outside it seeds the anchor above and this effect fires
+  // once the anchored fetch lands and the target actually appears among the rendered rows.
+  const jumpedFor = useRef<string | null>(null);
+  const jumpToMessage = useCallback((messageId: string): void => {
+    if ((messages.data ?? []).some((m) => m.id === messageId)) {
+      conversationRef.current?.jumpTo(messageId);
+      jumpedFor.current = messageId;
+    } else {
+      jumpedFor.current = null;
+      setAnchor(messageId);
+    }
+  }, [messages.data]);
+  useEffect(() => {
+    if (!anchor || jumpedFor.current === anchor) return;
+    if ((messages.data ?? []).some((m) => m.id === anchor)) {
+      conversationRef.current?.jumpTo(anchor);
+      jumpedFor.current = anchor;
+    }
+  }, [anchor, messages.data]);
+  // "Jump to latest" (VS-714): a convenience, not the only way back — scrolling all the way down
+  // through `messages.hasNewer` already reaches the tail on its own. Clearing the anchor reverts to
+  // the plain tailing query; once its data is in (fresh or already cached), the view is sent to the
+  // bottom the same way sending a message already does.
+  const wasAnchored = useRef(false);
+  useEffect(() => {
+    if (wasAnchored.current && !anchor && messages.data !== undefined) toBottom();
+    wasAnchored.current = anchor !== null;
+  }, [anchor, messages.data, toBottom]);
+  const jumpToLatest = useCallback((): void => { jumpedFor.current = null; setAnchor(null); }, []);
   const send = useCallback(
     (text: string, files: File[], opts: { projectId: string | null; blockId: string | null; replyToMessageId: string | null; idempotencyKey: string; dictated: boolean }): void | Promise<void> => {
       if (!fetchId) return;
@@ -797,46 +787,40 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
       <div className="flex min-h-0 flex-1 items-stretch" ref={shellRef}>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {anchor ? (
-            <JumpView
-              ws={ws}
-              messages={jump.data ?? []}
-              targetId={anchor}
-              loading={jump.isLoading}
-              projectName={projectNameFor}
-              blockName={blockName}
-              onTicket={openTicket}
-              onReply={(id) => patch({ replyToId: id })}
-              onBack={() => setAnchor(null)}
-            />
-          ) : (
-            <ChatConversation
-              ref={conversationRef}
-              ws={ws}
-              rows={rows}
-              loading={messages.data === undefined && !messages.isError ? <p className="text-micro text-text-4">Loading the conversation…</p> : null}
-              error={messages.isError && fetchId ? <p className="text-micro text-text-3">Could not load the thread; showing nothing until it returns.</p> : null}
-              empty={<EmptyState title="Tell me what you need." detail="Ask the weaver to file a ticket, explain a failure, or tell you what is running." />}
-              actorName="weaver"
-              workingAriaLabel="Weaver is working"
-              runtimeId={conductorRuntime}
-              showStreamedOutput={showStreamedOutput}
-              live={live}
-              working={working}
-              focused={focused}
-              revealIds={revealIds}
-              onTicket={openTicket}
-              projectName={projectNameFor}
-              blockName={blockName}
-              onReply={(id) => patch({ replyToId: id })}
-              resolveContext={resolveContext}
-              ready={messages.data !== undefined}
-              {...(messages.hasOlder ? { older: { hasOlder: true, isLoadingOlder: messages.isLoadingOlder, loadOlder: messages.loadOlder } } : {})}
-              renderDecisionMessage={renderDecisionMessage}
-              renderAfterTrace={renderAfterTrace}
-              footer={footer}
-              {...(retrying && lastRun ? { turnNotice: <TurnRetryNotice family={lastRun.errorFamily} /> } : {})}
-            />
-          )}
+            // VS-714: a convenience alongside free scrolling, not a gate on it — scrolling down
+            // through `messages.hasNewer` already reaches the tail without this.
+            <div className="flex flex-none items-center justify-center border-b border-line-1 bg-bg-2 px-4 py-1.5">
+              <button type="button" onClick={jumpToLatest} className="rounded-r4 border border-line-2 px-2.5 py-1 text-micro text-text-2 hover:text-text-1">Jump to latest</button>
+            </div>
+          ) : null}
+          <ChatConversation
+            ref={conversationRef}
+            ws={ws}
+            rows={rows}
+            loading={messages.data === undefined && !messages.isError ? <p className="text-micro text-text-4">Loading the conversation…</p> : null}
+            error={messages.isError && fetchId ? <p className="text-micro text-text-3">Could not load the thread; showing nothing until it returns.</p> : null}
+            empty={<EmptyState title="Tell me what you need." detail="Ask the weaver to file a ticket, explain a failure, or tell you what is running." />}
+            actorName="weaver"
+            workingAriaLabel="Weaver is working"
+            runtimeId={conductorRuntime}
+            showStreamedOutput={showStreamedOutput}
+            live={live}
+            working={working}
+            focused={focused}
+            revealIds={revealIds}
+            onTicket={openTicket}
+            projectName={projectNameFor}
+            blockName={blockName}
+            onReply={(id) => patch({ replyToId: id })}
+            resolveContext={resolveContext}
+            ready={messages.data !== undefined}
+            {...(messages.hasOlder ? { older: { hasOlder: true, isLoadingOlder: messages.isLoadingOlder, loadOlder: messages.loadOlder } } : {})}
+            {...(messages.hasNewer ? { newer: { hasNewer: true, isLoadingNewer: messages.isLoadingNewer, loadNewer: messages.loadNewer } } : {})}
+            renderDecisionMessage={renderDecisionMessage}
+            renderAfterTrace={renderAfterTrace}
+            footer={footer}
+            {...(retrying && lastRun ? { turnNotice: <TurnRetryNotice family={lastRun.errorFamily} /> } : {})}
+          />
 
           <div className="flex-none border-t border-line-1 bg-bg-0 px-4 py-3">
             <div className="mx-auto w-full max-w-[720px]">
@@ -898,7 +882,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
         threadId={fetchId}
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
-        onSelect={(messageId) => { setAnchor(messageId); setSearchOpen(false); }}
+        onSelect={(messageId) => { jumpToMessage(messageId); setSearchOpen(false); }}
       />
         </>
       ) : (

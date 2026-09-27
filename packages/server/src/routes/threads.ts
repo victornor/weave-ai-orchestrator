@@ -23,6 +23,9 @@ export function threadRoutes(): Hono<AppEnv> {
   app.get('/:id/messages', (c) => {
     const q = query(c, z.object({
       before: z.string().optional(),
+      // Paging forward from an anchored window toward the live tail (VS-714): mutually exclusive with
+      // `before` and `around` — a page has exactly one direction.
+      after: z.string().optional(),
       limit: z.coerce.number().int().min(1).max(500).optional(),
       // Jumping to a message outside the loaded page (VS-320): mutually exclusive with `before` —
       // an ordinary page and a window centered on an arbitrary message are two different reads, not
@@ -31,9 +34,10 @@ export function threadRoutes(): Hono<AppEnv> {
     }));
     if (q.around !== undefined) {
       if (q.before !== undefined) throw new OcError('validation', '`around` and `before` cannot be combined in the same request');
+      if (q.after !== undefined) throw new OcError('validation', '`around` and `after` cannot be combined in the same request');
       return c.json(c.get('ws').services.threads.around(c.req.param('id'), q.around));
     }
-    return c.json(c.get('ws').services.threads.messages(c.req.param('id'), { before: q.before, limit: q.limit }));
+    return c.json(c.get('ws').services.threads.messages(c.req.param('id'), { before: q.before, after: q.after, limit: q.limit }));
   });
 
   app.get('/:id/search', (c) => {

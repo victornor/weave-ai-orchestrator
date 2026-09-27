@@ -5,13 +5,17 @@ import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
 import { runState, type ActiveRun } from '../runs/active.js';
 import { ftsQuery } from '../search/ftsQuery.js';
+import { literalSnippet, needsLiteralMatch } from '../search/literalMatch.js';
 import { tx } from '../tickets/tx.js';
 import { readAttachmentBytes, sanitizeAttachmentFilename, writeAttachment, writeGeneratedAttachment } from './attachmentStorage.js';
 
 /** Default/max window sizes for `around()` — generous enough to cover a screenful of context either
- * side of a jumped-to message without loading the whole thread (VS-320). */
-const AROUND_DEFAULT_BEFORE = 25;
-const AROUND_DEFAULT_AFTER = 24;
+ * side of a jumped-to message without loading the whole thread (VS-320). Both sides match the UI's
+ * own `THREAD_PAGE_SIZE` (VS-714): the client tells whether more history exists beyond this window
+ * by comparing each side's count against that same size, the same way it already does for an
+ * ordinary `before`/`after` page, so the two constants must move together. */
+const AROUND_DEFAULT_BEFORE = 30;
+const AROUND_DEFAULT_AFTER = 30;
 const AROUND_MAX = 250;
 /** Default/max result count for `search()`, matching `specs/index.ts`'s own search limit. */
 const SEARCH_DEFAULT_LIMIT = 50;
@@ -490,6 +494,9 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
 
     messages(threadId, opts = {}) {
       const t = get(threadId);
+      if (opts.after !== undefined && opts.before !== undefined) {
+        throw new OcError('validation', '`before` and `after` cannot be combined in the same request');
+      }
       const params: Array<string | number> = [t.id];
       // The quote is joined in rather than resolved by the caller: this read is paged, so the replied-to
       // message is often outside the window, and a stored copy of its text could go stale. The join
@@ -497,6 +504,16 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       let sql = `SELECT m.*, r.body AS reply_to_excerpt FROM thread_messages m
                  LEFT JOIN thread_messages r ON r.id = m.reply_to_message_id AND r.thread_id = m.thread_id
                  WHERE m.thread_id = ?`;
+      // `after` pages forward, toward the live tail (VS-714): ascending order is already the shape
+      // `messages()` returns, so — unlike `before`, which queries DESC for `LIMIT` correctness and
+      // reverses after — no reverse is needed here.
+      if (opts.after !== undefined) {
+        sql += ' AND m.created_at > ? ORDER BY m.created_at ASC, m.rowid ASC LIMIT ?';
+        params.push(opts.after, Math.min(opts.limit ?? 50, 500));
+        return withReplyTargets(
+          db.all<ThreadMessage>(sql, params).map((m) => (m.replyToExcerpt === null ? m : { ...m, replyToExcerpt: excerpt(m.replyToExcerpt) })),
+        );
+      }
       if (opts.before) { sql += ' AND m.created_at < ?'; params.push(opts.before); }
       sql += ' ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?';
       params.push(Math.min(opts.limit ?? 50, 500));
@@ -538,6 +555,30 @@ export function createThreadsService(ctx: WorkspaceContext, deps: () => CoreServ
       const match = ftsQuery(query);
       if (!match.length) return [];
       const limit = Math.min(opts.limit ?? SEARCH_DEFAULT_LIMIT, SEARCH_MAX_LIMIT);
+      // A query with a character the tokenizer treats as a separator (VS-714) — `_password` and
+      // `password` tokenize identically — needs the raw body checked for a literal, case-insensitive
+      // match; the FTS `MATCH` above is still run first as a safe superset (its tokenized form always
+      // matches everything the literal text could possibly appear in), just over-fetched since the
+      // literal filter below narrows it. Bounded at `SEARCH_MAX_LIMIT` rather than an unbounded retry
+      // loop — see design.md's accepted trade-off.
+      if (needsLiteralMatch(query)) {
+        const needle = query.trim();
+        const candidates = db.all<ThreadSearchResult & { body: string }>(
+          `SELECT m.author_kind, m.author_id, m.created_at, m.id AS message_id, m.body AS body
+           FROM thread_message_search s
+           JOIN thread_messages m ON m.id = s.message_id
+           WHERE s.thread_id = ? AND s.workspace_id = ? AND thread_message_search MATCH ?
+           ORDER BY m.created_at DESC, m.rowid DESC
+           LIMIT ?`,
+          [t.id, ws, match, SEARCH_MAX_LIMIT],
+        );
+        return candidates
+          .filter((c) => c.body.toLowerCase().includes(needle.toLowerCase()))
+          .slice(0, limit)
+          .map(({ authorKind, authorId, createdAt, messageId, body }) => ({
+            authorKind, authorId, createdAt, messageId, snippet: literalSnippet(body, needle),
+          }));
+      }
       // Delimiters must never occur in a stored message body, or a coincidental occurrence reads as
       // a highlighted match. `[`/`]` do not qualify: markdown links (`[PR #267](...)`), checkboxes
       // (`[x]`) and `[Risk]`-style labels are common in this chat and would be misread as hits.

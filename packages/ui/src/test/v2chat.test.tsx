@@ -25,6 +25,8 @@ const state = vi.hoisted(() => ({
   blockTitles: new Map<string, string>(),
   search: [] as Array<{ messageId: string; authorKind: string; authorId: string | null; createdAt: string; snippet: string }>,
   context: [] as ThreadMessage[],
+  hasNewer: false,
+  loadNewer: vi.fn(),
   events: [] as unknown[],
   runEvents: [] as RunEvent[],
   runPartials: [] as Array<{ partId: string; kind: 'text' | 'thinking' | 'tool_input'; text: string }>,
@@ -88,8 +90,10 @@ vi.mock('../api/hooks', () => ({
   ACCOUNTS_REFRESH_MS: 300_000,
   useThreads: () => ({ data: [{ id: 't1' }], isSuccess: true }),
   useCreateThread: () => ({ data: { id: 't1' }, mutate: vi.fn(), isPending: false }),
-  useThreadMessages: () => ({
-    data: state.messages,
+  // An anchor (VS-714) reads the window a search jump seeded (`state.context`, standing in for the
+  // server's `around()` read) instead of the ordinary tailing list.
+  useThreadMessages: (_id: string | null, anchor?: string | null) => ({
+    data: anchor ? state.context : state.messages,
     isLoading: false,
     isError: false,
     error: null,
@@ -97,6 +101,9 @@ vi.mock('../api/hooks', () => ({
     isLoadingOlder: false,
     hasOlder: false,
     loadOlder: vi.fn(),
+    isLoadingNewer: false,
+    hasNewer: anchor ? state.hasNewer : false,
+    loadNewer: state.loadNewer,
   }),
   usePostThreadMessage: () => ({ mutateAsync: state.post, mutate: state.post, isPending: false }),
   useDecisions: (params: { status?: string | string[] } = {}) => {
@@ -128,7 +135,6 @@ vi.mock('../api/hooks', () => ({
     ],
   }),
   useRunTraces: () => ({ data: state.traces }),
-  useMessageContext: () => ({ data: state.context, isLoading: false }),
   useRunEvents: () => ({ data: state.events }),
   useThreadSearch: () => ({ data: state.search, isLoading: false, isError: false }),
   useRuns: () => ({ data: [] }),
@@ -263,6 +269,8 @@ beforeEach(() => {
   state.blockTitles = new Map();
   state.search = [];
   state.context = [];
+  state.hasNewer = false;
+  state.loadNewer.mockReset();
   state.events = [];
   state.runEvents = [];
   state.runPartials = [];
@@ -680,14 +688,50 @@ describe('the V2 Chat screen', () => {
     await waitFor(() => expect(screen.getByLabelText('Message the weaver')).toHaveValue('half typed message'));
   });
 
-  it('jumps the conversation to a chosen search result', async () => {
+  it('jumps a search result into the normal scrollable conversation, highlighted, with a "Jump to latest" convenience (VS-714)', async () => {
     state.search = [{ messageId: 'm9', authorKind: 'agent', authorId: 'weaver1', createdAt: '2026-09-13T08:00:00.000Z', snippet: 'a \u0002match\u0003 here' }];
     state.context = [message({ id: 'm9', body: 'the found message' })];
     render(<V2ChatPage />);
     fireEvent.click(screen.getByRole('button', { name: 'Search this conversation' }));
     fireEvent.change(await screen.findByLabelText('Search messages'), { target: { value: 'match' } });
     fireEvent.click(screen.getByRole('button', { name: /the found message|match/i }));
-    expect(await screen.findByText('Jumped to a message in the conversation')).toBeInTheDocument();
+
+    // Not a separate frozen view: the target renders inside the same scrollable conversation, and
+    // it is highlighted and in the DOM (VS-320's `JumpView`/"Jumped to a message" banner is gone).
+    const target = await screen.findByText('the found message');
+    expect(target.closest('[data-message-id="m9"]')).toHaveAttribute('data-jump-highlight');
+    expect(screen.queryByText('Jumped to a message in the conversation')).toBeNull();
+    expect(document.querySelector('[data-v2-chat-scroll]')).not.toBeNull();
+
+    // "Jump to latest" remains, but only as a convenience — not the view's only exit.
+    const latest = screen.getByRole('button', { name: 'Jump to latest' });
+    fireEvent.click(latest);
+    expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull();
+  });
+
+  it('loads newer history on scroll-down from a jumped-to message, no dead end (VS-714)', async () => {
+    state.search = [{ messageId: 'm9', authorKind: 'agent', authorId: 'weaver1', createdAt: '2026-09-13T08:00:00.000Z', snippet: 'a \u0002match\u0003 here' }];
+    state.context = [message({ id: 'm9', body: 'the found message' })];
+    state.hasNewer = true;
+    render(<V2ChatPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Search this conversation' }));
+    fireEvent.change(await screen.findByLabelText('Search messages'), { target: { value: 'match' } });
+    fireEvent.click(screen.getByRole('button', { name: /the found message|match/i }));
+    await screen.findByText('the found message');
+
+    // jsdom has no layout: stage the scroller's geometry the way the existing follow tests do, then
+    // scroll near its bottom. `messages.hasNewer` (from the anchored `useThreadMessages` window) is
+    // wired to `ChatConversation`'s `newer` prop, which `useStickToBottom` uses the same near-bottom
+    // trigger for as the existing near-top one already uses for `loadOlder`.
+    const el = document.querySelector('[data-v2-chat-scroll]') as HTMLElement;
+    let top = 0;
+    Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => 1000 });
+    Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => 300 });
+    Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (v: number) => { top = Math.max(0, Math.min(v, 700)); } });
+
+    top = 650; // within NEAR_BOTTOM_PX (120) of the loaded bottom (700)
+    fireEvent.scroll(el);
+    expect(state.loadNewer).toHaveBeenCalled();
   });
 
   it('renders a turn’s dispatched tickets as chips and the live workers with no message as a row (VS-412, VS-634)', async () => {

@@ -312,3 +312,45 @@ describe('the exact follow', () => {
     expect(result.current.following.current).toBe(true);
   });
 });
+
+describe('paging toward the live tail (VS-714)', () => {
+  function mountWithNewer(newer: { hasNewer: boolean; isLoadingNewer: boolean; loadNewer: () => void }) {
+    return renderHook(
+      ({ signal }: { signal: readonly unknown[] }) => useStickToBottom(signal, { exact: true, newer }),
+      { initialProps: { signal: [0] } },
+    );
+  }
+
+  it('asks for a newer page once the scroll gets near the bottom of what is loaded', () => {
+    const loadNewer = vi.fn();
+    const s = scroller(1000);
+    const { result } = mountWithNewer({ hasNewer: true, isLoadingNewer: false, loadNewer });
+    act(() => result.current.scrollRef(s.el));
+
+    // Far from the bottom: no request yet.
+    act(() => { s.setTop(0); s.scroll(); });
+    expect(loadNewer).not.toHaveBeenCalled();
+
+    // Within NEAR_BOTTOM_PX of the loaded bottom.
+    act(() => { s.setTop(s.bottom() - 50); s.scroll(); });
+    expect(loadNewer).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not ask again while a newer page is already loading', () => {
+    const loadNewer = vi.fn();
+    const s = scroller(1000);
+    const { result } = mountWithNewer({ hasNewer: true, isLoadingNewer: true, loadNewer });
+    act(() => result.current.scrollRef(s.el));
+    act(() => { s.setTop(s.bottom() - 10); s.scroll(); });
+    expect(loadNewer).not.toHaveBeenCalled();
+  });
+
+  it('does not ask once there is nothing newer left to load', () => {
+    const loadNewer = vi.fn();
+    const s = scroller(1000);
+    const { result } = mountWithNewer({ hasNewer: false, isLoadingNewer: false, loadNewer });
+    act(() => result.current.scrollRef(s.el));
+    act(() => { s.setTop(s.bottom() - 10); s.scroll(); });
+    expect(loadNewer).not.toHaveBeenCalled();
+  });
+});

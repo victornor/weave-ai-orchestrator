@@ -1,6 +1,7 @@
 /**
- * `useThreadSearch`/`useMessageContext` (VS-320) against the real hooks, not the `Chat.tsx`-facing
- * mock in `chat.test.tsx` — that mock bypasses debouncing entirely, so it cannot cover it.
+ * `useThreadSearch` (VS-320) and `useThreadMessages`'s anchored mode (VS-714) against the real
+ * hooks, not the `Chat.tsx`-facing mock in `chat.test.tsx` — that mock bypasses debouncing entirely,
+ * so it cannot cover it.
  */
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -26,7 +27,7 @@ vi.mock('../api/client', async () => {
   };
 });
 
-const { useThreadSearch, useMessageContext } = await import('../api/hooks');
+const { useThreadSearch, useThreadMessages } = await import('../api/hooks');
 
 function client(): QueryClient {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -84,15 +85,21 @@ describe('useThreadSearch (VS-320)', () => {
   });
 });
 
-describe('useMessageContext (VS-320)', () => {
-  it('does not fetch until both a thread id and a message id are known', () => {
-    renderHook(() => useMessageContext(null, null), { wrapper: wrap(client()) });
+describe('useThreadMessages anchored mode (VS-714)', () => {
+  it('does not fetch a null thread id even with an anchor given', () => {
+    renderHook(() => useThreadMessages(null, 'm1'), { wrapper: wrap(client()) });
     expect(state.calls).toHaveLength(0);
   });
 
-  it('fetches the around() window once both ids are known', async () => {
-    renderHook(() => useMessageContext('th_1', 'm1'), { wrapper: wrap(client()) });
+  it('seeds the anchored window through the around() read', async () => {
+    renderHook(() => useThreadMessages('th_1', 'm1'), { wrapper: wrap(client()) });
     await waitFor(() => expect(state.calls).toHaveLength(1));
     expect(state.calls[0]?.path).toBe('/threads/th_1/messages?around=m1');
+  });
+
+  it('a null anchor pages the ordinary tailing view instead', async () => {
+    renderHook(() => useThreadMessages('th_1', null), { wrapper: wrap(client()) });
+    await waitFor(() => expect(state.calls).toHaveLength(1));
+    expect(state.calls[0]?.path).not.toContain('around=');
   });
 });

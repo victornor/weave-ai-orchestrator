@@ -28,6 +28,9 @@ export function isAtBottom(el: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 
 }
 /** Within this many pixels of the top counts as asking for the page before the loaded history. */
 const NEAR_TOP_PX = 120;
+/** Within this many pixels of the bottom counts as asking for the page after the loaded history
+ *  (VS-714) — the symmetric trigger to `NEAR_TOP_PX`, for a list anchored away from the live tail. */
+const NEAR_BOTTOM_PX = 120;
 
 /**
  * How long after a scroll gesture a scroll event still counts as the human's. The events an input
@@ -60,6 +63,19 @@ export interface OlderPages {
   hasOlder: boolean;
   isLoadingOlder: boolean;
   loadOlder: () => void;
+}
+
+/**
+ * The newer end of the list, for a caller viewing a window anchored away from the live tail
+ * (VS-714) — the symmetric counterpart to `OlderPages`. Unlike an older page, a page appended past
+ * the bottom of what is loaded does not shift anything above the viewport, so there is no
+ * compensating scroll-position math to do here the way `NEAR_TOP_PX`'s `anchor.current` restores one.
+ */
+export interface NewerPages {
+  /** False once the loaded history already reaches the live tail: nothing more is asked for. */
+  hasNewer: boolean;
+  isLoadingNewer: boolean;
+  loadNewer: () => void;
 }
 
 export interface StickToBottom {
@@ -124,10 +140,11 @@ export function useStickToBottom(
   {
     ready = true,
     older,
+    newer,
     follow = true,
     contained = false,
     exact = false,
-  }: { ready?: boolean; older?: OlderPages; follow?: boolean; contained?: boolean; exact?: boolean } = {},
+  }: { ready?: boolean; older?: OlderPages; newer?: NewerPages; follow?: boolean; contained?: boolean; exact?: boolean } = {},
 ): StickToBottom {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -146,6 +163,8 @@ export function useStickToBottom(
   // rather than closing over the values this render happened to have.
   const olderRef = useRef(older);
   olderRef.current = older;
+  const newerRef = useRef(newer);
+  newerRef.current = newer;
 
   const reducedMotion = useCallback(
     (): boolean => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
@@ -245,6 +264,13 @@ export function useStickToBottom(
       if (pages?.hasOlder && !pages.isLoadingOlder && top <= NEAR_TOP_PX) {
         anchor.current = el.scrollHeight - top;
         pages.loadOlder();
+      }
+      // The bottom of the loaded history (VS-714): a page appended past it does not shift anything
+      // above the viewport, so — unlike the top trigger above — there is no distance to capture and
+      // restore.
+      const newerPages = newerRef.current;
+      if (newerPages?.hasNewer && !newerPages.isLoadingNewer && el.scrollHeight - top - el.clientHeight <= NEAR_BOTTOM_PX) {
+        newerPages.loadNewer();
       }
     };
     el.addEventListener('scroll', onScroll, { passive: true });

@@ -1,5 +1,5 @@
 import { decisionRow, newId, nowIso, type Db } from '@weave-ai/db';
-import { carriesWeaverReview, OcError, TERMINAL_TICKET_STATUSES, WEAVER_REVIEW_KINDS, WEAVER_REVIEW_NOTE_MAX, WEAVER_REVIEW_WAITING_ON_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type RoleSpec, type TicketStatus } from '@weave-ai/shared';
+import { ASKABLE_DECISION_KINDS, carriesWeaverReview, OcError, TERMINAL_TICKET_STATUSES, WEAVER_REVIEW_KINDS, WEAVER_REVIEW_NOTE_MAX, WEAVER_REVIEW_WAITING_ON_MAX, NAMED_CARD_OPTION_KEYS, type Decision, type DecisionAnswerInputs, type DecisionInput, type DecisionKind, type DecisionOwner, type DecisionStatus, type RoleSpec, type TicketStatus } from '@weave-ai/shared';
 import type { Actor, CoreServices, DecisionCreateInput, DecisionsService } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { recordActivity } from '../events.js';
@@ -292,8 +292,20 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     // otherwise the escalation supersedes the worker's card and the answer can never be relayed back.
     // A repeat ask of the same kind by the same owner on the same ticket still supersedes. Callers
     // passing an explicit key are unchanged; their cross-owner republish supersede is intentional.
-    const correlationKey = input.correlationKey ?? `${input.kind}:${owner}:${requestedTicketId ?? 'workspace'}`;
     const id = newId();
+    // VS-727: a ticketless askable-kind decision (`weave_ask`'s own use, with no ticket to attach —
+    // the weaver's own asks, and a ticketless session's) has no ticket to make its bucket unique, so
+    // `requestedTicketId ?? 'workspace'` used to put every ticketless card of a kind and owner —
+    // regardless of which project it was about — in the same bucket, and a second one silently
+    // superseded the first. Scoped to the three kinds `weave_ask` can actually raise: every
+    // system-owned kind (`retry_approval`, `hire_approval`, ...) already passes its own explicit
+    // `correlationKey` at every call site (see design.md's caller audit), so leaving their default
+    // untouched changes nothing for them today and avoids a future ticketless system call silently
+    // inheriting per-call uniqueness it never asked for.
+    const ticketlessAskableKind = !requestedTicketId && (ASKABLE_DECISION_KINDS as readonly string[]).includes(input.kind);
+    const correlationKey = input.correlationKey ?? (ticketlessAskableKind
+      ? `${input.kind}:${owner}:workspace:${id}`
+      : `${input.kind}:${owner}:${requestedTicketId ?? 'workspace'}`);
     const now = nowIso();
     return tx(db, () => {
       supersedeOpen(actor, ticketId, correlationKey);

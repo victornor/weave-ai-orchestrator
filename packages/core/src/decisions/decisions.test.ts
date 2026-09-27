@@ -172,6 +172,77 @@ describe('decisions', () => {
     });
   });
 
+  // VS-727: a ticketless ask (the weaver's own, or a ticketless session's) used to derive
+  // `${kind}:${owner}:workspace` regardless of project, so a second unrelated ticketless question of
+  // the same kind silently superseded an earlier, still-open one. The default now gives every
+  // ticketless askable-kind decision its own bucket unless the caller passes an explicit
+  // `correlationKey` on purpose.
+  describe('a ticketless ask gets its own bucket (VS-727)', () => {
+    const otherProject = (): string => {
+      const id = newId();
+      const now = new Date().toISOString();
+      h.db.insert('projects', {
+        id, workspaceId: h.workspaceId, slug: 'beta', name: 'Beta', gitUrl: 'git@example.com:acme/beta.git',
+        defaultBranch: 'main', clonePath: `${h.root}/projects/beta`, maxWorkers: 4, worktreeProvider: 'git',
+        openspecEnabled: 1, policiesJson: {}, status: 'ready', createdAt: now, updatedAt: now,
+      });
+      return id;
+    };
+
+    it('two ticketless questions naming different projects both stay open', () => {
+      const beta = otherProject();
+      const alpha = decisions.create(conductor(), { kind: 'question', title: 'Fernwood photo pricing', projectId: h.projectId });
+      const other = decisions.create(conductor(), { kind: 'question', title: 'ai-diary has not started', projectId: beta });
+      expect(decisions.get(alpha.id).status).toBe('open');
+      expect(decisions.get(other.id).status).toBe('open');
+    });
+
+    it('two ticketless questions naming no project at all both stay open', () => {
+      const first = decisions.create(conductor(), { kind: 'question', title: 'first' });
+      const second = decisions.create(conductor(), { kind: 'question', title: 'second' });
+      expect(decisions.get(first.id).status).toBe('open');
+      expect(decisions.get(second.id).status).toBe('open');
+    });
+
+    it('an explicit shared correlation key still supersedes a ticketless ask', () => {
+      const first = decisions.create(conductor(), { kind: 'question', title: 'v1', correlationKey: 'daily-standup' });
+      const second = decisions.create(conductor(), { kind: 'question', title: 'v2', correlationKey: 'daily-standup' });
+      expect(decisions.get(first.id).status).toBe('superseded');
+      expect(decisions.get(second.id).status).toBe('open');
+    });
+
+    it('applies the same way to concern and gate_finding, not only question', () => {
+      for (const kind of ['concern', 'gate_finding'] as const) {
+        const first = decisions.create(conductor(), { kind, title: `${kind} one` });
+        const second = decisions.create(conductor(), { kind, title: `${kind} two` });
+        expect(decisions.get(first.id).status).toBe('open');
+        expect(decisions.get(second.id).status).toBe('open');
+      }
+    });
+
+    it('leaves a ticket-scoped repeat ask superseding exactly as before', () => {
+      const t = ticket();
+      const first = decisions.create(conductor(), { ticketId: t.id, kind: 'question', title: 'v1' });
+      const second = decisions.create(conductor(), { ticketId: t.id, kind: 'question', title: 'v2' });
+      expect(decisions.get(first.id).status).toBe('superseded');
+      expect(decisions.get(second.id).status).toBe('open');
+    });
+
+    // A system-owned kind is never raised through weave_ask's default path — every call site sets its
+    // own correlationKey (design.md's caller audit) — so this only guards that the askable-kind
+    // scoping did not accidentally widen to cover it too.
+    it('leaves a ticketless system-owned kind (retry_approval) superseding per its own explicit key', () => {
+      const agentA = h.addWorker(null);
+      const agentB = h.addWorker(null);
+      const firstA = decisions.create(SYSTEM, { kind: 'retry_approval', owner: 'human', title: 'A failed once', correlationKey: `retry:${agentA}`, target: { agentId: agentA } });
+      const secondA = decisions.create(SYSTEM, { kind: 'retry_approval', owner: 'human', title: 'A failed again', correlationKey: `retry:${agentA}`, target: { agentId: agentA } });
+      const firstB = decisions.create(SYSTEM, { kind: 'retry_approval', owner: 'human', title: 'B failed once', correlationKey: `retry:${agentB}`, target: { agentId: agentB } });
+      expect(decisions.get(firstA.id).status).toBe('superseded');
+      expect(decisions.get(secondA.id).status).toBe('open');
+      expect(decisions.get(firstB.id).status).toBe('open');
+    });
+  });
+
   it('records the answer verbatim and wakes the asking agent', async () => {
     const t = ticket();
     const workerId = h.addWorker(t.id);
@@ -793,10 +864,12 @@ describe('decisions', () => {
     // Occupying its own bucket, the detached card must not have killed the workspace question.
     expect(decisions.get(workspaceQ.id).status).toBe('open');
 
-    // Nor may the next workspace-level question kill the detached one.
+    // VS-727: a second, unrelated ticketless ("workspace") question is not the same logical question,
+    // so it does not supersede the first one either — each ticketless ask gets its own bucket by
+    // default. It still leaves the detached, ticket-derived card alone.
     const workspaceQ2 = decisions.create(HUMAN, { kind: 'question', title: 'another workspace question' });
     expect(decisions.get(detached.id).status).toBe('open');
-    expect(decisions.get(workspaceQ.id).status).toBe('superseded');
+    expect(decisions.get(workspaceQ.id).status).toBe('open');
     expect(workspaceQ2.status).toBe('open');
   });
 

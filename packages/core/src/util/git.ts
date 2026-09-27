@@ -6,6 +6,68 @@ export async function git(args: string[], cwd: string, timeoutMs = 60_000, input
   return sh('git', args, { cwd, timeoutMs, env: { GIT_TERMINAL_PROMPT: '0' }, input, onLine });
 }
 
+/**
+ * Transport-level signals a retry can plausibly outlive (VS-717): a connect timeout, a reset
+ * connection, a DNS failure. Deliberately does not match a bare "Could not read from remote
+ * repository" or "Permission denied" — those also print on an auth failure, which a retry can never
+ * fix, and misclassifying it as transient would just delay the same park.
+ */
+const TRANSIENT_GIT_FETCH_PATTERNS: RegExp[] = [
+  /connection timed out/i,
+  /operation timed out/i,
+  /connection reset by peer/i,
+  /could not resolve host/i,
+  /could not resolve hostname/i,
+  /temporary failure in name resolution/i,
+  /network is unreachable/i,
+  /connection refused/i,
+  /the remote end hung up unexpectedly/i,
+  /kex_exchange_identification/i,
+];
+
+/** Whether a `git fetch origin` failure's stderr looks like a transient network/transport fault. */
+export function isTransientGitFetchError(stderr: string): boolean {
+  return TRANSIENT_GIT_FETCH_PATTERNS.some((re) => re.test(stderr));
+}
+
+export interface FetchOriginAttempt { attempt: number; attempts: number; stderr: string; willRetry: boolean }
+
+export interface FetchOriginRetryOptions {
+  /** Total attempts, including the first. Defaults to `delaysMs.length + 1`. */
+  attempts?: number;
+  /** Backoff between attempts, in order; the last value repeats if `attempts` exceeds its length. */
+  delaysMs?: number[];
+  sleep?: (ms: number) => Promise<void>;
+  onAttempt?: (info: FetchOriginAttempt) => void;
+  /** Overridable for tests: the fetch call itself, defaulting to a real `git fetch origin`. */
+  run?: (cwd: string, timeoutMs: number) => Promise<ExecResult>;
+}
+
+export interface FetchOriginRetryResult { result: ExecResult; attempts: number }
+
+/**
+ * `git fetch origin`, retried with backoff when the failure looks transient (VS-717) — a connect
+ * timeout, a reset connection, a DNS failure — rather than failing on the first hiccup. A
+ * non-transient failure (auth, missing repository) returns immediately, with no retry.
+ */
+export async function fetchOriginWithRetry(cwd: string, timeoutMs = 300_000, opts: FetchOriginRetryOptions = {}): Promise<FetchOriginRetryResult> {
+  const delays = opts.delaysMs ?? [30_000, 90_000];
+  const maxAttempts = opts.attempts ?? delays.length + 1;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const run = opts.run ?? ((c: string, t: number) => git(['fetch', 'origin'], c, t));
+  let result: ExecResult;
+  let attempt = 0;
+  for (;;) {
+    attempt++;
+    result = await run(cwd, timeoutMs);
+    if (result.ok) return { result, attempts: attempt };
+    const willRetry = attempt < maxAttempts && isTransientGitFetchError(result.stderr);
+    opts.onAttempt?.({ attempt, attempts: maxAttempts, stderr: result.stderr.trim().slice(0, 300), willRetry });
+    if (!willRetry) return { result, attempts: attempt };
+    await sleep(delays[attempt - 1] ?? delays[delays.length - 1] ?? 0);
+  }
+}
+
 export interface GitIdentity { name: string; email: string }
 export type GitIdentityKey = 'user.name' | 'user.email';
 export interface GitIdentityResolution { identity: GitIdentity | null; missing: GitIdentityKey[] }

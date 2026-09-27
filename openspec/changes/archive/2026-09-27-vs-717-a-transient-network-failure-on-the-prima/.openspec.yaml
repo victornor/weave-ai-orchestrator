@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-27
+goal: Retry a transient primary-clone fetch failure with backoff before parking
+  the worker

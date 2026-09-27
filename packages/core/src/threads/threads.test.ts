@@ -4,6 +4,7 @@ import { createProjectsService } from '../projects/index.js';
 import { createRoadmapService } from '../roadmap/index.js';
 import { createTicketsService } from '../tickets/service.js';
 import { createThreadsService, REPLY_EXCERPT_CHARS } from './service.js';
+import { needsLiteralMatch } from '../search/literalMatch.js';
 import { runState } from '../runs/active.js';
 import type { Actor, RoadmapService, ThreadsService, TicketsService } from '../api.js';
 
@@ -600,6 +601,25 @@ describe('threads', () => {
     expect(threads.messages(t.id, { limit: 2 }).map((m) => m.body)).toEqual(['two', 'three']);
   });
 
+  it('pages forward with `after`, ascending and strictly newer than the cursor (VS-714)', () => {
+    const t = threads.bindOrGet('web', 'web-after', null);
+    // Distinct, explicit timestamps (the `around` tie-break test above uses the same direct-insert
+    // pattern): writes in the same test can otherwise land in the same millisecond.
+    for (const [id, body, ts] of [['a', 'one', 't0'], ['b', 'two', 't1'], ['c', 'three', 't2'], ['d', 'four', 't3']] as const) {
+      h.db.run(`INSERT INTO thread_messages (id, thread_id, direction, author_kind, body, created_at) VALUES (?, ?, 'outbound', 'agent', ?, ?)`, [id, t.id, body, ts]);
+    }
+    expect(threads.messages(t.id, { after: 't1' }).map((m) => m.body)).toEqual(['three', 'four']);
+    expect(threads.messages(t.id, { after: 't1', limit: 1 }).map((m) => m.body)).toEqual(['three']);
+  });
+
+  it('rejects `before` combined with `after`', async () => {
+    const t = threads.bindOrGet('web', 'web-after-before', null);
+    await threads.outbound(CONDUCTOR, t.id, 'one');
+    expect(() => threads.messages(t.id, { before: '2026-01-01', after: '2026-01-01' })).toThrowError(
+      expect.objectContaining({ code: 'validation' }),
+    );
+  });
+
   it('rejects unknown threads', () => {
     expect(() => threads.get('nope')).toThrowError(expect.objectContaining({ code: 'not_found' }));
   });
@@ -772,6 +792,44 @@ describe('threads', () => {
       await threads.inbound(HUMAN, t.id, 'something ordinary');
       expect(threads.search(t.id, '   ')).toEqual([]);
       expect(threads.search(t.id, 'nonexistenttoken')).toEqual([]);
+    });
+
+    describe('literal punctuation match (VS-714)', () => {
+      it('"_password" only returns a message that literally contains "_password"', async () => {
+        const t = threads.bindOrGet('web', 'web-search-literal-1', null);
+        const literal = await threads.inbound(HUMAN, t.id, 'reset your _password here');
+        await threads.inbound(HUMAN, t.id, 'your password was changed');
+        expect(threads.search(t.id, '_password').map((r) => r.messageId)).toEqual([literal.id]);
+      });
+
+      it('a plain word query still returns every message containing the word', async () => {
+        const t = threads.bindOrGet('web', 'web-search-literal-2', null);
+        const underscored = await threads.inbound(HUMAN, t.id, 'reset your _password here');
+        const plain = await threads.inbound(HUMAN, t.id, 'your password was changed');
+        expect(threads.search(t.id, 'password').map((r) => r.messageId).sort()).toEqual([underscored.id, plain.id].sort());
+      });
+
+      it('highlights the literal matched text, not the tokenized word', async () => {
+        const t = threads.bindOrGet('web', 'web-search-literal-3', null);
+        await threads.inbound(HUMAN, t.id, 'reset your _password here');
+        const [result] = threads.search(t.id, '_password');
+        expect(result?.snippet).toContain('\u0002_password\u0003');
+      });
+
+      it('orders literal matches newest first', async () => {
+        const t = threads.bindOrGet('web', 'web-search-literal-4', null);
+        const older = await threads.inbound(HUMAN, t.id, 'the old _password');
+        await threads.outbound(CONDUCTOR, t.id, 'unrelated');
+        const newer = await threads.inbound(HUMAN, t.id, 'the new _password');
+        expect(threads.search(t.id, '_password').map((r) => r.messageId)).toEqual([newer.id, older.id]);
+      });
+
+      it('a query with no literal characters is unaffected by the literal path', async () => {
+        const t = threads.bindOrGet('web', 'web-search-literal-5', null);
+        await threads.inbound(HUMAN, t.id, 'ordinary text with no punctuation');
+        expect(needsLiteralMatch('ordinary')).toBe(false);
+        expect(threads.search(t.id, 'ordinary')).toHaveLength(1);
+      });
     });
   });
 

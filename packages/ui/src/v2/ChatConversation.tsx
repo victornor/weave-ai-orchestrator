@@ -14,7 +14,7 @@ import type { RunEvent, RunTrace, ThreadMessage } from '@weave-ai/shared';
 import { isHumanReplyToolEvent } from '@weave-ai/shared';
 import { ScrollToBottomButton } from '../components/ScrollToBottom';
 import { useStickToBottom } from '../lib/stickToBottom';
-import type { OlderPages } from '../lib/stickToBottom';
+import type { NewerPages, OlderPages } from '../lib/stickToBottom';
 import type { ChatEntry, ChatRow } from '../lib/dispatch';
 import { replyTargets } from '../lib/replyTargets';
 import { cx } from '../lib/cx';
@@ -54,6 +54,13 @@ function prefersReducedMotion(): boolean {
  *  bottom and resumes following (VS-451), which each surface's own `send` calls. */
 export interface ChatConversationHandle {
   toBottom: () => void;
+  /**
+   * Scroll to and briefly highlight a message already present in `rows` (VS-714) — the same path a
+   * reply's own "jump back" link already drives internally. A no-op if the message is not currently
+   * rendered; the caller is responsible for waiting until it is (an anchored fetch landing, say)
+   * before calling this.
+   */
+  jumpTo: (id: string) => void;
 }
 
 export interface ChatConversationProps {
@@ -101,6 +108,8 @@ export interface ChatConversationProps {
   ready?: boolean;
   /** The older end of the list, when this surface pages its history. */
   older?: OlderPages;
+  /** The newer end of the list, when this surface is anchored away from the live tail (VS-714). */
+  newer?: NewerPages;
   /** Weaver-only: render a decision-card message in place of its bubble, or null to fall through. */
   renderDecisionMessage?: (message: ThreadMessage) => React.ReactNode | null;
   /** VS-622: plan-only — render a plan-artifact card message in place of its bubble, or null to fall through. */
@@ -232,6 +241,7 @@ export function ChatConversation({
   resolveContext = NO_CONTEXT,
   ready = true,
   older,
+  newer,
   renderDecisionMessage,
   renderPlanArtifactMessage,
   renderAfterTrace,
@@ -248,13 +258,12 @@ export function ChatConversation({
     // and follows with a rAF loop that keeps up with a growing reveal (VS-425).
     exact: true,
     ...(older ? { older } : {}),
+    ...(newer ? { newer } : {}),
   });
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [highlightIds, setHighlightIds] = useState<ReadonlySet<string>>(() => new Set());
   const attachScroll = useCallback((el: HTMLDivElement | null) => { scrollerRef.current = el; stick.scrollRef(el); }, [stick.scrollRef]);
-  // Sending returns to the bottom and resumes following (VS-451); the caller's `send` calls this.
-  useImperativeHandle(ref, () => ({ toBottom: stick.toBottom }), [stick.toBottom]);
 
   // Which human message each reply answers, computed from the conversation on screen (VS-447).
   const messages = useMemo(() => rows.flatMap((r) => (r.kind === 'message' ? [r.entry.message] : [])), [rows]);
@@ -290,6 +299,11 @@ export function ChatConversation({
       setHighlightIds(new Set());
     }, JUMP_HIGHLIGHT_MS);
   }, [stick.pause]);
+
+  // Sending returns to the bottom and resumes following (VS-451); the caller's `send` calls this.
+  // `jumpTo` (VS-714) generalizes the same scroll-and-highlight path for an external caller — a
+  // search result — rather than only a reply's own "jump back" link.
+  useImperativeHandle(ref, () => ({ toBottom: stick.toBottom, jumpTo: (id: string) => onJumpTo([id]) }), [stick.toBottom, onJumpTo]);
 
   useEffect(
     () => () => {

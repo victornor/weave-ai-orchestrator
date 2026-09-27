@@ -19,6 +19,7 @@ import { recordActivity } from '../events.js';
 import * as cli from '../openspec/cli.js';
 import { projectRow } from '../openspec/index.js';
 import { ftsQuery } from '../search/ftsQuery.js';
+import { literalSnippet, needsLiteralMatch } from '../search/literalMatch.js';
 
 export { ftsQuery };
 
@@ -413,8 +414,26 @@ export function createSpecsService(ctx: WorkspaceContext, _deps: () => CoreServi
       // VS-578: a named OpenSpec-off project refuses; the weaver's unscoped search silently omits
       // OpenSpec-off projects rather than failing the whole query.
       const scope = projectId ? enabledProject(projectId).id : null;
+      const projectFilter = scope ? ' AND project_id = ?' : ' AND project_id NOT IN (SELECT id FROM projects WHERE openspec_enabled = 0)';
+      // A query with a tokenizer-dropped character (VS-714) needs its raw title/body checked for a
+      // literal, case-insensitive match — see `ThreadsService.search()` for the same treatment and
+      // why the FTS `MATCH` below is still a safe superset to over-fetch from.
+      if (needsLiteralMatch(query)) {
+        const needle = query.trim();
+        const sql = `SELECT kind, project_id, ref, title, body
+                       FROM knowledge_search WHERE knowledge_search MATCH ? AND kind IN ('spec','change')${projectFilter}
+                       ORDER BY rank LIMIT 200`;
+        const candidates = db.all<{ kind: string; projectId: string; ref: string; title: string; body: string }>(sql, scope ? [match, scope] : [match]);
+        return candidates
+          .filter((c) => c.title.toLowerCase().includes(needle.toLowerCase()) || c.body.toLowerCase().includes(needle.toLowerCase()))
+          .slice(0, 50)
+          .map((c) => ({
+            kind: c.kind, projectId: c.projectId, ref: c.ref, title: c.title,
+            snippet: literalSnippet(c.title.toLowerCase().includes(needle.toLowerCase()) ? c.title : c.body, needle, { open: '[', close: ']' }),
+          }));
+      }
       const sql = `SELECT kind, project_id, ref, title, snippet(knowledge_search, 4, '[', ']', '…', 16) AS snippet
-                     FROM knowledge_search WHERE knowledge_search MATCH ? AND kind IN ('spec','change')${scope ? ' AND project_id = ?' : ' AND project_id NOT IN (SELECT id FROM projects WHERE openspec_enabled = 0)'}
+                     FROM knowledge_search WHERE knowledge_search MATCH ? AND kind IN ('spec','change')${projectFilter}
                      ORDER BY rank LIMIT 50`;
       const rows = db.all<{ kind: string; projectId: string; ref: string; title: string; snippet: string }>(sql, scope ? [match, scope] : [match]);
       return rows.map((r) => ({ kind: r.kind, projectId: r.projectId, ref: r.ref, title: r.title, snippet: r.snippet }));

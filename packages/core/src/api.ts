@@ -821,7 +821,8 @@ export interface ThreadsService {
    * touched — so it cannot become a general message editor. `not_found` for an unknown message.
    */
   setMessageParts(messageId: string, parts: unknown[]): boolean;
-  messages(threadId: string, opts?: { before?: string; limit?: number }): S.ThreadMessage[];
+  /** `after` pages forward (VS-714) — ascending, strictly newer than the cursor — for extending an anchored window toward the live tail; mutually exclusive with `before`, enforced by the route. */
+  messages(threadId: string, opts?: { before?: string; after?: string; limit?: number }): S.ThreadMessage[];
   /** `not_found` when the message does not exist, or exists but under a different thread — the same response either way. Full stored body, regardless of whether the wake payload that referenced it was truncated (VS-242). */
   message(threadId: string, messageId: string): S.ThreadMessage;
   /** `not_found` when the attachment does not exist, or exists but under a different thread — the same response either way, so a thread id cannot be used to probe for one that belongs elsewhere. */

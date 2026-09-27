@@ -102,3 +102,39 @@ describe('GET /threads/:id/messages?around=', () => {
     expect((await res.json()).error.code).toBe('not_found');
   });
 });
+
+describe('GET /threads/:id/messages?after=', () => {
+  it('pages forward from the cursor, ascending (VS-714)', async () => {
+    const { h, fetch } = withRealThreads();
+    const t = h.runtime.services.threads.bindOrGet('web', 'web-7', null);
+    const first = await send(fetch, t.id, 'm0');
+    const second = await send(fetch, t.id, 'm1');
+    const third = await send(fetch, t.id, 'm2');
+
+    const cursor = h.runtime.services.threads.message(t.id, first.id).createdAt;
+    const res = await fetch(`/api/w/ws1/threads/${t.id}/messages?after=${encodeURIComponent(cursor)}`, { headers: authed() });
+    expect(res.status).toBe(200);
+    const page = await res.json();
+    expect(page.map((m: { id: string }) => m.id)).toEqual([second.id, third.id]);
+  });
+
+  it('rejects combining after with before', async () => {
+    const { h, fetch } = withRealThreads();
+    const t = h.runtime.services.threads.bindOrGet('web', 'web-8', null);
+    await send(fetch, t.id, 'm0');
+
+    const res = await fetch(`/api/w/ws1/threads/${t.id}/messages?after=2026-01-01T00:00:00.000Z&before=2026-01-02T00:00:00.000Z`, { headers: authed() });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('validation');
+  });
+
+  it('rejects combining after with around', async () => {
+    const { h, fetch } = withRealThreads();
+    const t = h.runtime.services.threads.bindOrGet('web', 'web-9', null);
+    const msg = await send(fetch, t.id, 'm0');
+
+    const res = await fetch(`/api/w/ws1/threads/${t.id}/messages?after=2026-01-01T00:00:00.000Z&around=${msg.id}`, { headers: authed() });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error.code).toBe('validation');
+  });
+});

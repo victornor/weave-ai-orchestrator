@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-09-27
+goal: 'Chat search: jumping to a result must land in the normal scrollable
+  conversation, and "_password" must only match messages that contain
+  "_password"'

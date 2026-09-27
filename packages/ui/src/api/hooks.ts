@@ -2310,7 +2310,9 @@ export function useCreateThread(): UseMutationResult<T.ThreadSummary, Error, { l
 
 /**
  * One page of thread history. Small enough that opening a long thread costs one short request and
- * one short render; the pages before it are fetched only when the human scrolls back to them.
+ * one short render; the pages before and after it are fetched only when the human scrolls to them.
+ * The server's own `around()` window (VS-714) is sized to match, so the anchor page's own boundary
+ * can be read the same way a `before`/`after` page's can — see `olderCursor`/`newerCursor` below.
  */
 export const THREAD_PAGE_SIZE = 30;
 
@@ -2326,27 +2328,86 @@ export interface ThreadHistory {
   /** False once a short page has come back: that page began the thread. */
   hasOlder: boolean;
   loadOlder: () => void;
+  /** True while the page after the loaded history is in flight (VS-714). */
+  isLoadingNewer: boolean;
+  /** False once a short page has come back: the loaded history already reaches the live tail. Always
+   *  false when not anchored — there is no "newer than latest" direction to page into. */
+  hasNewer: boolean;
+  loadNewer: () => void;
 }
 
-export function useThreadMessages(id: string | null): ThreadHistory {
+/**
+ * Where a page of thread history came from (VS-714): `latest`/`before` are the tailing view's own
+ * two states, unchanged from before this change; `around`/`after` only occur once `useThreadMessages`
+ * is given an anchor. Kept as a discriminated union, not two independent cursor strings, because the
+ * boundary check below needs to know which shape produced a page, not just its cursor.
+ */
+type ThreadPageParam =
+  | { kind: 'latest' }
+  | { kind: 'around'; id: string }
+  | { kind: 'before'; cursor: string }
+  | { kind: 'after'; cursor: string };
+
+function fetchThreadPage(ws: string, id: string, param: ThreadPageParam): Promise<T.ThreadMessage[]> {
+  const path = param.kind === 'around'
+    ? `/threads/${id}/messages${qs({ around: param.id })}`
+    : `/threads/${id}/messages${qs({
+      limit: THREAD_PAGE_SIZE,
+      ...(param.kind === 'before' ? { before: param.cursor } : {}),
+      ...(param.kind === 'after' ? { after: param.cursor } : {}),
+    })}`;
+  return api.ws<T.ThreadMessage[] | T.ThreadMessagesPage>(ws, path).then((r) => listOf<T.ThreadMessage>(r, 'messages'));
+}
+
+/** The next cursor toward older history, or `undefined` once nothing more precedes what is loaded. */
+function olderCursor(page: T.ThreadMessage[], param: ThreadPageParam): ThreadPageParam | undefined {
+  if (param.kind === 'around') {
+    // The anchor page mixes both directions in one array; a length check alone cannot tell which
+    // side ran out, so the target's own position splits it into a before-count and an after-count.
+    const idx = page.findIndex((m) => m.id === param.id);
+    const beforeCount = idx === -1 ? 0 : idx;
+    return beforeCount < THREAD_PAGE_SIZE ? undefined : { kind: 'before', cursor: page[0]!.createdAt };
+  }
+  return page.length < THREAD_PAGE_SIZE ? undefined : { kind: 'before', cursor: page[0]!.createdAt };
+}
+
+/** The next cursor toward newer history, or `undefined` once the loaded history reaches the tail. */
+function newerCursor(page: T.ThreadMessage[], param: ThreadPageParam): ThreadPageParam | undefined {
+  if (param.kind === 'latest') return undefined; // nothing is newer than the tailing view's own page
+  if (param.kind === 'around') {
+    const idx = page.findIndex((m) => m.id === param.id);
+    const afterCount = idx === -1 ? 0 : page.length - idx - 1;
+    return afterCount < THREAD_PAGE_SIZE ? undefined : { kind: 'after', cursor: page[page.length - 1]!.createdAt };
+  }
+  return page.length < THREAD_PAGE_SIZE ? undefined : { kind: 'after', cursor: page[page.length - 1]!.createdAt };
+}
+
+/**
+ * A thread's history: the tailing view when `anchor` is null or omitted (unchanged from before
+ * VS-714 — same query key, same paging-older behavior), or a window seeded around `anchor` and
+ * paged in both directions when it is a message id. Older pages are appended and newer pages are
+ * prepended to TanStack's own pages array, which — combined with the existing reverse-and-flatten
+ * below — puts each in its correct place with no change to that line: an appended (older) page ends
+ * up first, a prepended (newer) one ends up last.
+ */
+export function useThreadMessages(id: string | null, anchor?: string | null): ThreadHistory {
   const ws = useWs();
-  // `GET /threads/:id/messages` pages backwards on `created_at <` and answers oldest-first within a
-  // page, so the cursor for the page before one already loaded is that page's first message.
+  const initialPageParam: ThreadPageParam = anchor ? { kind: 'around', id: anchor } : { kind: 'latest' };
   const q = useInfiniteQuery({
-    queryKey: qk.threadMessages(ws, id ?? ''),
-    initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) =>
-      api
-        .ws<T.ThreadMessage[] | T.ThreadMessagesPage>(ws, `/threads/${id}/messages${qs({ limit: THREAD_PAGE_SIZE, before: pageParam })}`)
-        .then((r) => listOf<T.ThreadMessage>(r, 'messages')),
-    getNextPageParam: (page) => (page.length < THREAD_PAGE_SIZE ? undefined : page[0]?.createdAt),
+    queryKey: qk.threadMessages(ws, id ?? '', anchor ?? null),
+    initialPageParam,
+    queryFn: ({ pageParam }: { pageParam: ThreadPageParam }) => fetchThreadPage(ws, id ?? '', pageParam),
+    getNextPageParam: (lastPage: T.ThreadMessage[], _pages: T.ThreadMessage[][], lastPageParam: ThreadPageParam): ThreadPageParam | undefined => olderCursor(lastPage, lastPageParam),
+    getPreviousPageParam: (firstPage: T.ThreadMessage[], _pages: T.ThreadMessage[][], firstPageParam: ThreadPageParam): ThreadPageParam | undefined => newerCursor(firstPage, firstPageParam),
     enabled: Boolean(id),
   });
   // Invalidation (a sent message, a `thread.message` event) refetches the loaded pages in order,
   // recomputing each cursor from the page before it, so a message arriving at the bottom shifts the
-  // window without tearing a hole in it.
+  // window without tearing a hole in it. The same mechanism keeps an anchored, caught-up-to-the-tail
+  // window current: its newest `after` page's cursor is a fixed instant, so refetching it with that
+  // same cursor picks up anything written since, including a message that arrived just now.
   const data = useMemo(() => (q.data ? [...q.data.pages].reverse().flat() : undefined), [q.data]);
-  const { hasNextPage, isFetchingNextPage, fetchNextPage, refetch } = q;
+  const { hasNextPage, isFetchingNextPage, fetchNextPage, hasPreviousPage, isFetchingPreviousPage, fetchPreviousPage, refetch } = q;
   return {
     data,
     isLoading: q.isLoading,
@@ -2357,6 +2418,11 @@ export function useThreadMessages(id: string | null): ThreadHistory {
     hasOlder: hasNextPage,
     loadOlder: () => {
       if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+    },
+    isLoadingNewer: isFetchingPreviousPage,
+    hasNewer: hasPreviousPage,
+    loadNewer: () => {
+      if (hasPreviousPage && !isFetchingPreviousPage) void fetchPreviousPage();
     },
   };
 }
@@ -2414,20 +2480,6 @@ export function useThreadSearch(threadId: string | null, query: string): { data:
   return { data: enabled ? (q.data ?? []) : [], isLoading: enabled && q.isFetching, isError: enabled && q.isError };
 }
 
-/**
- * One bounded window of messages centered on `messageId`, oldest-first (VS-320) — for jumping to a
- * search result (or any known message id) outside the page `useThreadMessages` has loaded. A
- * one-shot query, not another `useInfiniteQuery`: the tailing hook's own result is never touched,
- * which is what lets the chat revert to it unchanged on "back to latest".
- */
-export function useMessageContext(threadId: string | null, messageId: string | null): UseQueryResult<T.ThreadMessage[]> {
-  const ws = useWs();
-  return useQuery({
-    queryKey: qk.threadContext(ws, threadId ?? '', messageId ?? ''),
-    queryFn: () => api.ws<T.ThreadMessage[]>(ws, `/threads/${threadId}/messages${qs({ around: messageId })}`),
-    enabled: Boolean(threadId) && Boolean(messageId),
-  });
-}
 
 /* ---------------------------------------------------------- presentation */
 

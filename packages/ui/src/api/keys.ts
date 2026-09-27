@@ -109,9 +109,12 @@ export const qk = {
   knowledgeUsageNeverRead: (ws: string, params: Record<string, unknown>) => ['w', ws, 'knowledge-usage', 'never-read', params] as const,
 
   threads: (ws: string) => ['w', ws, 'threads'] as const,
-  threadMessages: (ws: string, id: string) => ['w', ws, 'threads', id, 'messages'] as const,
+  // `anchor` (VS-714) distinguishes the tailing history from a window seeded around a jumped-to
+  // message; omitting it keeps the tailing key exactly as it always was. Both are still prefixed by
+  // `threadMessages(ws, id)` with no `anchor` argument, so an invalidation there (a sent message, a
+  // `thread.message` event) reaches an anchored query too.
+  threadMessages: (ws: string, id: string, anchor?: string | null) => ['w', ws, 'threads', id, 'messages', ...(anchor ? [anchor] : [])] as const,
   threadSearch: (ws: string, id: string, query: string) => ['w', ws, 'threads', id, 'search', query] as const,
-  threadContext: (ws: string, id: string, messageId: string) => ['w', ws, 'threads', id, 'context', messageId] as const,
 
   // Its own root rather than a key under `projects` (VS-97): the events that make a pull request
   // list stale are ticket events, and nothing under `projects` is reached by one — the mistake

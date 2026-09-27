@@ -203,6 +203,22 @@ describe('spec index', () => {
     expect(svc.search('NEAR("a" "b") OR *', harness.projectId)).toEqual([]);
   });
 
+  it('a query with tokenizer-dropped punctuation matches literally (VS-714)', async () => {
+    const { harness, clone } = setup();
+    fixture(harness, clone);
+    const svc = createSpecsService(harness.ctx, harness.deps);
+    await svc.index(harness.projectId);
+    // Inserted after indexing: `index()` re-derives every 'change'/'spec' row for the project from the
+    // fixture and would otherwise wipe these two straight back out.
+    harness.db.insert('knowledge_search', { kind: 'change', projectId: harness.projectId, ref: 'change:literal', title: 'Config', body: 'set the _password field before deploying' });
+    harness.db.insert('knowledge_search', { kind: 'change', projectId: harness.projectId, ref: 'change:plain', title: 'Config', body: 'the password was rotated last week' });
+
+    expect(svc.search('_password', harness.projectId).map((r) => r.ref)).toEqual(['change:literal']);
+    // Plain "password" is unaffected: it still matches both the underscored and the plain document,
+    // alongside whatever else in the fixture mentions the word.
+    expect(svc.search('password', harness.projectId).map((r) => r.ref)).toEqual(expect.arrayContaining(['change:literal', 'change:plain']));
+  });
+
   it('builds a capability/change/ticket graph', async () => {
     const { harness, clone } = setup();
     const { ticketId } = fixture(harness, clone);

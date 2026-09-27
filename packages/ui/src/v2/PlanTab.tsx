@@ -5,9 +5,11 @@
  * none of the modal's chrome — no overlay, header, project picker or inner plan tab list; those are
  * the chat's tab strip's now.
  *
- * The planner files no tickets and raises no decisions, so the weaver-only extras (inline decision
- * cards, dispatch chips, the reply control and the unattributed-worker row) are omitted rather than
- * shown broken.
+ * The planner raises no decisions, so the weaver-only extras (inline decision cards, the reply
+ * control and the unattributed-worker row) are omitted rather than shown broken. A dispatched scout
+ * and any ticket the planner names in its reply get the same live `V2TicketStrip` chip the weaver
+ * chat renders (VS-720) — `tickets`/`workers` are fetched with the same params `ChatPage` already
+ * uses for its own strip, so the query cache is shared rather than doubled.
  */
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -17,13 +19,16 @@ import { draftSummary, planArtifactCardPartsOf, resolveModel } from '@weave-ai/r
 import {
   usePlan, usePatchPlanDraft, useRemovePlanDraft, useDispatchPlanDraft, useSubmitPlan,
   useThreadMessages, usePostThreadMessage, useRoles, useRunTraces, useRuntimes, useRuntimeModels,
+  useTickets, useWorkers,
 } from '../api/hooks';
 import { useConnection, useWorkspaceEvents } from '../api/context';
 import { qk } from '../api/keys';
 import { useGo } from '../app/link';
 import { cx } from '../lib/cx';
 import { chatEntries, chatRows } from '../lib/dispatch';
+import type { ChatEntry } from '../lib/dispatch';
 import { useNewOutboundMessageIds } from '../lib/streamReveal';
+import { V2TicketStrip } from './ChatChips';
 import { ChatComposer } from './ChatComposer';
 import { ChatConversation, useLiveRunSettle } from './ChatConversation';
 import type { ChatConversationHandle, LiveChatRun } from './ChatConversation';
@@ -108,9 +113,25 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
     [messages.data],
   );
   const traces = useRunTraces({ ids: messageRuns, agent: plannerAgentId });
+  // VS-720: the same lists ChatPage fetches for the weaver chat's own ticket strip — same query
+  // params, so this shares that cache entry rather than issuing a second request.
+  const tickets = useTickets({ limit: 200, includeTerminal: true, fields: 'label' });
+  const workers = useWorkers({ includeRetired: true });
+  const entries = useMemo(
+    () => chatEntries(messages.data ?? [], tickets.data ?? [], workers.data ?? []).entries,
+    [messages.data, tickets.data, workers.data],
+  );
   const rows = useMemo(
-    () => chatRows(chatEntries(messages.data ?? [], [], []).entries, traces.data ?? [], { showSilent: false }),
-    [messages.data, traces.data],
+    () => chatRows(entries, traces.data ?? [], { showSilent: false }),
+    [entries, traces.data],
+  );
+  const projectIds = useMemo(() => projects.map((p) => p.id), [projects]);
+  const openTicket = useTicketLink();
+  const renderAfterTrace = useCallback(
+    (entry: ChatEntry): React.ReactNode => (
+      <V2TicketStrip references={entry.references} projectIds={projectIds} open={openTicket} />
+    ),
+    [projectIds, openTicket],
   );
   const rowRuns = useMemo(() => new Set((messages.data ?? []).map((m) => m.runId).filter((id): id is string => Boolean(id))), [messages.data]);
   useLiveRunSettle(live, setLive, rowRuns);
@@ -130,7 +151,6 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
   const canSubmit = drafts.length > 0 && plan.data?.plan.status === 'drafting' && !submit.isPending;
   const plannerRunning = live?.running ?? false;
   const projectName = (id: string | null): string | null => (id ? projectLabel(projects.find((p) => p.id === id) ?? { slug: id, name: id }) : null);
-  const openTicket = useTicketLink();
   const send = (body: string, files: File[], opts: { idempotencyKey: string; dictated?: boolean }): Promise<void> => {
     if (!plan.data) return Promise.reject(new Error('The planning conversation is still starting.'));
     return post
@@ -247,6 +267,7 @@ export function PlanTab({ ws, projectId, planId, projects, focused, plannerRunti
             projectName={projectName}
             resolveContext={resolveContext}
             renderPlanArtifactMessage={renderPlanArtifactMessage}
+            renderAfterTrace={renderAfterTrace}
             ready={messages.data !== undefined}
           />
           <div className="flex-none border-t border-line-1 p-2.5">

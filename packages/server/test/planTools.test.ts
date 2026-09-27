@@ -204,12 +204,14 @@ describe('the weave_plan_* tools (VS-398)', () => {
 
     const dispatched = await call(h, 'weave_plan_draft_dispatch', { draftId: scout.id }, claims);
     expect(dispatched.ok).toBe(true);
-    const linkedDraft = dataOf<PlanDraft>(dispatched);
+    const linkedDraft = dataOf<PlanDraft & { ticketIdentifier: string | null }>(dispatched);
     expect(linkedDraft.status).toBe('created');
     expect(linkedDraft.createdTicketId).toBeTruthy();
 
     const ticket = h.runtime.services.tickets.get(linkedDraft.createdTicketId!);
     expect(ticket).toMatchObject({ kind: 'scout', title: 'Scout the auth flow', status: 'todo', assigneeRoleId: 'role1' });
+    // VS-720: the tool result names the ticket so the planner can announce it reliably.
+    expect(linkedDraft.ticketIdentifier).toBe(ticket.identifier);
 
     // Dispatching a change draft is refused, and it stays unfiled.
     const refused = await call(h, 'weave_plan_draft_dispatch', { draftId: change.id }, claims);

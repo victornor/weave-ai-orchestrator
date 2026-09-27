@@ -592,6 +592,9 @@ export const TOOLS: ToolDef[] = [
       + 'A card may carry several single_choice inputs, so several closed-set questions asked at once are one card, each with its recommendation — never a list of questions in a prose message. '
       + 'A `secret` input is how you ask for a credential — never ask for one in prose. Its value is registered under the input\'s `secretName` and you receive only that name in `answerInputs`; '
       + 'the value never appears in the answer, the chat, a ticket, a log or a transcript. Attach it to a role with weave_role_set_secrets to give that role\'s workers the environment variable. '
+      + 'A new card supersedes an older open one only when they share a correlation key: on a ticket (a worker\'s own, always, even when you omit `ticketId`), a repeat ask of the same kind by the same owner on that ticket always does, replacing it in place. '
+      + 'Truly ticketless — no ticket at all, which only the weaver\'s own asks and a ticketless session\'s can be — every ask gets its own key by default, so unrelated ticketless questions never collide even from the same kind and owner; '
+      + 'pass an explicit `correlationKey` yourself when you want a ticketless re-ask to replace an earlier open one on purpose. '
       + 'End your turn after asking — the answer arrives as your next wake, with `answerInputs` keyed by your input keys.',
     handler: (ctx, i) => svc(ctx).decisions.create(ctx.actor, {
       ticketId: i.ticketId ? writeTicket(ctx, i.ticketId).id : (ctx.claims.ticketId ?? null),

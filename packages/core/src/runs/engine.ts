@@ -427,7 +427,10 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   if (ticket?.originKind === 'curation' && project) {
     let freshnessError: string | null = null;
     try {
-      await deps().projects.fetch(project.id);
+      // VS-717: only this gate opts into the bounded retry — it blocks one ticket either way, so
+      // the extra ~2 minutes on a transient failure is cheap here and would not be everywhere else
+      // `projects.fetch` is called (checkSync, reconcilePass, archiveAfterMerge, ...).
+      await deps().projects.fetch(project.id, { retryTransient: true });
       const row = ctx.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id]);
       if (!row || row.syncState !== 'in_sync') {
         freshnessError = `primary clone for ${project.slug} could not be safely brought in sync with origin/${landingBranchOf(row ?? project, ticket)}: it holds a commit not confirmed to be a stale copy of the remote, so it was left untouched`;

@@ -6,7 +6,8 @@ import type { WorkspaceContext } from '../context.js';
 import type { Actor, CommitDetail, CoreServices, HistoryPage, HistoryQuery, ProjectsService } from '../api.js';
 import { recordActivity } from '../events.js';
 import { binaryExists, type OnLine } from '../util/exec.js';
-import { git, githubSshRemote } from '../util/git.js';
+import { git, githubSshRemote, fetchOriginWithRetry } from '../util/git.js';
+import type { Logger } from '../logger.js';
 import { projectKnowledgeSkeleton } from '../workspace/loader.js';
 import { startKnowledgeRepoSwitch } from '../knowledge/repoSwitch.js';
 import { modelSettingFor, modelsFor } from '../models/resolve.js';
@@ -40,11 +41,26 @@ function toLegacyPolicies(policies: ProjectPolicies): unknown {
  * with a `merge: boolean` flag — the merge/no-merge distinction is a safety property (a read-only
  * check must never `checkout`/`merge`), not an implementation detail, and stays visible at each
  * call site instead of threaded through a boolean.
+ *
+ * `retryTransient` (VS-717) defaults to off: a bounded retry is only safe for the one caller that
+ * can afford to sit on a failing fetch for ~2 minutes (the curation freshness gate, which blocks a
+ * single ticket either way). Every other caller of `fetch`/`checkSync` — `GET /:id/sync`,
+ * `POST /:id/fetch`, the supervisor's serial `reconcilePass`, `archiveAfterMerge`, the knowledge
+ * repo-switch fetch — must fail on the first attempt, or a GitHub outage turns into minutes of
+ * added latency per project across all of them.
  */
-async function fetchLanding(project: Project): Promise<string> {
+async function fetchLanding(project: Project, log?: Logger, opts: { retryTransient?: boolean } = {}): Promise<string> {
   const landing = landingBranchOf(project);
-  const fetched = await git(['fetch', 'origin'], project.clonePath, 300_000);
-  if (!fetched.ok) throw new OcError('internal', `git fetch failed: ${fetched.stderr.trim().slice(0, 300)}`, { project: project.slug });
+  const { result: fetched, attempts } = await fetchOriginWithRetry(project.clonePath, 300_000, {
+    attempts: opts.retryTransient ? undefined : 1,
+    onAttempt: ({ attempt, attempts: total, stderr, willRetry }) => {
+      log?.warn({ project: project.slug, attempt, attempts: total, stderr }, willRetry ? 'git fetch origin failed transiently; retrying (VS-717)' : 'git fetch origin failed');
+    },
+  });
+  if (!fetched.ok) {
+    const retried = attempts > 1 ? ` after ${attempts} attempts` : '';
+    throw new OcError('internal', `git fetch failed${retried}: ${fetched.stderr.trim().slice(0, 300)}`, { project: project.slug, attempts });
+  }
   return landing;
 }
 
@@ -409,12 +425,12 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       log.info({ project: project.slug }, 'project archived (clone left on disk)');
     },
 
-    async fetch(id: string): Promise<{ head: string; fastForwarded: boolean }> {
+    async fetch(id: string, opts: { retryTransient?: boolean } = {}): Promise<{ head: string; fastForwarded: boolean }> {
       const project = get(id);
       // Kept on the project's own landing branch (VS-119, project-level regardless of any one
       // ticket's override — see design.md), not just fast-forwarded: `git clone` may have left the
       // clone on the repository's actual default branch, which differs from the landing branch.
-      const landing = await fetchLanding(project);
+      const landing = await fetchLanding(project, log, opts);
       const before = await git(['rev-parse', 'HEAD'], project.clonePath, 15_000);
       const beforeHead = before.stdout.trim();
       await git(['checkout', landing], project.clonePath, 30_000);
@@ -450,7 +466,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
 
     async checkSync(id: string): Promise<{ syncState: ProjectSyncState; behindBy: number | null }> {
       const project = get(id);
-      const landing = await fetchLanding(project);
+      const landing = await fetchLanding(project, log);
       const remote = `origin/${landing}`;
       const head = await git(['rev-parse', 'HEAD'], project.clonePath, 15_000);
       const remoteHead = await git(['rev-parse', remote], project.clonePath, 15_000);

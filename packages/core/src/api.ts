@@ -305,7 +305,10 @@ export interface ProjectsService {
   retryAdd(actor: Actor, id: string): { project: S.Project; jobId: string };
   update(actor: Actor, id: string, patch: Partial<S.ProjectConfig>): Promise<S.Project>;
   remove(actor: Actor, id: string): Promise<void>;
-  fetch(id: string): Promise<{ head: string; fastForwarded: boolean }>;   // git fetch + ff primary clone
+  /** `retryTransient` (VS-717, opt-in): bounded backoff on a transient fetch failure. Only the
+   *  curation freshness gate can afford ~2 extra minutes on a single blocked ticket; every other
+   *  caller — including `checkSync` — must fail on the first attempt. */
+  fetch(id: string, opts?: { retryTransient?: boolean }): Promise<{ head: string; fastForwarded: boolean }>;   // git fetch + ff primary clone
   /** Read-only (VS-131): fetches and classifies against origin/<landingBranch> without checkout or merge. */
   checkSync(id: string): Promise<{ syncState: S.ProjectSyncState; behindBy: number | null }>;
   reconcile(): Promise<void>;                                              // declared vs db

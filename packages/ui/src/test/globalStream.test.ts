@@ -63,6 +63,44 @@ describe('global event stream', () => {
     stream.stop();
   });
 
+  it('invalidates the slug the page fetched when the frame carries the row id (VS-706)', () => {
+    const qc = new QueryClient();
+    qc.setQueryData(qk.workspaces(), [{ id: 'vs706', internalId: '01ULIDWORKSPACE000000000', name: 'VS-706' }]);
+    const ticketKey = [...qk.tickets('vs706'), { limit: 300 }];
+    qc.setQueryData(ticketKey, [{ id: 't1', title: 'STALE-TITLE' }]);
+    const stream = new GlobalEventStream(qc);
+    stream.start();
+    try {
+      const source = FakeEventSource.open[0]!;
+      source.onopen!();
+      let seenId = '';
+      stream.onEvent((e) => { seenId = e.workspaceId; });
+      source.emit('ticket.updated', {
+        data: JSON.stringify({ seq: 4, workspaceId: '01ULIDWORKSPACE000000000', type: 'ticket.updated', entityId: 't1', createdAt: 'now' }),
+        lastEventId: 'cursor',
+      } as MessageEvent<string>);
+      expect(seenId).toBe('vs706');
+      expect(qc.getQueryState(ticketKey)?.isInvalidated).toBe(true);
+      expect(qc.getQueryState([...qk.tickets('01ULIDWORKSPACE000000000')])?.isInvalidated).not.toBe(true);
+    } finally {
+      stream.stop();
+    }
+  });
+
+  it('refetches a held workspace on reconnect even when no frame has named it yet (VS-706)', () => {
+    const qc = new QueryClient();
+    qc.setQueryData(qk.workspaces(), [{ id: 'vs706', internalId: '01ULIDWORKSPACE000000000', name: 'VS-706' }]);
+    const workerKey = [...qk.workers('vs706'), {}];
+    qc.setQueryData(workerKey, [{ id: 'a1', status: 'running' }]);
+    const stream = new GlobalEventStream(qc);
+    stream.start();
+    FakeEventSource.open[0]!.onopen!();
+    stream.retryNow();
+    FakeEventSource.open.at(-1)!.onopen!();
+    expect(qc.getQueryState(workerKey)?.isInvalidated).toBe(true);
+    stream.stop();
+  });
+
   it('closes while hidden and reconnects with its cursor on refocus', () => {
     const stream = new GlobalEventStream(new QueryClient());
     stream.start();

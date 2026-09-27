@@ -32,6 +32,24 @@ export function resync(qc: QueryClient, workspace: string): void {
 }
 
 /**
+ * VS-706: an event's `workspaceId` is the row id (`internalId`). Query keys and `/api/w/:ws` use the
+ * slug (`id` on the workspace list). Invalidating the row id never touches the reads a page holds.
+ * Falls back to the id as given when the list is not cached yet, so a test that uses one id for both
+ * is unchanged.
+ */
+export function streamWorkspaceId(qc: QueryClient, eventWorkspaceId: string): string {
+  const list = qc.getQueryData<readonly { id: string; internalId?: string }[]>(qk.workspaces());
+  const hit = list?.find((w) => w.internalId === eventWorkspaceId || w.id === eventWorkspaceId);
+  return hit?.id ?? eventWorkspaceId;
+}
+
+function asQueryEvent(qc: QueryClient, evt: WorkspaceEvent, connectionId?: string): WorkspaceEvent {
+  if (!evt.workspaceId) return evt;
+  const id = connectionId ?? streamWorkspaceId(qc, evt.workspaceId);
+  return id === evt.workspaceId ? evt : { ...evt, workspaceId: id };
+}
+
+/**
  * SSE subscription to `GET /api/w/:ws/events?after=<seq>` with backoff and
  * replay. Every event both invalidates the queries it can affect and is
  * re-broadcast to component-level listeners (live transcripts, toasts).
@@ -211,6 +229,8 @@ export class EventStream {
     } catch {
       return;
     }
+    // This connection was opened for the slug the page fetches with. The frame names the row id.
+    evt = asQueryEvent(this.qc, evt, this.workspace);
     // A live-only frame (seq 0: `worker.activity`, `run.event`) no longer moves the cursor, so it
     // must not re-notify status listeners on every frame — a busy turn would otherwise re-render
     // every connection-status subscriber many times a second (VS-417).
@@ -325,6 +345,14 @@ export class GlobalEventStream {
     if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     this.set({ state: 'hidden' });
   }
+  /** Workspaces whose reads this document already holds, plus any a frame has named. */
+  private resyncHeld(): void {
+    const ids = new Set<string>();
+    const list = this.qc.getQueryData<readonly { id: string }[]>(qk.workspaces());
+    for (const w of list ?? []) ids.add(w.id);
+    for (const raw of this.seen) ids.add(streamWorkspaceId(this.qc, raw));
+    for (const id of ids) resync(this.qc, id);
+  }
   private set(patch: Partial<ConnectionStatus>): void {
     this.status = { ...this.status, ...patch };
     for (const listener of this.listeners) listener(this.status);
@@ -341,7 +369,7 @@ export class GlobalEventStream {
       this.set({ state: 'connected', attempts: 0, capturedAt: new Date().toISOString(), lastFrameAt: Date.now() });
       this.watchdog.start();
       // VS-641: re-read what the missed window could not replay, per workspace this stream saw.
-      if (this.everConnected) { for (const ws of this.seen) resync(this.qc, ws); }
+      if (this.everConnected) this.resyncHeld();
       this.everConnected = true;
     };
     source.onmessage = (m) => this.handle(m as MessageEvent<string>);
@@ -362,6 +390,7 @@ export class GlobalEventStream {
     this.watchdog.touch();
     let evt: WorkspaceEvent;
     try { evt = JSON.parse(m.data) as WorkspaceEvent; } catch { return; }
+    evt = asQueryEvent(this.qc, evt);
     this.seen.add(evt.workspaceId);
     if (evt.seq > 0 && m.lastEventId) this.cursor = m.lastEventId;
     const patch: Partial<ConnectionStatus> = { capturedAt: evt.createdAt ?? new Date().toISOString() };

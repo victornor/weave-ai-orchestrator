@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-27
+goal: "The Live page still goes stale after being left alone, even with VS-641's
+  watchdog: find why it misses this and fix it"

@@ -28,6 +28,7 @@ import { effectiveModels, modelSettingFor, modelsFor } from '../models/resolve.j
 import { runTokenSecret, signRunToken } from './runtoken.js';
 import { imageAttachmentForm } from './image-input.js';
 import { materializeRunAttachments, runAttachmentDir } from './attachments.js';
+import { turnSshPath } from './sshConfigView.js';
 import { effectiveMcpServers, effectiveProviders, scopedSecretValue } from '../scoped.js';
 import { daemonSecretStore } from '../secrets/daemon.js';
 
@@ -651,6 +652,10 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     try { systemPromptText = readFileSync(instructionsPath, 'utf8'); } catch { systemPromptText = ''; }
 
     const configHome = join(ctx.paths.runtimesHome, setting.runtime);
+    // VS-704: a user-owned ssh config view, so OpenSSH accepts system config inside a user-namespace
+    // sandbox. Null leaves PATH unchanged and never fails the turn.
+    const sshPath = turnSshPath({ runtime: setting.runtime, configHome, runDir });
+    if (sshPath) env.PATH = sshPath;
     const reconcileCredential = (): void => reconcileRuntimeCredential(setting.runtime, configHome, {
       readCredential: credentialReaderFor(ctx.registries, setting.runtime),
       isolated: ctx.isolated, daemonConfigDir: ctx.daemonConfigDir,

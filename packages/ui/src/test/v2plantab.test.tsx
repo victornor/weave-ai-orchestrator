@@ -6,8 +6,8 @@
  */
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PlanDraft, Role, RunEvent, RunTrace, ThreadMessage, WorkspaceEvent } from '@weave-ai/shared';
-import { project, role } from './factories';
+import type { Agent, PlanDraft, Role, RunEvent, RunTrace, ThreadMessage, Ticket, TicketComment, WorkspaceEvent } from '@weave-ai/shared';
+import { project, role, ticket } from './factories';
 
 const state = vi.hoisted(() => ({
   planId: 'plan_1',
@@ -18,6 +18,9 @@ const state = vi.hoisted(() => ({
   traces: [] as RunTrace[],
   runEvents: [] as RunEvent[],
   runState: 'connected' as 'connected' | 'offline' | 'unreachable',
+  tickets: [] as Ticket[],
+  workers: [] as Agent[],
+  ticketComments: [] as TicketComment[],
   posted: [] as Array<Record<string, unknown>>,
   patched: [] as Array<Record<string, unknown>>,
   removed: [] as Array<Record<string, unknown>>,
@@ -40,6 +43,9 @@ function resetState(): void {
   state.traces = [];
   state.runEvents = [];
   state.runState = 'connected';
+  state.tickets = [];
+  state.workers = [];
+  state.ticketComments = [];
   state.posted = [];
   state.patched = [];
   state.removed = [];
@@ -89,6 +95,10 @@ vi.mock('../api/hooks', () => ({
   useThreadMessages: () => ({ data: state.messages, isError: false }),
   useRunTraces: () => ({ data: state.traces }),
   useRunEvents: () => ({ data: [] }),
+  useTickets: () => ({ data: state.tickets }),
+  useWorkers: () => ({ data: state.workers }),
+  useTicketComments: () => ({ data: state.ticketComments, isLoading: false }),
+  useTicketRuns: () => ({ data: [], isLoading: false }),
   useRuntimes: () => ({ data: [{ id: 'claude', capabilities: { contextCompactionAt: 0.8 } }] }),
   useRuntimeModels: () => ({ data: [{ id: 'sonnet', contextWindowTokens: 1_000_000 }] }),
   usePostThreadMessage: () => ({
@@ -144,11 +154,45 @@ describe('PlanTab (VS-556, from VS-398/VS-442)', () => {
     expect(state.posted[0]).toMatchObject({ threadId: 'th_plan', body: 'Start with the API', projectId: 'p1', files: [] });
   });
 
-  it('renders no ticket strip for a planner message that names a ticket (VS-634)', () => {
+  it('renders a ticket strip for a planner message that names a ticket, opening it through the shared link handler (VS-720)', () => {
+    state.tickets = [ticket({ id: 'tk9', identifier: 'VS-9', title: 'The follow-up', projectId: 'p1' })];
     state.messages = [{ id: 'm1', threadId: 'th_plan', direction: 'outbound', authorKind: 'agent', authorId: 'planner_1', runId: null, body: 'I filed VS-9 for the follow-up.', replyToMessageIds: [], parts: [], createdAt: 't0' } as unknown as ThreadMessage];
     const { container } = mount();
     expect(container.textContent).toContain('VS-9');
-    expect(container.querySelector('[data-v2-ticket-strip]')).toBeNull();
+    const strip = container.querySelector('[data-v2-ticket-strip]');
+    expect(strip).not.toBeNull();
+    fireEvent.click(strip!.querySelector('[data-v2-dispatch-chip]')!);
+    expect(state.go).toHaveBeenCalledWith('/w/$ws/tickets/$ticketId', { params: { ws: 'ws1', ticketId: 'VS-9' } });
+  });
+
+  it('renders a chip for a dispatched scout even when the planner\'s reply names no identifier (VS-720)', () => {
+    state.tickets = [ticket({
+      id: 'tk10', identifier: 'VS-10', title: 'Scout the auth flow', projectId: 'p1',
+      createdRunId: 'run_p1', assigneeRoleId: 'role1', workerId: null, status: 'todo',
+    })];
+    state.messages = [{
+      id: 'm1', threadId: 'th_plan', direction: 'outbound', authorKind: 'agent', authorId: 'planner_1',
+      runId: 'run_p1', body: 'I dispatched a scout.', replyToMessageIds: [], parts: [], createdAt: 't0',
+    } as unknown as ThreadMessage];
+    const { container } = mount();
+    expect(screen.getByText('I dispatched a scout.')).toBeInTheDocument();
+    const chip = container.querySelector('[data-v2-ticket-strip] [data-v2-dispatch-chip]');
+    expect(chip).not.toBeNull();
+    expect(chip!.textContent).toContain('VS-10');
+    expect(chip!.textContent).toContain('Scout the auth flow');
+  });
+
+  it('expands a chip\'s chevron to the ticket\'s live feed without opening the ticket (VS-720)', () => {
+    state.tickets = [ticket({ id: 'tk11', identifier: 'VS-11', title: 'Scout it', projectId: 'p1' })];
+    state.ticketComments = [{
+      id: 'c1', ticketId: 'tk11', authorKind: 'agent', authorId: null, runId: null,
+      body: 'Found the root cause.', kind: 'comment', sourceTrust: 'trusted', createdAt: '2026-09-27T00:00:00.000Z',
+    } as unknown as TicketComment];
+    state.messages = [{ id: 'm1', threadId: 'th_plan', direction: 'outbound', authorKind: 'agent', authorId: 'planner_1', runId: null, body: 'See VS-11.', replyToMessageIds: [], parts: [], createdAt: 't0' } as unknown as ThreadMessage];
+    const { container } = mount();
+    fireEvent.click(container.querySelector('[data-v2-chip-expand]')!);
+    expect(container.querySelector('[data-ticket-activity-feed]')?.textContent).toContain('Found the root cause.');
+    expect(state.go).not.toHaveBeenCalled();
   });
 
   it('sends an attachment through to the plan thread', () => {

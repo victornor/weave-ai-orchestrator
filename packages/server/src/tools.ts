@@ -1388,8 +1388,13 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_plan_draft_dispatch', scope: 'planner', input: z.object({ draftId: z.string().min(1) }),
-    description: 'Dispatch a `scout` draft in this plan as a real ticket right now, before the plan is submitted — the only draft kind, and the one narrow exception to never creating a real ticket. Refused for any other draft kind, a draft already dispatched or otherwise linked to a ticket, a draft with no target role, or a plan that is no longer drafting. Captain can do this too from the Plan modal; either way the report reaches you here, not the weaver — once the ticket finishes, call weave_plan_get again and read the linked draft\'s `report`.',
-    handler: (ctx, i) => { requireOwnDraft(ctx, i.draftId); return svc(ctx).planning.dispatchDraft(ctx.actor, i.draftId); },
+    description: 'Dispatch a `scout` draft in this plan as a real ticket right now, before the plan is submitted — the only draft kind, and the one narrow exception to never creating a real ticket. Refused for any other draft kind, a draft already dispatched or otherwise linked to a ticket, a draft with no target role, or a plan that is no longer drafting. Captain can do this too from the Plan modal; either way the report reaches you here, not the weaver — once the ticket finishes, call weave_plan_get again and read the linked draft\'s `report`. The result carries `ticketIdentifier` (e.g. "VS-123") — name it in your next weave_plan_reply so captain sees a live status chip for it, instead of just saying you dispatched a scout.',
+    handler: (ctx, i) => {
+      requireOwnDraft(ctx, i.draftId);
+      const draft = svc(ctx).planning.dispatchDraft(ctx.actor, i.draftId);
+      const ticketIdentifier = draft.createdTicketId ? svc(ctx).tickets.get(draft.createdTicketId).identifier : null;
+      return { ...draft, ticketIdentifier };
+    },
   },
   {
     name: 'weave_plan_artifact_put', scope: 'planner', input: z.object({

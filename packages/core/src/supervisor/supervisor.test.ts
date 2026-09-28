@@ -409,15 +409,54 @@ describe('supervisor scheduled passes', () => {
       expect(row.tokenEstimate).toBe(estimateTokens('# Knowledge\n'));
     });
 
-    it('asks at most once per file per day and persists the request in meta', async () => {
+    // VS-732: the sweep evaluates every file but makes one request per scope, not one per file.
+    it('asks once for a project with several qualifying files, not once per file (VS-732)', async () => {
       const requestCuration = vi.fn(async () => ({}));
       h.services.knowledge = { requestCuration } as never;
-      seedKnowledgeFile({ tokenEstimate: 9_000, curationPending: 1 });
-      await supervisor.tick();
-      h.db.run("DELETE FROM meta WHERE key = 'supervisor:curation_at'");   // force the 10-minute gate open again
+      const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
+      seedKnowledgeFile({ path: 'projects/api/PROJECT.md', scope: 'project', projectId: h.projectId, lastCuratedAt: old });
+      seedKnowledgeFile({ path: 'projects/api/docs/one.md', scope: 'project', projectId: h.projectId, lastCuratedAt: old });
+      seedKnowledgeFile({ path: 'projects/api/docs/two.md', scope: 'project', projectId: h.projectId, lastCuratedAt: old });
       await supervisor.tick();
       expect(requestCuration).toHaveBeenCalledTimes(1);
-      expect(h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:curation_requested:workspace/WORKSPACE.md'])).toBeDefined();
+      expect(requestCuration).toHaveBeenCalledWith({ kind: 'system', id: null }, 'project', h.projectId);
+    });
+
+    it('asks once per scope when two projects both qualify (VS-732)', async () => {
+      const requestCuration = vi.fn(async () => ({}));
+      h.services.knowledge = { requestCuration } as never;
+      const otherId = newId();
+      const now = nowIso();
+      h.db.insert('projects', {
+        id: otherId, workspaceId: h.workspaceId, slug: 'web', name: 'Web', gitUrl: 'git@example.com:acme/web.git',
+        defaultBranch: 'main', clonePath: join(h.root, 'projects', 'web'), maxWorkers: 4, worktreeProvider: 'git',
+        openspecEnabled: 1, policiesJson: {}, status: 'ready', createdAt: now, updatedAt: now,
+      });
+      const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
+      seedKnowledgeFile({ path: 'projects/api/PROJECT.md', scope: 'project', projectId: h.projectId, lastCuratedAt: old });
+      seedKnowledgeFile({ path: 'projects/web/PROJECT.md', scope: 'project', projectId: otherId, lastCuratedAt: old });
+      await supervisor.tick();
+      expect(requestCuration).toHaveBeenCalledTimes(2);
+      expect(requestCuration).toHaveBeenCalledWith({ kind: 'system', id: null }, 'project', h.projectId);
+      expect(requestCuration).toHaveBeenCalledWith({ kind: 'system', id: null }, 'project', otherId);
+    });
+
+    // VS-732: end to end through the real service — several files, one ticket, and a second pass
+    // inside the interval filing nothing, with no live daemon involved.
+    it('files one curation ticket for several qualifying files, and none on a second pass inside the interval (VS-732)', async () => {
+      const spawnCurator = vi.fn(async () => ({ id: 'curator-agent', ticketId: 'curation-ticket' }));
+      h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }), spawnCurator } as never;
+      h.services.knowledge = createKnowledgeService(h.ctx, h.deps);
+      h.services.knowledgeUsage = { neverRead: vi.fn(() => []) } as never;
+      const old = new Date(Date.now() - 20 * 86_400_000).toISOString();
+      seedKnowledgeFile({ path: 'projects/api/PROJECT.md', scope: 'project', projectId: h.projectId, lastCuratedAt: old });
+      seedKnowledgeFile({ path: 'projects/api/docs/one.md', scope: 'project', projectId: h.projectId, lastCuratedAt: old });
+      seedKnowledgeFile({ path: 'projects/api/docs/two.md', scope: 'project', projectId: h.projectId, lastCuratedAt: old });
+      await supervisor.tick();
+      expect(spawnCurator).toHaveBeenCalledTimes(1);
+      h.db.run("DELETE FROM meta WHERE key = 'supervisor:curation_at'");   // reopen the 10-minute gate; the interval still applies
+      await supervisor.tick();
+      expect(spawnCurator).toHaveBeenCalledTimes(1);
     });
 
     it('does not run the pass twice inside the 10-minute window', async () => {

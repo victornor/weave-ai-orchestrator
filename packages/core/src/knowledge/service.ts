@@ -12,7 +12,7 @@ import { requestKnowledgeRepoPr } from './repoDelivery.js';
 import { createEmbeddingIndex, type EmbeddingIndexOptions } from './embeddings.js';
 import { tx } from '../tickets/tx.js';
 import {
-  CURATION_BUDGET_FRACTION, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, MAX_DUPLICATE_ENTRIES, MAX_DUPLICATE_PAIRS, SECRET_SHAPED_RE, appendEntry, budgetOf, countWords, docFolderOf, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection, isDuplicateCandidate, isHubSectionPointer, isRedirectStub,
+  CURATION_BUDGET_FRACTION, CURATION_MIN_INTERVAL_MS, DOCUMENT_STALE_MS, DUPLICATE_THRESHOLD, EXPIRY_RE, MAX_DUPLICATE_ENTRIES, MAX_DUPLICATE_PAIRS, SECRET_SHAPED_RE, appendEntry, budgetOf, countWords, docFolderOf, docPathFor, docSlugOf, docSummary, docTitle, entriesOf, findSection, isDuplicateCandidate, isHubSectionPointer, isRedirectStub,
   isDocPath, isHubStub, normalize, parseDoc, parseLinks, readMirrorFile, relPathFor, renderDoc, repoKnowledgePath, sectionSizes, seedBody, sha256, similarity, today, withBudgetStated, type Entry,
 } from './files.js';
 
@@ -280,10 +280,16 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       // file, so a flag left on a linked document it did not touch would ask for the same run again
       // tomorrow, and every day after that (VS-67).
       if (reason === 'curation') {
+        // VS-732: a curation covers the scope, so it also resets the scope's staleness reference —
+        // the file the curator rewrote and every other file in the scope. Without this, every
+        // document the curator did not rewrite re-qualified as stale on the next sweep. The interval
+        // is measured from the last request *or* this completion, so a run that stayed open past the
+        // interval still holds the scope for a full interval after it finished.
         db.run(
-          'UPDATE knowledge_files SET curation_pending = 0 WHERE workspace_id = ? AND scope = ? AND project_id IS ? AND id <> ?',
-          [ws, row.scope, row.projectId, row.id],
+          'UPDATE knowledge_files SET curation_pending = 0, last_curated_at = ? WHERE workspace_id = ? AND scope = ? AND project_id IS ? AND id <> ?',
+          [nowIso(), ws, row.scope, row.projectId, row.id],
         );
+        stampCuration(row.scope, row.projectId);
       }
       mkdirSync(dirname(abs), { recursive: true });
       writeFileSync(abs, body, 'utf8');
@@ -373,8 +379,23 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     return { path, body: readFileSync(abs, 'utf8') };
   }
 
-  function fireCuration(scope: KnowledgeScope, projectId?: string | null): void {
-    void service.requestCuration(SYSTEM, scope, projectId).catch((e: unknown) => log.warn({ err: e, scope }, 'curation request failed'));
+  /** VS-732: where a scope's curation interval is stamped, keyed by scope + project. */
+  function curationIntervalKey(scope: KnowledgeScope, projectId: string | null | undefined): string {
+    return `knowledge:curation_at:${scope}:${projectId ?? ''}`;
+  }
+
+  function withinCurationInterval(scope: KnowledgeScope, projectId: string | null | undefined): boolean {
+    const raw = db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', [curationIntervalKey(scope, projectId)])?.value;
+    const last = Date.parse(raw ?? '');
+    return Number.isFinite(last) && Date.now() - last < CURATION_MIN_INTERVAL_MS;
+  }
+
+  function stampCuration(scope: KnowledgeScope, projectId: string | null | undefined): void {
+    db.run('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [curationIntervalKey(scope, projectId), nowIso()]);
+  }
+
+  function fireCuration(scope: KnowledgeScope, projectId?: string | null, opts: { force?: boolean } = {}): void {
+    void service.requestCuration(SYSTEM, scope, projectId, opts).catch((e: unknown) => log.warn({ err: e, scope }, 'curation request failed'));
   }
 
   // ---------- expiry ----------
@@ -447,7 +468,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       const budget = budgetOfRow(row);
       if (tokens > budget) {
         db.update('knowledge_files', row.id, { curationPending: true, updatedAt: nowIso() });
-        fireCuration(scope, projectId);
+        fireCuration(scope, projectId, { force: true });
         const { over } = sectionSizes(next, budget);
         throw new OcError('budget_exceeded', `${row.path} would be ${tokens} tokens over a budget of ${budget}; curation scheduled`, {
           tokenEstimate: tokens, budgetTokens: budget, sectionsOverBudget: over,
@@ -489,7 +510,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       const normalized = body.endsWith('\n') ? body : `${body}\n`;
       const revision = write(actor, row, abs, normalized, reason, all, mirrorFor(mirror, () => normalized), undefined, superseded);
       const tokens = estimateTokens(body);
-      if (reason !== 'curation' && tokens > budgetOfRow(row)) fireCuration(scope, projectId);
+      if (reason !== 'curation' && tokens > budgetOfRow(row)) fireCuration(scope, projectId, { force: true });
       return { revision, superseded };
     },
 
@@ -526,12 +547,35 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         }));
     },
 
-    async requestCuration(actor, scope, projectId) {
+    async requestCuration(actor, scope, projectId, opts = {}) {
+      // VS-732: a manual request (a human actor) or an explicit hard trigger — a write rejected for
+      // being over budget — bypasses the interval; everything else respects it. A soft over-share
+      // does not, because it means the file is approaching its budget, not that it is broken.
+      const force = opts.force ?? actor.kind === 'human';
       if (scope === 'project') {
         const p = projectOf(projectId);
+        if (!force && withinCurationInterval(scope, p.id)) {
+          log.info({ projectId: p.id }, 'curation request suppressed: within the interval');
+          return {};
+        }
+        // At most one open curation ticket, forced or not: the origin-fingerprint index would refuse
+        // a second anyway, so checking first makes the skip a clean no-op instead of a thrown conflict.
+        const open = db.get<{ n: number }>(
+          "SELECT COUNT(*) AS n FROM tickets WHERE workspace_id = ? AND origin_kind = 'curation' AND origin_fingerprint = ? AND status NOT IN ('done','cancelled')",
+          [ws, `curation:${p.id}`],
+        )?.n ?? 0;
+        if (open > 0) {
+          log.info({ projectId: p.id }, 'curation request suppressed: a curation ticket is already open');
+          return {};
+        }
         const agent = await deps().workers.spawnCurator(actor, p.id);
+        stampCuration(scope, p.id);
         log.info({ projectId: p.id, agentId: agent.id }, 'curation worker spawned');
         return { ticketId: agent.ticketId ?? undefined };
+      }
+      if (!force && withinCurationInterval(scope, null)) {
+        log.info({ scope }, 'curation request suppressed: within the interval');
+        return {};
       }
       const conductor = deps().workers.conductor();
       const wakeup = deps().wake.enqueue(conductor.id, {
@@ -540,6 +584,7 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         payload: { scope, projectId: projectId ?? null, path: relPathFor(scope) },
         idempotencyKey: `curate:${scope}`,
       });
+      stampCuration(scope, null);
       return { wakeId: wakeup.id };
     },
 

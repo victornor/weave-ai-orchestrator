@@ -72,7 +72,7 @@ export function knowledgeRoutes(): Hono<AppEnv> {
     const { revision } = await body(c, z.object({ revision: z.number().int().min(1) }));
     return c.json(c.get('ws').services.knowledge.revert(c.get('actor'), scopeParam.parse(c.req.param('scope')), revision, project(c)));
   });
-  app.post('/:scope/curate', async (c) => c.json(await c.get('ws').services.knowledge.requestCuration(c.get('actor'), scopeParam.parse(c.req.param('scope')), project(c)), 202));
+  app.post('/:scope/curate', async (c) => c.json(await c.get('ws').services.knowledge.requestCuration(c.get('actor'), scopeParam.parse(c.req.param('scope')), project(c), { force: true }), 202));
   return app;
 }
 

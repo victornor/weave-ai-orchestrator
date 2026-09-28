@@ -20,6 +20,16 @@ export const DOC_BUDGET = DEFAULT_KNOWLEDGE_BUDGETS.document;
  */
 export const CURATION_BUDGET_FRACTION = 0.8;
 /**
+ * VS-732: the shortest gap between two curation requests for the same scope and project. The sweep
+ * re-checks every file on every pass, but the point of curation is to *reduce* a scope, not to run
+ * once per file that happens to qualify: with a per-file cooldown a project with N stale or
+ * never-read documents filed N tickets a day (8 in one day on the WeaveAI project, 2026-09-27). A
+ * day is the same round interval the old per-file cooldown used, applied to the scope instead. A
+ * manual `weave knowledge curate` and a write rejected for being over budget are the only triggers
+ * that bypass it; they still never open a second curation ticket while one is already open.
+ */
+export const CURATION_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/**
  * VS-102: a linked document nobody has written to in this long is flagged stale on the knowledge
  * health view. Deliberately not §13.4's 14-day hub staleness — a hub file changes constantly, so 14
  * days of silence is unusual; a document holding a design rationale going quiet for a season is

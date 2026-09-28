@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-09-28
+goal: Cap automatic knowledge curation to one open-or-recent run per
+  project/scope so stale and never-read files stop refiling a ticket a day each

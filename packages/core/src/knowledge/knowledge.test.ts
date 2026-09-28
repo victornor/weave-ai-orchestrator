@@ -485,6 +485,93 @@ describe('knowledge', () => {
     expect(pending.curationPending).toBe(0);
   });
 
+  // VS-732: curation is capped to one run per scope and project, and bypassed only by a manual
+  // request or a hard over-budget rejection — the soft over-share condition waits for the interval.
+  describe('curation cap (VS-732)', () => {
+    const SYSTEM_ACTOR: Actor = { kind: 'system', id: null };
+
+    it('asks for at most one curation per project within the interval', async () => {
+      const first = await knowledge.requestCuration(SYSTEM_ACTOR, 'project', h.projectId);
+      expect(first.ticketId).toBe('curation-ticket');
+      expect(workers.spawnCurator).toHaveBeenCalledTimes(1);
+
+      const second = await knowledge.requestCuration(SYSTEM_ACTOR, 'project', h.projectId);
+      expect(second).toEqual({});
+      expect(workers.spawnCurator).toHaveBeenCalledTimes(1);
+    });
+
+    it('lets a manual curate through the interval', async () => {
+      await knowledge.requestCuration(SYSTEM_ACTOR, 'project', h.projectId);
+      await knowledge.requestCuration(HUMAN, 'project', h.projectId);
+      expect(workers.spawnCurator).toHaveBeenCalledTimes(2);
+    });
+
+    it('lets a rejected over-budget write through the interval', async () => {
+      const filler = Array.from({ length: 40 }, (_, i) => `- 2026-01-01 · durable fact number ${i} about the project internals`).join('\n');
+      knowledge.replace(HUMAN, 'project', `# API\n\n## Learnings\n${filler}\n`, 'human', h.projectId);
+      await knowledge.requestCuration(SYSTEM_ACTOR, 'project', h.projectId);   // opens the interval
+      workers.spawnCurator.mockClear();
+
+      budgets().project = 500;
+      expect(() => knowledge.note(WORKER, 'project', 'Learnings', 'One more fact worth remembering here.', h.projectId))
+        .toThrowError(expect.objectContaining({ code: 'budget_exceeded' }));
+      await tick();
+      expect(workers.spawnCurator).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not refile curation for a soft over-share write inside the interval', async () => {
+      const body = `# API\n\n## Learnings\n${Array.from({ length: 10 }, (_, i) => `- 2026-01-01 · durable fact number ${i} about the project internals`).join('\n')}\n`;
+      knowledge.replace(HUMAN, 'project', body, 'human', h.projectId);
+      const tokens = knowledge.get('project', h.projectId).tokenEstimate;
+      budgets().project = Math.ceil(tokens / 0.85);
+      await knowledge.requestCuration(SYSTEM_ACTOR, 'project', h.projectId);   // opens the interval
+      workers.spawnCurator.mockClear();
+
+      knowledge.note(WORKER, 'project', 'Learnings', 'The gateway retries idempotent calls twice.', h.projectId);
+      await tick();
+      expect(workers.spawnCurator).not.toHaveBeenCalled();
+    });
+
+    it('does not open a second curation ticket while one is open, even when forced', async () => {
+      const now = new Date().toISOString();
+      h.db.insert('tickets', {
+        id: newId(), workspaceId: h.workspaceId, projectId: h.projectId, number: 5, identifier: 'API-5', kind: 'task',
+        title: 'Curate project knowledge', description: '', status: 'todo', priority: 'low', assigneeRoleId: h.roleId,
+        createdByKind: 'system', originKind: 'curation', originFingerprint: `curation:${h.projectId}`, createdAt: now, updatedAt: now,
+      });
+      const r = await knowledge.requestCuration(HUMAN, 'project', h.projectId);
+      expect(r).toEqual({});
+      expect(workers.spawnCurator).not.toHaveBeenCalled();
+    });
+
+    it('caps a project without capping a different one', async () => {
+      const otherId = newId();
+      const now = new Date().toISOString();
+      h.db.insert('projects', {
+        id: otherId, workspaceId: h.workspaceId, slug: 'web', name: 'Web', gitUrl: 'git@example.com:acme/web.git',
+        defaultBranch: 'main', clonePath: join(h.root, 'projects', 'web'), maxWorkers: 4, worktreeProvider: 'git',
+        openspecEnabled: 1, policiesJson: {}, status: 'ready', createdAt: now, updatedAt: now,
+      });
+      await knowledge.requestCuration(SYSTEM_ACTOR, 'project', h.projectId);
+      workers.spawnCurator.mockClear();
+
+      await knowledge.requestCuration(SYSTEM_ACTOR, 'project', otherId);
+      expect(workers.spawnCurator).toHaveBeenCalledTimes(1);
+      expect(workers.spawnCurator).toHaveBeenCalledWith(expect.objectContaining({ kind: 'system' }), otherId);
+    });
+
+    it('resets the scope\'s staleness reference for a file the curator did not rewrite', () => {
+      const doc = knowledge.putDoc(WORKER, 'project', 'run-engine', '# Run engine\n\nOne turn end to end.\n', h.projectId);
+      const old = new Date(Date.now() - 40 * 86_400_000).toISOString();
+      h.db.run('UPDATE knowledge_files SET last_curated_at = ? WHERE path = ?', [old, doc.path]);
+
+      knowledge.replace(HUMAN, 'project', '# API\n\n## Learnings\n- 2026-01-01 · Curated.\n', 'curation', h.projectId);
+      const row = h.db.get<{ lastCuratedAt: string | null }>('SELECT last_curated_at AS lastCuratedAt FROM knowledge_files WHERE path = ?', [doc.path])!;
+      expect(Date.parse(row.lastCuratedAt!)).toBeGreaterThan(Date.parse(old));
+    });
+  });
+
+
   it('picks up out-of-band human edits as a revision', () => {
     const { path } = knowledge.get('shared');
     writeFileSync(path, '# Shared knowledge\n\n## Conventions\n- 2026-01-01 · Squash merges only.\n', 'utf8');

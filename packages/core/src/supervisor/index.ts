@@ -23,10 +23,9 @@ const TICK_MS = 15_000;
 const LIVENESS_EVERY_MS = 60_000;
 const KILL_AFTER_INTERRUPT_MS = 30_000;
 const DAY_MS = 86_400_000;
-/** PLAN §13.4: a knowledge file is due for curation 14 days after its last one; ask at most once a day. */
+/** PLAN §13.4: a knowledge file is due for curation 14 days after its last one; the sweep runs often and the per-scope interval lives in `requestCuration` (VS-732). */
 const CURATION_EVERY_MS = 10 * 60_000;
 const CURATION_STALE_MS = 14 * DAY_MS;
-const CURATION_REQUEST_COOLDOWN_MS = DAY_MS;
 /** VS-102: how often the knowledge health view is compared against its last sweep, per workspace/project. */
 const KNOWLEDGE_HEALTH_EVERY_MS = 30 * 60_000;
 /** A scope's total open issues reaching this many is itself worth telling the conductor about. */
@@ -961,6 +960,12 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       const refs = deps().knowledgeUsage.neverRead({ since: new Date(neverReadBefore).toISOString() });
       neverReadKeys = new Set(refs.map((r) => `${r.scope}:${r.projectId ?? ''}:${r.slug}`));
     } catch (e) { log.warn({ err: String(e) }, 'never-read sweep before curation failed'); }
+    interface Qualified { f: KnowledgeFileRow; budget: number; reason: 'over_budget' | 'stale' | 'never_read' }
+    // VS-732: evaluate every file, but ask at most once per scope and project. The curator reviews the
+    // whole scope, so a project with several qualifying files gets one request, not one per file; the
+    // per-scope interval in `requestCuration` then keeps the next pass from refiling. Every qualifying
+    // file is still logged with its own evidence, so a request is diagnosable from the log alone.
+    const groups = new Map<string, { scope: KnowledgeScope; projectId: string | null; files: Qualified[] }>();
     for (const f of rows) {
       // A row whose file is gone — deleted, archived, renamed, never materialised — has nothing to
       // curate, however old it looks.
@@ -982,21 +987,25 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         && Date.parse(f.updatedAt) < neverReadBefore;
       if (!stale && !overBudget && !neverRead) continue;
 
-      const key = `supervisor:curation_requested:${f.path}`;
-      const asked = Date.parse(meta(key) ?? '');
-      if (Number.isFinite(asked) && Date.now() - asked < CURATION_REQUEST_COOLDOWN_MS) continue;
-      setMeta(key, nowIso());
       const reason = overBudget ? 'over_budget' : stale ? 'stale' : 'never_read';
-      const fields = {
-        path: f.path, scope: f.scope, reason, tokenEstimate: f.tokenEstimate, budgetTokens: budget,
-        lastCuratedAt: f.lastCuratedAt, since: f.lastCuratedAt ?? f.updatedAt,
-        neverReadBefore,
-      };
+      const groupKey = `${f.scope}:${f.projectId ?? ''}`;
+      const group = groups.get(groupKey) ?? { scope: f.scope as KnowledgeScope, projectId: f.projectId, files: [] as Qualified[] };
+      group.files.push({ f, budget, reason });
+      groups.set(groupKey, group);
+    }
+    for (const group of groups.values()) {
+      for (const { f, budget, reason } of group.files) {
+        log.info({
+          path: f.path, scope: f.scope, reason, tokenEstimate: f.tokenEstimate, budgetTokens: budget,
+          lastCuratedAt: f.lastCuratedAt, since: f.lastCuratedAt ?? f.updatedAt,
+          neverReadBefore,
+        }, 'curation condition met');
+      }
       try {
-        await deps().knowledge.requestCuration(SYSTEM, f.scope as KnowledgeScope, f.projectId);
-        log.info(fields, 'curation requested');
+        const result = await deps().knowledge.requestCuration(SYSTEM, group.scope, group.projectId);
+        log.info({ scope: group.scope, projectId: group.projectId, files: group.files.length, ticketId: result.ticketId, wakeId: result.wakeId }, 'curation request complete');
       } catch (e) {
-        log.warn({ ...fields, err: String(e) }, 'curation request failed');
+        log.warn({ scope: group.scope, projectId: group.projectId, err: String(e) }, 'curation request failed');
       }
     }
   }
@@ -1060,7 +1069,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
 
       const cooldownKey = `supervisor:knowledge_health_notified:${scope.key}`;
       const notifiedAt = Date.parse(meta(cooldownKey) ?? '');
-      if (Number.isFinite(notifiedAt) && Date.now() - notifiedAt < CURATION_REQUEST_COOLDOWN_MS) continue;
+      if (Number.isFinite(notifiedAt) && Date.now() - notifiedAt < DAY_MS) continue;
       setMeta(cooldownKey, nowIso());
 
       let conductor: Agent;

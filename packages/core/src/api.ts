@@ -600,7 +600,7 @@ export interface KnowledgeService {
   revisions(scope: S.KnowledgeScope, projectId?: string | null): Array<{ revision: number; authorKind: string; reason: string; createdAt: string; ticketId: string | null; ticketIdentifier: string | null; superseded: string[] }>;
   revert(actor: Actor, scope: S.KnowledgeScope, revision: number, projectId?: string | null): { revision: number };
   lint(): Array<{ path: string; scope: string; projectId: string | null; tokenEstimate: number; budgetTokens: number; pct: number; lastCuratedAt: string | null; curationPending: boolean }>;
-  requestCuration(actor: Actor, scope: S.KnowledgeScope, projectId?: string | null): Promise<{ ticketId?: string; wakeId?: string }>;
+  requestCuration(actor: Actor, scope: S.KnowledgeScope, projectId?: string | null, opts?: { force?: boolean }): Promise<{ ticketId?: string; wakeId?: string }>;
   search(query: string, projectId?: string | null, limit?: number): Array<{ kind: string; projectId: string | null; ref: string; title: string; snippet: string }>;
   /**
    * VS-493: the opt-in semantic fallback over the caller's visible knowledge. Scoped exactly like

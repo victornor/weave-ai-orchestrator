@@ -8,12 +8,6 @@ export interface CodexBuildOpts {
   tmpDir?: string;
   configExists?: boolean;
   modelContextWindowTokens?: number;
-  /**
-   * VS-685: extra `workspace-write` sandbox roots — the checkout's git common dir, so a git
-   * worktree can write `index.lock`/`HEAD` outside the turn's cwd. Resolved by the adapter (this
-   * function stays pure); applied only when the resolved sandbox is `workspace-write`.
-   */
-  writableRoots?: string[];
 }
 /**
  * `mcp_servers.<name>.default_tools_approval_mode` (Rust `AppToolApproval`) is a different key from
@@ -132,19 +126,15 @@ export function buildArgs(input: TurnInput, opts: CodexBuildOpts = {}): CodexBui
   // `-C` exists on `codex exec` only; resume/fork inherit the spawned process cwd.
   if (mode === 'new') args.push('-C', input.cwd);
 
-  // Sandbox: a flag on `exec`, the equivalent config key on resume/fork.
+  // VS-758: every mode runs with `danger-full-access` (the OS sandbox has no network and blocks
+  // host access agents need), so `restricted` is no longer OS-enforced read-only. `bypass` already
+  // implies full access. The mode still decides approvals. Sandbox is a flag on `exec`, the
+  // equivalent config key on resume/fork.
   if (input.permission.mode === 'bypass') {
     args.push('--dangerously-bypass-approvals-and-sandbox');
   } else {
-    const sandbox = input.permission.mode === 'restricted' ? 'read-only' : 'workspace-write';
-    if (mode === 'new') args.push('--sandbox', sandbox);
-    else args.push('-c', `sandbox_mode=${toml(sandbox)}`);
-    // VS-685: a git worktree's metadata (`index.lock`, `HEAD`) lives in the main clone's
-    // `.git/worktrees/<name>/`, outside the sandbox's default (cwd) writable root, so `git commit`
-    // from the checkout is denied as EROFS. Grant the resolved roots explicitly.
-    if (sandbox === 'workspace-write' && (opts.writableRoots?.length ?? 0) > 0) {
-      args.push('-c', `sandbox_workspace_write.writable_roots=${JSON.stringify(opts.writableRoots)}`);
-    }
+    if (mode === 'new') args.push('--sandbox', 'danger-full-access');
+    else args.push('-c', `sandbox_mode=${toml('danger-full-access')}`);
     // Codex defaults headless invocations to approval_policy="never".  `auto` is
     // the sandboxed worker posture, not the bypass posture, so it also needs the
     // matching automatic approval policy to let its run-scoped MCP server answer.

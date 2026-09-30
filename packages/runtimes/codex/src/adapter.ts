@@ -11,7 +11,6 @@ import { buildArgs, mcpConfigToml, resumeCommand } from './args.js';
 import { runAppServerTurn } from './app-server.js';
 import { compactCodexThread } from './compact.js';
 import { createCodexParser, type CodexParseState } from './events.js';
-import { sandboxWritableRoots } from './gitdir.js';
 import { listModels as listCodexModels, modelContextWindow } from './models.js';
 import { readThreadContextTokens, readThreadUsage } from './usage.js';
 import { asCodexSession, type CodexSessionRef } from './session.js';
@@ -113,10 +112,7 @@ export const adapter: RuntimeAdapter = {
     const tmpDir = runTmpDir(input.runId);
     const model = input.model || (typeof input.options['model'] === 'string' ? input.options['model'] : null);
     const modelWindow = input.options['contextWindowTokens'] === undefined && input.options['autoCompactTokenLimit'] === undefined ? await modelContextWindow(model) : undefined;
-    // VS-685: a git worktree's metadata lives outside the turn's cwd, so give the workspace-write
-    // sandbox the checkout's git common dir (and the checkout itself when it is out of cwd).
-    const writableRoots = sandboxWritableRoots(input.worktree?.path, input.cwd);
-    let built = buildArgs(input, { tmpDir, modelContextWindowTokens: modelWindow, configExists: Boolean(input.configHome && existsSync(join(input.configHome, 'config.toml'))), writableRoots });
+    let built = buildArgs(input, { tmpDir, modelContextWindowTokens: modelWindow, configExists: Boolean(input.configHome && existsSync(join(input.configHome, 'config.toml'))) });
     mkdirSync(tmpDir, { recursive: true });
     rmSync(built.lastMessagePath, { force: true });
     // Runtime config is shared by workers. Never overwrite a config created by another turn
@@ -130,7 +126,7 @@ export const adapter: RuntimeAdapter = {
         built.files = built.files.filter((file) => file !== configFile);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        built = buildArgs(input, { tmpDir, modelContextWindowTokens: modelWindow, configExists: true, writableRoots });
+        built = buildArgs(input, { tmpDir, modelContextWindowTokens: modelWindow, configExists: true });
       }
     }
     writeFiles(built.files);

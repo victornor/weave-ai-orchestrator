@@ -39,9 +39,9 @@ export function configOverrides(args: readonly string[]): string[] {
 
 /** Sandbox and approval policy per permission mode (the same postures `buildArgs` gives `exec`). */
 export function postureFor(mode: TurnInput['permission']['mode']): { sandbox: string; approvalPolicy: string } {
-  if (mode === 'bypass') return { sandbox: 'danger-full-access', approvalPolicy: 'never' };
-  if (mode === 'restricted') return { sandbox: 'read-only', approvalPolicy: 'never' };
-  return { sandbox: 'workspace-write', approvalPolicy: 'on-request' };
+  // VS-758: full access in every mode; the mode only decides approvals.
+  if (mode === 'bypass' || mode === 'restricted') return { sandbox: 'danger-full-access', approvalPolicy: 'never' };
+  return { sandbox: 'danger-full-access', approvalPolicy: 'on-request' };
 }
 
 export async function runAppServerTurn(

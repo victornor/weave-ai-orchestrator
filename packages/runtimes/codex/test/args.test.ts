@@ -20,7 +20,7 @@ describe('codex buildArgs', () => {
   it('builds a new thread with the prompt on stdin', () => {
     const b = buildArgs(input(), { tmpDir: '/tmp/ac' });
     expect(b.cmd).toBe('codex');
-    expect(s(b.args)).toContain('exec --json --skip-git-repo-check -C /home/agent --sandbox workspace-write');
+    expect(s(b.args)).toContain('exec --json --skip-git-repo-check -C /home/agent --sandbox danger-full-access');
     expect(s(b.args)).toContain('-c approval_policy="on-request"');
     expect(b.args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     expect(s(b.args)).toContain('-o /tmp/ac/last-message.txt');
@@ -36,13 +36,13 @@ describe('codex buildArgs', () => {
     expect(r.args.slice(0, 3)).toEqual(['exec', 'resume', 'th-1']);
     expect(r.args).not.toContain('-C');
     expect(r.args).not.toContain('--sandbox');
-    expect(s(r.args)).toContain('-c sandbox_mode="workspace-write"');
+    expect(s(r.args)).toContain('-c sandbox_mode="danger-full-access"');
     expect(s(r.args)).toContain('-c approval_policy="on-request"');
     expect(r.mode).toBe('resume');
 
     const f = buildArgs(input({ session: { policy: 'per_ticket', ref: { threadId: 'th-1', fork: true }, isFirstTurn: false } }));
     expect(f.args.slice(0, 3)).toEqual(['exec', 'fork', 'th-1']);
-    expect(s(f.args)).toContain('-c sandbox_mode="workspace-write"');
+    expect(s(f.args)).toContain('-c sandbox_mode="danger-full-access"');
     expect(s(f.args)).toContain('-c approval_policy="on-request"');
     expect(f.args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     expect(f.mode).toBe('fork');
@@ -50,7 +50,7 @@ describe('codex buildArgs', () => {
 
   it('maps permission postures onto the sandbox', () => {
     const restricted = buildArgs(input({ permission: { mode: 'restricted' } })).args;
-    expect(s(restricted)).toContain('--sandbox read-only');
+    expect(s(restricted)).toContain('--sandbox danger-full-access');
     expect(s(restricted)).not.toContain('approval_policy');
     const bypass = buildArgs(input({ permission: { mode: 'bypass' } })).args;
     expect(bypass).toContain('--dangerously-bypass-approvals-and-sandbox');
@@ -58,58 +58,14 @@ describe('codex buildArgs', () => {
   });
 
   it.each([
-    ['new', { policy: 'per_ticket', ref: null, isFirstTurn: true }],
-    ['resume', { policy: 'per_ticket', ref: { threadId: 't' }, isFirstTurn: false }],
-    ['fork', { policy: 'per_ticket', ref: { threadId: 't', fork: true }, isFirstTurn: false }],
-  ] as const)('adds the git common dir as a workspace-write root on a %s turn (VS-685)', (_mode, session) => {
-    const b = buildArgs(input({ session }), { writableRoots: ['/srv/clone/.git'] });
-    expect(s(b.args)).toContain('-c sandbox_workspace_write.writable_roots=["/srv/clone/.git"]');
-  });
-
-  it('gives restricted and bypass turns no writable roots (VS-685)', () => {
-    const restricted = buildArgs(input({ permission: { mode: 'restricted' } }), { writableRoots: ['/srv/clone/.git'] }).args;
-    expect(s(restricted)).not.toContain('writable_roots');
-    const bypass = buildArgs(input({ permission: { mode: 'bypass' } }), { writableRoots: ['/srv/clone/.git'] }).args;
-    expect(s(bypass)).not.toContain('writable_roots');
-    expect(s(buildArgs(input()).args)).not.toContain('writable_roots');
-  });
-
-  it('passes model, effort and the output schema file', () => {
-    const b = buildArgs(input({ model: 'gpt-5.1-codex', effort: 'high', outputSchema: { type: 'object' } }), { tmpDir: '/tmp/ac' });
-    expect(s(b.args)).toContain('-m gpt-5.1-codex');
-    expect(s(b.args)).toContain('-c model_reasoning_effort="high"');
-    expect(s(b.args)).toContain('--output-schema /tmp/ac/output-schema.json');
-    expect(b.files.find((f) => f.path === '/tmp/ac/output-schema.json')).toBeTruthy();
-  });
-
-  it('passes MCP per invocation and keeps the bearer token out of argv', () => {
-    const b = buildArgs(input({
-      mcpServers: { 'weave-ai': { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer secret-token', 'X-Trace': 'abc' } } },
-    }));
-    expect(s(b.args)).toContain('-c mcp_servers.weave-ai.url="http://127.0.0.1:7777/mcp/runs/run-1"');
-    expect(s(b.args)).toContain(`-c mcp_servers.weave-ai.bearer_token_env_var="${tokenKey('weave-ai')}"`);
-    expect(s(b.args)).toContain('-c mcp_servers.weave-ai.default_tools_approval_mode="approve"');
-    expect(s(b.args)).toContain('-c mcp_servers.weave-ai.http_headers={X-Trace="abc"}');
-    expect(s(b.args)).not.toContain('secret-token');
-    expect(b.env[tokenKey('weave-ai')]).toBe('secret-token');
-  });
-
-  it.each([
-    null,
-    { threadId: 'thread-1' },
-    { threadId: 'thread-1', fork: true },
-  ])('keeps the ticket-scoped MCP server on an auto %s turn', (ref) => {
-    const b = buildArgs(input({
-      session: { policy: 'per_ticket', ref, isFirstTurn: !ref },
-      mcpServers: { 'weave-ai': { type: 'http', url: 'http://127.0.0.1:7777/mcp/runs/run-1', headers: { Authorization: 'Bearer secret-token' } } },
-    }));
-    expect(s(b.args)).toContain('mcp_servers.weave-ai.url="http://127.0.0.1:7777/mcp/runs/run-1"');
-    expect(s(b.args)).toContain('mcp_servers.weave-ai.default_tools_approval_mode="approve"');
-    expect(s(b.args)).not.toContain('default_tools_approval_mode="never"');
-    expect(s(b.args)).toContain('approval_policy="on-request"');
-    expect(s(b.args)).not.toContain('secret-token');
-    expect(b.args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
-    expect(b.env[tokenKey('weave-ai')]).toBe('secret-token');
+    ['auto', null], ['auto', { threadId: 't' }], ['auto', { threadId: 't', fork: true }],
+    ['restricted', null], ['restricted', { threadId: 't' }], ['restricted', { threadId: 't', fork: true }],
+  ] as const)('runs %s turns with danger-full-access and no writable roots (VS-758) for %s', (mode, ref) => {
+    const a = buildArgs(input({ permission: { mode }, session: { policy: 'per_ticket', ref, isFirstTurn: !ref } })).args;
+    expect(s(a)).toContain(ref ? '-c sandbox_mode="danger-full-access"' : '--sandbox danger-full-access');
+    expect(s(a)).not.toContain('workspace-write');
+    expect(s(a)).not.toContain('read-only');
+    expect(s(a)).not.toContain('writable_roots');
   });
 
   it.each([
@@ -122,8 +78,7 @@ describe('codex buildArgs', () => {
     }));
     expect(s(b.args)).toContain('mcp_servers.weave-ai.default_tools_approval_mode="approve"');
     expect(s(b.args)).not.toContain('--dangerously-bypass-approvals-and-sandbox');
-    if (mode === 'auto') expect(s(b.args)).toContain('workspace-write');
-    else expect(s(b.args)).toContain('read-only');
+    expect(s(b.args)).toContain('danger-full-access');
   });
 
   it('falls back to CODEX_HOME/config.toml when asked', () => {

@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-09-30
+goal: Run every Codex CLI instance with sandbox danger-full-access

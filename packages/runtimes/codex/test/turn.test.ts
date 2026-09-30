@@ -145,7 +145,7 @@ describe('Codex turn against a fake CLI', () => {
     expect(capture.args).not.toContain(turn.prompt);
     expect(capture.args).toContain('mcp_servers.weave-ai.default_tools_approval_mode="approve"');
     expect(capture.args).not.toContain('default_tools_approval_mode="never"');
-    expect(capture.args.join(' ')).toContain(mode === 'auto' ? 'workspace-write' : 'read-only');
+    expect(capture.args.join(' ')).toContain('danger-full-access');
     expect(capture.args.join(' ')).toContain('mcp_servers.weave-ai.url="http://localhost/mcp/runs/run-1"');
     expect(capture.args.join(' ')).not.toContain('ticket-token');
     expect(capture.cwd).toBe(turn.cwd);

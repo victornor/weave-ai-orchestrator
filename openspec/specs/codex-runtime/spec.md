@@ -24,7 +24,7 @@ The adapter SHALL emit `tool.call` when a command execution, file change or MCP 
 - **THEN** the page shows it as running with its output so far, and completes it in place
 
 ### Requirement: Approvals follow the permission mode
-The adapter SHALL answer every server-initiated approval request without a human: `bypass` runs with approval policy `never` and no sandbox; `restricted` uses a read-only sandbox and declines every request; `auto` uses a workspace-write sandbox with policy `on-request` and declines command, file-change and permission escalations while accepting the run-scoped MCP server's tool calls. A request the adapter does not recognise SHALL be declined, never left unanswered.
+The adapter SHALL run every Codex turn, in every permission mode, with sandbox `danger-full-access` and SHALL answer every server-initiated approval request without a human: `bypass` runs with approval policy `never`; `restricted` runs with approval policy `never` and declines every request; `auto` uses policy `on-request` and declines command, file-change and permission escalations while accepting the run-scoped MCP server's tool calls. A request the adapter does not recognise SHALL be declined, never left unanswered.
 
 #### Scenario: Escalation in auto mode
 - **WHEN** the model asks to run a command outside the sandbox in `auto` mode
@@ -33,6 +33,10 @@ The adapter SHALL answer every server-initiated approval request without a human
 #### Scenario: Unknown request
 - **WHEN** the server sends a request method the adapter does not know
 - **THEN** it is answered with a decline or an error response and the turn does not hang
+
+#### Scenario: Every mode has full access
+- **WHEN** a Codex turn or app-server thread starts in `auto`, `restricted` or `bypass` mode, new or resumed
+- **THEN** its sandbox is `danger-full-access`
 
 ### Requirement: Cancel and cut-off streams are safe
 Cancelling a turn SHALL interrupt the turn, then terminate the app-server process. If the server exits or its stream ends before `turn/completed`, the turn SHALL fail with the runtime's stderr reason, the run's outcome SHALL be decided as for an `exec` turn that ended early, and partials SHALL be dropped.
@@ -58,37 +62,3 @@ Every partial frame SHALL pass through the same secret redaction as persisted ev
 #### Scenario: Secret in command output
 - **WHEN** a command prints a registered secret while streaming
 - **THEN** the partial frame carries the redacted text
-
-### Requirement: A workspace-write Codex turn can write its worktree's git metadata
-
-When a Codex turn runs under the `workspace-write` sandbox (permission mode `auto`), the adapter
-SHALL add the checkout's git common directory as an additional sandbox writable root, so the
-per-worktree metadata a git worktree stores under the main clone's `.git/worktrees/<name>/`
-(such as `index.lock` and `HEAD`) is writable. The adapter SHALL resolve that directory from the
-run's checkout: a `.git` directory is itself the common directory; a linked worktree's `.git`
-file (`gitdir: <gitdir>`) resolves through `<gitdir>/commondir`. When the checkout lies outside
-the turn's working directory, the adapter SHALL add the checkout as a writable root too. The
-adapter SHALL add roots only to a `workspace-write` turn: `restricted` stays `read-only` and
-`bypass` stays unsandboxed. A checkout whose git directory cannot be resolved SHALL NOT fail the
-turn.
-
-#### Scenario: A Codex worker commits from its worktree checkout
-
-- **WHEN** a Codex worker in `auto` mode runs in a git worktree whose common dir is outside its working directory
-- **THEN** its invocation carries the git common directory among `sandbox_workspace_write.writable_roots`
-- **AND** `git add` and `git commit` inside the checkout succeed instead of failing with a read-only filesystem error
-
-#### Scenario: A resumed or forked worker keeps the writable root
-
-- **WHEN** an `auto` Codex worker resumes or forks a session in the same worktree
-- **THEN** that invocation carries the git common directory among its writable roots as well
-
-#### Scenario: Read-only and bypass turns gain no root
-
-- **WHEN** a Codex turn runs in `restricted` or `bypass` mode
-- **THEN** its invocation carries no `sandbox_workspace_write.writable_roots`
-
-#### Scenario: An unresolvable checkout does not fail the turn
-
-- **WHEN** the run's checkout has no readable `.git` file or directory
-- **THEN** the turn runs with the same sandbox it has today and is not failed by the missing root

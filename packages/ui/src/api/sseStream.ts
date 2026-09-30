@@ -32,6 +32,80 @@ export interface ConnectionStatus {
 
 export const BACKOFF = [500, 1000, 2000, 4000, 8000, 15000];
 
+/**
+ * VS-765: an attempt that has neither opened nor failed this long is abandoned. `EventSource` only
+ * fires `onerror` when the browser gives up, which for a SYN into a dead path or a request queued
+ * behind the six-connection HTTP/1.1 cap can be minutes — and the silence watchdog only runs once a
+ * stream has opened, so nothing else would ever notice.
+ */
+export const CONNECT_TIMEOUT_MS = 20_000;
+
+/** Why a stream was reopened (VS-765). `error` and `connect-timeout` are failures; the rest are triggers. */
+export type ReopenCause = 'error' | 'connect-timeout' | 'silence' | 'wake' | 'online' | 'retry';
+
+export interface ReconnectEntry {
+  at: string;
+  stream: string;
+  cause: ReopenCause;
+  /** `navigator.onLine` when it happened; null where the browser does not say. */
+  online: boolean | null;
+  attempts: number;
+  /** Age of the last frame or heartbeat when the stream was given up on; null if none had arrived. */
+  lastFrameAgeMs: number | null;
+  /** What `/api/health` answered right after a failure: `ok`, `http <status>`, `timeout` or `network`
+   * (a refused or reset connection, a certificate the browser rejects, or no route — fetch cannot say which). */
+  probe?: string;
+}
+
+const RECONNECT_LOG_MAX = 50;
+const reconnectLog: ReconnectEntry[] = [];
+const reconnectListeners = new Set<() => void>();
+
+export function getReconnectLog(): readonly ReconnectEntry[] { return reconnectLog; }
+export function subscribeReconnectLog(fn: () => void): () => void {
+  reconnectListeners.add(fn);
+  return () => { reconnectListeners.delete(fn); };
+}
+export function resetReconnectLog(): void { reconnectLog.length = 0; }
+
+function notifyReconnectLog(): void { for (const fn of reconnectListeners) fn(); }
+
+/** Appends to the bounded log and returns the entry so a probe can fill in its result later. */
+export function recordReopen(stream: string, cause: ReopenCause, attempts: number, lastFrameAt: number | null): ReconnectEntry {
+  const entry: ReconnectEntry = {
+    at: new Date().toISOString(),
+    stream,
+    cause,
+    online: typeof navigator !== 'undefined' ? navigator.onLine : null,
+    attempts,
+    lastFrameAgeMs: lastFrameAt === null ? null : Date.now() - lastFrameAt,
+  };
+  reconnectLog.push(entry);
+  if (reconnectLog.length > RECONNECT_LOG_MAX) reconnectLog.shift();
+  notifyReconnectLog();
+  return entry;
+}
+
+const PROBE_TIMEOUT_MS = 5_000;
+let probing = false;
+
+/**
+ * One `/api/health` read after a failure, so the log can tell a daemon that answers (the stream alone
+ * is broken) from one that does not (network, Tailscale, certificate). At most one runs at a time.
+ */
+export function probeHealth(entry: ReconnectEntry): void {
+  if (probing || typeof fetch !== 'function') return;
+  probing = true;
+  const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = setTimeout(() => ctl?.abort(), PROBE_TIMEOUT_MS);
+  let aborted = false;
+  ctl?.signal.addEventListener('abort', () => { aborted = true; });
+  void fetch('/api/health', { signal: ctl?.signal, cache: 'no-store' })
+    .then((r) => { entry.probe = r.ok ? 'ok' : `http ${r.status}`; })
+    .catch(() => { entry.probe = aborted ? 'timeout' : 'network'; })
+    .finally(() => { clearTimeout(timer); probing = false; notifyReconnectLog(); });
+}
+
 /** The daemon's keepalive cadence (shared with `packages/shared`) and the windows derived from it. */
 export const WATCHDOG_TICK_MS = HEARTBEAT_MS / 3;
 /** No frame or heartbeat this long → `stale` (about 2 heartbeats). */
@@ -48,6 +122,8 @@ interface WatchdogCallbacks {
   onDead: () => void;
   /** A tick overran badly — the machine slept — so the socket cannot be trusted. */
   onWake: () => void;
+  /** VS-765: an attempt begun with `beginConnect()` neither opened nor failed within `CONNECT_TIMEOUT_MS`. */
+  onConnectTimeout: () => void;
 }
 
 /**
@@ -62,12 +138,36 @@ export class SseWatchdog {
   private stale = false;
   private running = false;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private connectTimer: ReturnType<typeof setTimeout> | null = null;
+  private everOpened = false;
 
   constructor(private readonly cb: WatchdogCallbacks) {}
 
+  /** A connection attempt has begun: if `start()` or `stop()` does not follow in time, it is abandoned. */
+  beginConnect(): void {
+    this.clearConnect();
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = null;
+      this.cb.onConnectTimeout();
+    }, CONNECT_TIMEOUT_MS);
+  }
+
+  private clearConnect(): void {
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = null;
+    }
+  }
+
   get lastFrameAt(): number { return this.frameAt; }
 
+  /** When this stream last heard from the daemon, or null if no connection has ever opened — `frameAt`
+   *  alone starts at construction, which would pass a never-connected stream off as one that went quiet. */
+  get lastHeardAt(): number | null { return this.everOpened ? this.frameAt : null; }
+
   start(): void {
+    this.clearConnect();
+    this.everOpened = true;
     this.running = true;
     this.frameAt = Date.now();
     this.tickAt = Date.now();
@@ -77,6 +177,7 @@ export class SseWatchdog {
   }
 
   stop(): void {
+    this.clearConnect();
     this.running = false;
     this.stale = false;
     if (this.timer) {
@@ -170,19 +271,39 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStream {
       setStatus((s) => ({ ...s, ...patch }));
     };
 
+    const label = buildUrlRef.current()?.split('?')[0] ?? 'stream';
+
+    // A failed attempt — the browser's `onerror` or an attempt that never opened — backs off and retries.
+    const failed = (cause: 'error' | 'connect-timeout'): void => {
+      watchdog.stop();
+      es?.close();
+      if (stopped || hidden) return;
+      attempts += 1;
+      const entry = recordReopen(label, cause, attempts, watchdog.lastHeardAt);
+      if (attempts === 1) probeHealth(entry);
+      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+      set({ state: offline ? 'offline' : 'reconnecting', attempts });
+      const delay = BACKOFF[Math.min(attempts - 1, BACKOFF.length - 1)] ?? 15000;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => open(), delay);
+    };
+
     const watchdog: SseWatchdog = new SseWatchdog({
       onStale: () => set({ state: 'stale', lastFrameAt: watchdog.lastFrameAt }),
       onAlive: () => set({ state: 'connected', lastFrameAt: Date.now() }),
       onDead: () => {
         es?.close();
         if (stopped || hidden) return;
+        recordReopen(label, 'silence', attempts, watchdog.lastHeardAt);
         set({ state: 'reconnecting', lastFrameAt: watchdog.lastFrameAt });
         open('reconnecting');
       },
       onWake: () => {
         if (stopped || hidden) return;
+        recordReopen(label, 'wake', attempts, watchdog.lastHeardAt);
         open('reconnecting');
       },
+      onConnectTimeout: () => failed('connect-timeout'),
     });
 
     const open = (state: ConnectionState = 'connecting'): void => {
@@ -197,6 +318,7 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStream {
       set({ state });
       const source = new EventSource(url, { withCredentials: true });
       es = source;
+      watchdog.beginConnect();
       source.onopen = () => {
         attempts = 0;
         set({ state: 'connected', attempts: 0, capturedAt: new Date().toISOString(), lastFrameAt: Date.now() });
@@ -209,20 +331,12 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStream {
       // The keepalive is a named event `EventSource` delivers, unlike an SSE comment; only the clock
       // is touched here, never a status notification (VS-417, VS-641).
       source.addEventListener('heartbeat', () => watchdog.touch());
-      source.onerror = () => {
-        watchdog.stop();
-        source.close();
-        if (stopped || hidden) return;
-        attempts += 1;
-        const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-        set({ state: offline ? 'offline' : 'reconnecting', attempts });
-        const delay = BACKOFF[Math.min(attempts - 1, BACKOFF.length - 1)] ?? 15000;
-        timer = setTimeout(() => open(), delay);
-      };
+      source.onerror = () => failed('error');
     };
 
     const retryNow = (): void => {
       attempts = 0;
+      recordReopen(label, 'retry', 0, watchdog.lastHeardAt);
       open();
     };
     retryRef.current = retryNow;
@@ -232,6 +346,7 @@ export function useLiveStream(opts: LiveStreamOptions): LiveStream {
       // Trust nothing about the old socket: a device regaining its network is exactly when a
       // half-open stream is most likely, so open fresh and let onopen re-sync (VS-641).
       attempts = 0;
+      recordReopen(label, 'online', 0, watchdog.lastHeardAt);
       open('reconnecting');
     };
     const onOffline = (): void => {

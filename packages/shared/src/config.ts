@@ -758,7 +758,7 @@ export const DaemonConfigSchema = z.object({
     listen: z.string().default('127.0.0.1:7433'),
     publicUrl: z.string().optional(),
     trustProxy: z.boolean().default(false),
-    tls: z.object({ mode: z.enum(['none', 'self-signed', 'acme', 'files']).default('none'), cert: z.string().optional(), key: z.string().optional(), acmeEmail: z.string().optional(), domains: z.array(z.string()).default([]) }).default({}),
+    tls: z.object({ mode: z.enum(['none', 'self-signed', 'tailscale', 'acme', 'files']).default('none'), cert: z.string().optional(), key: z.string().optional(), acmeEmail: z.string().optional(), domains: z.array(z.string()).default([]) }).default({}),
   }).default({}),
   auth: z.object({
     loopbackTrusted: z.boolean().default(false),

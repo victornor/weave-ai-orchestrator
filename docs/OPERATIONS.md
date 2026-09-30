@@ -62,7 +62,7 @@ http:
   publicUrl: https://conductor.example.com
   trustProxy: true            # ONLY when a reverse proxy you control sets X-Forwarded-*
   tls:
-    mode: files               # none | self-signed | files
+    mode: files               # none | self-signed | tailscale | files
     cert: /etc/letsencrypt/live/conductor.example.com/fullchain.pem
     key:  /etc/letsencrypt/live/conductor.example.com/privkey.pem
 auth:
@@ -97,8 +97,38 @@ Two listeners always run:
 |---|---|---|
 | `none` | plain HTTP | loopback only, or strictly behind a proxy on the same host |
 | `self-signed` | generates `self-signed.crt`/`.key` in the config dir on first start (10-year, SANs from `tls.domains` plus `127.0.0.1`) | LAN, Tailscale, anything where clients can pin. Clients use `weave login <url> --pin`. |
-| `files` | reads `tls.cert` and `tls.key` (PEM) | you already have a certificate — Let's Encrypt via certbot, an internal CA, Tailscale certs |
-| `acme` | **not implemented** — the daemon throws `http.tls.mode "acme" is not implemented; use a reverse proxy or mode "files"` | — |
+| `tailscale` | fetches a publicly trusted (Let's Encrypt) certificate for the daemon's tailnet name from the local tailscaled, serves it, and renews it in place; see below | the daemon is reached over Tailscale and browsers must trust it with no warning |
+| `files` | reads `tls.cert` and `tls.key` (PEM) | you already have a certificate — Let's Encrypt via certbot, an internal CA |
+| `acme` | **not implemented** — the daemon throws `http.tls.mode "acme" is not implemented; use mode "tailscale" …, mode "files", or a reverse proxy` | — |
+
+#### `tailscale` mode
+
+```yaml
+http:
+  listen: 100.x.y.z:7433                       # `tailscale ip -4`
+  publicUrl: https://myhost.tailnet-name.ts.net:7433
+  tls:
+    mode: tailscale
+    # domains: [myhost.tailnet-name.ts.net]    # optional; default is this node's own tailnet name
+```
+
+One-time setup on the daemon host:
+
+1. Enable **HTTPS Certificates** on the DNS page of the Tailscale admin console (MagicDNS must be on).
+2. Let the daemon's user fetch certificates: `sudo tailscale set --operator=$USER`.
+3. Switch `http.tls.mode` to `tailscale` and restart the daemon.
+
+The certificate comes from tailscaled's LocalAPI (`/var/run/tailscale/tailscaled.sock`, or
+`AC_TAILSCALE_SOCKET`), so the `tailscale` binary does not need to be on the daemon's `PATH`. The
+certificate is checked every 12 hours and renewed when 30 days or less remain; the new one is swapped
+into the running listener, so nothing restarts and open connections are not dropped. A renewal that
+fails is logged and retried, and the old certificate stays in service.
+
+If tailscaled is not up yet (a reboot can start the daemon first), start waits and retries for up to
+about 150 seconds, logging each wait. After that — or at once for a cause waiting cannot fix — it fails
+with a message naming the fix (Tailscale not running, HTTPS Certificates not enabled, or the missing
+`--operator`). It never falls back to a self-signed certificate. Browsers trust the certificate without
+a warning, so `weave login` needs no `--pin` in this mode.
 
 `weave login` refuses to send a password in plaintext to a non-loopback host unless you pass
 `--insecure`. Don't.

@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query';
 import type { Decision, EphemeralEventType, EventType, WorkspaceEvent } from '@weave-ai/shared';
 import { qk } from './keys';
-import { BACKOFF, documentIsHidden, SseWatchdog, type ConnectionState, type ConnectionStatus } from './sseStream';
+import { BACKOFF, documentIsHidden, probeHealth, recordReopen, SseWatchdog, type ConnectionState, type ConnectionStatus } from './sseStream';
 
 export type { ConnectionState, ConnectionStatus };
 
@@ -75,20 +75,25 @@ export class EventStream {
       this.es?.close();
       this.es = null;
       if (this.stopped || this.hidden) return;
+      recordReopen(this.label, 'silence', this.status.attempts, this.watchdog.lastHeardAt);
       this.set({ state: 'reconnecting', lastFrameAt: this.watchdog.lastFrameAt });
       this.open();
     },
     onWake: () => {
       if (this.stopped || this.hidden) return;
+      recordReopen(this.label, 'wake', this.status.attempts, this.watchdog.lastHeardAt);
       this.set({ state: 'reconnecting' });
       this.open();
     },
+    onConnectTimeout: () => this.failed('connect-timeout'),
   });
 
   constructor(
     private readonly workspace: string,
     private readonly qc: QueryClient,
   ) {}
+
+  private get label(): string { return `workspace:${this.workspace}`; }
 
   getStatus(): ConnectionStatus {
     return this.status;
@@ -141,6 +146,7 @@ export class EventStream {
   /** Reconnects at once, resetting the backoff, whatever the current delay or state. */
   retryNow(): void {
     if (this.stopped || this.hidden) return;
+    recordReopen(this.label, 'retry', 0, this.watchdog.lastHeardAt);
     this.status = { ...this.status, attempts: 0 };
     this.set({ state: 'connecting' });
     this.open();
@@ -149,6 +155,7 @@ export class EventStream {
   private onOnline = (): void => {
     if (this.stopped || this.hidden) return;
     // Trust nothing about the old socket (VS-641): open fresh and let onopen re-sync.
+    recordReopen(this.label, 'online', 0, this.watchdog.lastHeardAt);
     this.set({ state: 'reconnecting' });
     this.open();
   };
@@ -185,12 +192,34 @@ export class EventStream {
     for (const l of this.listeners) l(this.status);
   }
 
+  /**
+   * A failed attempt — the browser's `onerror`, or an attempt that never opened (VS-765) — backs off and
+   * retries. Always replaces a pending retry, so two timers can never both reopen the stream.
+   */
+  private failed(cause: 'error' | 'connect-timeout'): void {
+    this.watchdog.stop();
+    this.es?.close();
+    this.es = null;
+    if (this.stopped || this.hidden) return;
+    const attempts = this.status.attempts + 1;
+    const entry = recordReopen(this.label, cause, attempts, this.watchdog.lastHeardAt);
+    if (attempts === 1) probeHealth(entry);
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    this.set({ state: offline ? 'offline' : attempts > BACKOFF.length ? 'offline' : 'reconnecting', attempts });
+    const delay = BACKOFF[Math.min(attempts - 1, BACKOFF.length - 1)] ?? 15000;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.open(), delay);
+  }
+
   private open(): void {
     if (this.stopped || this.hidden) return;
     this.es?.close();
+    // VS-765: a retry still waiting on its backoff would otherwise reopen over this connection later.
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
     const after = this.status.lastSeq ? `?after=${this.status.lastSeq}` : '';
     const es = new EventSource(`/api/w/${encodeURIComponent(this.workspace)}/events${after}`, { withCredentials: true });
     this.es = es;
+    this.watchdog.beginConnect();
     if (this.status.state === 'hidden') this.set({ state: 'connecting' });
 
     es.onopen = () => {
@@ -203,16 +232,7 @@ export class EventStream {
       if (this.everConnected) resync(this.qc, this.workspace);
       this.everConnected = true;
     };
-    es.onerror = () => {
-      this.watchdog.stop();
-      es.close();
-      if (this.stopped || this.hidden) return;
-      const attempts = this.status.attempts + 1;
-      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-      this.set({ state: offline ? 'offline' : attempts > BACKOFF.length ? 'offline' : 'reconnecting', attempts });
-      const delay = BACKOFF[Math.min(attempts - 1, BACKOFF.length - 1)] ?? 15000;
-      this.timer = setTimeout(() => this.open(), delay);
-    };
+    es.onerror = () => this.failed('error');
     es.onmessage = (m) => this.handle(m);
     // The daemon sends `event: <type>`; a named-event listener is required
     // because onmessage only receives unnamed frames.
@@ -270,17 +290,22 @@ export class GlobalEventStream {
       this.es?.close();
       this.es = null;
       if (this.stopped || this.hidden) return;
+      recordReopen(this.label, 'silence', this.status.attempts, this.watchdog.lastHeardAt);
       this.set({ state: 'reconnecting', lastFrameAt: this.watchdog.lastFrameAt });
       this.open();
     },
     onWake: () => {
       if (this.stopped || this.hidden) return;
+      recordReopen(this.label, 'wake', this.status.attempts, this.watchdog.lastHeardAt);
       this.set({ state: 'reconnecting' });
       this.open();
     },
+    onConnectTimeout: () => this.failed('connect-timeout'),
   });
 
   constructor(private readonly qc: QueryClient) {}
+
+  private readonly label = 'global';
 
   getStatus(): ConnectionStatus { return this.status; }
   subscribe(fn: Listener): () => void { this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -319,6 +344,7 @@ export class GlobalEventStream {
 
   retryNow(): void {
     if (this.stopped || this.hidden) return;
+    recordReopen(this.label, 'retry', 0, this.watchdog.lastHeardAt);
     this.status = { ...this.status, attempts: 0 };
     this.set({ state: 'connecting' });
     this.open();
@@ -327,6 +353,7 @@ export class GlobalEventStream {
   private onOnline = (): void => {
     if (this.stopped || this.hidden) return;
     // Trust nothing about the old socket (VS-641): open fresh and let onopen re-sync.
+    recordReopen(this.label, 'online', 0, this.watchdog.lastHeardAt);
     this.set({ state: 'reconnecting' });
     this.open();
   };
@@ -357,6 +384,20 @@ export class GlobalEventStream {
     this.status = { ...this.status, ...patch };
     for (const listener of this.listeners) listener(this.status);
   }
+  private failed(cause: 'error' | 'connect-timeout'): void {
+    this.watchdog.stop();
+    this.es?.close();
+    this.es = null;
+    if (this.stopped || this.hidden) return;
+    const attempts = this.status.attempts + 1;
+    const entry = recordReopen(this.label, cause, attempts, this.watchdog.lastHeardAt);
+    if (attempts === 1) probeHealth(entry);
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    this.set({ state: offline ? 'offline' : attempts > BACKOFF.length ? 'offline' : 'reconnecting', attempts });
+    const delay = BACKOFF[Math.min(attempts - 1, BACKOFF.length - 1)] ?? 15000;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => this.open(), delay);
+  }
   private open(): void {
     if (this.stopped || this.hidden) return;
     this.es?.close();
@@ -364,6 +405,7 @@ export class GlobalEventStream {
     const after = this.cursor ? `?after=${encodeURIComponent(this.cursor)}` : '';
     const source = new EventSource(`/api/events${after}`, { withCredentials: true });
     this.es = source;
+    this.watchdog.beginConnect();
     if (this.status.state === 'hidden') this.set({ state: 'connecting' });
     source.onopen = () => {
       this.set({ state: 'connected', attempts: 0, capturedAt: new Date().toISOString(), lastFrameAt: Date.now() });
@@ -375,16 +417,7 @@ export class GlobalEventStream {
     source.onmessage = (m) => this.handle(m as MessageEvent<string>);
     for (const type of TRACKED) source.addEventListener(type, (m) => this.handle(m as MessageEvent<string>));
     source.addEventListener('heartbeat', () => this.watchdog.touch());
-    source.onerror = () => {
-      this.watchdog.stop();
-      source.close();
-      if (this.stopped || this.hidden) return;
-      const attempts = this.status.attempts + 1;
-      const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
-      this.set({ state: offline ? 'offline' : attempts > BACKOFF.length ? 'offline' : 'reconnecting', attempts });
-      const delay = BACKOFF[Math.min(attempts - 1, BACKOFF.length - 1)] ?? 15000;
-      this.timer = setTimeout(() => this.open(), delay);
-    };
+    source.onerror = () => this.failed('error');
   }
   private handle(m: MessageEvent<string>): void {
     this.watchdog.touch();

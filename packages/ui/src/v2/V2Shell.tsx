@@ -10,6 +10,8 @@ import { A } from '../app/link';
 import { cx } from '../lib/cx';
 import { projectColorVar } from '../lib/projectColor';
 import { FanInStreams } from '../api/context';
+import { useGlobalConnection } from '../api/globalConnection';
+import { ConnectionBanner } from '../components/ConnectionBanner';
 import { useDaemonUpdate, useDaemonUpgrade, useMe, useRolesMany, useWorkersMany, useWorkspacePlugins, useWorkspaceProjects, useWorkspaces, type WorkspaceProjectsState, type WorkerListItem } from '../api/hooks';
 import { WeaveMark } from '../components/WeaveMark';
 import type { WorkspaceListItem, WorkspacePlugin } from '../api/types';
@@ -603,6 +605,13 @@ function MoreRow({
   );
 }
 
+/** VS-765: the daemon-wide stream's state, so a dropped or silent stream is visible on every page.
+ *  Its own component, so a status change re-renders only this banner and not the whole shell. */
+function ShellConnectionBanner(): React.ReactElement {
+  const connection = useGlobalConnection();
+  return <ConnectionBanner state={connection.state} capturedAt={connection.capturedAt} lastFrameAt={connection.lastFrameAt} />;
+}
+
 export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2Theme) => void }): React.ReactElement {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const ws = workspaceFromV2Path(path);
@@ -755,6 +764,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
       )}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <ShellConnectionBanner />
         <div
           key={routeSection(path)}
           className={cx(

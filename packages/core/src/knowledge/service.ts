@@ -394,6 +394,19 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
     db.run('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [curationIntervalKey(scope, projectId), nowIso()]);
   }
 
+  /**
+   * VS-757: a curation ticket that ended `done` without a write still curated the scope. Resets the
+   * staleness reference and the needs-curation record on every file of the scope and project, and
+   * restarts the interval, exactly as a curation write does; `updated_at` is left alone.
+   */
+  function markScopeCurated(scope: KnowledgeScope, projectId: string | null | undefined): void {
+    db.run(
+      'UPDATE knowledge_files SET curation_pending = 0, last_curated_at = ? WHERE workspace_id = ? AND scope = ? AND project_id IS ?',
+      [nowIso(), ws, scope, projectId ?? null],
+    );
+    stampCuration(scope, projectId);
+  }
+
   function fireCuration(scope: KnowledgeScope, projectId?: string | null, opts: { force?: boolean } = {}): void {
     void service.requestCuration(SYSTEM, scope, projectId, opts).catch((e: unknown) => log.warn({ err: e, scope }, 'curation request failed'));
   }
@@ -547,6 +560,8 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
         }));
     },
 
+    markCurated(scope, projectId) { markScopeCurated(scope, projectId); },
+
     async requestCuration(actor, scope, projectId, opts = {}) {
       // VS-732: a manual request (a human actor) or an explicit hard trigger — a write rejected for
       // being over budget — bypasses the interval; everything else respects it. A soft over-share
@@ -568,7 +583,16 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
           log.info({ projectId: p.id }, 'curation request suppressed: a curation ticket is already open');
           return {};
         }
-        const agent = await deps().workers.spawnCurator(actor, p.id);
+        let agent;
+        try {
+          agent = await deps().workers.spawnCurator(actor, p.id);
+        } catch (e) {
+          // VS-757: a project with no active role cannot be curated however often it is asked, so a
+          // scheduled request counts as made for the interval and the sweep reports it once, not
+          // every pass. A manual request still surfaces the error every time.
+          if (!force && e instanceof OcError && e.code === 'wrong_status') stampCuration(scope, p.id);
+          throw e;
+        }
         stampCuration(scope, p.id);
         log.info({ projectId: p.id, agentId: agent.id }, 'curation worker spawned');
         return { ticketId: agent.ticketId ?? undefined };

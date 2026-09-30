@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
-import { estimateTokens, type Project, type Run, type Ticket } from '@weave-ai/shared';
+import { estimateTokens, OcError, type Project, type Run, type Ticket } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createSupervisor } from './index.js';
 import { createKnowledgeService } from '../knowledge/service.js';
@@ -456,6 +456,54 @@ describe('supervisor scheduled passes', () => {
       expect(spawnCurator).toHaveBeenCalledTimes(1);
       h.db.run("DELETE FROM meta WHERE key = 'supervisor:curation_at'");   // reopen the 10-minute gate; the interval still applies
       await supervisor.tick();
+      expect(spawnCurator).toHaveBeenCalledTimes(1);
+    });
+
+    // VS-757: a curation that changes nothing writes no knowledge; its ticket ending `done` is what
+    // resets the scope, so old documents do not re-qualify daily.
+    describe('after a curation that made no write (VS-757)', () => {
+      const day = 86_400_000;
+      it('files no second ticket for 2 days, and one once 14 days have passed', async () => {
+        vi.useFakeTimers({ toFake: ['Date'] });
+        const spawnCurator = vi.fn(async () => ({ id: 'curator-agent', ticketId: 'curation-ticket' }));
+        h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }), spawnCurator } as never;
+        const knowledge = createKnowledgeService(h.ctx, h.deps);
+        h.services.knowledge = knowledge;
+        h.services.knowledgeUsage = { neverRead: vi.fn(() => []) } as never;
+        const reopen = (): void => { h.db.run("DELETE FROM meta WHERE key = 'supervisor:curation_at'"); };
+        // Documents never curated (NULL) and untouched for 30 days: stale by `updated_at`.
+        seedKnowledgeFile({ path: 'projects/api/PROJECT.md', scope: 'project', projectId: h.projectId });
+        seedKnowledgeFile({ path: 'projects/api/docs/one.md', scope: 'project', projectId: h.projectId });
+        await supervisor.tick();
+        expect(spawnCurator).toHaveBeenCalledTimes(1);
+
+        // The curator found nothing to change; its ticket ends done, which the tickets service reports here.
+        knowledge.markCurated('project', h.projectId);
+        for (const days of [1.5, 2]) {
+          vi.setSystemTime(new Date(Date.now() + days * day));
+          reopen();
+          await supervisor.tick();
+        }
+        expect(spawnCurator).toHaveBeenCalledTimes(1);
+
+        vi.setSystemTime(new Date(Date.now() + 13 * day));
+        reopen();
+        await supervisor.tick();
+        expect(spawnCurator).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    it('tries a project with no active role once per interval, not once per sweep (VS-757)', async () => {
+      const spawnCurator = vi.fn(async () => { throw new OcError('wrong_status', 'project api has no active role to curate its knowledge'); });
+      h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }), spawnCurator } as never;
+      h.services.knowledge = createKnowledgeService(h.ctx, h.deps);
+      h.services.knowledgeUsage = { neverRead: vi.fn(() => []) } as never;
+      seedKnowledgeFile({ path: 'projects/api/PROJECT.md', scope: 'project', projectId: h.projectId });
+      await supervisor.tick();
+      for (let i = 0; i < 3; i++) {
+        h.db.run("DELETE FROM meta WHERE key = 'supervisor:curation_at'");
+        await supervisor.tick();
+      }
       expect(spawnCurator).toHaveBeenCalledTimes(1);
     });
 

@@ -684,6 +684,32 @@ describe('tickets', () => {
       return t;
     };
 
+    // VS-757: a curation that changes nothing writes no knowledge, so its ticket's `done` is the signal.
+    describe('curation tickets (VS-757)', () => {
+      const curation = (): ReturnType<TicketsService['create']> =>
+        tickets.create(SYSTEM, { kind: 'task', title: 'Curate project knowledge', projectId: h.projectId, assigneeRoleId: h.roleId, originKind: 'curation', originFingerprint: `curation:${h.projectId}` });
+      let markCurated: ReturnType<typeof vi.fn>;
+      beforeEach(() => { markCurated = vi.fn(); h.services.knowledge = { markCurated } as never; });
+
+      it('marks the project scope curated when the ticket ends done, with no knowledge write', async () => {
+        const t = curation();
+        await tickets.transition(SYSTEM, t.id, { to: 'done', note: 'ending: done — no changes needed' });
+        expect(markCurated).toHaveBeenCalledExactlyOnceWith('project', h.projectId);
+      });
+
+      it('stamps nothing when the curation ticket is cancelled', async () => {
+        const t = curation();
+        await tickets.transition(SYSTEM, t.id, { to: 'cancelled' });
+        expect(markCurated).not.toHaveBeenCalled();
+      });
+
+      it('stamps nothing for a done ticket that is not a curation', async () => {
+        const t = tickets.create(SYSTEM, { kind: 'task', title: 'Other', projectId: h.projectId, assigneeRoleId: h.roleId });
+        await tickets.transition(SYSTEM, t.id, { to: 'done', note: 'ending: done — nothing to land' });
+        expect(markCurated).not.toHaveBeenCalled();
+      });
+    });
+
     it('finishes a no-commit task at done with no merge approval and records the stated ending', async () => {
       const t = await taskInProgress();
       await makeWorktree(t);

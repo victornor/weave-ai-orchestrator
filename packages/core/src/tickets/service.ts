@@ -599,6 +599,12 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         }
       }
     }
+    // VS-757: a curation that ended without a write (nothing needed changing) still curated the
+    // project's scope; only `done` counts, so a cancelled curation leaves staleness as it was.
+    if (t.status === 'done' && t.originKind === 'curation' && t.projectId) {
+      try { deps().knowledge.markCurated('project', t.projectId); }
+      catch (e) { log.warn({ err: e, ticketId: t.id }, 'marking the scope curated for a finished curation ticket failed'); }
+    }
     // A decision still open on a ticket that just finished has nothing left to decide (VS-142) —
     // closing it here covers every path that reaches a terminal status (transition, cancel, mergeDone).
     try {

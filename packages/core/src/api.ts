@@ -601,6 +601,8 @@ export interface KnowledgeService {
   revert(actor: Actor, scope: S.KnowledgeScope, revision: number, projectId?: string | null): { revision: number };
   lint(): Array<{ path: string; scope: string; projectId: string | null; tokenEstimate: number; budgetTokens: number; pct: number; lastCuratedAt: string | null; curationPending: boolean }>;
   requestCuration(actor: Actor, scope: S.KnowledgeScope, projectId?: string | null, opts?: { force?: boolean }): Promise<{ ticketId?: string; wakeId?: string }>;
+  /** VS-757: a curation ticket ended `done`; the scope counts as curated even though nothing was written. */
+  markCurated(scope: S.KnowledgeScope, projectId?: string | null): void;
   search(query: string, projectId?: string | null, limit?: number): Array<{ kind: string; projectId: string | null; ref: string; title: string; snippet: string }>;
   /**
    * VS-493: the opt-in semantic fallback over the caller's visible knowledge. Scoped exactly like

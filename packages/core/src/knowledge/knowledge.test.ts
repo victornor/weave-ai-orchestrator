@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId } from '@weave-ai/db';
-import { estimateTokens } from '@weave-ai/shared';
+import { estimateTokens, OcError } from '@weave-ai/shared';
 import { makeHarness, fakeWake, type TestHarness } from '../testing/context.js';
 import { createKnowledgeService } from './service.js';
 import { createKnowledgeUsageService } from './usage.js';
@@ -498,6 +498,29 @@ describe('knowledge', () => {
       const second = await knowledge.requestCuration(SYSTEM_ACTOR, 'project', h.projectId);
       expect(second).toEqual({});
       expect(workers.spawnCurator).toHaveBeenCalledTimes(1);
+    });
+
+    it('a manual curate of a project with no role still fails every time, and a scheduled one only stamps (VS-757)', async () => {
+      workers.spawnCurator.mockRejectedValue(new OcError('wrong_status', 'no active role'));
+      await expect(knowledge.requestCuration(HUMAN, 'project', h.projectId)).rejects.toMatchObject({ code: 'wrong_status' });
+      await expect(knowledge.requestCuration(HUMAN, 'project', h.projectId)).rejects.toMatchObject({ code: 'wrong_status' });
+      expect(workers.spawnCurator).toHaveBeenCalledTimes(2);
+      await expect(knowledge.requestCuration(SYSTEM_ACTOR, 'project', h.projectId)).rejects.toMatchObject({ code: 'wrong_status' });
+      expect(await knowledge.requestCuration(SYSTEM_ACTOR, 'project', h.projectId)).toEqual({});
+      expect(workers.spawnCurator).toHaveBeenCalledTimes(3);
+    });
+
+    it('markCurated resets every file of the scope, including never-curated ones, without touching updated_at (VS-757)', () => {
+      knowledge.note(HUMAN, 'project', 'Learnings', 'A durable fact about the project.', h.projectId);
+      const doc = knowledge.putDoc(HUMAN, 'project', 'topic', '# Topic\n\nBody.\n', h.projectId);
+      h.db.run("UPDATE knowledge_files SET curation_pending = 1, last_curated_at = NULL WHERE project_id = ?", [h.projectId]);
+      const before = h.db.all<{ path: string; updatedAt: string }>('SELECT path, updated_at FROM knowledge_files WHERE project_id = ? ORDER BY path', [h.projectId]);
+      knowledge.markCurated('project', h.projectId);
+      const rows = h.db.all<{ path: string; lastCuratedAt: string | null; curationPending: number; updatedAt: string }>('SELECT path, last_curated_at, curation_pending, updated_at FROM knowledge_files WHERE project_id = ? ORDER BY path', [h.projectId]);
+      expect(rows.length).toBeGreaterThan(1);
+      expect(rows.every((r) => r.lastCuratedAt !== null && r.curationPending === 0)).toBe(true);
+      expect(rows.map((r) => r.updatedAt)).toEqual(before.map((r) => r.updatedAt));
+      expect(doc.path).toBeTruthy();
     });
 
     it('lets a manual curate through the interval', async () => {

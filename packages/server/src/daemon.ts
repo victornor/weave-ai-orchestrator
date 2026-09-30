@@ -38,6 +38,7 @@ import { ChannelManager } from './channels.js';
 import { WebhookDispatcher } from './webhooks.js';
 import { PushDispatcher } from './pushDispatcher.js';
 import { ensurePushKeys, type PushKeys } from './vapid.js';
+import { localApiClient, resolveTailscaleCert, startCertRenewal, type RenewalHandle, type TailscaleClient, type TailscaleCertPair } from './tailscaleCert.js';
 import type { AppDeps, WorkspaceRuntime } from './types.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +67,11 @@ export interface StartOptions {
    * can exercise the bounded-then-cancel sequence without waiting real minutes for it.
    */
   shutdownGraceMs?: { drain: number; cancel: number };
+  /**
+   * VS-765 test-only seam for `http.tls.mode: tailscale`: a stub in place of tailscaled's LocalAPI, a
+   * shorter start-up wait, and a faster renewal check. Unset, the real LocalAPI and shipped timings apply.
+   */
+  tailscale?: { client?: TailscaleClient; waitMs?: number; retryMs?: number; renewCheckMs?: number; renewWindowMs?: number };
 }
 
 export interface DaemonHandle {
@@ -152,12 +158,19 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const app = createApp(deps, admin);
   const pidFile = join(configDir, 'daemon.json');
   let publicServer: ServerType | null = null;
+  let certRenewal: RenewalHandle | null = null;
   const writePidFile = () => writeFile(pidFile, JSON.stringify({
     pid: process.pid, publicUrl: deps.publicUrl, loopbackUrl: loopback.url, setupRequired: publicServer === null, startedAt: new Date().toISOString(),
   }, null, 2));
   const startPublic = async (): Promise<void> => {
     if (publicServer) return;
-    publicServer = await listen(app.fetch as never, { host, port, tls: await tlsOptions(daemonCfg, configDir) });
+    const tls = await tlsOptions(daemonCfg, configDir, opts.tailscale);
+    publicServer = await listen(app.fetch as never, { host, port, tls });
+    // VS-765: a renewed certificate reaches new handshakes through the running listener; nothing closes.
+    if (tls?.renewal) {
+      const server = publicServer as unknown as { setSecureContext(o: { cert: string; key: string }): void };
+      certRenewal = tls.renewal((pair) => server.setSecureContext({ cert: pair.cert, key: pair.key }));
+    }
     if (port === 0) {
       const bound = publicServer.address();
       if (typeof bound === 'object' && bound) deps.publicUrl = publicUrl.replace(/:0$/, `:${bound.port}`);
@@ -238,6 +251,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
       try { ws.services.supervisor.stop(); } catch (e) { log.warn({ err: e, ws: ws.id }, 'supervisor stop failed'); }
       await cancelRunningRuns(ws);
     }));
+    certRenewal?.stop();
     await Promise.all([publicServer ? close(publicServer) : Promise.resolve(), close(loopback.server)]);
     hostToolProbe.stop();
     for (const ws of new Set(workspaces.values())) { try { ws.ctx.db.close(); } catch (e) { log.warn({ err: e }, 'db close failed'); } }
@@ -561,9 +575,26 @@ function publicListenerAllowed(cfg: DaemonConfig, auth: AuthService, host: strin
   return loopbackBind || auth.hasOperator() || cfg.auth.loopbackTrusted;
 }
 
-async function tlsOptions(cfg: DaemonConfig, configDir: string): Promise<{ cert: string; key: string } | null> {
+interface TlsMaterial {
+  cert: string;
+  key: string;
+  /** Starts the renewal loop once the listener exists; `apply` swaps the certificate into it. */
+  renewal?: (apply: (pair: TailscaleCertPair) => void) => RenewalHandle;
+}
+
+async function tlsOptions(cfg: DaemonConfig, configDir: string, tailscale: StartOptions['tailscale'] = {}): Promise<TlsMaterial | null> {
   const tls = cfg.http.tls;
   if (tls.mode === 'none') return null;
+  if (tls.mode === 'tailscale') {
+    // No fallback: a failure here fails the start rather than serving a certificate nobody trusts.
+    const client = tailscale.client ?? localApiClient();
+    const current = await resolveTailscaleCert(client, { domains: tls.domains, waitMs: tailscale.waitMs, retryMs: tailscale.retryMs });
+    log.info({ domain: current.domain, notAfter: current.notAfter.toISOString() }, 'serving a tailscale-issued certificate');
+    return {
+      cert: current.cert, key: current.key,
+      renewal: (apply) => startCertRenewal({ client, domains: tls.domains, current, apply, checkMs: tailscale.renewCheckMs, windowMs: tailscale.renewWindowMs }),
+    };
+  }
   if (tls.mode === 'files') {
     if (!tls.cert || !tls.key) throw new Error('http.tls.mode is "files" but cert/key are not configured');
     return { cert: await readFile(tls.cert, 'utf8'), key: await readFile(tls.key, 'utf8') };
@@ -583,7 +614,7 @@ async function tlsOptions(cfg: DaemonConfig, configDir: string): Promise<{ cert:
     log.info({ certPath, domains }, 'generated a self-signed certificate');
     return { cert: pems.cert, key: pems.private };
   }
-  throw new Error(`http.tls.mode "${tls.mode}" is not implemented; use a reverse proxy or mode "files"`);
+  throw new Error(`http.tls.mode "${tls.mode}" is not implemented; use mode "tailscale" (a Tailscale-issued certificate), mode "files", or a reverse proxy`);
 }
 
 // ---------- small helpers ----------

@@ -165,15 +165,15 @@ http:
   listen: 100.x.y.z:7433                          # `tailscale ip -4`
   publicUrl: https://myhost.tailnet-name.ts.net:7433   # `tailscale status` shows the MagicDNS name
   tls:
-    mode: self-signed          # or "files" behind Caddy/nginx; see docs/OPERATIONS.md
-    domains: [myhost.tailnet-name.ts.net, myhost, localhost]
+    mode: tailscale            # a browser-trusted Tailscale certificate; see docs/OPERATIONS.md for the
+                               # one-time setup. Or "self-signed" (pin with --pin), or "files" behind Caddy/nginx
 auth:
   loopbackTrusted: false
 YAML
 
 weave daemon start                # "public listener held" until a password exists — expected
 weave daemon set-password         # opens the public listener in place
-weave login https://100.x.y.z:7433 --pin --device server   # a local context for this host
+weave login https://myhost.tailnet-name.ts.net:7433 --device server   # a local context for this host (add --pin with tls.mode self-signed)
 weave doctor                      # everything on this host; `--install` for what is missing
 
 # Host-only setup: coding CLIs, git, forge.
@@ -401,10 +401,10 @@ http:
   publicUrl: https://conductor.example.com   # what clients should use; defaults from listen
   trustProxy: false           # only then are X-Forwarded-* honoured
   tls:
-    mode: none                # none | self-signed | files | acme (acme not implemented; use a proxy)
+    mode: none                # none | self-signed | tailscale | files (acme is not implemented)
     cert: /path/fullchain.pem # mode: files
     key: /path/privkey.pem
-    domains: [conductor.example.com] # SANs for self-signed
+    domains: [conductor.example.com] # SANs for self-signed; the certificate name for tailscale (default: this node's tailnet name)
 auth:
   loopbackTrusted: false      # true = no password required, loopback only
   sessionDaysNamed: 30        # named devices

@@ -470,7 +470,7 @@ projects:
       deliveryMode: pr
       autoMergeDefault: false
       archiveCommit: push        # push | pr | local
-      requireCi: true
+      requireCi: true            # false merges on an absent check rollup; see below
 conductor:                    # its runtime and model are `models.conductor`, above
   channels: [web, cli, telegram]
   humanName: Victor            # how agents address you; "captain" when unset
@@ -490,6 +490,8 @@ webhooks:                     # at-least-once, HMAC-SHA256 signed POSTs from the
     secret: ${AC_WEBHOOK_SECRET}           # signs the body as X-WeaveAI-Signature: sha256=<hex>
 plugins: []                   # npm package names, or ./paths relative to the workspace root (see examples/plugins/)
 ```
+
+**`requireCi` and the landing gate.** With the default `requireCi: true`, the daemon never merges a pull request on an absent, all-skipped, cancelled or wrong-head check rollup of a repository that has GitHub Actions workflow files: it waits for a successful run on the exact head it lands. A repository with **no** workflow files (dynamic workflows such as Dependabot updates and disabled workflows do not count) has nothing that can ever report, so it lands without waiting and the ticket gets one comment saying it landed without CI because the repository has none. If the forge cannot say (the query keeps failing), the daemon retries it and otherwise waits at most ten minutes, measured from its first attempt for that head, before landing as for a repository with no CI. `requireCi: false` is the explicit override: the daemon merges on an absent rollup without asking the forge at all.
 
 ### `<workspace>/roles/<id>/role.yaml`
 

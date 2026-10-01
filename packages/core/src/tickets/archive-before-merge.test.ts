@@ -572,6 +572,125 @@ describe('archive-before-merge mechanics', () => {
       expect(forge.hasCiWorkflows).toHaveBeenCalledWith(clone);
     });
 
+    describe('a repository with no CI (VS-768)', () => {
+      const PR = 'https://example.com/pr/vs-768';
+      const base = () => ({ clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget, changeName: null, prUrl: PR, method: 'squash', requiresCi: true, classifyRetryDelayMs: 0 }) as const;
+
+      it('lands at once, with the default requireCi, when the repo has no workflows and the rollup is empty, and says why', async () => {
+        await pushBranchFromClone(BRANCH);
+        const onNoCiRepository = vi.fn();
+        const onNoCiTimeout = vi.fn();
+        const forge = fakeForge({ hasCiWorkflows: vi.fn(async () => false), markPullRequestReady: vi.fn(async () => ({ changed: true })) });
+
+        const outcome = await attemptArchiveThenMerge({ ...base(), forge, onNoCiRepository, onNoCiTimeout });
+        expect(outcome).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+        expect(onNoCiRepository).toHaveBeenCalledTimes(1);
+        expect(onNoCiTimeout).not.toHaveBeenCalled();
+      });
+
+      it('does not comment when requireCi is false, which is the explicit override', async () => {
+        await pushBranchFromClone(BRANCH);
+        const onNoCiRepository = vi.fn();
+        const forge = fakeForge({ hasCiWorkflows: vi.fn(async () => false) });
+
+        const outcome = await attemptArchiveThenMerge({ ...base(), requiresCi: false, forge, onNoCiRepository });
+        expect(outcome).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+        expect(forge.hasCiWorkflows).not.toHaveBeenCalled();
+        expect(onNoCiRepository).not.toHaveBeenCalled();
+      });
+
+      it('does not remember a failed workflows query: the next attempt asks again and lands', async () => {
+        await pushBranchFromClone(BRANCH);
+        // Fails on every try of the first attempt (a network or SSH timeout), answers on the second.
+        const hasCiWorkflows = vi.fn<(cwd: string) => Promise<boolean | null>>()
+          .mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValue(false);
+        const forge = fakeForge({ hasCiWorkflows, markPullRequestReady: vi.fn(async () => ({ changed: true })) });
+        const opts = { ...base(), forge };
+
+        expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'checks_pending' });
+        expect(hasCiWorkflows).toHaveBeenCalledTimes(3);
+        expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+        expect(hasCiWorkflows).toHaveBeenCalledTimes(4);
+      });
+
+      it('retries a failed workflows query within one attempt before giving up on it', async () => {
+        await pushBranchFromClone(BRANCH);
+        const hasCiWorkflows = vi.fn<(cwd: string) => Promise<boolean | null>>().mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('ssh: connect timed out')).mockResolvedValue(false);
+        const forge = fakeForge({ hasCiWorkflows, markPullRequestReady: vi.fn(async () => ({ changed: true })) });
+
+        expect(await attemptArchiveThenMerge({ ...base(), forge })).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+        expect(hasCiWorkflows).toHaveBeenCalledTimes(3);
+      });
+
+      it('measures the wait for an unclassifiable repo from the first attempt across merge_done calls, then lands with the note', async () => {
+        await pushBranchFromClone(BRANCH);
+        const onNoCiTimeout = vi.fn();
+        const hasCiWorkflows = vi.fn(async () => null);
+        const forge = fakeForge({ hasCiWorkflows, markPullRequestReady: vi.fn(async () => ({ changed: true })) });
+        const opts = { ...base(), forge, noCiGraceMs: 400, onNoCiTimeout };
+        // A controlled clock, so loaded-host git latency cannot move a call across the grace boundary.
+        let clock = Date.now();
+        const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+        try {
+          expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'checks_pending' });
+          clock += 150;
+          expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'checks_pending' });
+          clock += 150;
+          expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'checks_pending' }); // 300ms in: still inside the grace
+          expect(onNoCiTimeout).not.toHaveBeenCalled();
+          clock += 200;
+          // 500ms after the first attempt, though only 200ms after the previous call: a restarted timer would still wait.
+          expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+          expect(onNoCiTimeout).toHaveBeenCalledTimes(1);
+        } finally {
+          nowSpy.mockRestore();
+        }
+        await expectNoScratch();
+      });
+
+      it('keeps the wait running when the forge reports a lagging head or a pending read in between', async () => {
+        await pushBranchFromClone(BRANCH);
+        const prState = vi.fn()
+          .mockResolvedValueOnce({ state: 'open' as const, ciState: 'none' as const })
+          .mockResolvedValueOnce({ state: 'open' as const, ciState: 'none' as const, headSha: 'not-the-landing-head' })
+          .mockResolvedValueOnce({ state: 'open' as const, ciState: 'pending' as const })
+          .mockResolvedValue({ state: 'open' as const, ciState: 'none' as const });
+        const markPullRequestReady = vi.fn().mockResolvedValueOnce({ changed: true }).mockResolvedValue({ changed: false });
+        const forge = fakeForge({ hasCiWorkflows: vi.fn(async () => null), markPullRequestReady, prState });
+        const opts = { ...base(), forge, noCiGraceMs: 60_000 };
+
+        for (let i = 0; i < 4; i += 1) expect(await attemptArchiveThenMerge(opts)).toEqual({ kind: 'checks_pending' });
+        expect(forge.mergePr).not.toHaveBeenCalled();
+      });
+
+      it('still waits for a repository that has workflows when the rollup is empty or all skipped (VS-466)', async () => {
+        await pushBranchFromClone(BRANCH);
+        const forge = fakeForge({
+          hasCiWorkflows: vi.fn(async () => true),
+          markPullRequestReady: vi.fn(async () => ({ changed: true })),
+          prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'none' as const, checkDetails: [{ name: 'build', state: 'none' as const, url: null }] })),
+        });
+        const onNoCiRepository = vi.fn();
+
+        expect(await attemptArchiveThenMerge({ ...base(), forge, onNoCiRepository, noCiGraceMs: 0 })).toEqual({ kind: 'checks_pending' });
+        expect(await attemptArchiveThenMerge({ ...base(), forge, onNoCiRepository, noCiGraceMs: 0 })).toEqual({ kind: 'checks_pending' });
+        expect(forge.mergePr).not.toHaveBeenCalled();
+        expect(onNoCiRepository).not.toHaveBeenCalled();
+      });
+
+      it('lands a repository that has workflows once the head shows a success', async () => {
+        await pushBranchFromClone(BRANCH);
+        const forge = fakeForge({
+          hasCiWorkflows: vi.fn(async () => true),
+          prState: vi.fn(async () => ({ state: 'open' as const, ciState: 'success' as const })),
+        });
+        const onNoCiRepository = vi.fn();
+
+        expect(await attemptArchiveThenMerge({ ...base(), forge, onNoCiRepository })).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+        expect(onNoCiRepository).not.toHaveBeenCalled();
+      });
+    });
+
     it('starts one fresh run when the head has no usable run, records it, and still waits (VS-467)', async () => {
       await pushBranchFromClone(BRANCH);
       const hasUsableCheckRun = vi.fn(async () => false);

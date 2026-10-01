@@ -1763,6 +1763,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
                       requiresCi: (p.policies as { requireCi?: boolean } | null)?.requireCi !== false,
                       // VS-393: the forge could not tell the repo has no CI, and no rollup appeared
                       // within the wait limit — merge anyway, with one line on the ticket saying so.
+                      // VS-768: the forge says the repository has no workflow files at all, so there is
+                      // nothing to wait for; it lands, and the ticket says why.
+                      onNoCiRepository: () => systemComment(t.id, 'landed without CI because the repository has no GitHub Actions workflows', actor),
                       onNoCiTimeout: () => systemComment(t.id, 'no checks appeared within the wait limit; the forge could not confirm the repository has CI, so the merge proceeds as for a project with none', actor),
                       // VS-467: the head had no usable run for a CI repository; one empty trigger
                       // commit was pushed to start a fresh pull_request run. The landing still waits

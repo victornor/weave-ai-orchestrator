@@ -117,6 +117,14 @@ export interface ArchiveThenMergeOpts {
   /** VS-393: called once when the grace elapses and this sequence stops waiting and merges anyway, so the ticket records why. */
   onNoCiTimeout?: () => void | Promise<void>;
   /**
+   * VS-768: called once when the sequence merges an absent rollup because the forge reports the
+   * repository has no CI workflows (with `requiresCi`, the default), so the ticket records that it
+   * landed without CI because the repository has none.
+   */
+  onNoCiRepository?: () => void | Promise<void>;
+  /** VS-768: pause between retries of a failed "does this repo have workflows" query. Defaults to `CLASSIFY_RETRY_DELAY_MS`; a test passes 0. */
+  classifyRetryDelayMs?: number;
+  /**
    * VS-467: called once when the sequence has started a fresh `pull_request` run for a head that had
    * none usable (a `synchronize` push on the non-draft pull request), so the ticket records it. The
    * landing still waits for that run's success; this is a note, never a substitute for one.
@@ -156,15 +164,25 @@ export type ArchiveThenMergeOutcome =
 export const CI_NONE_GRACE_MS = 10 * 60_000;
 
 /**
- * When this sequence first saw an absent rollup for a pull request, so the grace above survives the
+ * When this sequence first saw an absent rollup it could not classify, per pull request *and head*
+ * (VS-768), so the grace above is measured from the first attempt for that head and survives the
  * landing's retries. It lives in the daemon process, which holds those retries; a restart restarts the
- * grace, which can only delay a no-CI merge, never break one. Entries are dropped as soon as a rollup
- * appears or a landing concludes.
+ * grace, which can only delay a no-CI merge, never break one. An entry is dropped when the sequence
+ * classifies the repository, a rollup appears, or the landing concludes — never because the forge
+ * reported another head or a pending read in between, which used to restart the wait.
  */
-const noneSinceByPr = new Map<string, number>();
+const noneSinceByHead = new Map<string, number>();
+const noCiKey = (prUrl: string, head: string | null): string => `${prUrl}@${head ?? ''}`;
 
-/** A clone's "does this repo have any CI workflows" answer, cached so a landing retry does not re-ask. */
+/**
+ * A clone's "does this repo have any CI workflows" answer, cached so a landing retry does not re-ask.
+ * Only a definite answer is cached (VS-768): a failed query used to be stored as `null` for the whole
+ * TTL, so one network blip made every `merge_done` retry for five minutes read "cannot classify".
+ */
 const CI_WORKFLOWS_TTL_MS = 5 * 60_000;
+/** VS-768: how often a failed workflows query is retried within one attempt, and the pause between tries. */
+const CLASSIFY_ATTEMPTS = 3;
+const CLASSIFY_RETRY_DELAY_MS = 2_000;
 const ciWorkflowsByClone = new Map<string, { at: number; value: boolean | null }>();
 
 /**
@@ -194,16 +212,22 @@ async function pushLandingTriggerCommit(worktreePath: string, branch: string): P
 
 /** Test-only: forget the per-pull-request and per-clone no-CI state between cases. */
 export function resetNoCiStateForTests(): void {
-  noneSinceByPr.clear(); ciWorkflowsByClone.clear(); retriggeredByPr.clear(); retriggerAttemptsByPr.clear();
+  noneSinceByHead.clear(); ciWorkflowsByClone.clear(); retriggeredByPr.clear(); retriggerAttemptsByPr.clear();
 }
 
-async function repoHasCiWorkflows(forge: ForgeAdapter, clonePath: string): Promise<boolean | null> {
+async function repoHasCiWorkflows(forge: ForgeAdapter, clonePath: string, retryDelayMs: number): Promise<boolean | null> {
   if (!forge.hasCiWorkflows) return null;
   const cached = ciWorkflowsByClone.get(clonePath);
   if (cached && Date.now() - cached.at < CI_WORKFLOWS_TTL_MS) return cached.value;
-  const value = await forge.hasCiWorkflows(clonePath).catch(() => null);
-  ciWorkflowsByClone.set(clonePath, { at: Date.now(), value });
-  return value;
+  for (let i = 0; i < CLASSIFY_ATTEMPTS; i += 1) {
+    if (i > 0 && retryDelayMs > 0) await new Promise((r) => setTimeout(r, retryDelayMs));
+    const value = await forge.hasCiWorkflows(clonePath).catch(() => null);
+    if (value !== null) {
+      ciWorkflowsByClone.set(clonePath, { at: Date.now(), value });
+      return value;
+    }
+  }
+  return null;
 }
 
 /**
@@ -296,25 +320,20 @@ export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promi
     const state = await forge.prState(clonePath, prUrl);
     // A rollup the forge reports for any head other than the one this landing produces is evidence
     // about a different commit, so it can never be a pass for this one: wait and re-read.
-    if (expectedHead && state.headSha && state.headSha !== expectedHead) {
-      noneSinceByPr.delete(prUrl);
-      return { kind: 'checks_pending' };
-    }
-    if (state.ciState === 'pending') {
-      noneSinceByPr.delete(prUrl);
-      return { kind: 'checks_pending' };
-    }
+    if (expectedHead && state.headSha && state.headSha !== expectedHead) return { kind: 'checks_pending' };
+    if (state.ciState === 'pending') return { kind: 'checks_pending' };
+    const noCiKeyForHead = noCiKey(prUrl, expectedHead);
     if (requiresCi && state.ciState === 'none') {
       // A head this sequence just pushed, or a PR it just brought out of draft, cannot have
       // registered its checks yet: an absent rollup there is "not yet", never a pass — unless the
       // repository has no CI workflows at all, which merges exactly as it did before VS-393. A forge
       // that cannot answer waits, but only for the bounded grace, so a repo we cannot classify still
       // lands instead of retrying forever on checks that will never exist.
-      const hasWorkflows = await repoHasCiWorkflows(forge, clonePath);
+      const hasWorkflows = await repoHasCiWorkflows(forge, clonePath, opts.classifyRetryDelayMs ?? CLASSIFY_RETRY_DELAY_MS);
       if (hasWorkflows === true) {
         // VS-466: a repository with CI workflows never lands on an absent (or all-skipped) rollup.
         // Wait for the run the transition above started; retry, never land, until it resolves.
-        noneSinceByPr.delete(prUrl);
+        noneSinceByHead.delete(noCiKeyForHead);
         // VS-467: the common unstick — a non-draft head with no usable run (none at all, or only
         // skipped/cancelled ones) gets one fresh `pull_request` run started by a `synchronize` push.
         // Only on a retry where nothing was pushed (a fresh draft's own transition starts its run),
@@ -336,22 +355,24 @@ export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promi
         return { kind: 'checks_pending' };
       }
       if (hasWorkflows === null) {
-        const waiting = changed || changedDraft || noneSinceByPr.has(prUrl);
+        const waiting = changed || changedDraft || noneSinceByHead.has(noCiKeyForHead);
         if (waiting) {
-          const since = noneSinceByPr.get(prUrl) ?? Date.now();
-          noneSinceByPr.set(prUrl, since);
+          const since = noneSinceByHead.get(noCiKeyForHead) ?? Date.now();
+          noneSinceByHead.set(noCiKeyForHead, since);
           if (Date.now() - since < (opts.noCiGraceMs ?? CI_NONE_GRACE_MS)) return { kind: 'checks_pending' };
           // Past the grace: stop waiting and merge as a no-CI project, with the caller's one report.
-          noneSinceByPr.delete(prUrl);
+          noneSinceByHead.delete(noCiKeyForHead);
           await opts.onNoCiTimeout?.();
         } else {
-          noneSinceByPr.delete(prUrl);
+          noneSinceByHead.delete(noCiKeyForHead);
         }
       } else {
-        noneSinceByPr.delete(prUrl);
+        // The forge says the repository has no workflow files: nothing can ever report on this head.
+        noneSinceByHead.delete(noCiKeyForHead);
+        await opts.onNoCiRepository?.();
       }
-    } else if (state.ciState !== 'none') {
-      noneSinceByPr.delete(prUrl);
+    } else {
+      noneSinceByHead.delete(noCiKey(prUrl, expectedHead));
     }
     if (state.ciState === 'failure') return { kind: 'checks_failed' };
     const result = await forge.mergePr(clonePath, prUrl, method);

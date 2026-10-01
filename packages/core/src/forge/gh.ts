@@ -146,15 +146,23 @@ export function repoVisibilityFromGh(stdout: string): { private: boolean } | nul
 }
 
 /**
- * VS-393: `gh api repos/{owner}/{repo}/actions/workflows --jq .total_count` prints a bare count.
- * `0` means no CI workflows are configured; anything else (including a count we cannot parse) means
- * "there may be checks", and `null` on a non-number so the caller waits rather than assuming none.
+ * VS-393 / VS-768: does `gh api repos/{owner}/{repo}/actions/workflows?per_page=100` list any workflow
+ * that can run on a pull request? Only an active workflow file under `.github/workflows/` counts.
+ * `total_count` also counts GitHub's built-in dynamic workflows (Dependabot updates, default-setup
+ * CodeQL, Copilot review — their paths sit outside that directory) and disabled workflows, so a repository with
+ * none of its own would read as "has CI" and wait forever for a run that never comes. `null` when the
+ * body cannot be read, or when the list is truncated without showing a workflow file, so the caller
+ * waits rather than assuming either way.
  */
-export function workflowCountFromGh(stdout: string): boolean | null {
-  const text = stdout.trim();
-  if (!text) return null;
-  const n = Number(text);
-  return Number.isInteger(n) && n >= 0 ? n > 0 : null;
+export function hasWorkflowFilesFromGh(stdout: string): boolean | null {
+  let doc: { total_count?: unknown; workflows?: unknown };
+  try { doc = JSON.parse(stdout) as typeof doc; } catch { return null; }
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.workflows)) return null;
+  const files = (doc.workflows as Array<{ path?: unknown; state?: unknown }>).filter(
+    (w) => w?.state === 'active' && typeof w.path === 'string' && w.path.startsWith('.github/workflows/'),
+  );
+  if (files.length > 0) return true;
+  return typeof doc.total_count === 'number' && doc.total_count > doc.workflows.length ? null : false;
 }
 
 /**
@@ -323,14 +331,16 @@ export class GhForge implements ForgeAdapter {
   }
 
   /**
-   * VS-393: does the repository have any Actions workflows? `gh api .../actions/workflows` with the
-   * `{owner}`/`{repo}` placeholders resolves the current clone's remote. `null` on any failure or
-   * unparseable count, so the caller falls back to its bounded wait rather than guessing "no CI".
+   * VS-393: does the repository have any Actions workflow files? `gh api .../actions/workflows` with
+   * the `{owner}`/`{repo}` placeholders resolves the current clone's remote. `null` on any failure or
+   * unreadable body, so the caller falls back to its bounded wait rather than guessing "no CI".
+   * VS-768: the list is read here, not through `--jq .total_count`, so dynamic and disabled workflows
+   * are not counted (see `hasWorkflowFilesFromGh`).
    */
   async hasCiWorkflows(cwd: string): Promise<boolean | null> {
-    const r = await sh('gh', ['api', 'repos/{owner}/{repo}/actions/workflows', '--jq', '.total_count'], { cwd, timeoutMs: 30_000, env: { NO_COLOR: '1' } });
+    const r = await sh('gh', ['api', 'repos/{owner}/{repo}/actions/workflows?per_page=100'], { cwd, timeoutMs: 30_000, env: { NO_COLOR: '1' } });
     if (!r.ok) return null;
-    return workflowCountFromGh(r.stdout);
+    return hasWorkflowFilesFromGh(r.stdout);
   }
 
   /** The open pull request whose head is `branch`, if there is one (VS-340 backfill retry). */

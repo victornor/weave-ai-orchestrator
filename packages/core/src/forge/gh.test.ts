@@ -10,7 +10,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GhForge, checkTally, mergeSettingsFromGh, parsePullRequestUrl, pullRequestDetailFromGh, pullRequestFromGh, pullRequestRunsFromGh, repoVisibilityFromGh, runnerLabelsFromGh, workflowCountFromGh } from './gh.js';
+import { GhForge, checkTally, mergeSettingsFromGh, parsePullRequestUrl, pullRequestDetailFromGh, pullRequestFromGh, pullRequestRunsFromGh, repoVisibilityFromGh, hasWorkflowFilesFromGh, runnerLabelsFromGh } from './gh.js';
 
 let home: string;
 
@@ -315,27 +315,48 @@ describe('markPullRequestReady', () => {
   });
 });
 
-describe('hasCiWorkflows (VS-393)', () => {
-  it('reports false for a repository with no workflows and true for one with any', async () => {
-    fakeGh('0');
+/** One workflow entry in the shape `gh api repos/{owner}/{repo}/actions/workflows` returns (captured from a real repository). */
+const workflowEntry = (name: string, path: string, state = 'active'): Record<string, unknown> => ({
+  id: 357231908, node_id: 'W_kwDOUOpguM4VSu0k', name, path, state,
+  created_at: '2026-09-13T19:13:56.000+02:00', updated_at: '2026-09-13T19:46:36.000+02:00',
+  url: 'https://api.github.com/repos/acme/api/actions/workflows/357231908',
+  html_url: `https://github.com/acme/api/blob/main/${path}`, badge_url: 'https://github.com/acme/api/workflows/CI/badge.svg',
+});
+const workflowList = (...entries: Array<Record<string, unknown>>): string => JSON.stringify({ total_count: entries.length, workflows: entries });
+
+describe('hasCiWorkflows (VS-393, VS-768)', () => {
+  it('reports false for a repository with no workflows and true for one with a workflow file', async () => {
+    fakeGh(workflowList());
     await expect(new GhForge().hasCiWorkflows(home)).resolves.toBe(false);
-    expect(argsList()).toEqual(['api', 'repos/{owner}/{repo}/actions/workflows', '--jq', '.total_count']);
-    fakeGh('3');
+    expect(argsList()).toEqual(['api', 'repos/{owner}/{repo}/actions/workflows?per_page=100']);
+    fakeGh(workflowList(workflowEntry('CI', '.github/workflows/ci.yml')));
     await expect(new GhForge().hasCiWorkflows(home)).resolves.toBe(true);
   });
 
-  it('answers null when gh fails or the count is not a number', async () => {
+  it('answers null when gh fails or the body is not a workflow list', async () => {
     fakeGh('', 1, 'HTTP 404');
     await expect(new GhForge().hasCiWorkflows(home)).resolves.toBeNull();
-    fakeGh('not-a-number');
+    fakeGh('not-json');
     await expect(new GhForge().hasCiWorkflows(home)).resolves.toBeNull();
   });
 
-  it('maps a count without gh', () => {
-    expect(workflowCountFromGh('0\n')).toBe(false);
-    expect(workflowCountFromGh('12')).toBe(true);
-    expect(workflowCountFromGh('')).toBeNull();
-    expect(workflowCountFromGh('  ')).toBeNull();
+  it('does not count dynamic or disabled workflows as CI (VS-768)', () => {
+    // total_count is 2, yet nothing here can run on a pull request.
+    expect(hasWorkflowFilesFromGh(workflowList(
+      workflowEntry('Dependabot Updates', 'dynamic/dependabot/dependabot-updates'),
+      workflowEntry('CI', '.github/workflows/ci.yml', 'disabled_manually'),
+    ))).toBe(false);
+    expect(hasWorkflowFilesFromGh(workflowList(
+      workflowEntry('Dependabot Updates', 'dynamic/dependabot/dependabot-updates'),
+      workflowEntry('CI', '.github/workflows/ci.yml'),
+    ))).toBe(true);
+  });
+
+  it('answers null for a truncated list that shows no workflow file, and for an unreadable one', () => {
+    expect(hasWorkflowFilesFromGh(JSON.stringify({ total_count: 150, workflows: [workflowEntry('Dependabot Updates', 'dynamic/dependabot/dependabot-updates')] }))).toBeNull();
+    expect(hasWorkflowFilesFromGh('')).toBeNull();
+    expect(hasWorkflowFilesFromGh('{"workflows":null}')).toBeNull();
+    expect(hasWorkflowFilesFromGh('null')).toBeNull();
   });
 });
 
@@ -424,6 +445,19 @@ describe('prState', () => {
       { name: 'lint', state: 'pending', url: null },
       { name: 'typecheck', state: 'failure', url: null },
     ]);
+  });
+
+  it('reads an empty rollup as no checks, never pending (VS-768)', async () => {
+    fakeGh(JSON.stringify({ state: 'OPEN', statusCheckRollup: [], mergeStateStatus: 'CLEAN', headRefOid: 'abc123' }));
+    const state = await new GhForge().prState(home, 'https://github.com/acme/api/pull/51');
+    expect(state.ciState).toBe('none');
+    expect(state.checks).toBeUndefined();
+  });
+
+  it('reads a rollup of only skipped checks as none, not success (VS-466)', async () => {
+    fakeGh(JSON.stringify({ state: 'OPEN', statusCheckRollup: [{ name: 'build', status: 'COMPLETED', conclusion: 'SKIPPED' }] }));
+    const state = await new GhForge().prState(home, 'https://github.com/acme/api/pull/51');
+    expect(state.ciState).toBe('none');
   });
 
   it('reports no check detail when the forge reports no checks (VS-481)', async () => {

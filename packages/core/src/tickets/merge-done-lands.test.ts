@@ -27,6 +27,7 @@ describe('mergeDone lands an open PR itself (VS-327)', () => {
   let origin: string;
   let clone: string;
   let openspecArchiveAfterMerge: ReturnType<typeof vi.fn>;
+  let requireCi: boolean;
 
   const commit = async (repo: string, file: string, body: string, message: string): Promise<void> => {
     writeFileSync(join(repo, file), body);
@@ -36,6 +37,7 @@ describe('mergeDone lands an open PR itself (VS-327)', () => {
   const head = async (repo: string, ref = 'HEAD'): Promise<string> => (await git(['rev-parse', ref], repo)).stdout.trim();
 
   beforeEach(async () => {
+    requireCi = false;
     h = makeHarness();
     const wake = fakeWake();
     const decisions = { create: vi.fn(() => ({ id: newId() })), supersedeForTarget: vi.fn(() => 0), withdrawForTicket: vi.fn(() => 0) };
@@ -69,7 +71,7 @@ describe('mergeDone lands an open PR itself (VS-327)', () => {
       get: () => ({
         id: h.projectId, workspaceId: h.workspaceId, slug: 'api', name: 'API', gitUrl: 'git@example.com:acme/api.git',
         defaultBranch: 'main', landingBranch: null, clonePath: clone, maxWorkers: 4, setupCommand: null,
-        worktreeProvider: 'git', openspecEnabled: true, openspecVersion: null, knowledgeRepoEnabled: false, knowledgeSwitch: null, policies: { deliveryMode: 'pr', requireCi: false },
+        worktreeProvider: 'git', openspecEnabled: true, openspecVersion: null, knowledgeRepoEnabled: false, knowledgeSwitch: null, policies: { deliveryMode: 'pr', requireCi },
         status: 'ready', syncState: 'in_sync', primaryCloneSyncedHead: null, lastFetchedAt: null, errorText: null,
       } satisfies Project),
     } as never;
@@ -266,6 +268,23 @@ describe('mergeDone lands an open PR itself (VS-327)', () => {
     await expect(tickets.mergeDone(AGENT, ticketId, {})).rejects.toMatchObject({ code: 'merge_checks_pending', retryable: true });
     expect(forge.mergePr).not.toHaveBeenCalled();
     expect(tickets.get(ticketId).status).toBe('merging');
+  });
+
+  it('lands a repository with no workflows and an empty rollup on the first call, and says why on the ticket (VS-768)', async () => {
+    await git(['checkout', '-b', BRANCH], clone);
+    await commit(clone, 'a.ts', 'export const a = 1;\n', 'feat: a');
+    await git(['push', 'origin', BRANCH], clone);
+    await git(['checkout', 'main'], clone);
+    requireCi = true; // the project default
+    const ticketId = await fileMergingTicket('task', null);
+
+    const forge = openPrForge({ hasCiWorkflows: vi.fn(async () => false), markPullRequestReady: vi.fn(async () => ({ changed: true })) });
+    h.ctx.registries.forges.set('github', forge);
+
+    await tickets.mergeDone(AGENT, ticketId, {});
+    expect(forge.mergePr).toHaveBeenCalledTimes(1);
+    expect(tickets.get(ticketId).status).toBe('done');
+    expect(tickets.comments(ticketId).filter((c) => c.body === 'landed without CI because the repository has no GitHub Actions workflows')).toHaveLength(1);
   });
 
   it('lands two tickets touching the same capability back to back, each archiving against the other\'s state (acceptance #3)', async () => {

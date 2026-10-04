@@ -7,6 +7,7 @@
  * The token is never in the data this renders — `UsageCredential` has no field for one — so there
  * is nothing here to redact.
  */
+import { runtimeLoginFix } from '@weave-ai/shared';
 import type { UsageCredential } from '../api/types';
 import { cx } from '../lib/cx';
 
@@ -33,7 +34,7 @@ function Row({ credential }: { credential: UsageCredential }): React.ReactElemen
       {c.needsLogin ? (
         <p className="text-micro text-text-3">
           {at(c.refreshFailedAt) ? <>Refresh failed {at(c.refreshFailedAt)}. </> : null}
-          Run <code className="ac-mono text-text-soft">{c.runtimeId} /login</code> on the daemon&rsquo;s host; the work
+          Run <code className="ac-mono text-text-soft">{runtimeLoginFix(c.runtimeId).command}</code> on the daemon&rsquo;s host; the work
           resumes on its own.
         </p>
       ) : c.lastVerifiedAt ? (

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { decision } from './factories';
 import { clearHiddenCache, decisionFingerprint, isHiddenFromChat, readHidden, writeHidden, EXPIRY_WINDOW_MS } from '../lib/hiddenDecisions';
 
@@ -11,9 +11,15 @@ const hiddenFor = (d: ReturnType<typeof decision>): Record<string, { fingerprint
 });
 
 beforeEach(() => {
+  // The store prunes entries over a month old against the real clock; freeze it at NOW so the dated
+  // fixtures above do not age out as the calendar moves.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(NOW);
   localStorage.clear();
   clearHiddenCache();
 });
+
+afterEach(() => { vi.useRealTimers(); });
 
 describe('hidden decisions', () => {
   it('hides only the decision the entry was taken against', () => {

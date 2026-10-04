@@ -329,6 +329,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
         ?? { workspaceId: 'ws1', runtimeId, present: false, expiresAt: null, lastVerifiedAt: null, refreshFailedAt: null, needsLogin: false, detail: null, updatedAt: '2026-09-07T09:00:00.000Z' },
       gatedRuntimes: () => (options.credentials ?? []).filter((c) => c.needsLogin).map((c) => c.runtimeId),
       noteAuthFailure: (runtimeId: string) => ({ workspaceId: 'ws1', runtimeId, present: true, expiresAt: null, lastVerifiedAt: null, refreshFailedAt: '2026-09-07T09:07:00.000Z', needsLogin: true, detail: null, updatedAt: '2026-09-07T09:07:00.000Z' }),
+      loginChangedSinceFailure: () => true,
       noteVerified: (runtimeId: string) => ({ workspaceId: 'ws1', runtimeId, present: true, expiresAt: null, lastVerifiedAt: '2026-09-07T10:00:00.000Z', refreshFailedAt: null, needsLogin: false, detail: null, updatedAt: '2026-09-07T10:00:00.000Z' }),
     }),
     threads: impl('threads', { list: () => [], primaryThread: () => null }),

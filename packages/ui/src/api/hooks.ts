@@ -2280,6 +2280,30 @@ export function useSyncUsageAccounts(): UseMutationResult<T.UsageAccountSync, Er
   });
 }
 
+/**
+ * VS-769: every workspace's credential states, polled, for the shell banner. The daemon pushes no
+ * event when a login is lost or restored, so this asks every 30 s; the query is cheap (a file read
+ * per runtime, no CLI is spawned) and shares its key with the Usage page.
+ */
+export function useRuntimeCredentialsMany(ids: readonly string[]): UseQueryResult<T.UsageCredential[]>[] {
+  return useQueries({
+    queries: ids.map((id) => ({
+      queryKey: qk.usageCredentials(id),
+      queryFn: () => api.ws<unknown>(id, '/usage/credentials').then((r) => listOf<T.UsageCredential>(r, 'credentials')),
+      refetchInterval: 30_000,
+    })),
+  });
+}
+
+/** "I fixed it" (VS-769): probe the runtime now and lift its gate if the login works. */
+export function useRecheckRuntimeLogin(): UseMutationResult<{ released: boolean; reason: string | null }, Error, { ws: string; runtimeId: string }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ ws, runtimeId }) => api.ws<{ released: boolean; reason: string | null }>(ws, '/usage/accounts/login-recheck', { method: 'POST', body: { runtimeId } }),
+    onSuccess: (_out, { ws }) => { void qc.invalidateQueries({ queryKey: qk.usageCredentials(ws) }); },
+  });
+}
+
 /** Each runtime's credential state: valid with an expiry, or an expired login and what to run. */
 export function useUsageCredentials(): UseQueryResult<T.UsageCredential[]> {
   const ws = useWs();

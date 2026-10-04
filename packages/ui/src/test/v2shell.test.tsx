@@ -59,6 +59,8 @@ vi.mock('../app/link', () => ({
 }));
 
 vi.mock('../api/hooks', () => ({
+  useRuntimeCredentialsMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
+  useRecheckRuntimeLogin: () => ({ mutate: vi.fn(), isPending: false, isSuccess: false }),
   useWorkspaces: () => ({ data: state.workspaces, isError: false }),
   useWorkspaceProjects: (ids: readonly string[]) =>
     Object.fromEntries(ids.map((id) => [id, { status: 'success', projects: state.projectsByWs[id] ?? [] }])),

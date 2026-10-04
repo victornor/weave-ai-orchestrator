@@ -40,6 +40,7 @@ import { PushDispatcher } from './pushDispatcher.js';
 import { ensurePushKeys, type PushKeys } from './vapid.js';
 import { localApiClient, resolveTailscaleCert, startCertRenewal, type RenewalHandle, type TailscaleClient, type TailscaleCertPair } from './tailscaleCert.js';
 import type { AppDeps, WorkspaceRuntime } from './types.js';
+import { registerDemoAdapters, startDemoPlayer } from './demo/adapters.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const log = getLogger('daemon');
@@ -72,6 +73,13 @@ export interface StartOptions {
    * shorter start-up wait, and a faster renewal check. Unset, the real LocalAPI and shipped timings apply.
    */
   tailscale?: { client?: TailscaleClient; waitMs?: number; retryMs?: number; renewCheckMs?: number; renewWindowMs?: number };
+  /**
+   * VS-770: demo mode. The caller (`startDemo`) has already prepared and seeded the config directory.
+   * Here it only swaps the real side effects out: no coding-CLI runtime, channel, surface or real
+   * forge is registered, and no dispatcher, supervisor, channel, webhook, push or host-tool loop runs,
+   * so nothing can start an agent, run git against a remote or reach the network.
+   */
+  demo?: boolean;
 }
 
 export interface DaemonHandle {
@@ -103,9 +111,11 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   // VS-318: the service manager's PATH is not the user's. Resolve the daemon user's login-shell
   // PATH before any workspace loads or host tool spawns, then keep the detection snapshot fresh so
   // an unavailable tool is visible without anyone probing /api/health.
-  try { await ensureHostToolPath(daemonCfg.hostToolPaths); }
-  catch (e) { log.warn({ err: String(e) }, 'host tool PATH resolution failed; using the inherited PATH'); }
-  const hostToolProbe = startHostToolProbe();
+  if (!opts.demo) {
+    try { await ensureHostToolPath(daemonCfg.hostToolPaths); }
+    catch (e) { log.warn({ err: String(e) }, 'host tool PATH resolution failed; using the inherited PATH'); }
+  }
+  const hostToolProbe = opts.demo ? { stop: () => undefined } : startHostToolProbe();
 
   // Generated once per installation, never written back to daemon.yaml — see vapid.ts and
   // AppDeps.pushKeys for why the private half stays off DaemonConfigSchema entirely.
@@ -122,7 +132,8 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const registries = createRegistries();
 
   const workspaces = new Map<string, WorkspaceRuntime>();
-  await registerBuiltins(registries, createRuntimeHost(workspaces, configDir, daemonCfg));
+  if (opts.demo) registerDemoAdapters(registries);
+  else await registerBuiltins(registries, createRuntimeHost(workspaces, configDir, daemonCfg));
   const { publicUrl, host, port } = resolveUrls(daemonCfg);
 
   // The loopback listener must exist before workspaces load: its URL goes into every run's env.
@@ -147,7 +158,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const admin = makeAdmin(configDir, isolated, daemonCfg, registries, workspaces, loopback.url, pushKeys, incidents);
   const registry = workspaceLoader.readRegistry(configDir);
   for (const entry of registry.workspaces) {
-    try { await loadWorkspaceInto(workspaces, entry.path, { daemon: daemonCfg, registries, loopbackUrl: loopback.url, daemonConfigDir: configDir, isolated, pushKeys, incidents, ...dirs() }); }
+    try { await loadWorkspaceInto(workspaces, entry.path, { daemon: daemonCfg, registries, loopbackUrl: loopback.url, daemonConfigDir: configDir, isolated, pushKeys, incidents, demo: opts.demo, ...dirs() }); }
     catch (e) { log.error({ err: e, workspace: entry.id, path: entry.path }, 'workspace failed to load'); }
   }
 
@@ -213,10 +224,12 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const cancelGraceMs = opts.shutdownGraceMs?.cancel ?? SHUTDOWN_CANCEL_GRACE_MS;
 
   let stopping: Promise<void> | null = null;
+  let demoPlayer: { stop(): void } | null = null;
   const stop = (reason = 'shutdown'): Promise<void> => (stopping ??= shutdown(reason));
 
   async function shutdown(reason: string): Promise<void> {
     log.info({ reason }, 'daemon shutting down');
+    demoPlayer?.stop();
     // VS-339: mark every workspace and record the deliberate shutdown before the first await. systemd
     // signals the whole control group, so a runtime child can exit and its turn finalize before the
     // async stop below ever reaches the dispatcher; the synchronous mark is what catches it. The
@@ -263,6 +276,9 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     process.once(signal, () => { void stop(signal).then(() => process.exit(0)); });
   }
 
+  // VS-770: the scripted live progress that makes a demo's running views move; stopped with the daemon.
+  if (opts.demo) demoPlayer = startDemoPlayer(workspaces);
+
   return { publicUrl: deps.publicUrl, loopbackUrl: loopback.url, workspaces, registries, stop };
 }
 
@@ -271,7 +287,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
 async function loadWorkspaceInto(
   workspaces: Map<string, WorkspaceRuntime>,
   path: string,
-  opts: { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; v2ThemeCss: string; daemonConfigDir: string; isolated: boolean; pushKeys: PushKeys | null; incidents?: IncidentsService },
+  opts: { daemon: DaemonConfig; registries: Registries; loopbackUrl: string; skillsDir: string; templatesDir: string; v2ThemeCss: string; daemonConfigDir: string; isolated: boolean; pushKeys: PushKeys | null; incidents?: IncidentsService; demo?: boolean },
 ): Promise<WorkspaceRuntime> {
   const ctx: WorkspaceContext = await workspaceLoader.loadWorkspace(path, opts);
   const services: CoreServices = createCore(ctx);
@@ -303,6 +319,11 @@ async function loadWorkspaceInto(
   try { services.jobs.reconcile(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'job reconciliation failed'); }
   // Asks which runtime the workers setting should hold when the VS-77 migration could not settle it.
   try { services.models.reconcile(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'model settings reconciliation failed'); }
+  // VS-770: a demo workspace is a seeded database; nothing may dispatch, supervise or deliver.
+  if (opts.demo) {
+    log.info({ workspace: ctx.workspaceId, root: ctx.paths.root }, 'demo workspace loaded');
+    return runtime;
+  }
   await services.workers.ensureConductor().catch((e: unknown) => log.error({ err: e, ws: ctx.workspaceId }, 'ensureConductor failed'));
   try { services.dispatcher.start(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'dispatcher failed to start'); }
   try { services.supervisor.start(); } catch (e) { log.error({ err: e, ws: ctx.workspaceId }, 'supervisor failed to start'); }

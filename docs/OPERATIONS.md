@@ -727,6 +727,34 @@ the supported destructive path.
 
 ---
 
+### Merged branches are deleted from the remote (VS-770)
+
+After the daemon confirms a ticket's pull request merged, it deletes the ticket's branch on the
+remote (and the local branch, if it lingers). It is on by default and never fails the landing: a
+failed delete is logged and noted once on the ticket.
+
+A branch is deleted only when all of these hold: it is not the project's default branch or a landing
+branch; no other open pull request has it as its head; and nothing was pushed to it after the merge.
+"Nothing pushed after" is judged two ways, either of which accepts: the forge says the pull request is
+merged and the branch head still equals the pull request's head at merge (the only proof for a
+squash-merge, whose commit never has the branch head as an ancestor), or the head is an ancestor of the
+landing branch (merge-commit and rebase projects). A branch with a newer commit is kept, with one
+comment on the ticket saying why.
+
+Turn it off per project with `weave project set-policy <id> deleteBranchAfterMerge=false` or the
+"delete branch after merge" control in Settings → Projects (inherit, on or off). A workspace-wide
+default goes in `workspace.yaml` as `defaults.deleteBranchAfterMerge: false`; a project's own value wins.
+
+**Clearing the existing backlog.** Nothing is deleted retroactively unless you ask:
+
+```
+weave project prune-branches <project> --dry-run    # list what would be deleted
+weave project prune-branches <project>              # delete it
+```
+
+It considers only branches that belong to a done or cancelled ticket and applies the same rules as the
+post-merge delete. The dry run is read-only apart from a `git fetch`.
+
 ## 9. Self-hosted CI runner
 
 `.github/workflows/ci.yml` — `lint`, `typecheck`, `test-core` and `test-ui` — runs on a self-hosted

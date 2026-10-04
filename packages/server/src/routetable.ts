@@ -88,6 +88,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: `${W}/projects/{id}`, tag: 'projects', summary: 'One project', auth: 'session' },
   { method: 'PATCH', path: `${W}/projects/{id}`, tag: 'projects', summary: 'Update project config', auth: 'session', mutating: true },
   { method: 'DELETE', path: `${W}/projects/{id}`, tag: 'projects', summary: 'Remove a project', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/projects/{id}/prune-branches`, tag: 'projects', summary: 'Delete remote branches of done or cancelled tickets contained in what landed (dryRun lists only)', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/projects/{id}/fetch`, tag: 'projects', summary: 'Fetch and fast-forward the primary clone', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/projects/{id}/retry`, tag: 'projects', summary: 'Re-run a failed add, reusing what is already on disk', auth: 'session', mutating: true },
 

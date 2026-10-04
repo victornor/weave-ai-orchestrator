@@ -319,6 +319,8 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | `weave project set-policy <id> <key>=<value>...` | per-project policies (`deliveryMode`, `mergeMethod`, `requireCi`, …) |
 | `weave project set-landing-branch <id> [branch] \| --clear` | set, change or clear the branch tickets' work is expected to reach, after the project was added |
 | `weave project set-openspec <id> on\|off` | turn a project's OpenSpec mode on or off after it was added; tickets already bound to a change keep their flow (VS-578) |
+| `weave project set-policy <id> deleteBranchAfterMerge=true\|false` | delete a ticket's remote branch after its pull request merges; on by default (VS-770) |
+| `weave project prune-branches <id> [--dry-run]` | delete the leftover branches of done or cancelled tickets whose work landed (VS-770) |
 | `weave project set-policy <id> visualPlanArtifact=true\|false` | experimental, off by default: require a visual artifact with every change plan, shown on its approval card (VS-624) |
 | `weave runtime list \| detect \| models <id> \| login <id> [--print]` | coding CLIs and their auth |
 

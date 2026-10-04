@@ -11,6 +11,7 @@ import * as weaver from './commands/weaver.js';
 import * as conversation from './commands/conversation.js';
 import * as daemon from './commands/daemon.js';
 import * as decision from './commands/decision.js';
+import * as demo from './commands/demo.js';
 import * as doctor from './commands/doctor.js';
 import * as init from './commands/init.js';
 import * as knowledge from './commands/knowledge.js';
@@ -57,7 +58,7 @@ export function buildProgram(): Command {
     });
 
   for (const register of [
-    init.register, daemon.register, auth.register, workspace.register, project.register, runtime.register,
+    init.register, daemon.register, demo.register, auth.register, workspace.register, project.register, runtime.register,
     models.register, role.register, worker.register, ticket.register, decision.register, conversation.register, weaver.register,
     presentation.register, runs.register, usage.register, knowledge.register, changelog.register, specs.register, worktree.register,
     doctor.register, agent.register, repl.register, routine.register, plugin.register,

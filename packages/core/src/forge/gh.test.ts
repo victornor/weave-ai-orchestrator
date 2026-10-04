@@ -638,3 +638,22 @@ describe('repoMergeSettings (VS-584)', () => {
     await expect(new GhForge().repoMergeSettings(home)).resolves.toBeNull();
   });
 });
+
+describe('GhForge.deleteBranch (VS-770)', () => {
+  beforeEach(() => { home = mkdtempSync(join(tmpdir(), 'ac-gh-del-')); });
+  afterEach(() => { vi.unstubAllEnvs(); rmSync(home, { recursive: true, force: true }); });
+
+  it('deletes the ref through the REST API', async () => {
+    fakeGh('');
+    await new GhForge().deleteBranch(home, 'ac/vs-1-x');
+    expect(argsList()).toEqual(['api', '-X', 'DELETE', 'repos/{owner}/{repo}/git/refs/heads/ac/vs-1-x']);
+  });
+  it('treats an already-deleted ref as success', async () => {
+    fakeGh('', 1, 'gh: Reference does not exist (HTTP 422)');
+    await expect(new GhForge().deleteBranch(home, 'ac/vs-1-x')).resolves.toBeUndefined();
+  });
+  it('throws on any other failure', async () => {
+    fakeGh('', 1, 'gh: Branch is protected (HTTP 422)');
+    await expect(new GhForge().deleteBranch(home, 'ac/vs-1-x')).rejects.toThrow(/DELETE ref failed/);
+  });
+});

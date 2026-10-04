@@ -9,7 +9,7 @@ import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
 import { parkForHuman, runProducedEvidence } from '../runs/engine.js';
-import { ungateRuntime } from '../runs/authgate.js';
+import { recheckRuntimeLogin } from '../runs/authgate.js';
 import { allWorkerStallStates, createWorkerStallState, deleteWorkerStallState, getWorkerStallState, recordEscalation, recordRecoveryAttempt } from './stall-state.js';
 import { archivedDirFor } from '../openspec/index.js';
 import { CURATION_BUDGET_FRACTION, budgetOf, docSlugOf, isDocPath } from '../knowledge/files.js';
@@ -165,13 +165,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
    */
   async function loginRecheck(): Promise<void> {
     const gated = deps().accounts.gatedRuntimes();
-    for (const runtimeId of gated) {
-      const before = deps().accounts.credential(runtimeId);
-      if (!before.present) continue;                       // nothing to probe: the credential is gone entirely
-      if (before.expiresAt !== null && before.refreshFailedAt !== null && before.expiresAt <= before.refreshFailedAt) continue;
-      const [described] = await deps().accounts.refresh([runtimeId]);
-      if (described && described.billingType !== 'unknown') ungateRuntime(ctx, deps, runtimeId);
-    }
+    for (const runtimeId of gated) await recheckRuntimeLogin(ctx, deps, runtimeId, { manual: false });
   }
 
   const due = (key: string, everyMs: number): boolean => {

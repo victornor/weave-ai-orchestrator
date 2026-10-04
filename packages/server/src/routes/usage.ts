@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { USAGE_GRAINS, USAGE_WINDOWS } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body, query } from '../http.js';
+import { recheckRuntimeLogin } from '@weave-ai/core';
 
 /** An on-demand sync of one runtime, or of every runtime the workspace spends on (VS-84). */
 const AccountSyncBody = z.object({ runtimeId: z.string().min(1).optional() });
@@ -46,6 +47,17 @@ export function usageRoutes(): Hono<AppEnv> {
       ...out,
       accounts: out.accounts.map((a) => ({ ...a, displayName: ws.ctx.registries.runtimes.get(a.runtimeId)?.displayName ?? a.runtimeId })),
     });
+  });
+  /**
+   * "I fixed it" (VS-769): probe a runtime whose login the daemon stopped and lift the gate now
+   * instead of at the supervisor's next tick. The operator's word is enough to skip the
+   * credential-changed check, but not to release a runtime whose probe still cannot describe the
+   * account — `released: false` then carries why.
+   */
+  app.post('/accounts/login-recheck', async (c) => {
+    const ws = c.get('ws');
+    const { runtimeId } = await body(c, z.object({ runtimeId: z.string().min(1) }));
+    return c.json(await recheckRuntimeLogin(ws.ctx, () => ws.services, runtimeId, { manual: true }));
   });
   /**
    * The credential state per runtime (VS-75): present, when it expires, when it was last verified,

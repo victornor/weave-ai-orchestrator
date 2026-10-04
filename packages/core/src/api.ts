@@ -797,6 +797,8 @@ export interface AccountsService {
   gatedRuntimes(): string[];
   /** Record that a turn on this runtime could not authenticate, and raise the gate. */
   noteAuthFailure(runtimeId: string, detail: string | null): S.RuntimeCredential;
+  /** VS-769: whether the credential differs from the one that failed, i.e. someone logged in since. True when that cannot be told. */
+  loginChangedSinceFailure(runtimeId: string): boolean;
   /** Record that a turn or a probe on this runtime worked, and clear the gate. */
   noteVerified(runtimeId: string): S.RuntimeCredential;
 }

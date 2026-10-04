@@ -1347,6 +1347,7 @@ describe('supervisor runtime login recheck', () => {
   let refresh: ReturnType<typeof vi.fn>;
   let noteVerified: ReturnType<typeof vi.fn>;
   let credential: { present: boolean; expiresAt: string | null; refreshFailedAt: string | null };
+  let changed = true;
 
   beforeEach(() => {
     h = makeHarness();
@@ -1357,6 +1358,7 @@ describe('supervisor runtime login recheck', () => {
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
     refresh = vi.fn(async () => []);
     noteVerified = vi.fn();
+    changed = true;
     // The credential was renewed after the failure: expiry later than the failure time, so the
     // cheap pre-check lets the probe run.
     credential = { present: true, expiresAt: '2026-09-08T10:00:00.000Z', refreshFailedAt: '2026-09-07T09:07:00.000Z' };
@@ -1364,6 +1366,8 @@ describe('supervisor runtime login recheck', () => {
       list: () => [], get: () => null, refresh,
       gatedRuntimes: () => ['claude'],
       credential: () => credential,
+      // VS-769: someone logged in since the failure, unless a test says otherwise.
+      loginChangedSinceFailure: () => changed,
       noteVerified,
     } as never;
     supervisor = createSupervisor(h.ctx, h.deps);
@@ -1392,8 +1396,9 @@ describe('supervisor runtime login recheck', () => {
   });
 
   it('skips the probe when nobody has logged in since the failure', async () => {
-    // The credential's expiry has not moved past the failure, so it is still the dead one.
-    credential = { present: true, expiresAt: '2026-09-07T09:00:00.000Z', refreshFailedAt: '2026-09-07T09:07:00.000Z' };
+    // The credential is the one that failed, so it is still the dead one — even though its access
+    // token has not expired yet (VS-769: the probe describes the account regardless).
+    changed = false;
     await supervisor.tick();
     expect(refresh).not.toHaveBeenCalledWith(['claude']);
   });

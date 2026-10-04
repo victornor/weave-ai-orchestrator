@@ -12,6 +12,7 @@ import { projectColorVar } from '../lib/projectColor';
 import { FanInStreams } from '../api/context';
 import { useGlobalConnection } from '../api/globalConnection';
 import { ConnectionBanner } from '../components/ConnectionBanner';
+import { LoginBanner } from './LoginBanner';
 import { useDaemonUpdate, useDaemonUpgrade, useMe, useRolesMany, useWorkersMany, useWorkspacePlugins, useWorkspaceProjects, useWorkspaces, type WorkspaceProjectsState, type WorkerListItem } from '../api/hooks';
 import { WeaveMark } from '../components/WeaveMark';
 import type { WorkspaceListItem, WorkspacePlugin } from '../api/types';
@@ -765,6 +766,7 @@ export function V2Shell({ theme, onTheme }: { theme: V2Theme; onTheme: (t: V2The
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <ShellConnectionBanner />
+        <LoginBanner workspaceIds={ids} />
         <div
           key={routeSection(path)}
           className={cx(

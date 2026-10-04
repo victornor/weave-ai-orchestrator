@@ -13,7 +13,7 @@
  * it again without the human answering anything.
  */
 import { nowIso } from '@weave-ai/db';
-import { LOGIN_PAUSE_CODE, OcError, type Agent } from '@weave-ai/shared';
+import { LOGIN_PAUSE_CODE, OcError, runtimeLoginFix, type Agent } from '@weave-ai/shared';
 import type { CoreServices } from '../api.js';
 import type { WorkspaceContext } from '../context.js';
 import { modelSettingFor, modelsFor, workerOptionRuntimes } from '../models/resolve.js';
@@ -28,16 +28,28 @@ const pauseReason = (runtimeId: string): string => `${LOGIN_PAUSE_CODE}: the ${r
 
 export const loginDecisionTitle = (runtimeId: string): string => `The ${runtimeId} login expired — log in again to resume`;
 
-export function loginDecisionContext(runtimeId: string, detail: string | null): string {
+export function loginDecisionContext(runtimeId: string, detail: string | null, stoppedAgents: string[] = []): string {
   return [
     `Every agent on the ${runtimeId} runtime is stopped: its credential could not be refreshed.`,
+    stoppedAgents.length > 0 ? `Paused: ${stoppedAgents.join(', ')}.` : null,
     detail ? `The runtime said: ${detail}` : null,
     '',
-    `Run \`${runtimeId} /login\` on the daemon's host (for Claude Code: \`claude /login\`).`,
-    'Nothing else is needed — the work resumes on its own within a minute of the login working again,',
+    runtimeLoginFix(runtimeId).text,
+    'Nothing else is needed — the work resumes on its own once the login is seen working again,',
     'and this card withdraws itself. No worker needs to be resumed by hand.',
   ].filter((l) => l !== null).join('\n');
 }
+
+/** VS-769: one daemon-level incident per runtime outage, found again by this title while it is open. */
+export const loginIncidentTitle = (runtimeId: string): string => `Runtime login expired: ${runtimeId}`;
+
+/** A probe that releases a gate which fails again inside this window stops being trusted (VS-769). */
+export const PROBE_TRUST_WINDOW_MS = 15 * 60_000;
+const probeReleasedKey = (runtimeId: string): string => `login:probe_released_at:${runtimeId}`;
+const manualOnlyKey = (runtimeId: string): string => `login:manual_only:${runtimeId}`;
+const getMeta = (ctx: WorkspaceContext, key: string): string | null => ctx.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', [key])?.value ?? null;
+const setMeta = (ctx: WorkspaceContext, key: string, value: string): void => { ctx.db.run('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value]); };
+const delMeta = (ctx: WorkspaceContext, key: string): void => { ctx.db.run('DELETE FROM meta WHERE key = ?', [key]); };
 
 /** One open finding per ticket, whatever fails and however often, while the ticket's worker stays paused for this. */
 export const authOutageCorrelationKey = (ticketId: string): string => `auth-outage:${ticketId}`;
@@ -90,6 +102,14 @@ export function gateRuntimeForLogin(
 
   step('record the credential failure', () => { deps().accounts.noteAuthFailure(runtimeId, detail); });
 
+  // VS-769: a gate that comes back soon after a probe released it means the probe lied (the CLI can
+  // describe an account whose OAuth refresh is dead). From then on only a turn that succeeds, or the
+  // operator's explicit re-check, lifts it.
+  step('stop trusting the probe', () => {
+    const at = Number(getMeta(ctx, probeReleasedKey(runtimeId)) ?? 0);
+    if (at > 0 && Date.now() - at < PROBE_TRUST_WINDOW_MS) setMeta(ctx, manualOnlyKey(runtimeId), nowIso());
+  });
+
   // Pause every agent on the runtime, not only the one that failed: they would each fail the same
   // way within a tick. Their queued wake-ups are deliberately left alone — the dispatcher skips a
   // gated runtime before it claims anything, so the work waits rather than being lost and re-asked.
@@ -124,7 +144,7 @@ export function gateRuntimeForLogin(
       // block that ticket alone while every other agent sat silently.
       ticketId: null,
       title: loginDecisionTitle(runtimeId),
-      context: loginDecisionContext(runtimeId, detail),
+      context: loginDecisionContext(runtimeId, detail, agentsOn(ctx, runtimeId).map((a) => a.name)),
       target: { runtimeId },
       correlationKey: key,
     });
@@ -154,8 +174,24 @@ export function gateRuntimeForLogin(
   // turn, and an outage must not be able to hide behind an agent the outage itself has stopped.
   if (raised) {
     void deps().threads.notifyHuman({ kind: 'system', id: null }, {
-      text: `**${loginDecisionTitle(runtimeId)}**\n\n${loginDecisionContext(runtimeId, detail)}`,
+      text: `**${loginDecisionTitle(runtimeId)}**\n\n${loginDecisionContext(runtimeId, detail, agentsOn(ctx, runtimeId).map((a) => a.name))}`,
     }).catch((e: unknown) => log.error({ err: String(e), runtimeId }, 'could not tell the human the login expired'));
+
+    // VS-769: the outage is also a daemon-level incident, so the Incidents page and the nightly
+    // sweep see it. Once per outage: only the call that raised the card files it.
+    step('file the incident', () => {
+      const incidents = deps().incidents;
+      if (!incidents) return;
+      const title = loginIncidentTitle(runtimeId);
+      if (incidents.list({ status: 'open', workspaceId: ctx.workspaceId, limit: 200 }).items.some((i) => i.title === title)) return;
+      incidents.create({
+        reporterKind: 'system', title,
+        whatFailed: detail ?? `a ${runtimeId} turn could not authenticate`,
+        tryingToDo: `run agents on the ${runtimeId} runtime`,
+        evidence: [`agents paused: ${agentsOn(ctx, runtimeId).map((a) => a.name).join(', ')}`, runtimeLoginFix(runtimeId).text].join('\n'),
+        workspaceId: ctx.workspaceId, agentId: input.agentId ?? 'daemon', runId: input.runId ?? '',
+      });
+    });
   }
 
   log.warn({ runtimeId, agentId: input.agentId ?? null }, 'runtime gated: its login expired');
@@ -168,11 +204,14 @@ export function gateRuntimeForLogin(
  */
 export function ungateRuntime(ctx: WorkspaceContext, deps: () => CoreServices, runtimeId: string): number {
   const log = ctx.log('run');
+  let wasGated = false;
+  try { wasGated = deps().accounts.gatedRuntimes().includes(runtimeId); } catch { /* treated as not gated: no announcement */ }
   const step = (name: string, fn: () => void): void => {
     try { fn(); } catch (e) { log.error({ err: String(e), step: name, runtimeId }, `clearing the ${runtimeId} login gate failed at ${name}`); }
   };
 
   step('clear the credential state', () => { deps().accounts.noteVerified(runtimeId); });
+  step('forget the probe history', () => { delMeta(ctx, manualOnlyKey(runtimeId)); delMeta(ctx, probeReleasedKey(runtimeId)); });
 
   let released = 0;
   step('release the paused agents', () => {
@@ -193,8 +232,50 @@ export function ungateRuntime(ctx: WorkspaceContext, deps: () => CoreServices, r
     }
   });
 
+  // VS-769: close the incident and say so once, on the channel path. Only when a gate really was up.
+  if (wasGated) {
+    step('resolve the incident', () => {
+      const incidents = deps().incidents;
+      if (!incidents) return;
+      const title = loginIncidentTitle(runtimeId);
+      for (const i of incidents.list({ status: 'open', workspaceId: ctx.workspaceId, limit: 200 }).items) {
+        if (i.title === title) incidents.resolve(i.id, { resolution: 'the login was restored', resolvedByAgentId: 'daemon', resolvedByWorkspaceId: ctx.workspaceId });
+      }
+    });
+    step('announce the recovery', () => {
+      void deps().threads.notifyHuman({ kind: 'system', id: null }, {
+        text: `**The ${runtimeId} login is working again**\n\n${released > 0 ? `${released} paused agent${released === 1 ? '' : 's'} resumed.` : 'Nothing was left paused.'}`,
+      }).catch((e: unknown) => log.error({ err: String(e), runtimeId }, 'could not tell the human the login was restored'));
+    });
+  }
+
   if (released > 0) log.info({ runtimeId, released }, 'runtime login restored: paused agents released');
   return released;
+}
+
+/**
+ * Probe a gated runtime and lift the gate when it really works (VS-769).
+ *
+ * The periodic caller (`manual: false`) lifts nothing on a probe alone. The claude `get_usage`
+ * probe describes the account even when the OAuth refresh is dead — on 2026-10-03 it released the
+ * gate within a minute and the weaver then failed three more times. It needs the credential to have
+ * changed since the failure, and gives up auto-releasing for good if that release was wrong. The
+ * operator's own re-check (`manual: true`) is a statement that they fixed it, so it skips both.
+ */
+export async function recheckRuntimeLogin(
+  ctx: WorkspaceContext, deps: () => CoreServices, runtimeId: string, opts: { manual: boolean },
+): Promise<{ released: boolean; reason: string | null }> {
+  const accounts = deps().accounts;
+  if (!accounts.credential(runtimeId).present) return { released: false, reason: `no ${runtimeId} credential on the daemon's host` };
+  if (!opts.manual) {
+    if (getMeta(ctx, manualOnlyKey(runtimeId))) return { released: false, reason: 'a probe released this gate and it failed again; waiting for a successful turn or a manual re-check' };
+    if (!accounts.loginChangedSinceFailure(runtimeId)) return { released: false, reason: 'the credential has not changed since the failure' };
+  }
+  const [described] = await accounts.refresh([runtimeId]);
+  if (!described || described.billingType === 'unknown') return { released: false, reason: `the ${runtimeId} probe could not describe the account` };
+  ungateRuntime(ctx, deps, runtimeId);
+  setMeta(ctx, probeReleasedKey(runtimeId), String(Date.now()));
+  return { released: true, reason: null };
 }
 
 /** The runtime a login pause was raised for: the detail row, or the reason string on rows gated before `runtimeId` was recorded. */

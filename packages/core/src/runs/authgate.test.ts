@@ -5,7 +5,7 @@
  * conductor and a dropped merge. These pin the shape that replaces it: one gate, one card, one
  * message on the channel path, and a resume nobody has to ask for.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
 import { DEFAULT_MODEL_SETTING, type Agent, type Decision } from '@weave-ai/shared';
@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAccountsService } from '../usage/accounts.js';
 import { createDispatcher } from './dispatcher.js';
 import { makeHarness, type TestHarness } from '../testing/context.js';
-import { LOGIN_PAUSE_CODE, authOutageCorrelationKey, gateRuntimeForLogin, loginCorrelationKey, loginPauseRuntime, releaseLoginPausesForAbandonedRuntimes, ungateRuntime } from './authgate.js';
+import { LOGIN_PAUSE_CODE, authOutageCorrelationKey, gateRuntimeForLogin, loginCorrelationKey, loginPauseRuntime, recheckRuntimeLogin, releaseLoginPausesForAbandonedRuntimes, ungateRuntime } from './authgate.js';
 
 let h: TestHarness;
 /** Every decision the fake service was asked to create, in order. */
@@ -120,7 +120,7 @@ describe('one outage raises exactly one decision', () => {
     gate();
     const context = String(created[0]!['context']);
     expect(String(created[0]!['title'])).toContain('claude');
-    expect(context).toContain('/login');
+    expect(context).toContain('weave runtime login claude');
     expect(context).toContain('resumes on its own');
   });
 
@@ -137,7 +137,7 @@ describe('the human is told over the channel, not through the conductor', () => 
     gate();
     expect(agentRow(h.conductorId).status).toBe('paused');   // the conductor cannot take a turn
     expect(notified).toHaveLength(1);                        // and the human is told anyway
-    expect(notified[0]).toContain('/login');
+    expect(notified[0]).toContain('weave runtime login claude');
   });
 
   it('does not repeat the message on a second failure', () => {
@@ -364,5 +364,131 @@ describe('a login pause outliving a runtime the workspace abandoned', () => {
 
     const agent = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [w])!;
     expect(loginPauseRuntime(agent)).toBe('claude');
+  });
+});
+
+describe('the outage is announced with the exact fix, once, and ends cleanly (VS-769)', () => {
+  let filed: Array<Record<string, unknown>>;
+  let resolved: string[];
+  beforeEach(() => {
+    filed = []; resolved = [];
+    const open: Array<Record<string, unknown>> = [];
+    h.services.incidents = {
+      create: (i: Record<string, unknown>) => { const row = { id: `inc${filed.length + 1}`, ...i }; filed.push(row); open.push(row); return row; },
+      list: () => ({ items: open.filter((i) => !resolved.includes(String(i['id']))), total: 0 }),
+      resolve: (id: string) => { resolved.push(id); return {}; },
+    } as never;
+  });
+
+  it('names the runtime, the paused agents and the runtime-specific command', () => {
+    h.addWorker(null);
+    gate();
+    const context = String(created[0]!['context']);
+    expect(context).toContain('Paused:');
+    expect(context).toContain('weave runtime login claude');
+    expect(notified[0]).toContain('weave runtime login claude');
+    expect(notified[0]).toContain('Paused:');
+  });
+
+  it('gives another runtime its own command, not claude\'s', () => {
+    gateRuntimeForLogin(h.ctx, h.deps, { runtimeId: 'codex' }, null);
+    expect(String(created[0]!['context'])).toContain('weave runtime login codex');
+    expect(String(created[0]!['context'])).toContain('`codex login`');
+    expect(String(created[0]!['context'])).not.toContain('claude');
+  });
+
+  it('files one incident per outage however many runs fail', () => {
+    gate(); gate(); gate();
+    expect(filed).toHaveLength(1);
+    expect(filed[0]!['reporterKind']).toBe('system');
+    expect(filed[0]!['title']).toBe('Runtime login expired: claude');
+  });
+
+  it('posts one recovery line, resolves the incident and withdraws the card', () => {
+    gate();
+    notified.length = 0;
+    ungateRuntime(h.ctx, h.deps, 'claude');
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toContain('login is working again');
+    expect(resolved).toEqual(['inc1']);
+    expect(withdrawn).toHaveLength(1);
+    // Clearing a gate that is not up says nothing.
+    ungateRuntime(h.ctx, h.deps, 'claude');
+    expect(notified).toHaveLength(1);
+  });
+
+  it('a later outage files a new incident', () => {
+    gate(); ungateRuntime(h.ctx, h.deps, 'claude'); gate();
+    expect(filed).toHaveLength(2);
+  });
+});
+
+describe('a probe alone does not lift the gate (VS-769)', () => {
+  const credPath = () => join(h.ctx.paths.runtimesHome, 'claude', '.credentials.json');
+  const setExpiry = (ms: number): void => writeFileSync(credPath(), JSON.stringify({ claudeAiOauth: { expiresAt: ms } }));
+  let probes: number;
+  beforeEach(() => {
+    probes = 0;
+    // The real claude reader parses this same file; the harness registers no adapters, so a reader
+    // with the same contract stands in (the CLI itself is never launched).
+    const runtimes = h.ctx.registries.runtimes as unknown as { get: (id: string) => unknown };
+    const realGet = runtimes.get.bind(runtimes);
+    runtimes.get = (id: string) => id !== 'claude' ? realGet(id) : {
+      readCredential: ({ configHome }: { configHome: string }) => {
+        const raw = JSON.parse(readFileSync(join(configHome, '.credentials.json'), 'utf8')) as { claudeAiOauth?: { expiresAt?: number } };
+        const ms = raw.claudeAiOauth?.expiresAt;
+        return { present: true, expiresAt: typeof ms === 'number' ? new Date(ms).toISOString() : null };
+      },
+    };
+    const real = h.services.accounts!;
+    h.services.accounts = Object.assign(Object.create(real), {
+      refresh: async () => { probes += 1; return [{ runtimeId: 'claude', billingType: 'subscription_included' }]; },
+    }) as never;
+  });
+
+  it('the claude credential reader reports the expiry the test writes', () => {
+    setExpiry(Date.parse('2026-10-04T20:00:00Z'));
+    expect(h.services.accounts!.credential('claude').expiresAt).toBe('2026-10-04T20:00:00.000Z');
+  });
+
+  it('keeps the gate when the probe works but the credential is unchanged', async () => {
+    setExpiry(Date.parse('2026-10-04T20:00:00Z'));
+    gate();
+    const r = await recheckRuntimeLogin(h.ctx, h.deps, 'claude', { manual: false });
+    expect(r.released).toBe(false);
+    expect(probes).toBe(0);
+    expect(h.services.accounts!.gatedRuntimes()).toEqual(['claude']);
+    expect(withdrawn).toHaveLength(0);
+  });
+
+  it('releases once the credential changed and the probe describes the account', async () => {
+    setExpiry(Date.parse('2026-10-04T20:00:00Z'));
+    gate();
+    setExpiry(Date.parse('2026-10-05T02:00:00Z'));
+    expect((await recheckRuntimeLogin(h.ctx, h.deps, 'claude', { manual: false })).released).toBe(true);
+    expect(h.services.accounts!.gatedRuntimes()).toEqual([]);
+  });
+
+  it('after a probe release that fails again, only a manual re-check lifts the gate', async () => {
+    setExpiry(Date.parse('2026-10-04T20:00:00Z'));
+    gate();
+    setExpiry(Date.parse('2026-10-05T02:00:00Z'));
+    await recheckRuntimeLogin(h.ctx, h.deps, 'claude', { manual: false });
+    gate();                                          // the login was still dead
+    setExpiry(Date.parse('2026-10-05T04:00:00Z'));   // even a changed credential does not bring the auto-probe back
+    expect((await recheckRuntimeLogin(h.ctx, h.deps, 'claude', { manual: false })).released).toBe(false);
+    expect((await recheckRuntimeLogin(h.ctx, h.deps, 'claude', { manual: true })).released).toBe(true);
+  });
+
+  it('a manual re-check releases even when the credential file looks unchanged', async () => {
+    setExpiry(Date.parse('2026-10-04T20:00:00Z'));
+    gate();
+    expect((await recheckRuntimeLogin(h.ctx, h.deps, 'claude', { manual: true })).released).toBe(true);
+  });
+
+  it('a manual re-check does not release when the probe still cannot describe the account', async () => {
+    gate();
+    (h.services.accounts as never as { refresh: unknown }).refresh = async () => [{ runtimeId: 'claude', billingType: 'unknown' }];
+    expect((await recheckRuntimeLogin(h.ctx, h.deps, 'claude', { manual: true })).released).toBe(false);
   });
 });

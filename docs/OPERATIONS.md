@@ -492,10 +492,10 @@ park workers individually.
 **To recover, log the CLI in on the daemon's host:**
 
 ```bash
-claude /login          # or: codex login · opencode auth login · gemini
+weave runtime login claude   # or codex · opencode · gemini · cursor (the CLI's own login also works if the workspace shares the host's credentials: claude /login · codex login · opencode auth login)
 ```
 
-That is the whole procedure. Within a minute the supervisor's probe succeeds, the gate clears, every
+That is the whole procedure. Once the credential has changed and the supervisor's probe succeeds (or you press "I fixed it" in the banner), the gate clears, every
 paused agent takes the turn it was holding, and the decision withdraws itself. You do not answer the
 card and you do not resume any worker — resume is refused while the gate is up, because the
 dispatcher would not start that turn anyway.

@@ -26,6 +26,9 @@ export const ACCOUNT_PROBE_TIMEOUT_MS = 20_000;
  */
 export const MANUAL_SYNC_INTERVAL_MS = 30_000;
 
+/** The credential expiry seen when the runtime's login last failed (VS-769); a `meta` row so a later credential write cannot overwrite it. */
+const failedExpiryKey = (runtimeId: string): string => `login:failed_expiry:${runtimeId}`;
+
 interface CredentialRow {
   workspaceId: string; runtimeId: string; present: number; expiresAt: string | null;
   lastVerifiedAt: string | null; refreshFailedAt: string | null; needsLogin: number;
@@ -216,6 +219,11 @@ export function createAccountsService(ctx: WorkspaceContext): AccountsService {
     },
 
     noteAuthFailure(runtimeId: string, detail: string | null): S.RuntimeCredential {
+      // VS-769: remember which credential failed, so a later probe cannot mistake "the CLI still
+      // describes the account" for "someone logged in again". The OAuth access token can outlive
+      // a dead refresh token, so the expiry only moves when the login really changed.
+      const failed = readCredentialFacts(ctx, runtimeId);
+      ctx.db.run('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [failedExpiryKey(runtimeId), failed.expiresAt ?? '']);
       return writeCredential(ctx, runtimeId, {
         needsLogin: 1,
         refreshFailedAt: nowIso(),
@@ -224,7 +232,16 @@ export function createAccountsService(ctx: WorkspaceContext): AccountsService {
       });
     },
 
+    loginChangedSinceFailure(runtimeId: string): boolean {
+      const recorded = ctx.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', [failedExpiryKey(runtimeId)])?.value;
+      if (recorded === undefined) return true;           // gated before this was recorded: the probe is all there is
+      const current = readCredentialFacts(ctx, runtimeId).expiresAt ?? '';
+      if (recorded === '' && current === '') return true; // the runtime does not report an expiry: nothing to compare
+      return current !== recorded;
+    },
+
     noteVerified(runtimeId: string): S.RuntimeCredential {
+      ctx.db.run('DELETE FROM meta WHERE key = ?', [failedExpiryKey(runtimeId)]);
       return writeCredential(ctx, runtimeId, { needsLogin: 0, refreshFailedAt: null, detail: null, lastVerifiedAt: nowIso() });
     },
   };

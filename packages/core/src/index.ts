@@ -52,3 +52,4 @@ export {
   type PluginRegistry, type PluginRuntime, type PluginRouteDef, type PluginHookDef,
 } from './plugins/index.js';
 export { PluginDataService } from './plugins/data.js';
+export { recheckRuntimeLogin } from './runs/authgate.js';

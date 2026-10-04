@@ -90,6 +90,13 @@ export interface ForgeAdapter {
    */
   pullRequestForBranch?(cwd: string, branch: string): Promise<{ url: string; number: number } | null>;
   /**
+   * Optional (VS-770): deletes a branch from the remote repository. A branch that is already gone is
+   * success, not an error. The caller owns every safety decision (protected branches, containment);
+   * this deletes exactly what it is told to. A forge that cannot do this omits it and cleanup is
+   * skipped for that project.
+   */
+  deleteBranch?(cwd: string, branch: string): Promise<void>;
+  /**
    * Optional (VS-359): whether a repository is public, or `null` when the forge cannot say. `cwd` is
    * where the forge runs; the optional `remote` names the repository to inspect and defaults to
    * `cwd`'s own origin — the URL form lets the project-creation form ask before a clone exists, so

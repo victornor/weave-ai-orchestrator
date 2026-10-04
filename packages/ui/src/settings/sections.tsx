@@ -393,13 +393,14 @@ function ArchivedProjectRow({ p }: { p: Project }): React.ReactElement {
 }
 
 /** A workspace's values for the two policies it can set a default for; the rest inherit the schema. */
-type WorkspacePolicyDefaults = { proposalApproval?: string; deliveryMode?: string };
+type WorkspacePolicyDefaults = { proposalApproval?: string; deliveryMode?: string; deleteBranchAfterMerge?: string };
 
 /** The workspace defaults that a project policy can fall back to, from `GET /api/w/:ws`'s config. */
 function workspacePolicyDefaults(config: Record<string, unknown>): WorkspacePolicyDefaults {
   const defaults = (config['defaults'] ?? {}) as Record<string, unknown>;
   const pick = (key: string): string | undefined => (typeof defaults[key] === 'string' ? (defaults[key] as string) : undefined);
-  return { proposalApproval: pick('proposalApproval'), deliveryMode: pick('deliveryMode') };
+  // VS-770: a boolean default that is on unless the workspace config says false.
+  return { proposalApproval: pick('proposalApproval'), deliveryMode: pick('deliveryMode'), deleteBranchAfterMerge: defaults['deleteBranchAfterMerge'] === false ? 'off' : 'on' };
 }
 
 /** One project's row: its own `maxWorkers`/`landingBranch`/policy commit state, independent of every other row. */
@@ -673,6 +674,16 @@ function ActiveProjectRow({
             label="require CI"
             options={['on', 'off']}
             value={booleanPolicyValue(p.policies, 'requireCi')}
+            toValue={(raw) => raw === 'on'}
+            onSelect={setPolicy}
+          />
+          <PolicySelect
+            p={p}
+            policyKey="deleteBranchAfterMerge"
+            label="delete branch after merge"
+            options={['on', 'off']}
+            value={booleanPolicyValue(p.policies, 'deleteBranchAfterMerge')}
+            workspaceValue={workspaceDefaults.deleteBranchAfterMerge}
             toValue={(raw) => raw === 'on'}
             onSelect={setPolicy}
           />

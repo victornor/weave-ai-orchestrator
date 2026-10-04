@@ -92,6 +92,11 @@ export const ProjectPoliciesSchema = z.object({
    */
   visualPlanArtifact: z.boolean(),
   /**
+   * VS-770: delete a ticket's remote branch (and its local branch) once its pull request is confirmed
+   * merged. On unless a project, or failing that the workspace default, sets it false.
+   */
+  deleteBranchAfterMerge: z.boolean(),
+  /**
    * What going live does, shown verbatim on the promotion card and carried into the promotion pull
    * request's body when landing differs from default (VS-568, VS-584).
    */
@@ -144,6 +149,21 @@ export function visualPlanArtifactEnabled(policies: Record<string, unknown> | nu
   if (raw === undefined || raw === null) return false;
   const parsed = ProjectPoliciesSchema.shape.visualPlanArtifact.safeParse(raw);
   return parsed.success && parsed.data === true;
+}
+
+/**
+ * VS-770: whether a merged ticket's branch is deleted from the remote. A project's explicit boolean
+ * wins, then the workspace default; an absent or malformed value at both levels is on — the safe
+ * direction here, unlike YOLO, is the documented default.
+ */
+export function deleteBranchAfterMergeEnabled(
+  policies: Record<string, unknown> | null | undefined,
+  workspaceDefault?: boolean | null,
+): boolean {
+  const raw = (policies as { deleteBranchAfterMerge?: unknown } | null | undefined)?.deleteBranchAfterMerge;
+  const parsed = ProjectPoliciesSchema.shape.deleteBranchAfterMerge.safeParse(raw);
+  if (parsed.success && parsed.data !== undefined) return parsed.data;
+  return workspaceDefault ?? true;
 }
 
 /** The promotion mode of a project that has not configured one: derive it from the forge, safely. */
@@ -424,6 +444,8 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
   hireApproval: legacyApprovalOwner.default('human'),
   deliveryMode: z.enum(DELIVERY_MODES).default('pr'),
   autoMerge: z.boolean().default(false),
+  /** VS-770: the workspace default for `policies.deleteBranchAfterMerge`; a project's own value wins. */
+  deleteBranchAfterMerge: z.boolean().default(true),
   worktrees: z.enum(WORKTREE_PROVIDERS).default('worktrunk'),
   maxConcurrentRuns: z.number().int().min(1).default(6),
   /**

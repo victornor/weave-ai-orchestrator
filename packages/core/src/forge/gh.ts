@@ -278,6 +278,15 @@ export class GhForge implements ForgeAdapter {
     return { mergeCommit: after?.mergeCommit };
   }
 
+  /** VS-770: `DELETE git/refs/heads/<branch>`. A ref that is already gone ("Reference does not exist" / 404) counts as deleted. */
+  async deleteBranch(cwd: string, branch: string): Promise<void> {
+    const r = await sh('gh', ['api', '-X', 'DELETE', `repos/{owner}/{repo}/git/refs/heads/${branch}`], { cwd, timeoutMs: 60_000, env: { NO_COLOR: '1' } });
+    if (r.ok) return;
+    const detail = `${r.stderr} ${r.stdout}`.trim();
+    if (/reference does not exist|HTTP 404/i.test(detail)) return;
+    throw new OcError('internal', `gh api DELETE ref failed: ${detail.slice(0, 300)}`, { branch });
+  }
+
   /**
    * Every pull request `gh` will name, most recently updated first. `--state all` in one call rather
    * than open and closed in two: `gh` cannot filter by update time either way, so a second spawn buys

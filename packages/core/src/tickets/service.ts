@@ -1,6 +1,6 @@
 import { newId, nowIso, ticketRow, type Db } from '@weave-ai/db';
 import {
-  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, landingBranchOf, yoloEnabled, visualPlanArtifactEnabled,
+  OcError, LIVENESS_STATUSES, TERMINAL_TICKET_STATUSES, NAMED_CARD_OPTION_KEYS, estimateTokens, landingBranchOf, yoloEnabled, visualPlanArtifactEnabled, deleteBranchAfterMergeEnabled,
   type CommentKind, type Decision, type SourceTrust, type Ticket, type TicketComment, type TicketStatus, type WorkProductType,
 } from '@weave-ai/shared';
 import type { Actor, CoreServices, Page, TicketCreateInput, TicketFilter, TicketsService, TransitionInput } from '../api.js';
@@ -15,6 +15,7 @@ import { attemptArchiveThenMerge } from './archive-before-merge.js';
 import { createMergeQueue } from './merge-queue.js';
 import { landLock } from '../util/land-lock.js';
 import { git } from '../util/git.js';
+import { cleanupMergedBranch, deleteBranchEverywhere, evaluateBranch, remoteHeads } from './branch-cleanup.js';
 import { reconcileProjectKnowledgeFromRepo } from '../knowledge/repoSync.js';
 import { reconcileProjectArtifactsFromRepo } from './artifactRepoSync.js';
 import { SECRET_SHAPED_RE } from '../knowledge/files.js';
@@ -27,6 +28,8 @@ import type { Wakeup } from '@weave-ai/shared';
 import { ATTACHMENT_MAX_OUTBOUND_FILE_BYTES, detectAttachmentMediaType, guessOutboundMediaType } from '@weave-ai/shared';
 import { actingAgentHome, assertAttachablePath, assertNotHiddenUnderHome, resolveOutboundAttachmentRoots } from '../threads/outboundAttachments.js';
 import { sanitizeAttachmentFilename, sha256, writeGeneratedAttachment } from '../threads/attachmentStorage.js';
+
+export interface PruneEntry { branch: string; ticket: string; sha: string }
 
 function ticketBranchFor(t: { identifier: string; title: string }): string {
   const slug = t.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40).replace(/-+$/, '');
@@ -574,6 +577,44 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       body, kind, sourceTrust: actor.kind === 'human' ? 'trusted' : 'trusted', createdAt: nowIso(),
     });
     ctx.events.emit('ticket.comment', 'ticket', ticketId, { id, ticketId, body, kind });
+  }
+
+  /** VS-770: branches no cleanup or prune may ever delete — the default, every landing branch in use. */
+  function protectedBranchesOf(p: Project): Set<string> {
+    const set = new Set<string>([p.defaultBranch, landingBranchOf(p)]);
+    for (const r of db.all<{ landingBranch: string | null }>('SELECT DISTINCT landing_branch FROM tickets WHERE project_id = ? AND landing_branch IS NOT NULL', [p.id])) {
+      if (r.landingBranch) set.add(r.landingBranch);
+    }
+    return set;
+  }
+
+  /**
+   * VS-770: after `done` is recorded, delete the merged ticket's branch when the policy allows. Runs
+   * outside the landing's critical section and never throws: a failure is logged and noted once on
+   * the ticket, and a keep that is worth knowing about is noted too.
+   */
+  async function deleteMergedBranch(t: Ticket, target: { project: Project; branch: string; prUrl: string }, actor: Actor): Promise<void> {
+    try {
+      if (!deleteBranchAfterMergeEnabled(target.project.policies, ctx.config.defaults.deleteBranchAfterMerge)) return;
+      const forge = ctx.registries.forges.get('github');
+      if (!forge?.deleteBranch) return;
+      const r = await cleanupMergedBranch({
+        forge, cwd: target.project.clonePath, branch: target.branch, prUrl: target.prUrl,
+        protectedBranches: protectedBranchesOf(target.project), landingBranch: landingBranchOf(target.project, t),
+      });
+      if (r.outcome === 'deleted') {
+        log.info({ ticketId: t.id, branch: target.branch }, 'deleted merged branch');
+        recordActivity(db, ws, actor, 'ticket.branch_deleted', 'ticket', t.id, { branch: target.branch }, t.id);
+      } else if (r.outcome === 'kept') {
+        log.info({ ticketId: t.id, branch: target.branch, reason: r.reason }, 'kept merged branch');
+        if (!r.quiet) systemComment(t.id, `kept remote branch: ${r.reason}`, actor);
+      } else {
+        log.warn({ ticketId: t.id, branch: target.branch, error: r.error }, 'deleting merged branch failed');
+        systemComment(t.id, `could not delete remote branch ${target.branch}: ${r.error}`, actor);
+      }
+    } catch (e) {
+      log.warn({ err: e, ticketId: t.id }, 'branch cleanup after merge failed');
+    }
   }
 
   /** After a ticket becomes terminal: wake dependents and the parent (PLAN §7.1). */
@@ -1702,6 +1743,42 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       ).map((r) => ({ ...r, previewable: r.previewable === 1 }));
     },
 
+    async pruneBranches(actor, projectId, opts) {
+      const forge = ctx.registries.forges.get('github');
+      if (!forge?.deleteBranch) throw new OcError('validation', 'no forge that can delete branches is available');
+      const p = deps().projects.get(projectId);
+      if (!existsSync(p.clonePath)) throw new OcError('validation', `project ${p.slug} has no clone on disk`);
+      const fetched = await git(['fetch', 'origin'], p.clonePath, 300_000);
+      if (!fetched.ok) throw new OcError('internal', `git fetch failed: ${fetched.stderr.trim().slice(0, 300)}`, { project: p.slug });
+      const heads = await remoteHeads(p.clonePath);
+      const protectedBranches = protectedBranchesOf(p);
+      const rows = db.all<Record<string, unknown>>("SELECT * FROM tickets WHERE project_id = ? AND status IN ('done', 'cancelled')", [p.id]).map(row);
+      const result: { dryRun: boolean; candidates: PruneEntry[]; deleted: string[]; kept: Array<{ branch: string; reason: string }>; failed: Array<{ branch: string; error: string }> } = {
+        dryRun: opts.dryRun, candidates: [], deleted: [], kept: [], failed: [],
+      };
+      const seen = new Set<string>();
+      for (const t of rows) {
+        const names = new Set<string>([ticketBranchFor(t)]);
+        for (const w of db.all<{ branch: string }>('SELECT branch FROM worktrees WHERE ticket_id = ?', [t.id])) names.add(w.branch);
+        const pr = db.get<{ url: string | null }>("SELECT url FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' ORDER BY created_at DESC LIMIT 1", [t.id]);
+        for (const branch of names) {
+          const remoteSha = heads.get(branch);
+          if (!remoteSha || seen.has(branch)) continue;
+          seen.add(branch);
+          const verdict = await evaluateBranch({
+            forge, cwd: p.clonePath, branch, protectedBranches, prUrl: pr?.url ?? null, remoteSha, landingRef: `origin/${landingBranchOf(p, t)}`,
+          }).catch((e: unknown) => ({ delete: false as const, reason: e instanceof Error ? e.message : String(e) }));
+          if (!verdict.delete) { result.kept.push({ branch, reason: verdict.reason }); continue; }
+          result.candidates.push({ branch, ticket: t.identifier, sha: remoteSha });
+          if (opts.dryRun) continue;
+          try { await deleteBranchEverywhere(forge, p.clonePath, branch); result.deleted.push(branch); }
+          catch (e) { result.failed.push({ branch, error: e instanceof Error ? e.message : String(e) }); }
+        }
+      }
+      if (!opts.dryRun) recordActivity(db, ws, actor, 'project.branches_pruned', 'project', p.id, { deleted: result.deleted.length, failed: result.failed.length });
+      return result;
+    },
+
     async mergeDone(actor, id, info) {
       const t = get(id);
       if (t.status !== 'merging') throw new OcError('wrong_status', `${t.identifier} is ${t.status}, not merging`);
@@ -1713,6 +1790,8 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       // — which pushes straight to the landing branch — is only reached for a PR merged out of band.
       let archivedByNewFlow = false;
       let newFlowArchivedAs: string | null = null;
+      // VS-770: what the post-merge branch cleanup needs, captured where the pull request is known.
+      let cleanupTarget: { project: Project; branch: string; prUrl: string } | null = null;
       if (t.projectId) {
         let project: Project | null = null;
         try { project = deps().projects.get(t.projectId); } catch { project = null; }
@@ -1738,6 +1817,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
               if (pr?.url) {
                 const forge = ctx.registries.forges.get('github');
                 const state = forge ? await forge.prState(p.clonePath, pr.url).catch(() => null) : null;
+                cleanupTarget = { project: p, branch, prUrl: pr.url };
                 if (state && state.state === 'closed') {
                   throw new OcError('merge_unverified', `pull request is closed, not merged`, { forgeState: state.state, prUrl: pr.url });
                 }
@@ -1909,6 +1989,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       propagateTerminal(next, actor);
       // The slot this ticket held is free: the next ticket in the project's queue merges now (§11.4).
       await mergeQueue.pump(t.projectId);
+      if (cleanupTarget) await deleteMergedBranch(next, cleanupTarget, actor);
       if (t.projectId) { const pid = t.projectId; schedule(100, 'spec reindex after merge', () => deps().specs.index(pid)); }
       log.info({ ticketId: t.id, archivedAs, skipped }, 'ticket merged');
       return next;

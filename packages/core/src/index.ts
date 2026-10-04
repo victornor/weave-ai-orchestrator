@@ -34,6 +34,8 @@ export * from './workspace/index.js';
 export { registerBuiltinWorktreeProviders, GitWorktreeProvider, WorktrunkProvider, landedWorkTest, renderWtConfig, writeWtConfig, type LandedInput, type LandedVerdict } from './worktrees/index.js';
 export { listScratchTrees, sweepScratchWorktrees, activeScratchWorktrees, scratchRoot, SCRATCH_STALE_MS, type ScratchTarget, type ScratchLand, type ScratchTreeInfo, type ScratchClone } from './tickets/scratch.js';
 export { registerBuiltinForges, GhForge } from './forge/index.js';
+// VS-770: the demo daemon marks its seeded running runs as executing, as the engine would.
+export { runState } from './runs/active.js';
 export { createPromotionService } from './promotion/index.js';
 export { humanName, buildTurnPrompt, renderTemplate, renderCharter, renderBrief, renderWorkerInstructions, renderConductorInstructions, humanSelectionNotice, dictatedNotice, withDictatedNotice, VOICE_DICTATED_NOTICE, flattenWakes, type TurnPromptOptions } from './prompts/index.js';
 export { createSessions, type SessionsService, type SessionRow } from './sessions/index.js';

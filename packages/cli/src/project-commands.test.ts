@@ -232,3 +232,44 @@ describe('weave project retry', () => {
     expect(out).toContain('project added api');
   });
 });
+
+describe('weave project prune-branches (VS-770)', () => {
+  const result = (dryRun: boolean) => ({
+    dryRun, candidates: [{ branch: 'ac/vs-1-x', ticket: 'VS-1', sha: 'a'.repeat(40) }], deleted: dryRun ? [] : ['ac/vs-1-x'],
+    kept: [{ branch: 'ac/vs-2-y', reason: 'newer commits' }], failed: [],
+  });
+
+  it('--dry-run sends dryRun:true and lists without claiming a deletion', async () => {
+    routes['POST /api/w/ws1/projects/api/prune-branches'] = () => ({ body: result(true) });
+    const { out } = await cli('project', 'prune-branches', 'api', '--dry-run');
+    expect(calls.find((c) => c.path.endsWith('/prune-branches'))?.body).toEqual({ dryRun: true });
+    expect(out).toContain('ac/vs-1-x');
+    expect(out).toContain('would be deleted');
+    expect(out).not.toContain('deleted 1');
+  });
+
+  it('without --dry-run sends dryRun:false and reports the deletions', async () => {
+    routes['POST /api/w/ws1/projects/api/prune-branches'] = () => ({ body: result(false) });
+    const { out } = await cli('project', 'prune-branches', 'api');
+    expect(calls.find((c) => c.path.endsWith('/prune-branches'))?.body).toEqual({ dryRun: false });
+    expect(out).toContain('deleted 1 branch(es)');
+  });
+});
+
+describe('weave demo (VS-770)', () => {
+  it('refuses the live daemon port without starting anything', async () => {
+    const { err } = await cli('demo', '--port', '7433');
+    expect(err).toContain('7433');
+    expect(process.exitCode).toBeGreaterThan(0);
+  });
+});
+
+describe('weave demo server resolution (VS-770)', () => {
+  it('uses the server build beside the CLI, never an installed release that would ignore --demo', async () => {
+    const { siblingServerBin } = await import('./commands/demo.js');
+    // A checkout that has not been built (CI's test job) has no server build to find, and says so.
+    let found: string | null = null;
+    try { found = siblingServerBin(); } catch (e) { expect(String(e instanceof Error ? e.message : e)).toContain('no demo mode'); }
+    if (found) expect(found).toMatch(/packages\/server\/dist\/bin\.js$/);
+  });
+});

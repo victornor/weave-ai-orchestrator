@@ -109,6 +109,11 @@ export interface TicketsService {
   artifacts(projectId: string | null): Array<{ id: string; ticketId: string; ticketIdentifier: string; ticketTitle: string; key: string; title: string | null; metadata: Record<string, unknown>; url: string | null; previewable: boolean; updatedAt: string }>;
   /** Async: archives the OpenSpec change after the merge is verified (PLAN §12.2). */
   mergeDone(actor: Actor, id: string, info: { mergeCommit?: string; method?: string }): Promise<S.Ticket>;
+  /**
+   * VS-770: deletes remote branches of done or cancelled tickets whose head is contained in what
+   * landed (same rules as the post-merge cleanup). With `dryRun` it only lists the candidates.
+   */
+  pruneBranches(actor: Actor, projectId: string, opts: { dryRun: boolean }): Promise<{ dryRun: boolean; candidates: Array<{ branch: string; ticket: string; sha: string }>; deleted: string[]; kept: Array<{ branch: string; reason: string }>; failed: Array<{ branch: string; error: string }> }>;
   /** The per-project merge queue that decides which approved ticket merges now (PLAN §11.4). */
   mergeQueue: MergeQueueService;
   /** Liveness scan helper: tickets in active statuses without an action path. */

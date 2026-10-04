@@ -153,6 +153,7 @@ Keys:   proposalApproval=human|conductor|none   mergeMethod=squash|merge|rebase
         taskApproval=human|conductor|none       archiveCommit=push|pr|local
         requireCi=true|false                    mergeConcurrency=<1-8>
         yolo=true|false                         (YOLO mode for this project; off unless set)
+        deleteBranchAfterMerge=true|false       (delete the remote branch after merge; on unless set)
 Example: weave project set-policy api deliveryMode=pr requireCi=false`)
     .action(async (id: string, assignments: string[], _opts: unknown, command: Command) => run(async () => {
       const { client } = await session(command);
@@ -168,6 +169,27 @@ Example: weave project set-policy api deliveryMode=pr requireCi=false`)
       emit(updated, () => {
         write(`${style.ok('updated')} ${id} policies`);
         fields(Object.entries(policies).map(([k, v]) => [k, String(v)] as [string, string]));
+      });
+    }));
+
+  project
+    .command('prune-branches')
+    .argument('<project>', 'project id')
+    .description("delete remote branches of done or cancelled tickets whose head is contained in what landed (VS-770)")
+    .option('--dry-run', 'list the branches that would be deleted and delete nothing')
+    .action(async (id: string, opts: Record<string, boolean>, command: Command) => run(async () => {
+      const dryRun = opts['dryRun'] === true;
+      const { client } = await session(command);
+      const r = await client.wpost<PruneResult>(`/projects/${encodeURIComponent(id)}/prune-branches`, { dryRun });
+      emit(r, () => {
+        table(r.candidates, [
+          { header: 'BRANCH', get: (b) => b.branch },
+          { header: 'TICKET', get: (b) => b.ticket },
+          { header: 'HEAD', get: (b) => b.sha.slice(0, 12) },
+        ]);
+        if (dryRun) write(style.dim(`${r.candidates.length} branch(es) would be deleted; ${r.kept.length} kept. Re-run without --dry-run to delete.`));
+        else write(`${style.ok('deleted')} ${r.deleted.length} branch(es); ${r.kept.length} kept${r.failed.length ? `; ${r.failed.length} failed` : ''}`);
+        for (const f of r.failed) writeErr(`${f.branch}: ${f.error}`);
       });
     }));
 
@@ -193,6 +215,12 @@ function coerce(value: string): unknown {
   if (value === 'false') return false;
   if (/^-?\d+$/.test(value)) return Number(value);
   return value;
+}
+
+/** What `POST /projects/:id/prune-branches` answers (VS-770). */
+interface PruneResult {
+  dryRun: boolean; candidates: Array<{ branch: string; ticket: string; sha: string }>; deleted: string[];
+  kept: Array<{ branch: string; reason: string }>; failed: Array<{ branch: string; error: string }>;
 }
 
 /** What `POST /projects` and `POST /projects/:id/retry` answer: the row, and the job doing the rest. */

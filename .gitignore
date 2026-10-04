@@ -12,3 +12,4 @@ coverage/
 docs/design/*
 !docs/design/v2/
 docs/research/
+demo-screenshots/

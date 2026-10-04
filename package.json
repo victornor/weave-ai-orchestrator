@@ -14,12 +14,15 @@
     "test": "node scripts/test.mjs",
     "lint": "node scripts/guard-boundaries.mjs && node scripts/guard-console.mjs && node scripts/guard-test-fixtures.mjs",
     "dev": "pnpm --filter @weave-ai/server run dev",
-    "weave": "node packages/cli/dist/bin.js"
+    "weave": "node packages/cli/dist/bin.js",
+    "demo:screenshots": "node scripts/demo-screenshots.mjs",
+    "demo": "node packages/server/dist/bin.js --demo"
   },
   "devDependencies": {
-    "typescript": "^5.9.2",
-    "vitest": "^3.2.4",
+    "@types/node": "^24.5.2",
+    "playwright-core": "^1.63.0",
     "tsx": "^4.20.5",
-    "@types/node": "^24.5.2"
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
   }
 }

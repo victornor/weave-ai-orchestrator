@@ -94,6 +94,11 @@ export function projectRoutes(): Hono<AppEnv> {
   app.post('/:id/retry', (c) => c.json(c.get('ws').services.projects.retryAdd(c.get('actor'), c.req.param('id')), 202));
   app.patch('/:id', async (c) => c.json(await c.get('ws').services.projects.update(c.get('actor'), c.req.param('id'), await body(c, ProjectConfigSchema.partial().strict()))));
   app.delete('/:id', async (c) => { await c.get('ws').services.projects.remove(c.get('actor'), c.req.param('id')); return c.json({ ok: true }); });
+  // VS-770: delete the remote branches of done or cancelled tickets that are contained in what landed. `dryRun` (the default) only lists them.
+  app.post('/:id/prune-branches', async (c) => {
+    const { dryRun } = await body(c, z.object({ dryRun: z.boolean().default(true) }).strict());
+    return c.json(await c.get('ws').services.tickets.pruneBranches(c.get('actor'), c.req.param('id'), { dryRun }));
+  });
   app.post('/:id/fetch', async (c) => c.json(await c.get('ws').services.projects.fetch(c.req.param('id'))));
   /** Read-only (VS-131): classifies the clone against its remote without checkout or merge. */
   // VS-568: how far the landing branch is ahead of the default branch, and which tickets wait.

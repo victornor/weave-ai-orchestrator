@@ -41,7 +41,7 @@ const run = (key: string): string => demoId(`run:${key}`);
 export const SHOTS: ShotSpec[] = [
   { name: 'chat', path: '/w/{ws}/chat', settleMs: 800 },
   { name: 'needs', path: '/w/{ws}/needs' },
-  { name: 'work-board', path: '/w/{ws}/work' },
+  { name: 'work-board', path: '/w/{ws}/work', settleMs: 2500 },
   { name: 'roles', path: '/w/{ws}/roles' },
   { name: 'project-storefront', path: '/w/{ws}/p/storefront' },
   { name: 'project-ledger', path: '/w/{ws}/p/ledger' },

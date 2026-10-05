@@ -79,6 +79,7 @@ const TICKETS: TicketSpec[] = [
   { n: 22, project: 'pocket', role: 'release', kind: 'operational', status: 'todo', title: 'Submit Pocket 4.2 to the app stores', summary: 'Release 4.2 to both stores.', description: 'Submit the 4.2 build to review on iOS and start the Android staged rollout.', priority: 'high', createdAgo: 500, action: C.ACTION_APP_STORES },
   { n: 23, project: 'pocket', role: 'mobile', kind: 'task', status: 'todo', title: 'Document the release checklist', summary: 'Write down what a release needs.', description: 'Turn the release steps into a checklist in the project knowledge base.', priority: 'low', createdAgo: 400 },
   { n: 24, project: 'pocket', role: 'mobile', kind: 'change', status: 'proposed', title: 'Push notification preferences', summary: 'Shoppers choose which notifications they get.', description: 'Order updates, price drops and promotions, each on its own switch.', priority: 'medium', createdAgo: 300, worker: 'active', plan: C.PLAN_PUSH_PREFS },
+  { n: 25, project: 'ledger', role: 'backend', kind: 'change', status: 'in_review', title: 'Cursor pagination for ledger exports', summary: 'Large exports stream in pages instead of timing out.', description: 'Replace offset pagination on the export endpoint with an opaque cursor so large ledgers export without timeouts.', priority: 'medium', createdAgo: 2 * 1440, pr: 219, prState: 'open', worker: 'active', comments: [['agent', 'agent', 'PR is up and CI is running. Exports of 2 million rows now stream in 5,000-row pages, and the old offset parameter still works for existing callers.', 30]] },
 ];
 
 const changeNameOf = (t: TicketSpec): string => `lum-${t.n}-${t.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40).replace(/-$/, '')}`;
@@ -209,7 +210,7 @@ export function seedLumen(c: SeedContext): SeedResult {
       decision(`plan:${t.n}`, { kind: 'plan_approval', title: `Approve the plan for ${WS.prefix}-${t.n}: ${t.title}`, context: t.summary, optionsJson: planOptions, targetJson: { documentId: planDoc.docId, revision: planDoc.rev }, correlationKey: `plan_approval:${tid}`,
         ...(t.n === 4 ? { weaverReviewStatus: 'looked', weaverReviewedAt: ago(25), weaverReviewNote: 'The plan matches the ask and the merge rule for conflicting carts is explicit. No concerns.' } : {}) });
     }
-    if (t.status === 'in_review') {
+    if (t.status === 'in_review' && t.n !== 25) {
       decision(`merge:${t.n}`, { kind: 'merge_approval', title: `Approve the merge for ${WS.prefix}-${t.n}: ${t.title}`, context: `Work product: ${prUrl}`, optionsJson: [{ key: 'approve', label: 'Approve merge', recommended: true }, { key: 'changes', label: 'Request changes', description: 'Send it back to the worker.' }], correlationKey: `merge_approval:${tid}`,
         ...(t.n === 18 ? { weaverReviewStatus: 'concerns', weaverReviewedAt: ago(40), weaverReviewNote: 'The biometric prompt is not shown on devices without enrolled biometrics; the fallback path has no test.', weaverReviewWaitingOn: 'worker' } : {}) });
     }
@@ -298,6 +299,13 @@ export function eventRows(db: Db, runId: string, script: ScriptedEvent[], starte
 const projectOfTicket = (ticketId: string): string | null => TICKETS.find((t) => id(`ticket:${t.n}`) === ticketId)?.project ?? null;
 const kindOfTicket = (ticketId: string): string | null => TICKETS.find((t) => id(`ticket:${t.n}`) === ticketId)?.kind ?? null;
 
+const DELIVERED: Record<number, string> = {
+  3: 'Opened the PR: shipping and tax are broken out; layout holds to 320px.',
+  10: 'Capture writes now store the idempotency key in the same transaction.',
+  18: 'Biometric prompt falls back to the passcode after three failed attempts.',
+  25: 'PR is up; waiting for CI.',
+};
+
 function seedRuns(db: Db, workspaceId: string, root: string, projectIds: Record<string, string>, roleIds: Record<string, string>, weaverId: string, tickets: Record<string, string>, workerOf: Record<number, string>): void {
   const rand = rng(7);
   const mk = (key: string, agentId: string, ticketId: string | null, status: string, startedAgo: number, minutes: number, opts: { model?: string; runtime?: string; summary?: string; events?: number; script?: ScriptedEvent[]; errorCode?: string } = {}): string => {
@@ -321,9 +329,15 @@ function seedRuns(db: Db, workspaceId: string, root: string, projectIds: Record<
   mk('w5:live', live(5), tickets['LUM-5']!, 'running', 9, 0, { events: 6 });
   mk('w6:live', live(6), tickets['LUM-6']!, 'running', 22, 0, { events: 9 });
   mk('w11:live', live(11), tickets['LUM-11']!, 'running', 14, 0, { events: 5 });
-  mk('weaver:live', weaverId, null, 'running', 2, 0, { script: WEAVER_SCRIPT, events: 3 });
+  mk('weaver:live', weaverId, null, 'running', 2, 0, { script: WEAVER_SCRIPT, events: 5 });
   // finished
-  for (const n of [1, 2, 3, 10, 13, 14, 18, 21]) mk(`w${n}:a`, live(n), tickets[`LUM-${n}`]!, 'succeeded', n * 90 + 120, 14 + (n % 9), { summary: `Delivered LUM-${n}.`, model: n % 3 === 0 ? 'claude-opus-5-5' : 'claude-sonnet-5-5' });
+  for (const n of [1, 2, 3, 10, 13, 14, 18, 21, 25]) mk(`w${n}:a`, live(n), tickets[`LUM-${n}`]!, 'succeeded', n * 90 + 120, 14 + (n % 9), { summary: DELIVERED[n] ?? `Delivered LUM-${n}.`, model: n % 3 === 0 ? 'claude-opus-5-5' : 'claude-sonnet-5-5' });
+  mk('w5:a', live(5), tickets['LUM-5']!, 'succeeded', 60, 6, { summary: 'Reproduced the badge drift; fixing the selector next.' });
+  mk('w6:a', live(6), tickets['LUM-6']!, 'succeeded', 70, 8, { summary: 'Pulled the Friday traces; the jump lines up with the tax lookup deploy.' });
+  mk('w11:a', live(11), tickets['LUM-11']!, 'succeeded', 80, 7, { summary: 'Plan approved; the change stays inside the limiter.' });
+  mk('w8:a', live(8), tickets['LUM-8']!, 'succeeded', 500, 12, { summary: 'Plan approved. Adding the locale to the cache key next.' });
+  mk('w9:a', live(9), tickets['LUM-9']!, 'succeeded', 650, 8, { summary: 'Commands written; waiting for your approval before anything runs.' });
+  mk('w24:a', live(24), tickets['LUM-24']!, 'succeeded', 420, 10, { summary: 'Plan written and submitted for approval.' });
   mk('w4:a', live(4), tickets['LUM-4']!, 'succeeded', 1200, 11, { summary: 'Plan written and submitted for approval.' });
   mk('w7:a', live(7), tickets['LUM-7']!, 'succeeded', 800, 9, { summary: 'Plan revised after feedback.' });
   mk('w12:a', live(12), tickets['LUM-12']!, 'succeeded', 400, 6, { summary: 'Blocked: needs read access to the production replica.' });

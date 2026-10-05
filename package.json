@@ -16,6 +16,7 @@
     "dev": "pnpm --filter @weave-ai/server run dev",
     "weave": "node packages/cli/dist/bin.js",
     "demo:screenshots": "node scripts/demo-screenshots.mjs",
+    "scan:secrets": "node scripts/scan-secrets.mjs",
     "demo:readme-images": "node scripts/demo-readme-images.mjs",
     "demo": "node packages/server/dist/bin.js --demo"
   },

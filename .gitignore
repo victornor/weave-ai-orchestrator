@@ -13,3 +13,28 @@ docs/design/*
 !docs/design/v2/
 docs/research/
 demo-screenshots/
+
+# Secrets, local config and stray output (VS-774). `.env` alone missed `.env.local`, key material,
+# local databases and scratch files.
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.sqlite
+*.sqlite3
+*.db
+*.db-shm
+*.db-wal
+*.log
+*.orig
+*.rej
+*.swp
+*~
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.review-screenshots/
+gitleaks-report.json

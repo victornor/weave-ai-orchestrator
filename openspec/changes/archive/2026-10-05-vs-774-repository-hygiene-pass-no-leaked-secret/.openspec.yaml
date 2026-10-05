@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-05
+goal: Repository hygiene pass - no leaked secrets or personal/host details in the tree or history, and nothing stray left in the repo
+skip_specs: true

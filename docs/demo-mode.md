@@ -30,7 +30,7 @@ daemon runs the same `packages/server/dist/bin.js`.
 ## What is in it
 
 A fictional company, **Lumen Labs**, with three projects (Storefront, Ledger API, Pocket App), seven
-roles, and 24 tickets: every status (backlog through done and cancelled) and every kind (change, task,
+roles, and 25 tickets: every status (backlog through done and cancelled) and every kind (change, task,
 scout, question, operational). There are workers running, idle, paused and errored; plan, merge,
 action, hire and promotion approvals, unseen, reviewed and held, plus questions with options and inputs;
 a conversation with the weaver; runs with transcripts; 30 days of usage; incidents; scheduled tasks; a
@@ -72,6 +72,22 @@ chromium`), else a system `chromium` or `google-chrome`. Desktop is 1440x900; ph
 
 The command exits non-zero if any page logs a console or page error or a request fails, and says which.
 
+## README images
+
+```
+pnpm build
+pnpm demo:readme-images                       # captures, composes, writes docs/images/readme/*.jpg
+pnpm demo:readme-images --from ~/shots        # compose from desktop captures you already have
+pnpm demo:readme-images --only chat,usage --out ~/preview
+```
+
+`scripts/demo-readme-images.mjs` takes each page listed in its `PAGES` array, captures it at desktop size in
+light and dark (through the same capture as above), cuts the two along one diagonal (light left, dark right,
+aligned pixel for pixel), and puts the result in a window frame on a gradient that reads on GitHub's light and
+dark themes. It is plain HTML rendered by Chromium; there is no image library to install. The images are
+JPEGs of about 150 KB each, and are committed. Regenerate them after a UI change, then review the result by eye.
+To feature another page, add it to `PAGES` and to the README.
+
 ## Add a view
 
 Add an entry to `SHOTS` in `packages/server/src/demo/manifest.ts`:
@@ -96,5 +112,6 @@ seed lacks, add it in `src/demo/seed.ts` and keep ids label-derived (`id('thing:
 | `src/demo/knowledge.ts` | knowledge pages, written through the knowledge service |
 | `src/demo/adapters.ts`, `script.ts` | the pretend runtime and forge, the live-progress player |
 | `src/demo/manifest.ts`, `capture.ts`, `scripts/demo-screenshots.mjs` | the screenshots |
+| `scripts/demo-readme-images.mjs` | the framed light/dark README images |
 
 All under `packages/server/`.

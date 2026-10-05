@@ -1,7 +1,7 @@
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 import type { RuntimeAdapter, RuntimeModel, TurnResult } from '@weave-ai/runtime-sdk';
 import { runState, type Registries } from '@weave-ai/core';
-import { DEMO_NOW_MS } from './clock.js';
+import { ago, DEMO_NOW_MS } from './clock.js';
 import { scriptFor } from './script.js';
 import type { WorkspaceRuntime } from '../types.js';
 
@@ -60,21 +60,20 @@ const TICK_MS = 1_500;
 /**
  * VS-770: the scripted live progress. Each tick appends the next scripted event to every run the seed
  * left `running` — persisted, so a page opened mid-run reads it, and broadcast as the live `run.event`
- * frame a watching page follows. Timestamps count up from the demo's fixed "now" so they never depend
- * on the wall clock.
+ * frame a watching page follows. Timestamps sit just before the demo's fixed "now" so they never depend
+ * on the wall clock. The weaver's run is not played: it rests on a pending tool call, so the chat reads as
+ * a turn in progress rather than one that flickers.
  */
 export function startDemoPlayer(workspaces: Map<string, WorkspaceRuntime>): { stop(): void } {
   const cursors = new Map<string, number>();
-  let ticks = 0;
   const timer = setInterval(() => {
-    ticks += 1;
     for (const ws of new Set(workspaces.values())) {
       let running: Array<{ id: string; kind: string; agentId: string; projectSlug: string | null; ticketKind: string | null }> = [];
       try {
         running = ws.ctx.db.all<{ id: string; kind: string; agentId: string; projectSlug: string | null; ticketKind: string | null }>(
           `SELECT r.id AS id, a.kind AS kind, a.id AS agent_id, p.slug AS project_slug, t.kind AS ticket_kind
              FROM runs r JOIN agents a ON a.id = r.agent_id LEFT JOIN projects p ON p.id = a.project_id LEFT JOIN tickets t ON t.id = r.ticket_id
-            WHERE r.status = 'running' ORDER BY r.id`,
+            WHERE r.status = 'running' AND a.kind != 'weaver' ORDER BY r.id`,
         );
       } catch { continue; }
       for (const run of running) {
@@ -84,9 +83,13 @@ export function startDemoPlayer(workspaces: Map<string, WorkspaceRuntime>): { st
         const script = scriptFor(run.kind, run.projectSlug, run.ticketKind);
         // Continue from where the persisted history stops, so the first tick follows the last seeded event.
         const at = cursors.get(run.id) ?? (ws.ctx.db.get<{ n: number }>('SELECT COUNT(*) n FROM run_events WHERE run_id = ?', [run.id])?.n ?? 0);
+        // A script plays once and then holds on its last event, so a long-open page never shows a loop.
+        if (at >= script.length) continue;
         cursors.set(run.id, at + 1);
-        const ev = script[at % script.length]!;
-        const ts = new Date(DEMO_NOW_MS + ticks * TICK_MS).toISOString();
+        const ev = script[at]!;
+        // Stamped a few seconds before the demo's "now", not after it: a page's clock starts at that instant,
+        // so a later stamp reads as the future and every live clock would sit at "0 s".
+        const ts = ago(0.15);
         try {
           const seq = (ws.ctx.db.get<{ n: number }>('SELECT COALESCE(MAX(seq),0) n FROM run_events WHERE run_id = ?', [run.id])?.n ?? 0) + 1;
           const stream = ev.stream ?? 'runtime';

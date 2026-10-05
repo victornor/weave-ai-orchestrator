@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { chromium } from 'playwright-core';
 import { startDemo, type DemoHandle } from './index.js';
 import { capture } from './capture.js';
+import { demoId } from './ids.js';
 import { PRIMARY_WORKSPACE, SHOTS } from './manifest.js';
 
 const uiDist = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'ui', 'dist');
@@ -71,10 +72,17 @@ describe('the demo daemon (VS-770)', () => {
   it('keeps its running runs moving: the player appends scripted events', async () => {
     const runs = (await get(`/api/w/${PRIMARY_WORKSPACE}/runs?status=running`)).body as { items: Array<{ id: string }> };
     expect(runs.items.length).toBeGreaterThanOrEqual(3);
-    const before = ((await get(`/api/w/${PRIMARY_WORKSPACE}/runs/${runs.items[0]!.id}/events`)).body as unknown[]).length;
+    // The weaver's run rests on a pending tool call, and a script that has played out holds: what moves is
+    // the total across the workers' runs.
+    const played = runs.items.filter((r) => r.id !== demoId('run:weaver:live'));
+    const total = async (): Promise<number> => {
+      let n = 0;
+      for (const r of played) n += ((await get(`/api/w/${PRIMARY_WORKSPACE}/runs/${r.id}/events`)).body as unknown[]).length;
+      return n;
+    };
+    const before = await total();
     await new Promise((r) => setTimeout(r, 3_500));
-    const after = ((await get(`/api/w/${PRIMARY_WORKSPACE}/runs/${runs.items[0]!.id}/events`)).body as unknown[]).length;
-    expect(after).toBeGreaterThan(before);
+    expect(await total()).toBeGreaterThan(before);
   }, 15_000);
 
   it.skipIf(!browserReady)('renders every manifest route without a page error or a failed request', async () => {

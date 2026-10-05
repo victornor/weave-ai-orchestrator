@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-10-05
+goal: README marketing screenshots (every page, light/dark split view, framed on
+  a background) and a complete README rewrite
+skip_specs: true

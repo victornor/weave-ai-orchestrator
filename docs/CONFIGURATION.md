@@ -204,5 +204,5 @@ export default definePlugin({
 });
 ```
 
-The full authoring guide is [`docs/PLUGINS.md`](docs/PLUGINS.md); a complete worked example —
-a tool, storage, a route, and a page — is [`examples/plugins/notes/`](examples/plugins/notes/).
+The full authoring guide is [`docs/PLUGINS.md`](PLUGINS.md); a complete worked example —
+a tool, storage, a route, and a page — is [`examples/plugins/notes/`](../examples/plugins/notes/).

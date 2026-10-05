@@ -1,0 +1,23 @@
+# Secret-scan config for `pnpm scan:secrets` (VS-774). Extends gitleaks' default rules; the
+# allowlist below is every known false positive, matched on the exact line so a real secret
+# written beside one still fires. Each entry is a deliberate test fixture (a fake token the
+# redaction tests must see) or a storage key whose variable name merely contains "KEY".
+title = "weave-ai gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake credentials and storage-key names used as test fixtures and constants"
+condition = "OR"
+regexTarget = "line"
+regexes = [
+  '''const KEY = 'sk-live-abcdef123456''',
+  '''const KEY = 'sk-chaos-secret-key-987''',
+  '''const SECRET = 'sk-live-0123456789''',
+  '''use [AO]C_RUN_TOKEN=rt_abc123def456ghi789''',
+  '''key = 'vs382_yolo_migrated''',
+  '''Bearer abcdefghijklmnop''',
+  '''const KEY = 'conductor\.live\.cellSizes\.ws1''',
+  '''LIVE_COLUMNS_KEY = 'weave\.v2\.live\.columns''',
+]

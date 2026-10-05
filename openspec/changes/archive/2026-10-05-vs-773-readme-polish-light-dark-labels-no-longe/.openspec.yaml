@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-05
+goal: README framed screenshots keep the Light/Dark labels off the page content; list Cursor among the coding CLIs
+skip_specs: true

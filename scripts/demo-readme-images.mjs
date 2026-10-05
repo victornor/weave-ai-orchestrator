@@ -4,6 +4,7 @@
 // With no --from it runs `pnpm demo:screenshots` (desktop, both themes) into a temp directory first, so
 // one command regenerates every image from scratch. With --from it composes from a folder that already
 // holds `<name>--desktop--light.png` and `<name>--desktop--dark.png`.
+// The Light and Dark labels sit on the background below the window, so they never cover the page.
 // Each image is the same page twice: light on the left, dark on the right, cut by one diagonal, with the
 // two halves aligned pixel for pixel, inside a window frame on a gradient that reads on GitHub's light
 // and dark themes. Pure HTML rendered by Chromium (playwright-core): no image library to install.
@@ -58,18 +59,18 @@ body{width:${CANVAS.w}px;height:${CANVAS.h}px;overflow:hidden;font:600 13px/1 sy
 .stage img{position:absolute;left:0;top:0;width:${SHOT.w}px;height:${SHOT.h}px;display:block}
 .dark{clip-path:${clip}}
 svg{position:absolute;left:0;top:0}
-.tag{position:absolute;bottom:18px;padding:7px 12px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;backdrop-filter:blur(6px)}
-.tag.l{left:18px;background:rgba(255,255,255,.88);color:#23232b;box-shadow:0 0 0 1px rgba(0,0,0,.12)}
-.tag.d{right:18px;background:rgba(20,20,26,.88);color:#f2f2f6;box-shadow:0 0 0 1px rgba(255,255,255,.18)}
+.tag{position:absolute;top:${PAD.top + BAR + SHOT.h + 36}px;padding:7px 12px;border-radius:999px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;backdrop-filter:blur(6px)}
+.tag.l{left:${PAD.x}px;background:rgba(255,255,255,.88);color:#23232b;box-shadow:0 0 0 1px rgba(0,0,0,.12)}
+.tag.d{right:${PAD.x}px;background:rgba(20,20,26,.88);color:#f2f2f6;box-shadow:0 0 0 1px rgba(255,255,255,.18)}
 </style>
 <div class="win">
   <div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><span class="t">${title}</span></div>
   <div class="stage">
     <img src="${light}"><img class="dark" src="${dark}">
     <svg width="${SHOT.w}" height="${SHOT.h}"><line x1="${top * SHOT.w}" y1="0" x2="${bottom * SHOT.w}" y2="${SHOT.h}" stroke="rgba(255,255,255,.9)" stroke-width="2"/></svg>
-    <span class="tag l">Light</span><span class="tag d">Dark</span>
   </div>
-</div>`;
+</div>
+<span class="tag l">Light</span><span class="tag d">Dark</span>`;
 }
 
 async function launch() {

@@ -45,6 +45,11 @@ import { registerDemoAdapters, startDemoPlayer } from './demo/adapters.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const log = getLogger('daemon');
 
+/** VS-783: an interface IP (Tailscale's) can be assigned after the daemon starts; wait this long for it. */
+const LISTEN_WAIT_TIMEOUT_MS = 60_000;
+const LISTEN_WAIT_INITIAL_DELAY_MS = 500;
+const LISTEN_WAIT_MAX_DELAY_MS = 5_000;
+
 const RUNTIME_PACKAGES = ['@weave-ai/runtime-claude', '@weave-ai/runtime-codex', '@weave-ai/runtime-opencode', '@weave-ai/runtime-gemini', '@weave-ai/runtime-cursor', '@weave-ai/runtime-weave'];
 const CHANNEL_PACKAGES = ['@weave-ai/channel-web', '@weave-ai/channel-cli', '@weave-ai/channel-telegram'];
 const SURFACE_PACKAGES = ['@weave-ai/surface-headless', '@weave-ai/surface-tmux', '@weave-ai/surface-herdr', '@weave-ai/surface-hyprland'];
@@ -80,6 +85,13 @@ export interface StartOptions {
    * so nothing can start an agent, run git against a remote or reach the network.
    */
   demo?: boolean;
+  /**
+   * VS-783: how long, and how fast, the public listener waits for a not-yet-assigned listen address
+   * (`EADDRNOTAVAIL`) before the start fails. Unset, the shipped `LISTEN_WAIT_*` values apply.
+   * `hostForAttempt` is a test-only seam: it picks the host to bind on each attempt (0-based), so a
+   * test can make an address "appear" after a delay without owning a real interface IP.
+   */
+  listenWait?: { timeoutMs?: number; initialDelayMs?: number; maxDelayMs?: number; hostForAttempt?: (attempt: number) => string };
 }
 
 export interface DaemonHandle {
@@ -176,7 +188,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const startPublic = async (): Promise<void> => {
     if (publicServer) return;
     const tls = await tlsOptions(daemonCfg, configDir, opts.tailscale);
-    publicServer = await listen(app.fetch as never, { host, port, tls });
+    publicServer = await listen(app.fetch as never, { host, port, tls }, opts.listenWait);
     // VS-765: a renewed certificate reaches new handshakes through the running listener; nothing closes.
     if (tls?.renewal) {
       const server = publicServer as unknown as { setSecureContext(o: { cert: string; key: string }): void };
@@ -578,12 +590,45 @@ async function startLoopbackListener(): Promise<LoopbackListener> {
   };
 }
 
-async function listen(fetch: (req: Request, env: unknown) => Response | Promise<Response>, o: { host: string; port: number; tls: { cert: string; key: string } | null }): Promise<ServerType> {
+async function listen(
+  fetch: (req: Request, env: unknown) => Response | Promise<Response>,
+  o: { host: string; port: number; tls: { cert: string; key: string } | null },
+  wait: StartOptions['listenWait'] = {},
+): Promise<ServerType> {
   const server = o.tls
     ? createAdaptorServer({ fetch: fetch as never, createServer: createHttpsServer, serverOptions: { cert: o.tls.cert, key: o.tls.key } })
     : createAdaptorServer({ fetch: fetch as never, createServer: createHttpServer });
-  await new Promise<void>((res, rej) => { server.once('error', rej); server.listen(o.port, o.host, () => res()); });
+  await listenWithWait(
+    (attempt) => new Promise<void>((res, rej) => { server.once('error', rej); server.listen(o.port, wait.hostForAttempt?.(attempt) ?? o.host, () => { server.off('error', rej); res(); }); }),
+    { host: o.host, ...wait },
+  );
   return server;
+}
+
+/**
+ * VS-783: run `bind` until it succeeds. Only `EADDRNOTAVAIL` — the address is not assigned yet — is
+ * retried, with a doubling delay, for at most `timeoutMs`; the error that ends the wait is the last
+ * `EADDRNOTAVAIL` itself, so a start that never gets its address fails exactly as it did before. Any
+ * other error (`EADDRINUSE`, `EACCES`, ...) rejects at once. One info line, on the first failure.
+ */
+export async function listenWithWait(
+  bind: (attempt: number) => Promise<void>,
+  o: { host: string; timeoutMs?: number; initialDelayMs?: number; maxDelayMs?: number },
+): Promise<void> {
+  const timeoutMs = o.timeoutMs ?? LISTEN_WAIT_TIMEOUT_MS;
+  const maxDelayMs = o.maxDelayMs ?? LISTEN_WAIT_MAX_DELAY_MS;
+  let delay = o.initialDelayMs ?? LISTEN_WAIT_INITIAL_DELAY_MS;
+  const deadline = Date.now() + timeoutMs;
+  for (let attempt = 0; ; attempt++) {
+    try { return await bind(attempt); }
+    catch (e) {
+      const remaining = deadline - Date.now();
+      if ((e as NodeJS.ErrnoException)?.code !== 'EADDRNOTAVAIL' || remaining <= 0) throw e;
+      if (attempt === 0) log.info({ host: o.host, timeoutMs }, `waiting for listen address ${o.host} to become available`);
+      await new Promise((r) => setTimeout(r, Math.min(delay, remaining)));
+      delay = Math.min(delay * 2, maxDelayMs);
+    }
+  }
 }
 
 function close(server: ServerType): Promise<void> {

@@ -200,6 +200,39 @@ describe('mergeDone lands an open PR itself (VS-327)', () => {
     expect(openspecArchiveAfterMerge).not.toHaveBeenCalled();
   });
 
+  describe('a bound change that does not exist (VS-787)', () => {
+    async function branchWithoutChange(): Promise<void> {
+      await git(['checkout', '-b', BRANCH], clone);
+      await commit(clone, 'a.ts', 'export const a = 1;\n', 'feat: a');
+      await git(['push', 'origin', BRANCH], clone);
+      await git(['checkout', 'main'], clone);
+    }
+
+    it('lands a task ticket and notes that the archive was skipped', async () => {
+      await branchWithoutChange();
+      const ticketId = await fileMergingTicket('task', 'fix-the-thing');
+      const forge = openPrForge();
+      h.ctx.registries.forges.set('github', forge);
+
+      const next = await tickets.mergeDone(AGENT, ticketId, {});
+      expect(next.status).toBe('done');
+      expect(forge.mergePr).toHaveBeenCalledTimes(1);
+      expect(tickets.comments(ticketId).filter((c) => c.body === 'no OpenSpec change; archive skipped')).toHaveLength(1);
+      expect(openspecArchiveAfterMerge).not.toHaveBeenCalled();
+    });
+
+    it('still blocks a change ticket', async () => {
+      await branchWithoutChange();
+      const ticketId = await fileMergingTicket('change', 'fix-the-thing');
+      const forge = openPrForge();
+      h.ctx.registries.forges.set('github', forge);
+
+      await expect(tickets.mergeDone(AGENT, ticketId, {})).rejects.toMatchObject({ code: 'openspec_archive_blocked' });
+      expect(forge.mergePr).not.toHaveBeenCalled();
+      expect(tickets.comments(ticketId).some((c) => c.body === 'no OpenSpec change; archive skipped')).toBe(false);
+    });
+  });
+
   it('still uses the old archive path for a PR merged out of band', async () => {
     await git(['checkout', '-b', BRANCH], clone);
     await commit(clone, 'a.ts', 'export const a = 1;\n', 'feat: a');

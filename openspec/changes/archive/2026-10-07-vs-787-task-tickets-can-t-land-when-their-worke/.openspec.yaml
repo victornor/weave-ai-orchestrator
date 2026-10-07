@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-10-07
+goal: Task tickets can't land when their worker never created the OpenSpec change

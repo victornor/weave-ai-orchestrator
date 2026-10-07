@@ -318,6 +318,44 @@ describe('archive-before-merge mechanics', () => {
 
     const GADGET_WHY = 'Gadgets exist so callers can rely on a gadget being present and shaped the way this capability guarantees.';
 
+    it('skips the archive when the bound change is missing and missingChangeIsOk is set (VS-787)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const forge = fakeForge();
+      const onArchiveSkipped = vi.fn();
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget,
+        changeName: 'fix-the-thing', missingChangeIsOk: true, onArchiveSkipped, forge, prUrl: 'https://example.com/pr/787', method: 'squash',
+      });
+      expect(outcome).toEqual({ kind: 'merged', mergeCommit: 'deadbeef', archivedAs: null });
+      expect(onArchiveSkipped).toHaveBeenCalledTimes(1);
+      expect(forge.mergePr).toHaveBeenCalledTimes(1);
+      await expectNoScratch();
+    });
+
+    it('still throws openspec_archive_blocked for a missing change without the opt (VS-787)', async () => {
+      await pushBranchFromClone(BRANCH);
+      const forge = fakeForge();
+      await expect(attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget,
+        changeName: 'fix-the-thing', forge, prUrl: 'https://example.com/pr/787', method: 'squash',
+      })).rejects.toMatchObject({ code: 'openspec_archive_blocked' });
+      expect(forge.mergePr).not.toHaveBeenCalled();
+      await expectNoScratch();
+    });
+
+    it('archives an existing change as before when missingChangeIsOk is set (VS-787)', async () => {
+      await seedGadgetChange(origin, 'add-gadget', GADGET_WHY);
+      await git(['pull', 'origin', 'main'], clone);
+      await pushBranchFromClone(BRANCH);
+      const onArchiveSkipped = vi.fn();
+      const outcome = await attemptArchiveThenMerge({
+        clonePath: clone, branch: BRANCH, landingBranch: 'main', scratch: scratchTarget,
+        changeName: 'add-gadget', missingChangeIsOk: true, onArchiveSkipped, forge: fakeForge(), prUrl: 'https://example.com/pr/787', method: 'squash',
+      });
+      expect(outcome).toMatchObject({ kind: 'merged', archivedAs: expect.stringContaining('add-gadget') });
+      expect(onArchiveSkipped).not.toHaveBeenCalled();
+    });
+
     it('rebuilds a conflicting archive branch from the landing tip (VS-408)', async () => {
       await seedGadgetChange(origin, 'add-gadget', GADGET_WHY);
       await git(['pull', 'origin', 'main'], clone);

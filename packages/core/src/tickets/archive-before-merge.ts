@@ -102,6 +102,14 @@ export interface ArchiveThenMergeOpts {
   landingBranch: string;
   /** Null for a ticket that carries no OpenSpec change — archiving is skipped, but staleness and the merge are still handled. */
   changeName: string | null;
+  /**
+   * VS-787: when true (a `task` ticket), a bound change that exists neither under `changes/` nor in
+   * the archive means "nothing to archive": the landing proceeds and `onArchiveSkipped` fires once.
+   * Left false, a missing change still throws `openspec_archive_blocked` (a `change` ticket).
+   */
+  missingChangeIsOk?: boolean;
+  /** VS-787: called once when the archive was skipped because the bound change does not exist. */
+  onArchiveSkipped?: () => void | Promise<void>;
   forge: ForgeAdapter;
   prUrl: string;
   method: string;
@@ -289,7 +297,9 @@ export async function attemptArchiveThenMerge(opts: ArchiveThenMergeOpts): Promi
       // which is a real error `archiveOnBranch` still needs to report (VS-327 review, PR #272).
       const stillUnarchived = existsSync(join(scratch.path, 'openspec', 'changes', changeName));
       const archivedElsewhere = !stillUnarchived ? cli.archivedDirFor(scratch.path, changeName) : null;
-      if (stillUnarchived || !archivedElsewhere) {
+      if (!stillUnarchived && !archivedElsewhere && opts.missingChangeIsOk) {
+        await opts.onArchiveSkipped?.();
+      } else if (stillUnarchived || !archivedElsewhere) {
         const result = await archiveOnBranch(scratch.path, changeName);
         archivedAs = result.archivedAs;
         changed = true;

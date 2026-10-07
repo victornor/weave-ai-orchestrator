@@ -1840,6 +1840,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
                   try {
                     outcome = await attemptArchiveThenMerge({
                       clonePath: p.clonePath, branch, landingBranch: landingBranchOf(p, t), changeName: t.openspecChangeName, forge, prUrl: pr.url, method,
+                      // VS-787: a task is often a small fix whose worker never wrote the change the
+                      // ticket was bound to; that is "nothing to archive", not a landing failure.
+                      missingChangeIsOk: t.kind === 'task',
+                      onArchiveSkipped: () => systemComment(t.id, 'no OpenSpec change; archive skipped', actor),
                       requiresCi: (p.policies as { requireCi?: boolean } | null)?.requireCi !== false,
                       // VS-393: the forge could not tell the repo has no CI, and no rollup appeared
                       // within the wait limit — merge anyway, with one line on the ticket saying so.

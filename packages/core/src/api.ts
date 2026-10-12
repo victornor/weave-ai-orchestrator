@@ -852,7 +852,8 @@ export interface AuthService {
   hasOperator(): boolean;
   setPassword(username: string, password: string): Promise<void>;
   login(input: { username: string; password: string; totp?: string; kind: S.AuthSessionKind; deviceName?: string; ip?: string; userAgent?: string }): Promise<{ token: string; sessionId: string; expiresAt: string } | { totpRequired: true }>;
-  verify(token: string): { sessionId: string; operatorId: string; kind: S.AuthSessionKind } | null;
+  /** Slides the session's expiry forward; `expiresAt` is the new one, for re-issuing the web cookie. */
+  verify(token: string): { sessionId: string; operatorId: string; kind: S.AuthSessionKind; expiresAt: string } | null;
   logout(sessionId: string): void;
   sessions(): Array<{ id: string; kind: string; deviceName: string | null; createdAt: string; lastSeenAt: string; expiresAt: string; ip: string | null; revokedAt: string | null }>;
   revoke(sessionId: string): void; revokeAll(exceptSessionId?: string): number;

@@ -1,12 +1,12 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { getConnInfo } from '@hono/node-server/conninfo';
-import { setCookie, deleteCookie } from 'hono/cookie';
+import { deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { AUTH_SESSION_KINDS, OcError } from '@weave-ai/shared';
 import type { AppDeps, AppEnv } from '../types.js';
 import { body } from '../http.js';
-import { SESSION_COOKIE } from '../auth.js';
+import { SESSION_COOKIE, setSessionCookie } from '../auth.js';
 
 const LoginSchema = z.object({
   username: z.string().min(1),
@@ -37,12 +37,7 @@ export function authRoutes(deps: AppDeps): Hono<AppEnv> {
       userAgent: c.req.header('user-agent'),
     });
     if ('totpRequired' in result) throw new OcError('auth_totp_required', 'a TOTP code is required');
-    if (input.kind === 'web') {
-      setCookie(c, SESSION_COOKIE, result.token, {
-        httpOnly: true, sameSite: 'Lax', path: '/', secure: deps.publicUrl.startsWith('https://'),
-        expires: new Date(result.expiresAt),
-      });
-    }
+    if (input.kind === 'web') setSessionCookie(c, deps, result.token, result.expiresAt);
     return c.json(result);
   });
 

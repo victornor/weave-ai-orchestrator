@@ -54,6 +54,17 @@ describe('auth gating', () => {
     expect((await forged.json()).error.code).toBe('forbidden');
   });
 
+  it('re-sets the ac_session cookie to the slid expiry on every web-session request', async () => {
+    const { fetch } = app();
+    const viaCookie = await fetch('/api/w/ws1/tickets', { headers: { cookie: 'ac_session=web-token' } });
+    expect(viaCookie.headers.get('set-cookie')).toMatch(/^ac_session=web-token;.*Expires=.*HttpOnly/);
+    // A browser whose cookie already expired gets it back from its bearer copy, so its event stream recovers.
+    const viaBearer = await fetch('/api/w/ws1/tickets', { headers: { authorization: 'Bearer web-token' } });
+    expect(viaBearer.headers.get('set-cookie')).toMatch(/^ac_session=web-token;/);
+    const cli = await fetch('/api/w/ws1/tickets', { headers: authed() });
+    expect(cli.headers.get('set-cookie')).toBeNull();
+  });
+
   it('bypasses auth for loopback peers when loopbackTrusted is set', async () => {
     harness = makeHarness();
     harness.deps.daemon.auth.loopbackTrusted = true;

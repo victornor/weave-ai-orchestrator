@@ -121,14 +121,15 @@ export function createAuthService(db: Db, cfg: DaemonConfig): AuthService {
       return { token, sessionId: id, expiresAt };
     },
 
-    verify(token: string): { sessionId: string; operatorId: string; kind: AuthSessionKind } | null {
+    verify(token: string): { sessionId: string; operatorId: string; kind: AuthSessionKind; expiresAt: string } | null {
       if (!token) return null;
       const row = db.get<SessionRow>('SELECT * FROM auth_sessions WHERE token_hash = ?', [sha256(token)]);
       if (!row || row.revokedAt) return null;
       if (new Date(row.expiresAt).getTime() < Date.now()) return null;
       const now = nowIso();
-      db.update('auth_sessions', row.id, { lastSeenAt: now, expiresAt: expiryFor(row.kind, row.deviceName ?? undefined) });
-      return { sessionId: row.id, operatorId: row.operatorId, kind: row.kind };
+      const expiresAt = expiryFor(row.kind, row.deviceName ?? undefined);
+      db.update('auth_sessions', row.id, { lastSeenAt: now, expiresAt });
+      return { sessionId: row.id, operatorId: row.operatorId, kind: row.kind, expiresAt };
     },
 
     logout(sessionId: string): void { service.revoke(sessionId); },

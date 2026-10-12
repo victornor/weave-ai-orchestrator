@@ -388,8 +388,10 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
 
   const runtime: WorkspaceRuntime = { id: workspaceId, ctx, services, channels: null, webhooks: null, push: null };
 
-  const tokens = new Map<string, { sessionId: string; operatorId: string; kind: 'web' | 'cli' | 'presenter' }>([
-    ['sess-token', { sessionId: 'sess1', operatorId: 'op1', kind: 'cli' }],
+  const expiresAt = new Date(Date.now() + 30 * 86_400_000).toISOString();
+  const tokens = new Map<string, { sessionId: string; operatorId: string; kind: 'web' | 'cli' | 'presenter'; expiresAt: string }>([
+    ['sess-token', { sessionId: 'sess1', operatorId: 'op1', kind: 'cli', expiresAt }],
+    ['web-token', { sessionId: 'sess2', operatorId: 'op1', kind: 'web', expiresAt }],
   ]);
   const auth = unimplemented<AuthService>('auth', calls, {
     hasOperator: () => options.hasOperator ?? true,

@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono';
-import { getCookie } from 'hono/cookie';
+import { getCookie, setCookie } from 'hono/cookie';
 import { OcError } from '@weave-ai/shared';
 import { getLogger } from '@weave-ai/core';
 import type { AppDeps, AppEnv, Principal } from './types.js';
@@ -8,6 +8,21 @@ import { isRunToken, peekWorkspaceId, runTokenSecret, verifyRunToken } from './r
 
 const log = getLogger('auth');
 export const SESSION_COOKIE = 'ac_session';
+const COOKIE_MAX_AGE_MS = 399 * 86_400_000;
+
+/**
+ * Sets `ac_session` to expire with the session itself. Login sets it; every authenticated web
+ * request re-sets it, because `verify` slides the session's expiry and a cookie left at its login
+ * expiry dies while the session (and the UI's bearer copy) lives on — `EventSource` sends only the
+ * cookie, so the live stream 401s while REST still works. Capped at the 400 days browsers (and
+ * Hono, which throws past it) allow; the next request re-sets it anyway.
+ */
+export function setSessionCookie(c: Context<AppEnv>, deps: AppDeps, token: string, expiresAt: string): void {
+  const expires = new Date(Math.min(new Date(expiresAt).getTime(), Date.now() + COOKIE_MAX_AGE_MS));
+  setCookie(c, SESSION_COOKIE, token, {
+    httpOnly: true, sameSite: 'Lax', path: '/', secure: deps.publicUrl.startsWith('https://'), expires,
+  });
+}
 
 /** Routes reachable with no principal at all (bootstrap, login, discovery, health). */
 const OPEN_PATHS: Array<{ method: string; path: RegExp }> = [
@@ -80,6 +95,8 @@ export function authMiddleware(deps: AppDeps): MiddlewareHandler<AppEnv> {
     if (token) {
       const session = deps.auth.verify(token);
       if (!session) throw new OcError('auth_session_expired', 'session token is invalid or expired');
+      // A web bearer also (re)plants the cookie: it heals a browser whose cookie already expired.
+      if (session.kind === 'web') setSessionCookie(c, deps, token, session.expiresAt);
       return setPrincipal(c, next, { kind: 'operator', operatorId: session.operatorId, sessionId: session.sessionId, sessionKind: session.kind, viaCookie: false });
     }
 
@@ -88,6 +105,7 @@ export function authMiddleware(deps: AppDeps): MiddlewareHandler<AppEnv> {
       const session = deps.auth.verify(cookie);
       if (!session) throw new OcError('auth_session_expired', 'session cookie is invalid or expired');
       checkCsrf(c, deps);
+      if (session.kind === 'web') setSessionCookie(c, deps, cookie, session.expiresAt);
       return setPrincipal(c, next, { kind: 'operator', operatorId: session.operatorId, sessionId: session.sessionId, sessionKind: session.kind, viaCookie: true });
     }
 

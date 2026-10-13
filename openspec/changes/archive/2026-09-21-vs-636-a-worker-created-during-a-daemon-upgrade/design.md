@@ -31,7 +31,7 @@ See `proposal.md` — Why. The relevant current state:
 - Changing the worktree provider, branch naming, or landing behaviour.
 - Re-provisioning a worker that legitimately has no checkout (curation workers, persistent sessions).
 - Any schema change; `agents.worktree_path` and `agents.branch` already carry what is needed.
-- Touching the retired VOFM-130 worker or ticket.
+- Touching the retired ACME-130 worker or ticket.
 
 ## Decisions
 

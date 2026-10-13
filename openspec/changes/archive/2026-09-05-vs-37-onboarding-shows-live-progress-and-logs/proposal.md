@@ -1,7 +1,7 @@
 ## Why
 
 Adding a project through onboarding is one blocking `POST /projects` that can run for minutes and
-reports nothing until it returns. The workspace owner watched `Add project vautoig` sit at `running`
+reports nothing until it returns. The workspace owner watched `Add project acme-mcp` sit at `running`
 for about four minutes with no indication of progress, no way to tell a slow clone from a hung one,
 and — had it failed — nothing but a one-line error to act on. Every other long operation in the
 daemon (a run, an upgrade) is observable while it runs; project add is the one that is not.

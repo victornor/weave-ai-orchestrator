@@ -1,6 +1,6 @@
 ## Context
 
-`attemptArchiveThenMerge` decides, for an absent rollup (`ciState === 'none'`) with `requiresCi` (the default), between "wait", "merge as a no-CI repository" and, since VS-466/467, "wait for a run and retrigger it". Its only inputs for that are `forge.hasCiWorkflows` (`true | false | null`) and per-process maps keyed by pull request or clone. Cause analysis and file:line evidence are in `proposal.md`; the live repository cannot be read from this project, so which of the two leading causes (cached failed query, dynamic workflows) hit VAPIAuto is not proven. The change fixes both and every path that makes the wait unreliable, and each is covered by its own test.
+`attemptArchiveThenMerge` decides, for an absent rollup (`ciState === 'none'`) with `requiresCi` (the default), between "wait", "merge as a no-CI repository" and, since VS-466/467, "wait for a run and retrigger it". Its only inputs for that are `forge.hasCiWorkflows` (`true | false | null`) and per-process maps keyed by pull request or clone. Cause analysis and file:line evidence are in `proposal.md`; the live repository cannot be read from this project, so which of the two leading causes (cached failed query, dynamic workflows) hit the affected repository is not proven. The change fixes both and every path that makes the wait unreliable, and each is covered by its own test.
 
 ## Decisions
 

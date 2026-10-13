@@ -1,6 +1,6 @@
 ## Why
 
-On 2026-09-14/15, VOFM-77's merge approval (`01M2H4C2P0D8G2EPGDA5MH5KEA`) sat unseen for three hours.
+On 2026-09-14/15, ACME-77's merge approval (`01M2H4C2P0D8G2EPGDA5MH5KEA`) sat unseen for three hours.
 The weaver was woken at creation, but its run never called `weave_decision_review` — its summary said
 "marked looked" while the `activity` table recorded no `decision.review` for it. Because of VS-411 an
 `unseen` approval is excluded from the Needs-you count and its approving answer is refused, and
@@ -64,4 +64,4 @@ can therefore stall indefinitely with no signal to either side.
 - Tests: `packages/core/src/supervisor/supervisor.test.ts` (reminder backoff/idempotency, digest
   list), `packages/core/src/prompts/*.test.ts`, `packages/ui/src/test/v2ticket.test.tsx`,
   `packages/ui/src/test/v2needs.test.tsx`, `packages/ui/src/test/v2needsCount.test.ts`, plus one
-  core integration test reproducing the VOFM-77 shape end to end.
+  core integration test reproducing the ACME-77 shape end to end.

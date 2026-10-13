@@ -2467,14 +2467,14 @@ describe('supervisor silence watchdog (VS-461)', () => {
       expect((digest!.input as { reason: string }).reason).not.toContain('not reviewed');
     });
 
-    it('reproduces the VOFM-77 shape end to end with the real wake and review services', async () => {
+    it('reproduces the ACME-77 shape end to end with the real wake and review services', async () => {
       h.services.wake = createWakeService(h.ctx, h.deps) as never;
       const decisions = createDecisionsService(h.ctx, h.deps);
       h.services.decisions = decisions as never;
       const ticketId = seedTicket(h, { status: 'in_review' });
       const workerId = h.addWorker(ticketId);
       // A worker raises the merge approval; the weaver is woken at creation (VS-361) and its turn
-      // ends without ever calling the review. VOFM-77's summary said "marked looked" here.
+      // ends without ever calling the review. ACME-77's summary said "marked looked" here.
       const approval = decisions.create({ kind: 'agent', id: workerId }, {
         ticketId, kind: 'merge_approval', title: 'Merge TST-1?', askedByAgentId: workerId,
       });

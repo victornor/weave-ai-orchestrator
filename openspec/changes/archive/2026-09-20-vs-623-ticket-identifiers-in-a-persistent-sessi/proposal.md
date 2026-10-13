@@ -2,7 +2,7 @@
 
 A persistent session's chat shows agent text as the turn's own transcript (VS-618), but ticket
 identifiers in that text are plain text: captain filed a ticket from a session and could not click
-`VOFM-113` to open it. The weaver chat has linked identifiers since VS-349, but VS-618's transcript
+`ACME-113` to open it. The weaver chat has linked identifiers since VS-349, but VS-618's transcript
 text, the live streaming turn and the delivered-final-text fallback do not go through that linkifier.
 
 Captain's addition (ticket comment 2026-09-20 04:20Z): clicking a ticket link should not navigate

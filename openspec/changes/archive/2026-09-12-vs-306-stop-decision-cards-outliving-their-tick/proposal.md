@@ -33,7 +33,7 @@ to fix.
   approval gate on a live ticket.
 - **Weaver visibility:** the per-turn prompt's "Open decisions" lines gain the decision's age and,
   for a ticket-scoped decision, the ticket's identifier and status, e.g.
-  `- <id> [question, owner human, VOFM-33 done, 23h] <title>`.
+  `- <id> [question, owner human, ACME-33 done, 23h] <title>`.
 - The interaction with the approval-integrity repair scan is made explicit and proven: that scan
   re-raises approvals only for tickets in `proposed` / `in_review` / a non-terminal `operational`
   ticket, none of which is terminal, so the sweep cannot withdraw what it raises.

@@ -3,7 +3,7 @@
 A steer cannot stop a worker whose turn is already running. On a runtime that cannot take mid-turn
 input, `weave_worker_message` records the message on the ticket and enqueues a `conductor_request`
 wake that sits `queued` behind the executing run, so the correction only lands after the turn ends —
-exactly what captain saw on VOFM-166 on 2026-09-22 (a weaver steer labelled `queued` beside a turn
+exactly what captain saw on ACME-166 on 2026-09-22 (a weaver steer labelled `queued` beside a turn
 running 7m34s). The same is true of a human's comment on the ticket, which enqueues a `ticket_comment`
 wake that queues behind the running turn. VS-657 already gave ticketless persistent sessions the
 behaviour wanted: stop the running turn now and resume the same session with the message.

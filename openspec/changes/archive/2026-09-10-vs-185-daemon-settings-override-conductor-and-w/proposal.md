@@ -20,7 +20,7 @@ Settings fields are disabled; when empty, per-workspace Settings work as today.
 - **Ticket create is unchanged.** `ac_worker_models` / `workerModelId` still pick from the
   effective catalog (daemon if filled, else workspace). Unknown id at write time is still
   rejected; a later overlay that drops an id falls back to the effective workers setting.
-- **ADR 0013** records the daemon overlay as the exception to ADR 0011/0012's
+- **ADR 0024** records the daemon overlay as the exception to ADR 0011/0023's
   workspace-only sources. Roles, projects and agent rows still cannot choose a runtime or a
   model.
 
@@ -61,5 +61,5 @@ models` sets overlays.
 **Clients.** Settings → This daemon → Models edits overlays. Workspace Models disables a
 locked control with a hint. Telegram / TUI out of scope.
 
-**Docs.** `docs/PLAN.md` §5, `docs/API.md`, ADR 0013. Product decision "exactly two settings
+**Docs.** `docs/PLAN.md` §5, `docs/API.md`, ADR 0024. Product decision "exactly two settings
 per workspace" is amended, not silently dropped.

@@ -1,6 +1,6 @@
 ## Why
 
-An interactive session's conversational instruction is gated on `agent.turnCount === 0`. From the second turn the agent is given the ordinary worker contract — deliver the ticket through propose → apply → merge — so a diagnostic chat (Captain, 2026-09-10, VOFM-19) produces a merge approval instead of an answer. The first-turn hold is correct and stays; the session-wide posture is what is wrong.
+An interactive session's conversational instruction is gated on `agent.turnCount === 0`. From the second turn the agent is given the ordinary worker contract — deliver the ticket through propose → apply → merge — so a diagnostic chat (Captain, 2026-09-10, ACME-19) produces a merge approval instead of an answer. The first-turn hold is correct and stays; the session-wide posture is what is wrong.
 
 ## What Changes
 

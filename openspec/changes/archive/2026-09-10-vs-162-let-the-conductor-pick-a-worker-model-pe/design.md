@@ -7,7 +7,7 @@ See proposal.md for why. Today `modelSettingFor(config, kind)` is the only reade
 login-pause target goes through it. `GET`/`PUT /models` is the whole `WorkspaceModels` block
 (`{ conductor, workers }`); the CLI get-then-puts that block, and Settings spreads `current`
 when saving one side. ADR 0011 forbade per-ticket overrides; this change is the catalog-shaped
-exception captain asked for on 2026-09-09, recorded as ADR 0012.
+exception captain asked for on 2026-09-09, recorded as ADR 0023.
 
 ## Goals / Non-Goals
 
@@ -130,10 +130,10 @@ conductor ticket create ... --worker-model <id>
 No new Board ticket-create picker unless one already exists; humans edit the catalog, the
 conductor (or CLI) picks per ticket.
 
-### D8 — ADR 0012, not a silent PLAN edit
+### D8 — ADR 0023, not a silent PLAN edit
 
 PLAN §5 and ADR 0011 say the two settings are the whole of model selection. The deviation is
-ADR 0012: a ticket may name a catalog id; roles, projects and agent rows still cannot. ADR
+ADR 0023: a ticket may name a catalog id; roles, projects and agent rows still cannot. ADR
 0011 stays accepted for everything else.
 
 ## Risks / Trade-offs

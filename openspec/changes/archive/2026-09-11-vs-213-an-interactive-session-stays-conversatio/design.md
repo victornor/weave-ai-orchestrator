@@ -11,7 +11,7 @@ Two supervision paths treat a quiet open ticket as unfinished work:
 - `livenessViolations()` (`tickets/service.ts`) includes `todo` / `in_progress` / … with a live worker, no run, no wake. The 60 s `livenessScan` then enqueues `liveness_repair`. An interactive ticket stays `todo` after the greeting comment, so this can fire a second turn *before the human has spoken*.
 - `stalledWorkers()` (`supervisor/index.ts`, VS-202) matches a worker on a non-terminal ticket with nothing left to wake it and `last_run_at` older than the threshold. A finished conversation is that shape exactly. It does not exclude `interactive_session`.
 
-The 2026-09-10 silence and the unwanted merge approval (VOFM-19) are one event under the prompt flip (the agent stops conversing and starts delivering). `liveness_repair` is a confirmed independent cause of the same pair of symptoms, and is in scope under "not treated as incomplete."
+The 2026-09-10 silence and the unwanted merge approval (ACME-19) are one event under the prompt flip (the agent stops conversing and starts delivering). `liveness_repair` is a confirmed independent cause of the same pair of symptoms, and is in scope under "not treated as incomplete."
 
 ## Goals / Non-Goals
 

@@ -14,8 +14,8 @@ server caller is the ticket-detail read, `GET /tickets/:id`
 `ticket.updated` invalidates `qk.ticket(ws, id)` (`packages/ui/src/api/events.ts:312`), so the read
 that emitted the event is itself invalidated by it: **read → statusFor → emit → invalidate → read**.
 On a running daemon that is a self-sustaining loop. Measured 2026-09-15: V Services VS-381 produced
-7,980 identical `ticket.updated` events in 15 minutes (~9/s), and the VOFM workspace showed the same
-shape on VOFM-77/84/69/57. Each iteration also bumped `updatedAt` and spawned four `openspec`
+7,980 identical `ticket.updated` events in 15 minutes (~9/s), and another workspace showed the same
+shape on ACME-77/84/69/57. Each iteration also bumped `updatedAt` and spawned four `openspec`
 subprocesses (`status`, `list`, `instructions apply`, `validate`).
 
 ## What changes

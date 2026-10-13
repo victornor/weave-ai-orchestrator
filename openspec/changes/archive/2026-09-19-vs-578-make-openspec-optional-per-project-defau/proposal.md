@@ -1,6 +1,6 @@
 ## Why
 
-Captain, 2026-09-19: make OpenSpec optional per project, defaulted on. On internal projects the propose/plan/spec/tasks/validate/archive ceremony is overkill and expensive; on production and customer-facing projects it is the point. The cost is measured, not theoretical: VOFM-109 spent about 9.5 of its first 27 minutes writing a proposal, a design, three spec deltas and a task list before any code existed.
+Captain, 2026-09-19: make OpenSpec optional per project, defaulted on. On internal projects the propose/plan/spec/tasks/validate/archive ceremony is overkill and expensive; on production and customer-facing projects it is the point. The cost is measured, not theoretical: ACME-109 spent about 9.5 of its first 27 minutes writing a proposal, a design, three spec deltas and a task list before any code existed.
 
 A `Project.openspecEnabled` flag already exists (`openspec.enabled`, default `true`) and already gates project bootstrap and ticket↔change binding, but it does not make OpenSpec optional in practice. An audit of the code at `5f313099` (below) shows the flag-off path is dead-ended at the `proposed` gate and every OpenSpec-shaped surface still assumes a change.
 

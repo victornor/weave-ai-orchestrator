@@ -4,7 +4,7 @@ A ticket moved to `blocked` with an `{owner, action}` path — a worker stuck on
 weaver answer, or a human reply — has no automatic exit from `blocked` once that path is resolved.
 Answering the decision, sending a weaver message, or leaving a human comment all wake the worker,
 but none of them touch the ticket status, and the only instruction to undo the block is one table
-row in the worker skill that workers miss. In fern-ofm, VOFM-55 stayed `blocked` on the board for over
+row in the worker skill that workers miss. In fern-ofm, ACME-55 stayed `blocked` on the board for over
 1.5 hours while its worker had the blocker answered, raised three action cards, ran a production
 deploy and was still working: the board said blocked while the Live page said working.
 

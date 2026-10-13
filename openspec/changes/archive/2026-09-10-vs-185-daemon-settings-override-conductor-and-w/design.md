@@ -110,10 +110,10 @@ Update every Settings mock that enumerates sections (`settingsScopes.test.tsx` a
 `runtimesInUse`, union runtimes named by filled daemon overlays so a daemon-only runtime is
 not treated as abandoned.
 
-### D7 — ADR 0013, not a silent PLAN edit
+### D7 — ADR 0024, not a silent PLAN edit
 
-PLAN §5 and ADR 0011/0012 say the two workspace settings (plus the workspace catalog) are the
-whole of model selection. ADR 0013 records the daemon overlay: optional, per-control, live,
+PLAN §5 and ADR 0011/0023 say the two workspace settings (plus the workspace catalog) are the
+whole of model selection. ADR 0024 records the daemon overlay: optional, per-control, live,
 does not rewrite workspace yaml. Roles, projects and agent rows still cannot choose a runtime
 or a model.
 

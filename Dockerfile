@@ -1,11 +1,11 @@
 # Weave AI daemon. See docs/DOCKER.md.
 #
 # Stage 1 builds the monorepo (tsc -b for every package plus the Vite web app); stage 2 is a slim
-# runtime carrying only what the daemon needs at run time: node 22, git, gh, openspec, the built
+# runtime carrying only what the daemon needs at run time: node 26, git, gh, openspec, the built
 # `dist/` output and the production dependency tree.
 
 # ---------- build ----------
-FROM node:22-slim AS build
+FROM node:26-slim AS build
 WORKDIR /src
 
 RUN apt-get update \
@@ -29,7 +29,7 @@ RUN pnpm build \
  && pnpm prune --prod
 
 # ---------- runtime ----------
-FROM node:22-slim AS runtime
+FROM node:26-slim AS runtime
 WORKDIR /app
 
 # git: clones and worktrees. gh: the built-in GitHub forge (PR state and merges).

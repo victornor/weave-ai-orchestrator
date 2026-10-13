@@ -1,7 +1,7 @@
 /**
  * `weave models [show] | models set weaver|workers | models inherit
  * weaver|workers|options | models options …` — model selection (VS-77, ADR 0011; VS-162,
- * ADR 0012; VS-284; VS-356). The weaver control's name is `weaver`; its legacy CLI name `conductor`
+ * ADR 0023; VS-284; VS-356). The weaver control's name is `weaver`; its legacy CLI name `conductor`
  * is still accepted as a deprecated input (VS-377). The wire field it reads and writes is `weaver`
  * (VS-263) — `wireField()` is the one place that translates.
  *

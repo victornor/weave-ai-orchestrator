@@ -23,5 +23,5 @@
 
 ## 6. Docs and green
 
-- [x] 6.1 Add `docs/adr/0019-unconfigured-worker-tiers.md` (nullable option runtime; first-boot seed of a missing `daemon.yaml` only; no migration). Point ADR 0012 and 0013 at it. Update `docs/PLAN.md` §5 and `docs/API.md` (`runtime: null`, `model_unconfigured`).
+- [x] 6.1 Add `docs/adr/0019-unconfigured-worker-tiers.md` (nullable option runtime; first-boot seed of a missing `daemon.yaml` only; no migration). Point ADR 0023 and 0013 at it. Update `docs/PLAN.md` §5 and `docs/API.md` (`runtime: null`, `model_unconfigured`).
 - [x] 6.2 `pnpm lint`, `pnpm typecheck`, and `pnpm test` (core suite **and** UI suite). Paste **both** suite blocks verbatim in the PR and the ticket comment — do not add the totals, do not report one suite as both.

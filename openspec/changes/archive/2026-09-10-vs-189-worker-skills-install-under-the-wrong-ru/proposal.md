@@ -12,7 +12,7 @@ resolved differently between two renders is left with skills only under the old 
 `skills/manifest.json` maps `claude` to `.claude/skills/<name>/SKILL.md`, so on the claude runtime none of
 the four worker-audience skills resolve, and the worker runs its whole life without its operating contract.
 
-VS-185 (merged after this ticket was filed, ADR 0013) confirmed the diagnosis rather than changing it:
+VS-185 (merged after this ticket was filed, ADR 0024) confirmed the diagnosis rather than changing it:
 every runtime/model resolution call site — spawn, dispatch, the turn engine, session creation, the auth
 gate — now goes through the one function `modelSettingFor(modelsFor(ctx), kind, ticket)`, so there is a
 single, consistent answer to "what runtime is this agent on right now" everywhere it is asked. That answer

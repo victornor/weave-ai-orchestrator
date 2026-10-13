@@ -1633,7 +1633,7 @@ describe('the document a decision target points at (VS-224)', () => {
   });
   const actionDecision = decision({
     kind: 'action_approval',
-    title: 'Approve the action for VOFM-25: deploy the headers',
+    title: 'Approve the action for ACME-25: deploy the headers',
     context: 'Review the action document below — approve to run it; revise to send feedback; reject to cancel.',
     target: { documentId: 'doc_1', revision: 2 },
     options: [

@@ -64,8 +64,8 @@
 
 ## 6. Docs and green
 
-- [x] 6.1 Add `docs/adr/0013-daemon-model-overrides.md` (optional per-control overlay; live;
-      does not rewrite workspace yaml; empty catalog = no overlay). Point ADR 0011/0012 at
+- [x] 6.1 Add `docs/adr/0024-daemon-model-overrides.md` (optional per-control overlay; live;
+      does not rewrite workspace yaml; empty catalog = no overlay). Point ADR 0011/0023 at
       it. Update `docs/PLAN.md` §5 daemon.yaml/`models` note and `docs/API.md`.
 - [x] 6.2 `pnpm typecheck`, `pnpm lint`, `pnpm test` and
       `pnpm --filter @agent-conductor/ui exec vitest run` all pass.

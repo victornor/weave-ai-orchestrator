@@ -125,7 +125,7 @@ checked against that run's `decision.review` rows. It is the wrong signal for th
   and that list is exactly the thing being trusted.
 - The authoritative outcome signal already exists. `weaver_review_status` records whether the review
   happened, regardless of what any summary says, and items 1–3 read it. They catch the *outcome* the
-  VOFM-77 incident produced — a card stuck unseen with nobody re-woken, counted, or told — with no
+  ACME-77 incident produced — a card stuck unseen with nobody re-woken, counted, or told — with no
   self-report involved.
 
 The ticket explicitly permits skipping this item with an argument in the design. If the *belief*

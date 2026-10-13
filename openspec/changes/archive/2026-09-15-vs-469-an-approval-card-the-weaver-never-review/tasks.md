@@ -17,7 +17,7 @@
 
 ## 4. Integration test and evidence
 
-- [x] 4.1 Add one core integration test reproducing the VOFM-77 shape: raise a merge approval through the ticket transition, end a weaver run without reviewing it, then assert (a) the reminder fires after the threshold and names the decision, (b) a built digest lists it as not reviewed, (c) a mark made without calling the review service leaves the decision `unseen`, and (d) after `decisions.review(looked)` the reminders stop. Verify the test passes in `pnpm vitest run packages/core`.
+- [x] 4.1 Add one core integration test reproducing the ACME-77 shape: raise a merge approval through the ticket transition, end a weaver run without reviewing it, then assert (a) the reminder fires after the threshold and names the decision, (b) a built digest lists it as not reviewed, (c) a mark made without calling the review service leaves the decision `unseen`, and (d) after `decisions.review(looked)` the reminders stop. Verify the test passes in `pnpm vitest run packages/core`.
 - [x] 4.2 Capture uncommitted screenshots of Needs you and the ticket page with an unseen merge card at 1440 dark and 390 dark, using a scratch daemon on a loopback port other than 7433 and a scratch config dir. Report the absolute paths on the ticket; keep the files outside `work/`.
 
 ## 5. Verify and deliver

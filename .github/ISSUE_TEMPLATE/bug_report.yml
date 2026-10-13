@@ -1,0 +1,37 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report security problems here; see SECURITY.md. Remove tokens, hostnames and paths from logs before pasting.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `weave --version`, or the commit you built.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Node version, coding-CLI runtime, how you run the daemon.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      render: shell

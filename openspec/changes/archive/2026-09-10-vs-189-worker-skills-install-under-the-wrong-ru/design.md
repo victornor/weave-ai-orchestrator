@@ -10,7 +10,7 @@ See `proposal.md` for the motivation. The relevant code today:
   `.ac-render.json` in the home. `Marker` today is `{ briefRevision, specRevision, roleRevision,
   renderedAt }` — no runtime.
 - `packages/core/src/runs/engine.ts:228` resolves `setting = modelSettingFor(modelsFor(ctx), agent.kind,
-  ticket)` fresh on every turn — as of VS-185/ADR 0013, `modelsFor(ctx)` is the one place that applies a
+  ticket)` fresh on every turn — as of VS-185/ADR 0024, `modelsFor(ctx)` is the one place that applies a
   filled daemon-level overlay on top of the workspace's own settings, and every call site (spawn,
   dispatch, the turn engine, session creation, the auth gate) goes through this same pair of functions —
   and writes the corrected `runtimeId` to both the DB row and the in-memory `agent` object *before* calling

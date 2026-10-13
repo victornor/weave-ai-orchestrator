@@ -335,7 +335,7 @@ describe('opencode generates its own config instead of sharing the host config (
       $schema: 'https://opencode.ai/config.json',
       autoupdate: true,
       provider: { codeify: { options: { apiKey: 'k' } } },
-      mcp: { vautoig: { type: 'remote', url: 'http://192.168.1.221:3333', enabled: true } },
+      mcp: { acmeMcp: { type: 'remote', url: 'http://192.0.2.10:3333', enabled: true } },
       plugin: ['some-plugin'],
     }));
 
@@ -357,15 +357,15 @@ describe('opencode generates its own config instead of sharing the host config (
     mkdirSync(dirname(ocJsonHost()), { recursive: true });
     writeFileSync(ocJsonHost(), JSON.stringify({
       provider: { codeify: {} },
-      mcp: { vautoig: { type: 'remote', url: 'http://192.168.1.221:3333', enabled: true } },
+      mcp: { acmeMcp: { type: 'remote', url: 'http://192.0.2.10:3333', enabled: true } },
     }));
 
     linkOc();
 
     const text = readFileSync(ocConfig(), 'utf8');
     expect('mcp' in readConfig()).toBe(false);
-    expect(text).not.toContain('vautoig');
-    expect(text).not.toContain('192.168.1.221');
+    expect(text).not.toContain('acmeMcp');
+    expect(text).not.toContain('192.0.2.10');
   });
 
   it('reflects a provider change on the next link', () => {
@@ -393,7 +393,7 @@ describe('opencode generates its own config instead of sharing the host config (
 
   it('replaces the old host-config symlink without writing through it', () => {
     mkdirSync(dirname(ocJsonHost()), { recursive: true });
-    const hostBody = JSON.stringify({ provider: { codeify: {} }, mcp: { vautoig: {} } });
+    const hostBody = JSON.stringify({ provider: { codeify: {} }, mcp: { acmeMcp: {} } });
     writeFileSync(ocJsonHost(), hostBody);
     chmodSync(ocJsonHost(), 0o640);
     // A workspace upgraded from VS-161 holds the owner's file here as a symlink.
@@ -460,7 +460,7 @@ describe('opencode generates its own config instead of sharing the host config (
 
   it('removes a stale opencode.jsonc symlink so opencode cannot merge personal mcp', () => {
     mkdirSync(dirname(ocJsoncHost()), { recursive: true });
-    writeFileSync(ocJsoncHost(), '{"mcp":{"vautoig":{}}}');
+    writeFileSync(ocJsoncHost(), '{"mcp":{"acmeMcp":{}}}');
     mkdirSync(dirname(ocJsonHost()), { recursive: true });
     writeFileSync(ocJsonHost(), JSON.stringify({ provider: { codeify: {} } }));
     mkdirSync(ocHome(), { recursive: true });

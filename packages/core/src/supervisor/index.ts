@@ -563,7 +563,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   /**
    * VS-469: a review-carrying approval that stays `unseen` re-wakes the weaver until it is reviewed or
    * closed. The card is woken for the weaver once at creation, and nothing else ever re-raises it, so
-   * a weaver that believes it marked the card (as VOFM-77's did, without calling the tool) leaves it
+   * a weaver that believes it marked the card (as ACME-77's did, without calling the tool) leaves it
    * stuck: excluded from the human's Needs-you count, unapprovable without an override, and invisible
    * to every later digest. This scan is the missing reader.
    *

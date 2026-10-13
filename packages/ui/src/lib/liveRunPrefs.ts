@@ -1,9 +1,10 @@
 /**
  * Whether the weaver chat shows the weaver's streamed text and mid-turn tool trace (VS-616).
  *
- * Captain asked for this to be opt-in and off by default: the streamed text is run output, not
- * something the weaver decided to send, so showing it unasked risks it being read as a delivered
- * message. Off, the weaver chat shows only sent messages plus the one-line activity row.
+ * On by default (VS-799): watching a long turn with only a "running" indicator left the reader in
+ * the dark. The section is marked as in-progress run output and clears when the real message
+ * arrives, so it is not read as a delivered message. Off (an explicit choice in Settings), the
+ * weaver chat shows only sent messages plus the one-line activity row.
  *
  * Like every other chat-display preference (`chatPrefs.ts`'s "Turns with no reply", the rail, the
  * theme, text size) this is held in this browser's localStorage, not on the daemon — there is no
@@ -15,12 +16,12 @@ import { useEffect, useState } from 'react';
 const KEY = 'conductor.chat.liveRunOutput';
 const EVENT = 'conductor:chat-live-run-output';
 
-/** The default is off: text the weaver has not sent is not shown until the human asks for it. */
+/** The default is on: only a stored 'off' (the user turned it off) hides the live section. */
 export function readShowLiveRunOutput(): boolean {
   try {
-    return localStorage.getItem(KEY) === 'on';
+    return localStorage.getItem(KEY) !== 'off';
   } catch {
-    return false;
+    return true;
   }
 }
 

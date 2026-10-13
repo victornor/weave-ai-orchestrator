@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-14
+goal: "Weaver chat: show live activity by default"
+skip_specs: true

@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { AUTH_SESSION_KINDS, OcError } from '@weave-ai/shared';
 import type { AppDeps, AppEnv } from '../types.js';
 import { body } from '../http.js';
-import { SESSION_COOKIE, setSessionCookie } from '../auth.js';
+import { SESSION_COOKIE, isLoopbackRequest, setSessionCookie } from '../auth.js';
 
 const LoginSchema = z.object({
   username: z.string().min(1),
@@ -22,6 +22,8 @@ export function authRoutes(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   app.post('/setup', async (c) => {
+    // First-time setup claims the daemon, so only a client on the host itself may do it (VS-797).
+    if (!isLoopbackRequest(c, deps)) throw new OcError('forbidden', 'first-time setup is only accepted from the daemon host; run `weave daemon set-password` on that machine');
     if (deps.auth.hasOperator()) throw new OcError('conflict', 'an operator already exists');
     const input = await body(c, SetupSchema);
     await deps.auth.setPassword(input.username, input.password);

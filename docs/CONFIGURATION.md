@@ -49,7 +49,7 @@ http:
     key: /path/privkey.pem
     domains: [conductor.example.com] # SANs for self-signed; the certificate name for tailscale (default: this node's tailnet name)
 auth:
-  loopbackTrusted: false      # true = no password required, loopback only
+  loopbackTrusted: false      # true = no password required for loopback clients; ignored (with a warning) unless http.listen is loopback
   sessionDaysNamed: 30        # named devices
   sessionHoursUnnamed: 12     # unnamed browser sessions
   lockoutAttempts: 5

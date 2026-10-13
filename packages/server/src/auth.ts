@@ -42,13 +42,40 @@ export function isOpenPath(method: string, path: string): boolean {
   return OPEN_PATHS.some((r) => r.method === method && r.path.test(path));
 }
 
-/** True when the TCP peer is on the loopback interface (or we are the loopback listener). */
+function isLoopbackAddress(addr: string): boolean {
+  return addr === '::1' || addr === '127.0.0.1' || addr.startsWith('127.') || addr.startsWith('::ffff:127.');
+}
+
+/**
+ * True when the request's client is on the loopback interface (or we are the loopback listener).
+ *
+ * The TCP peer must be loopback, and a reverse proxy on the same host must not launder a remote
+ * client into one (VS-797): with `http.trustProxy` the forwarded client address (the entry the
+ * trusted proxy appended, the last one) decides; without it, any forwarding header means a proxy is
+ * in front, and the request is not loopback.
+ */
 export function isLoopbackRequest(c: Context<AppEnv>, deps: AppDeps): boolean {
   if (deps.listener === 'loopback') return true;
   const env = c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined;
   const addr = env?.incoming?.socket?.remoteAddress;
-  if (!addr) return false;
-  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1' || addr.startsWith('127.');
+  if (!addr || !isLoopbackAddress(addr)) return false;
+  const forwarded = forwardedClient(c);
+  if (forwarded === undefined) return true;
+  if (!deps.daemon.http.trustProxy) return false;
+  return forwarded !== null && isLoopbackAddress(forwarded);
+}
+
+/** The client a proxy reports: `undefined` when no forwarding header is present, `null` when one is unreadable. */
+function forwardedClient(c: Context<AppEnv>): string | null | undefined {
+  const xff = c.req.header('x-forwarded-for');
+  const rfc = c.req.header('forwarded');
+  const real = c.req.header('x-real-ip');
+  if (xff === undefined && rfc === undefined && real === undefined) return undefined;
+  let candidate: string | undefined;
+  if (xff !== undefined) candidate = xff.split(',').at(-1)?.trim();
+  else if (real !== undefined) candidate = real.trim();
+  else candidate = /for="?\[?([^;,"\]]+)/i.exec(rfc!.split(',').at(-1) ?? '')?.[1]?.trim();
+  return candidate ? candidate : null;
 }
 
 function bearer(c: Context<AppEnv>): string | null {

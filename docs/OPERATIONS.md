@@ -78,11 +78,17 @@ The same directory also holds `workspaces.yaml` (the registry of workspace paths
 (operator account, sessions, TOTP), and `daemon.json` (written while the daemon runs: pid,
 `publicUrl`, `loopbackUrl`).
 
-**The public listener is held** on a non-loopback bind until an operator password exists (unless
-`auth.loopbackTrusted` is set). The daemon still starts: the loopback listener serves
-`POST /api/auth/setup`, `daemon.json` carries `setupRequired: true`, and `weave daemon set-password`
-run on the daemon host (minimum 8 characters) opens the public listener in place, no restart needed.
-Nothing is ever reachable from the network unauthenticated.
+**The public listener is held** on a non-loopback bind until an operator password exists. The daemon
+still starts: the loopback listener serves `POST /api/auth/setup`, `daemon.json` carries
+`setupRequired: true`, and `weave daemon set-password` run on the daemon host (minimum 8 characters)
+opens the public listener in place, no restart needed. Nothing is ever reachable from the network
+unauthenticated.
+
+> **`auth.loopbackTrusted` is for a loopback bind only.** It lets any peer that connects from
+> 127.0.0.1 act as the operator with no password. On a non-loopback `http.listen` (`0.0.0.0`, a LAN
+> address) the daemon ignores it and logs a warning at startup. First-time `POST /api/auth/setup` is
+> accepted only from a loopback client, whatever the setting: set the password on the daemon host
+> (`weave daemon set-password`, or `docker exec` into the container), never over the network.
 
 Two listeners always run:
 
@@ -137,6 +143,14 @@ a warning, so `weave login` needs no `--pin` in this mode.
 
 Terminate TLS in the proxy, run the daemon on loopback with `tls.mode: none`, and set
 `trustProxy: true` plus an explicit `publicUrl`. SSE needs buffering off and a long read timeout.
+
+> **Do not combine a proxy with `auth.loopbackTrusted: true`.** A proxy on the same host connects
+> to the daemon from 127.0.0.1, so without care every remote request would look local. The daemon
+> treats a request as loopback only if the proxy reports a loopback client: with `trustProxy: true` it
+> reads the last `X-Forwarded-For` entry (the one your proxy appended); without `trustProxy` any
+> `X-Forwarded-For`, `X-Real-IP` or `Forwarded` header makes the request non-loopback. A proxy that
+> sends none of them cannot be told apart from a local client, so keep `loopbackTrusted: false`
+> (the default) and use the operator password.
 
 ```yaml
 # daemon.yaml

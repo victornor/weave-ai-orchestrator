@@ -395,6 +395,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   ]);
   const auth = unimplemented<AuthService>('auth', calls, {
     hasOperator: () => options.hasOperator ?? true,
+    setPassword: async () => undefined,
     verify: (token: string) => tokens.get(token) ?? null,
     totpEnabled: () => false,
     sessions: () => [...tokens.values()].map((t) => ({ id: t.sessionId, kind: t.kind, deviceName: null, createdAt: '', lastSeenAt: '', expiresAt: '', ip: null, revokedAt: null })),

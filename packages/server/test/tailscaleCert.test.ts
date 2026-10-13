@@ -21,9 +21,11 @@ initLogger(process.env.AC_LOG_LEVEL ?? 'silent');
 const NAME = 'myhost.tailnet-name.ts.net';
 
 async function makeCert(days: number, cn = NAME): Promise<{ cert: string; key: string }> {
-  const selfsigned = (await import('selfsigned')) as { generate: (attrs: unknown, opts: unknown) => { cert: string; private: string } };
-  const pems = selfsigned.generate([{ name: 'commonName', value: cn }], {
-    days, keySize: 2048, extensions: [{ name: 'subjectAltName', altNames: [{ type: 2, value: cn }, { type: 7, ip: '127.0.0.1' }] }],
+  const selfsigned = (await import('selfsigned')) as { generate: (attrs: unknown, opts: unknown) => Promise<{ cert: string; private: string }> };
+  const notBeforeDate = new Date();
+  const pems = await selfsigned.generate([{ name: 'commonName', value: cn }], {
+    notBeforeDate, notAfterDate: new Date(notBeforeDate.getTime() + days * 86_400_000), keySize: 2048, algorithm: 'sha256',
+    extensions: [{ name: 'subjectAltName', altNames: [{ type: 2, value: cn }, { type: 7, ip: '127.0.0.1' }] }],
   });
   return { cert: pems.cert, key: pems.private };
 }

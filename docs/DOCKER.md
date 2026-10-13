@@ -21,8 +21,9 @@ docker run -d --name weave \
   weave-ai
 ```
 
-The daemon listens on `0.0.0.0:7433` inside the container. It refuses to start on a non-loopback
-address without an operator password unless `auth.loopbackTrusted` is set, so set one first:
+The daemon listens on `0.0.0.0:7433` inside the container. Until an operator password exists the
+public listener is held, so set one first, from inside the container (a request from the network,
+including the Docker gateway, cannot create the operator):
 
 ```bash
 docker exec -it weave node packages/cli/dist/bin.js --url http://127.0.0.1:7433 daemon set-password
@@ -31,6 +32,9 @@ docker exec -it weave node packages/cli/dist/bin.js --url http://127.0.0.1:7433 
 ```
 
 Then point a browser or `weave login http://<host>:7433` at it.
+
+Do not set `auth.loopbackTrusted: true` for a container: it is ignored on a `0.0.0.0` bind (the daemon
+logs a warning), and behind a proxy on the host it would trust the proxy's own address.
 
 ## What the image does not carry
 

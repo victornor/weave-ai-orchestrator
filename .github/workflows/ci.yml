@@ -4,11 +4,8 @@
 # on push to main — the merge queue lands exactly the head CI just passed — only the daily schedule
 # and workflow_dispatch below. Separate jobs so each check is its own status.
 #
-# Every job runs on this repository's self-hosted runner, `weave-ci-01` (VS-394/VS-395), not on paid
-# GitHub-hosted minutes: one container on the daemon's host with an 8-CPU CFS quota and a 16 GiB
-# memory cap, isolated from the host. Setup, status, logs and removal are in `docs/OPERATIONS.md`,
-# "Self-hosted CI runner".
-# See openspec/changes/archive/2026-09-13-vs-329-add-github-actions-ci-lint-typecheck-and/,
+# Every job runs on a GitHub-hosted runner: this workflow is triggered by pull requests, so it must
+# never run on a persistent machine of ours (VS-797). See openspec/changes/archive/2026-09-13-vs-329-add-github-actions-ci-lint-typecheck-and/,
 # openspec/changes/vs-393-ci-runs-about-4-times-per-pr-run-it-once/ and
 # openspec/changes/vs-395-switch-agent-conductor-s-ci-jobs-to-the/.
 name: CI
@@ -28,25 +25,19 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  # The self-hosted runner is a container with an 8-CPU CFS quota (VS-394). Inside it,
-  # `os.availableParallelism()`/`nproc` can still report the host's 32 cores, and vitest's forks pool
-  # would size itself to 31, oversubscribing the quota. Cap the forks at the quota (VS-395).
-  VITEST_MAX_FORKS: "8"
-
 jobs:
   lint:
     name: lint
-    runs-on: [self-hosted, linux, x64, weave-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     # Skip a draft pull request; a scheduled or dispatched run is never a draft.
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # pnpm first: setup-node's cache needs it, and pnpm/action-setup reads the
       # `packageManager` field (pnpm@11.25.0) from package.json when no version is given.
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           # Mirrors the `node = "26"` pin in mise.toml.
           node-version: "26"
@@ -56,13 +47,13 @@ jobs:
 
   typecheck:
     name: typecheck
-    runs-on: [self-hosted, linux, x64, weave-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "26"
           cache: pnpm
@@ -71,21 +62,16 @@ jobs:
       # itself, then the ui package is typechecked against them.
       - run: pnpm typecheck
 
-  # VS-392 split the core/server suite into four shards because a private-repo GitHub-hosted runner
-  # reported 2 CPUs and vitest's forks pool sized itself to one worker. That is wrong for the
-  # self-hosted runner: it is a single runner with an 8-CPU quota, so four shard jobs would queue one
-  # after another and re-run install/setup four times (VS-395). One `test-core` job now runs the whole
-  # suite with the forks capped at 8 (workflow `VITEST_MAX_FORKS`); the required `test-core` check
-  # name is unchanged.
+  # One job runs the whole core/server suite; the required `test-core` check name is unchanged.
   test-core:
     name: test-core
-    runs-on: [self-hosted, linux, x64, weave-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "26"
           cache: pnpm
@@ -100,13 +86,13 @@ jobs:
 
   test-ui:
     name: test-ui
-    runs-on: [self-hosted, linux, x64, weave-ci]
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "26"
           cache: pnpm

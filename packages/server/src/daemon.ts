@@ -39,6 +39,7 @@ import { WebhookDispatcher } from './webhooks.js';
 import { PushDispatcher } from './pushDispatcher.js';
 import { ensurePushKeys, type PushKeys } from './vapid.js';
 import { localApiClient, resolveTailscaleCert, startCertRenewal, type RenewalHandle, type TailscaleClient, type TailscaleCertPair } from './tailscaleCert.js';
+import { generateSelfSigned } from './selfSignedCert.js';
 import type { AppDeps, WorkspaceRuntime } from './types.js';
 import { registerDemoAdapters, startDemoPlayer } from './demo/adapters.js';
 
@@ -117,8 +118,9 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const configDir = opts.configDir ?? workspaceLoader.configDir();
   const isolated = resolveIsolation(configDir, opts.shareHostCredentials);
   await mkdir(configDir, { recursive: true });
-  const daemonCfg = withListen(workspaceLoader.ensureFreshDaemonConfig(configDir), opts.listen);
-  initLogger(daemonCfg.logLevel);
+  const listenCfg = withListen(workspaceLoader.ensureFreshDaemonConfig(configDir), opts.listen);
+  initLogger(listenCfg.logLevel);
+  const daemonCfg = ignoreLoopbackTrustOnPublicBind(listenCfg);
 
   // VS-318: the service manager's PATH is not the user's. Resolve the daemon user's login-shell
   // PATH before any workspace loads or host tool spawns, then keep the detection snapshot fresh so
@@ -635,10 +637,25 @@ function close(server: ServerType): Promise<void> {
   return new Promise((res) => { server.close(() => res()); });
 }
 
+function isLoopbackBind(host: string): boolean {
+  return host === '127.0.0.1' || host === '::1' || host === 'localhost';
+}
+
+/**
+ * `auth.loopbackTrusted` is for a loopback bind only (VS-797). On any other bind every network peer
+ * reaches the listener, and trusting loopback peers there means a same-host proxy, a container
+ * gateway or a mistaken setting hands out an unauthenticated daemon, so the flag is dropped.
+ */
+export function ignoreLoopbackTrustOnPublicBind(cfg: DaemonConfig, warn: (msg: string) => void = (msg) => log.warn(msg)): DaemonConfig {
+  const [host = '127.0.0.1'] = splitListen(cfg.http.listen);
+  if (!cfg.auth.loopbackTrusted || isLoopbackBind(host)) return cfg;
+  warn(`auth.loopbackTrusted is ignored because http.listen is ${cfg.http.listen}, not a loopback address; set an operator password instead (weave daemon set-password)`);
+  return { ...cfg, auth: { ...cfg.auth, loopbackTrusted: false } };
+}
+
 /** PLAN §4.4: the public listener never starts unauthenticated on a non-loopback bind. */
 function publicListenerAllowed(cfg: DaemonConfig, auth: AuthService, host: string): boolean {
-  const loopbackBind = host === '127.0.0.1' || host === '::1' || host === 'localhost';
-  return loopbackBind || auth.hasOperator() || cfg.auth.loopbackTrusted;
+  return isLoopbackBind(host) || auth.hasOperator() || cfg.auth.loopbackTrusted;
 }
 
 interface TlsMaterial {
@@ -669,16 +686,12 @@ async function tlsOptions(cfg: DaemonConfig, configDir: string, tailscale: Start
     const certPath = join(configDir, 'self-signed.crt');
     const keyPath = join(configDir, 'self-signed.key');
     if (existsSync(certPath) && existsSync(keyPath)) return { cert: await readFile(certPath, 'utf8'), key: await readFile(keyPath, 'utf8') };
-    const selfsigned = (await import('selfsigned')) as { generate: (attrs: unknown, opts: unknown) => { cert: string; private: string } };
     const domains = tls.domains.length ? tls.domains : ['localhost'];
-    const pems = selfsigned.generate([{ name: 'commonName', value: domains[0]! }], {
-      days: 3650, keySize: 2048,
-      extensions: [{ name: 'subjectAltName', altNames: [...domains.map((d) => ({ type: 2, value: d })), { type: 7, ip: '127.0.0.1' }] }],
-    });
+    const pems = await generateSelfSigned(domains);
     await writeFile(certPath, pems.cert, { mode: 0o600 });
-    await writeFile(keyPath, pems.private, { mode: 0o600 });
+    await writeFile(keyPath, pems.key, { mode: 0o600 });
     log.info({ certPath, domains }, 'generated a self-signed certificate');
-    return { cert: pems.cert, key: pems.private };
+    return pems;
   }
   throw new Error(`http.tls.mode "${tls.mode}" is not implemented; use mode "tailscale" (a Tailscale-issued certificate), mode "files", or a reverse proxy`);
 }

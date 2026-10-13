@@ -9,3 +9,11 @@ allowBuilds:
   onnxruntime-node: true
   protobufjs: true
 verifyDepsBeforeRun: false
+# Transitive production dependencies with a fixed advisory (VS-797); drop an entry once its parent
+# resolves a patched version on its own.
+overrides:
+  proxy-addr: ">=2.0.8"
+  sharp: ">=0.35.5"
+  hono: ">=4.13.7"
+  fast-uri: ">=3.1.8 <4"
+  ip-address: ">=10.7.1"

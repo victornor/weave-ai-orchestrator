@@ -1629,7 +1629,7 @@ export function DeviceSection({ themeControl = 'full' }: { themeControl?: 'full'
   // The chat reads this through `useShowSilentTurns`; the writer publishes, so a chat already
   // mounted behind this page follows without a reload.
   const [silentTurns, setSilentTurns] = useState(readShowSilentTurns);
-  // VS-616: the same for the weaver chat's streamed text and mid-turn tool trace, also off by default.
+  // VS-616: the same for the weaver chat's streamed text and mid-turn tool trace, on by default.
   const showLiveRunOutput = useShowLiveRunOutput();
   const dictationDiagnostics = useDictationDiagnosticsEnabled();
 
@@ -1729,8 +1729,8 @@ export function DeviceSection({ themeControl = 'full' }: { themeControl?: 'full'
               <span className="block text-meta text-text-1">Live weaver output</span>
               <span className="block text-micro text-text-3">
                 Show the weaver&apos;s words and tool calls as they stream, in a marked in-progress section that clears when its
-                real message arrives. Off, the chat shows only what the weaver has sent plus the activity row. Stored in this
-                browser, not on the daemon.
+                real message arrives. On by default. Off, the chat shows only what the weaver has sent plus the activity row.
+                Stored in this browser, not on the daemon.
               </span>
             </span>
             <button

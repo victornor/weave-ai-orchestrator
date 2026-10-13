@@ -250,9 +250,8 @@ function liveEvent(seq: number, type: RunEvent['type'], payload: Record<string, 
 }
 
 beforeEach(() => {
-  // VS-616: the weaver chat's streamed text and trace are opt-in (off by default). These tests are
-  // about the chat's live trace, so they open with it on; the default-off behaviour has its own
-  // describe at the end that turns it back off.
+  // VS-799: the weaver chat's streamed text and trace are on by default; the tests open with it
+  // explicitly on, and the describe at the end covers the default and turning it off.
   writeShowLiveRunOutput(true);
   window.HTMLElement.prototype.scrollIntoView = vi.fn();
   state.width = 900;
@@ -1047,7 +1046,15 @@ describe('the weaver chat stream is opt-in (VS-616)', () => {
     ];
   };
 
-  it('off by default: shows sent messages and the activity row, no streamed text and no trace', () => {
+  it('on by default: a fresh profile shows the streamed text and the tool trace', () => {
+    localStorage.removeItem('conductor.chat.liveRunOutput');
+    liveTurn();
+    render(<V2ChatPage />);
+    expect(document.querySelector('[data-live-partials]')).toHaveTextContent('Draft reply in progress');
+    expect(document.querySelector('[data-trace-tool]')).not.toBeNull();
+  });
+
+  it('switched off: shows sent messages and the activity row, no streamed text and no trace', () => {
     writeShowLiveRunOutput(false);
     liveTurn();
     state.messages = [message({ id: 'm1', body: 'have you started?' })];

@@ -8,7 +8,7 @@ only — `skip_specs: true`.
 Captain, 2026-09-14: a trace row for a file tool prints the whole path, e.g.
 
 ```
-Edit  /home/user/agent-conductor/workspace/.agent-conductor/runtimes/claude/projects/-home-v-…/memory/MEMORY.md
+Edit  /home/user/agent-conductor/workspace/.agent-conductor/runtimes/claude/projects/-home-user-…/memory/MEMORY.md
 ```
 
 The directory prefix adds nothing a reader needs. The tool name plus the file's base name

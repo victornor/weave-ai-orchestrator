@@ -1,6 +1,6 @@
 /**
- * Which runtime, model and effort a turn runs on (VS-77, ADR 0011; VS-162, ADR 0012; VS-185, ADR
- * 0013; VS-284).
+ * Which runtime, model and effort a turn runs on (VS-77, ADR 0011; VS-162, ADR 0023; VS-185, ADR
+ * 0024; VS-284).
  *
  * There is one answer and one place it comes from: the effective model settings after the
  * workspace's own configured value (if any) is layered over a daemon overlay (if filled), which is

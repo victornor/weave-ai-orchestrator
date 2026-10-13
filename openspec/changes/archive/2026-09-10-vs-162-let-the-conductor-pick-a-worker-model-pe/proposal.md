@@ -26,7 +26,7 @@ when-to-use description, so the conductor can pick the fitting one when it files
   edit / remove for options. `conductor models options …` is the CLI. `GET`/`PUT /models`
   carries `workerOptions`; an omitted array on PUT keeps the existing list so a partial
   body cannot wipe the catalog.
-- **ADR 0012** records the exception to ADR 0011's "no per-ticket override": the override
+- **ADR 0023** records the exception to ADR 0011's "no per-ticket override": the override
   is an id into a workspace-defined catalog, not a free runtime/model on the ticket, and
   not a per-role list.
 
@@ -69,7 +69,7 @@ runtime-home set include option runtimes. `tickets.create` / `assign` validate t
 
 **Clients.** Settings → Models lists the catalog. Ticket types grow `workerModelId`.
 
-**Docs.** `docs/PLAN.md` §5, `docs/API.md`, ADR 0012, conductor skill/template sentence
+**Docs.** `docs/PLAN.md` §5, `docs/API.md`, ADR 0023, conductor skill/template sentence
 telling it to list and pick. Onboarding still writes the two settings only.
 
 **Not touched.** The conductor's own model. Per-role lists. Changing `workerModelId` after

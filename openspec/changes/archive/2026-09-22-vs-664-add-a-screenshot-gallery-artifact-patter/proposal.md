@@ -1,6 +1,6 @@
 ## Why
 
-Captain, on VOFM-168 (2026-09-22): a worker reworked a responsive UI across 11 tabs and came back
+Captain, on ACME-168 (2026-09-22): a worker reworked a responsive UI across 11 tabs and came back
 with 66 before-screenshots plus a metrics JSON, all attached as plain ticket files and a zip, when it
 should have laid them out in an openable, pannable, zoomable artifact. The artifact kit
 (`weave_artifact_kit`) and the `weave-ai-artifacts` skill exist, but nothing in either offers a way to

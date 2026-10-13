@@ -46,7 +46,7 @@ Add `'model_unconfigured'` to `ERROR_CODES`. HTTP 400 via the `validation` statu
 
 Rejected: reusing `runtime_unreachable` (that means a named adapter is not installed; here nothing was named). Rejected: falling back to workers (the silent path captain forbade).
 
-Deleted / unknown id still falls back to workers (ADR 0012, unchanged).
+Deleted / unknown id still falls back to workers (ADR 0023, unchanged).
 
 ### D3 — Seed in `startDaemon` when the file is absent, not as a Zod default
 
@@ -77,7 +77,7 @@ The add form keeps seeding its runtime draft from `current.workers.runtime` so a
 
 ### D6 — ADR amendment, not a silent PLAN rewrite
 
-New ADR 0019 (next free after 0018): unconfigured worker options and the fresh-install seed. Amend ADR 0012 (runtime no longer always set on an option) and ADR 0013 (first-boot catalog overlay is filled without the operator). PLAN §5 notes the seed and nullable option runtime. `docs/API.md` documents `runtime: null` on worker options and `model_unconfigured`.
+New ADR 0019 (next free after 0018): unconfigured worker options and the fresh-install seed. Amend ADR 0023 (runtime no longer always set on an option) and ADR 0024 (first-boot catalog overlay is filled without the operator). PLAN §5 notes the seed and nullable option runtime. `docs/API.md` documents `runtime: null` on worker options and `model_unconfigured`.
 
 ## Risks / Trade-offs
 

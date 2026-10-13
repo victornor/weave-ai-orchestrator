@@ -5,7 +5,7 @@ only — `skip_specs: true`.
 
 ## Why
 
-An interactive session on VOFM-84 (2026-09-14, opencode) cost ~526k fresh input tokens for two
+An interactive session on ACME-84 (2026-09-14, opencode) cost ~526k fresh input tokens for two
 questions. Three runs:
 
 | run | purpose | steps | fresh input | cached input |

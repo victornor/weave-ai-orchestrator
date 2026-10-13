@@ -138,8 +138,8 @@ Three rules worth internalising:
 
 | | |
 |---|---|
-| Node | **≥ 22** (the DB uses `node:sqlite`). The repo pins Node 26 via `mise.toml`. |
-| pnpm | 11.x (`mise` installs it; `corepack` works too) |
+| Node | **≥ 22** to run the daemon (the DB uses `node:sqlite`); **26** to develop, which is what CI, `mise.toml` and the Docker image use. |
+| pnpm | 11.25.0, the version `packageManager` pins (`mise` installs it; `corepack` works too) |
 | git | required |
 | A coding CLI | at least one of `claude`, `opencode`, `codex`, `gemini`, `cursor-agent`, **logged in on the daemon host** |
 | `gh` | required for `deliveryMode: pr` (the default). Use `deliveryMode: local-branch` without it. |
@@ -153,7 +153,7 @@ prints the `sudo` command for the rest.
 ## Install
 
 ```bash
-git clone git@github.com:victornor/agent-conductor.git && cd agent-conductor
+git clone https://github.com/victornor/agent-conductor.git && cd agent-conductor
 mise install                 # node + pnpm, if you use mise
 pnpm install
 pnpm build                   # tsc -b across every package, and the web app
@@ -174,7 +174,7 @@ EOF
 chmod +x ~/.local/bin/weave
 ```
 
-The pre-rename `conductor` command still works as a deprecated alias; it will be removed later.
+The pre-rename `conductor` command no longer exists: only `weave` is installed. Old `conductor` keys in config files are still read as aliases of their `weaver` names.
 Where `weave` is not on your PATH, substitute `node packages/cli/dist/bin.js`.
 
 ```bash
@@ -250,11 +250,11 @@ See [`docs/demo-mode.md`](docs/demo-mode.md).
 | [`docs/SCENARIOS.md`](docs/SCENARIOS.md) | end-to-end walkthroughs of what each participant sees |
 | [`docs/demo-mode.md`](docs/demo-mode.md) | demo mode, and how these screenshots are regenerated |
 | [`skills/README.md`](skills/README.md) | the agent-facing instruction layer |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | how to build, test and propose a change |
 | [`CLAUDE.md`](CLAUDE.md) | conventions for coding agents working on this repo |
 
 Root scripts: `pnpm build`, `pnpm test`, `pnpm lint` (the boundary and console guards),
-`pnpm typecheck`, `pnpm dev` (daemon in the foreground). CI runs the same checks on a self-hosted
-GitHub Actions runner; see [`docs/OPERATIONS.md` §9](docs/OPERATIONS.md#9-self-hosted-ci-runner).
+`pnpm typecheck`, `pnpm dev` (daemon in the foreground). CI runs the same checks on every pull request; see [`docs/OPERATIONS.md` §9](docs/OPERATIONS.md#9-continuous-integration).
 
 ## Licence and contributing
 
@@ -264,4 +264,4 @@ free to read, build, modify and test, but production use needs a licence key.
 
 Contributions are welcome. By submitting one you accept the contributor licence agreement in
 [`CLA.md`](CLA.md), which lets the project relicense your work, including into `ee/`. Read
-[`CLAUDE.md`](CLAUDE.md) for the repo's conventions before you open a pull request.
+[`CONTRIBUTING.md`](CONTRIBUTING.md) before you open a pull request; report security issues as described in [`SECURITY.md`](SECURITY.md).

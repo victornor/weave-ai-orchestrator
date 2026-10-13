@@ -11,9 +11,9 @@ and [`docs/`](docs/); this file is about the code.
 | [`docs/API.md`](docs/API.md) | The HTTP + SSE + MCP surface. Adding a route means adding it here too. |
 
 The visual contract for `packages/ui` and, by extension, `packages/tui` — tokens, components, screens
-and states — is held outside this repository and is not published. `packages/ui/src/index.css` is the
-in-tree expression of its tokens and the lint gate that rejects raw hex and px in components; PLAN §21
-carries the brief behind it. Ask a maintainer for anything neither answers.
+and states — is committed under `docs/design/v2/` (ADR 0020), with its handoff notes in `docs/design/v2/HANDOFF.md`.
+`packages/ui/src/index.css` is the in-tree expression of its tokens and the lint gate that rejects raw hex and px in components; PLAN §21
+carries the brief behind it.
 
 Deviations from the plan go in `docs/adr/` with the reason, not into the plan silently.
 

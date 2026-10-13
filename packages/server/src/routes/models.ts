@@ -1,6 +1,6 @@
 /**
  * `GET /models` and `PUT /models` — the workspace's two model settings plus the worker-options
- * catalog (VS-77, ADR 0011; VS-162, ADR 0012; VS-185, ADR 0013; VS-284; VS-356).
+ * catalog (VS-77, ADR 0011; VS-162, ADR 0023; VS-185, ADR 0024; VS-284; VS-356).
  *
  * GET returns effective values — the workspace's own configured setting when it has one, otherwise
  * a filled daemon overlay, otherwise the schema default — plus an additive per-control `source`

@@ -1,13 +1,13 @@
-# ADR 0013 — Daemon model overlays
+# ADR 0024 — Daemon model overlays
 
-**Status:** accepted · 2026-09-10 · amends ADR 0011 and ADR 0012 (the two workspace settings and the
+**Status:** accepted · 2026-09-10 · amends ADR 0011 and ADR 0023 (the two workspace settings and the
 workspace catalog remain; a filled daemon overlay is the effective value for that control on every
 workspace) · amended by ADR 0019 (a missing `daemon.yaml` is seeded with three unconfigured tiers;
 an existing file is never rewritten)
 
 ## Context
 
-ADR 0011 made model selection exactly two workspace settings. ADR 0012 added a workspace catalog a
+ADR 0011 made model selection exactly two workspace settings. ADR 0023 added a workspace catalog a
 ticket may name. A daemon that hosts many workspaces then repeats the same conductor model, workers
 default, and named options in every `workspace.yaml`. Captain asked on 2026-09-10 for optional
 daemon-level overlays: when filled, every workspace uses those values and workspace Settings for

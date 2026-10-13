@@ -46,7 +46,7 @@ incapable of being stranded by a transition that will never arrive: there is no 
 transition. The project survives, the asker still gets woken with the answer, and the human still
 sees the card — it simply stops pretending to be a gate on a finished ticket. The weaver is expected
 to name the finished ticket in the title or context if the reference matters, which the two real
-cases already did ("here is what I learned from VOFM-33").
+cases already did ("here is what I learned from ACME-33").
 
 **Why the correlation key is preserved too, not recomputed from the empty attachment.** `create()`
 defaults the key to `${kind}:${ticketId ?? 'workspace'}`, and `supersedeOpen()` matches on
@@ -116,7 +116,7 @@ decision's age with `formatAge` from `@weave-ai/render` (`core` already depends 
 short form (`4m`, `23h`, `6d`) used on ticket cards:
 
 ```
-- <id> [question, owner human, VOFM-33 done, 23h] <title>
+- <id> [question, owner human, ACME-33 done, 23h] <title>
 ```
 
 A decision with no ticket shows no ticket segment (`[question, owner human, 23h]`). Age and ticket

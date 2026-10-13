@@ -1,6 +1,6 @@
-# ADR 0012 — Named worker model options, picked per ticket
+# ADR 0023 — Named worker model options, picked per ticket
 
-**Status:** accepted · 2026-09-09 · amends ADR 0011 (the two settings remain; a ticket may name a catalog id) · amended by ADR 0013 (the catalog a ticket names is the effective catalog after a daemon overlay) · amended by ADR 0019 (`runtime: null` is unconfigured; a fresh `daemon.yaml` ships three such tiers)
+**Status:** accepted · 2026-09-09 · amends ADR 0011 (the two settings remain; a ticket may name a catalog id) · amended by ADR 0024 (the catalog a ticket names is the effective catalog after a daemon overlay) · amended by ADR 0019 (`runtime: null` is unconfigured; a fresh `daemon.yaml` ships three such tiers)
 
 ## Context
 

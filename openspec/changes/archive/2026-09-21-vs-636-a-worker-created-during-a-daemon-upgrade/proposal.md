@@ -1,6 +1,6 @@
 ## Why
 
-On 2026-09-20 a V OFM worker (Deployment Engineer #16, VOFM-130) was created at 21:14:22Z, inside a
+On 2026-09-20 a V OFM worker (Deployment Engineer #16, ACME-130) was created at 21:14:22Z, inside a
 daemon restart window, so `spawn()` never finished `provisionTicketWorktree`. The row was left
 `provisioning` with `worktreePath = null`. A later relaunch flipped it to `active` without creating a
 checkout, so every turn ran with `hasWorktree: false`, the daemon could not read the ticket's
@@ -24,7 +24,7 @@ restart and a turn ever re-checks the checkout it depends on.
   "this worker has no worktree; it is being repaired", not "planning is not complete".
 - The self-heal is **visible**: a repair logs and records an activity entry naming the worker.
 
-The retired VOFM-130 worker and ticket are untouched.
+The retired ACME-130 worker and ticket are untouched.
 
 ## Capabilities
 

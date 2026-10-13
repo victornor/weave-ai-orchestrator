@@ -302,7 +302,7 @@ export const ModelSettingSchema = z.object({
 export type ModelSetting = z.infer<typeof ModelSettingSchema>;
 
 /**
- * One named worker model a ticket may point at (VS-162, ADR 0012; VS-236, ADR 0019). `id` is the
+ * One named worker model a ticket may point at (VS-162, ADR 0023; VS-236, ADR 0019). `id` is the
  * kebab slug the conductor passes as `workerModelId`; `description` is the when-to-use note.
  * `runtime: null` means the option is not yet chosen — distinct from `model: null` (the runtime picks).
  */
@@ -358,7 +358,7 @@ export const DEFAULT_WORKER_TIERS: WorkerModelOption[] = WorkerOptionsArraySchem
 ]);
 
 /**
- * Optional per-control overlays on the daemon (VS-185, ADR 0013). Absent/null (and an empty
+ * Optional per-control overlays on the daemon (VS-185, ADR 0024). Absent/null (and an empty
  * `workerOptions` list) means no overlay for that control; a present setting or a non-empty catalog
  * is filled and governs every workspace.
  */

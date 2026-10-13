@@ -85,7 +85,7 @@
 
 ## 8. Docs, ADR, conductor prompt
 
-- [x] 8.1 Add `docs/adr/0012-worker-model-options.md` recording the catalog exception to ADR
+- [x] 8.1 Add `docs/adr/0023-worker-model-options.md` recording the catalog exception to ADR
       0011 (ticket may name a catalog id; roles/projects/agents still cannot; live lookup;
       omitted PUT preserves the catalog). Point ADR 0011 at it. Update `docs/PLAN.md` §5's
       `workspace.yaml` example with `workerOptions` and the ticket column list.

@@ -14,7 +14,7 @@ into it (`credentialPaths`, `packages/core/src/workspace/loader.ts`):
 
 That link was added so custom `provider` definitions (cheaper-inference, codeify) reach a turn, but
 it shares the whole file. The owner's config also carries a personal remote MCP server belonging to
-another workspace (`mcp.vautoig`), and potentially `plugin` entries. Every worker therefore loads
+another workspace (`mcp.acme-mcp`), and potentially `plugin` entries. Every worker therefore loads
 that server's tool definitions into its first request — measured at roughly 46,350 input tokens
 before any work (VS-435 `01M2GX51E7EXPPQQM6R8X6BCME`, VS-437 `01M2GX85BNKQZ6QQ2JX1F409B3`) — and
 can call another workspace's tools, breaking the project boundary.

@@ -69,7 +69,7 @@ is reachable by scrolling. `place-items: center` clips the overflow start edge a
 
 The existing UI-review pattern is a two-capture before/after pair, and up to three images still scan
 inside a `.row` of cards. At **four or more** images that belong together, a flat attachment list
-stops being scannable and a zip hides every image behind a download — the VOFM-168 case (66 images)
+stops being scannable and a zip hides every image behind a download — the ACME-168 case (66 images)
 is far past it. The skill states four as the trigger, and leaves one-to-three on the existing pattern.
 
 ### 5. Images stay `data:` URIs — attachment URLs are not used

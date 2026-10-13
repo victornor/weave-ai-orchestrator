@@ -1,12 +1,12 @@
 # ADR 0019 — Unconfigured worker tiers on a fresh daemon
 
-**Status:** accepted · 2026-09-11 · amends ADR 0012 and ADR 0013 (a catalog option may now have
+**Status:** accepted · 2026-09-11 · amends ADR 0023 and ADR 0024 (a catalog option may now have
 `runtime: null`; a missing `daemon.yaml` is seeded with three such options; existing files are never
 rewritten)
 
 ## Context
 
-ADR 0012 added a named catalog a ticket may point at. ADR 0013 moved that catalog to an optional
+ADR 0023 added a named catalog a ticket may point at. ADR 0024 moved that catalog to an optional
 daemon overlay. `WorkerModelOptionSchema` extended `ModelSettingSchema`, whose `runtime` defaulted
 to `claude`, so an option with no adapter silently became Claude. Captain asked for a fresh
 deployment to ship `quick`, `standard` and `deep` with no adapter chosen, and for that state to

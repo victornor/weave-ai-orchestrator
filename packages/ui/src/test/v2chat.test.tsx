@@ -38,6 +38,7 @@ const state = vi.hoisted(() => ({
   lastRun: null as { id: string; status: string; errorFamily?: string | null; scheduledRetryAt?: string | null } | null,
   compacting: false,
   answer: vi.fn(),
+  dismiss: vi.fn(),
   post: vi.fn(),
   compact: vi.fn(),
   go: vi.fn(),
@@ -111,6 +112,7 @@ vi.mock('../api/hooks', () => ({
     return { data: state.decisions.filter((d) => wanted.includes(d.status)), isSuccess: true };
   },
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
+  useDismissDecision: () => ({ mutate: state.dismiss, isPending: false }),
   useWorkers: () => ({ data: state.workers }),
   useProjects: () => ({ data: [{ id: 'p1', workspaceId: 'ws1', slug: 'web', name: 'web' }] }),
   useRoadmapBlocks: () => ({ data: state.roadmapBlocks }),

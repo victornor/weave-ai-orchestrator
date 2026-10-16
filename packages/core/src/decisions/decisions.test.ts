@@ -755,6 +755,47 @@ describe('decisions', () => {
     expect(decisions.list({ status: ['withdrawn'] })).toHaveLength(1);
   });
 
+  // VS-806: a human dismisses an agent-raised card with an optional reason; the asker is told.
+  describe('dismissing a card (VS-806)', () => {
+    const askedByConductor = (kind: 'question' | 'concern' | 'gate_finding' = 'question') =>
+      decisions.create(conductor(), { kind, title: 'Which store?', askedByAgentId: h.conductorId, correlationKey: newId() });
+
+    it('closes the card as withdrawn, recording the human and the trimmed reason, and wakes the asker as dismissed', () => {
+      const d = askedByConductor();
+      const dismissed = decisions.dismiss(HUMAN, d.id, '  wrong project  ');
+      expect(dismissed).toMatchObject({ status: 'withdrawn', answerText: 'wrong project', answeredByKind: 'human', answeredById: 'victor', answerKey: null });
+      expect(decisions.get(d.id).status).toBe('withdrawn');
+      const call = wake.calls.find((c) => c.agentId === h.conductorId && c.input.source === 'decision_answered');
+      expect(call?.input.payload).toEqual({ decisionId: d.id, dismissed: true, ticketId: null, reason: 'wrong project' });
+    });
+
+    it('records no reason when none is given, and still wakes the asker', () => {
+      const d = askedByConductor('concern');
+      expect(decisions.dismiss(HUMAN, d.id).answerText).toBe('');
+      const call = wake.calls.find((c) => c.agentId === h.conductorId && c.input.source === 'decision_answered');
+      expect(call?.input.payload).toEqual({ decisionId: d.id, dismissed: true, ticketId: null });
+    });
+
+    it('refuses a system-raised approval and leaves it open', () => {
+      const t = ticket();
+      const d = decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'plan', correlationKey: `plan_approval:${t.id}` });
+      expect(() => decisions.dismiss(HUMAN, d.id, 'no')).toThrow(expect.objectContaining({ code: 'forbidden' }));
+      expect(decisions.get(d.id).status).toBe('open');
+    });
+
+    it('refuses a decision that is no longer open', async () => {
+      const d = askedByConductor();
+      await decisions.answer(HUMAN, d.id, { text: 'sqlite' });
+      expect(() => decisions.dismiss(HUMAN, d.id, 'late')).toThrow(expect.objectContaining({ code: 'wrong_status' }));
+    });
+
+    it('refuses an agent actor and leaves the card open', () => {
+      const d = askedByConductor();
+      expect(() => decisions.dismiss(conductor(), d.id, 'mine')).toThrow(expect.objectContaining({ code: 'forbidden' }));
+      expect(decisions.get(d.id).status).toBe('open');
+    });
+  });
+
   it('supersedeForTarget closes the open decision for a correlation key', () => {
     const t = ticket();
     decisions.create(AGENT, { ticketId: t.id, kind: 'plan_approval', title: 'v1', correlationKey: `plan_approval:${t.id}` });

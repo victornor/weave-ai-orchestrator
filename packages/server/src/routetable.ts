@@ -148,6 +148,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'GET', path: `${W}/decisions/{id}`, tag: 'decisions', summary: 'One decision', auth: 'session' },
   { method: 'POST', path: `${W}/decisions/{id}/answer`, tag: 'decisions', summary: 'Answer a decision', auth: 'session', mutating: true },
   { method: 'POST', path: `${W}/decisions/{id}/withdraw`, tag: 'decisions', summary: 'Withdraw a decision', auth: 'session', mutating: true },
+  { method: 'POST', path: `${W}/decisions/{id}/dismiss`, tag: 'decisions', summary: 'Dismiss an agent-raised decision card with an optional reason', auth: 'session', mutating: true },
 
   { method: 'GET', path: `${W}/runs`, tag: 'runs', summary: 'List runs', auth: 'session' },
   { method: 'GET', path: `${W}/runs/{id}`, tag: 'runs', summary: 'One run', auth: 'session' },

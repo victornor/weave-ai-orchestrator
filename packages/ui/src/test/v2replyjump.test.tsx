@@ -155,6 +155,7 @@ const state = vi.hoisted(() => ({
   runState: 'connected' as 'connected' | 'offline' | 'unreachable',
   lastRun: null as { id: string; status: string } | null,
   answer: vi.fn(),
+  dismiss: vi.fn(),
   post: vi.fn(),
   go: vi.fn(),
   reducedMotion: false,
@@ -209,6 +210,7 @@ vi.mock('../api/hooks', () => ({
     return { data: state.decisions.filter((d) => wanted.includes(d.status)), isSuccess: true };
   },
   useAnswerDecision: () => ({ mutate: state.answer, isPending: false }),
+  useDismissDecision: () => ({ mutate: state.dismiss, isPending: false }),
   useWorkers: () => ({ data: state.workers }),
   useProjects: () => ({ data: [{ id: 'p1', workspaceId: 'ws1', slug: 'web', name: 'web' }] }),
   useRoadmapBlocks: () => ({ data: [] }),

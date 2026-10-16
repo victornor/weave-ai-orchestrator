@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   decisions: [] as Decision[],
   tickets: [] as unknown[],
   workers: {} as Record<string, Array<{ id: string; name: string }>>,
+  dismiss: vi.fn(),
 }));
 
 vi.mock('@tanstack/react-router', () => ({
@@ -45,6 +46,7 @@ vi.mock('../api/hooks', () => ({
     ids.map((id) => ({ data: state.decisions.filter((d) => d.workspaceId === id || d.workspaceId === `ulid-${id}`), isError: false, refetch: vi.fn() })),
   useTicketsMany: (ids: readonly string[]) => ids.map(() => ({ data: state.tickets })),
   useAnswerDecision: () => ({ mutate: vi.fn(), isPending: false }),
+  useDismissDecision: () => ({ mutate: state.dismiss, isPending: false }),
   useTicketWorkProducts: () => ({ data: [], isLoading: false }),
   useTicketFor: () => ({ data: undefined }),
   useTicketDocument: () => ({ data: undefined, isLoading: false, isError: true }),
@@ -158,6 +160,30 @@ describe('the V2 Needs you screen', () => {
     render(<V2NeedsPage />);
     expect(screen.getByText('Scoped decision')).toBeInTheDocument();
     expect(screen.getByText('1 waiting')).toBeInTheDocument();
+  });
+
+  it('dismisses an agent-raised card with the typed reason, scoped to its workspace (VS-806)', () => {
+    state.dismiss.mockReset();
+    state.decisions = [
+      makeDecision({ id: 'd1', workspaceId: 'ws1', kind: 'question', options: [], allowFreeText: true, title: 'Misplaced question' }),
+    ];
+    render(<V2NeedsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss…' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Why dismiss this card? (optional)' }), { target: { value: 'wrong project' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(state.dismiss).toHaveBeenCalledTimes(1);
+    expect(state.dismiss.mock.calls[0]![0]).toEqual({ id: 'd1', ws: 'ws1', reason: 'wrong project' });
+  });
+
+  it('dismisses with no reason key when none is typed (VS-806)', () => {
+    state.dismiss.mockReset();
+    state.decisions = [
+      makeDecision({ id: 'd1', workspaceId: 'ws1', kind: 'question', options: [], allowFreeText: true, title: 'Misplaced question' }),
+    ];
+    render(<V2NeedsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(state.dismiss.mock.calls[0]![0]).toEqual({ id: 'd1', ws: 'ws1' });
   });
 
   it('shows an empty state when nothing is waiting', () => {

@@ -26,6 +26,7 @@ import { useConnection, useWorkspaceEvents, useWs } from '../api/context';
 import {
   ACCOUNTS_REFRESH_MS,
   useAnswerDecision,
+  useDismissDecision,
   useCompactWeaver,
   useCreateThread,
   useDecisions,
@@ -148,6 +149,7 @@ function DecisionsPane({
   loaded,
   busy,
   onAnswer,
+  onDismiss,
   width,
   onStartDrag,
   onKeyDown,
@@ -167,6 +169,7 @@ function DecisionsPane({
   loaded: boolean;
   busy: boolean;
   onAnswer: (id: string, a: V2Answer) => void;
+  onDismiss: (id: string, reason: string) => void;
   width: number;
   onStartDrag: (e: React.PointerEvent) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
@@ -266,6 +269,7 @@ function DecisionsPane({
                 projectLabel={p ? projectLabel(p) : null}
                 projectSlug={p?.slug ?? null}
                 onAnswer={(a) => onAnswer(d.id, a)}
+                onDismiss={(reason) => onDismiss(d.id, reason)}
               />
             );
           })
@@ -300,6 +304,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // optimistically the moment it is answered, without waiting for the list to refetch (VS-369).
   const answeredDecisions = useDecisions({ status: 'answered', owner: 'human', limit: 200 });
   const answer = useAnswerDecision();
+  const dismiss = useDismissDecision();
   // Retired workers and terminal tickets are fetched because the chips are the record of what a
   // turn did: a finished dispatch keeps its label, and a finished worker still resolves for it
   // (V1's Chat, `includeRetired`/`includeTerminal`). `fields: 'label'` keeps that payload small.
@@ -547,6 +552,23 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
     [answer, offline, openDecisions],
   );
 
+  // VS-806: dismissing sends the optional reason to the asker; a card closed elsewhere is not an error.
+  const onDismiss = useCallback(
+    (id: string, reason: string): void => {
+      setAnswerError(null);
+      dismiss.mutate(
+        { id, ...(reason ? { reason } : {}) },
+        {
+          onError: (e) => {
+            if (isClosedRefusal(e)) return;
+            setAnswerError(e.message || 'Could not dismiss that card.');
+          },
+        },
+      );
+    },
+    [dismiss],
+  );
+
   // Only a weaver reply that arrived after this thread opened streams in; history never re-animates
   // and the human's own messages do not reveal.
   const revealIds = useNewOutboundMessageIds(messages.data, fetchId);
@@ -727,13 +749,14 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
                 projectLabel={project ? projectLabel(project) : null}
                 projectSlug={project?.slug ?? null}
                 onAnswer={(a) => onAnswer(d.id, a)}
+                onDismiss={(reason) => onDismiss(d.id, reason)}
               />
             </div>
           );
         })}
       </>
     );
-  }, [decisionsById, ticketsById, projectsById, showInlineDecisionCard, exitingDecisionIds, answer.isPending, agentNameById, onAnswer, ws]);
+  }, [decisionsById, ticketsById, projectsById, showInlineDecisionCard, exitingDecisionIds, answer.isPending, agentNameById, onAnswer, onDismiss, ws]);
 
   // VS-634: under every weaver message that references tickets, a live status strip — one chip per
   // ticket (identifier, worker name or title, current status), opening the ticket through the same
@@ -863,6 +886,7 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
             loaded={decisions.isSuccess}
             busy={answer.isPending}
             onAnswer={onAnswer}
+            onDismiss={onDismiss}
             width={divider}
             onStartDrag={startDrag}
             onKeyDown={onDividerKey}

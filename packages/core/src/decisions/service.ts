@@ -856,6 +856,38 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       });
     },
 
+    dismiss(actor, id, reason) {
+      if (actor.kind !== 'human') throw new OcError('forbidden', 'only a human can dismiss a decision card');
+      const d = get(id);
+      if (d.status !== 'open') throw new OcError('wrong_status', `decision ${id} is ${d.status}`, { status: d.status });
+      if (!(ASKABLE_DECISION_KINDS as readonly string[]).includes(d.kind)) {
+        throw new OcError('forbidden', `a ${d.kind} card cannot be dismissed; only ${ASKABLE_DECISION_KINDS.join(', ')} cards can`);
+      }
+      const why = (reason ?? '').trim();
+      const dismissed = tx(db, () => {
+        db.update('decisions', d.id, {
+          status: 'withdrawn' as DecisionStatus, answerText: why,
+          answeredByKind: actor.kind, answeredById: actor.id, answeredAt: nowIso(),
+        });
+        const next = get(d.id);
+        recordActivity(db, ws, actor, 'decision.dismiss', 'decision', d.id, { reason: why }, d.ticketId);
+        ctx.events.emit('decision.answered', 'decision', d.id, next);
+        return next;
+      });
+      // A dismissal is a `decision_answered` wake marked `dismissed` with no `answer`: it already
+      // steers a running turn and resolves a block, and the asker's prompt tells it apart.
+      if (dismissed.askedByAgentId) {
+        const interruptRunId = steerInterruptTarget(ctx, dismissed.askedByAgentId);
+        wake(dismissed.askedByAgentId, 'decision_answered', `decision dismissed: ${dismissed.title}`, {
+          decisionId: dismissed.id, dismissed: true, ticketId: dismissed.ticketId,
+          ...(why ? { reason: why } : {}),
+          ...(interruptRunId ? { interruptedRunId: interruptRunId } : {}),
+        });
+        if (interruptRunId) interruptRunForSteer(ctx, deps, actor, interruptRunId);
+      }
+      return dismissed;
+    },
+
     supersedeForTarget(actor, ticketId, correlationKey) {
       return tx(db, () => supersedeOpen(actor, ticketId, correlationKey));
     },

@@ -1808,6 +1808,15 @@ function decisionsLists(qc: QueryClient): Array<{ key: readonly unknown[]; statu
 }
 
 export function useAnswerDecision(): UseMutationResult<unknown, Error, { id: string; ws?: string; key?: string; text?: string; remember?: boolean; inputs?: DecisionAnswerInputs; overrideHold?: boolean; overrideReason?: string }> {
+  return useCloseDecision('answer');
+}
+
+/** VS-806: dismiss an agent-raised card, with an optional reason the asker is told. Leaves the open lists like an answer. */
+export function useDismissDecision(): UseMutationResult<unknown, Error, { id: string; ws?: string; reason?: string }> {
+  return useCloseDecision('dismiss');
+}
+
+function useCloseDecision<V extends { id: string; ws?: string }>(action: 'answer' | 'dismiss'): UseMutationResult<unknown, Error, V> {
   const ctxWs = useHookWs();
   const qc = useQueryClient();
   // VS-369: one POST per decision while it is in flight, so a double click cannot answer twice.
@@ -1817,7 +1826,7 @@ export function useAnswerDecision(): UseMutationResult<unknown, Error, { id: str
       if (inFlight.current.has(id)) return Promise.resolve(undefined);
       inFlight.current.add(id);
       const ws = wsArg ?? ctxWs;
-      return api.ws(ws, `/decisions/${id}/answer`, { method: 'POST', body }).finally(() => { inFlight.current.delete(id); });
+      return api.ws(ws, `/decisions/${id}/${action}`, { method: 'POST', body }).finally(() => { inFlight.current.delete(id); });
     },
     onMutate: async (v) => {
       const ws = v.ws ?? ctxWs;

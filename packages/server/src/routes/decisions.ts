@@ -28,5 +28,10 @@ export function decisionRoutes(): Hono<AppEnv> {
     const { reason } = await body(c, z.object({ reason: z.string().default('withdrawn by operator') }));
     return c.json(c.get('ws').services.decisions.withdraw(c.get('actor'), c.req.param('id'), reason));
   });
+  // VS-806: a human dismisses an agent-raised card; the asker is woken with the optional reason.
+  app.post('/:id/dismiss', async (c) => {
+    const { reason } = await body(c, z.object({ reason: z.string().optional() }));
+    return c.json(c.get('ws').services.decisions.dismiss(c.get('actor'), c.req.param('id'), reason));
+  });
   return app;
 }

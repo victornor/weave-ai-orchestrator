@@ -20,7 +20,7 @@ const state = vi.hoisted(() => ({
   ctxWs: '',
   path: '/needs',
   decisions: {} as Record<string, Decision[]>,
-  posts: [] as Array<{ ws: string; path: string }>,
+  posts: [] as Array<{ ws: string; path: string; body?: unknown }>,
   outcome: 'ok' as AnswerOutcome,
   /** When true the next decisions GET is held open, so a test can prove the card left optimistically. */
   holdDecisions: false,
@@ -54,8 +54,8 @@ vi.mock('../api/client', async () => {
         return Promise.resolve({});
       },
       ws: (workspace: string, path: string, init?: { method?: string; body?: unknown }) => {
-        if (init?.method === 'POST' && path.includes('/answer')) {
-          state.posts.push({ ws: workspace, path });
+        if (init?.method === 'POST' && (path.includes('/answer') || path.includes('/dismiss'))) {
+          state.posts.push({ ws: workspace, path, body: init.body });
           const id = path.split('/')[2]!;
           if (state.outcome === 'revision_pending') {
             return Promise.reject(new actual.ApiError(409, { code: 'revision_pending', message: 'decision is held', details: { weaverReviewStatus: 'concerns', weaverReviewNote: 'fix it first' } }));
@@ -114,7 +114,7 @@ vi.mock('../v2/chatSplit', async (importOriginal) => {
 
 const { V2NeedsPage } = await import('../v2/NeedsYouPage');
 const { V2ChatPage } = await import('../v2/ChatPage');
-const { useAnswerDecision } = await import('../api/hooks');
+const { useAnswerDecision, useDismissDecision } = await import('../api/hooks');
 const { qk } = await import('../api/keys');
 
 const question = (over: Partial<Decision> = {}): Decision =>
@@ -203,6 +203,20 @@ describe('answering a V2 decision card', () => {
       result.current.mutate({ id: 'd1', ws: 'alpha', key: 'a' });
     });
     expect(state.posts).toHaveLength(1);
+  });
+
+  it('posts a dismissal to the dismiss route with the reason, and the card leaves the open list (VS-806)', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const key = [...qk.decisions('alpha'), { status: 'open', owner: 'human' }];
+    qc.setQueryData(key, [question()]);
+    const { result } = renderHook(() => useDismissDecision(), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>,
+    });
+    await act(async () => {
+      result.current.mutate({ id: 'd1', ws: 'alpha', reason: 'wrong project' });
+    });
+    expect(state.posts).toEqual([{ ws: 'alpha', path: '/decisions/d1/dismiss', body: { reason: 'wrong project' } }]);
+    expect(qc.getQueryData(key)).toEqual([]);
   });
 
   it('removes an already-answered card with no error', async () => {

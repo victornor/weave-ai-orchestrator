@@ -61,7 +61,7 @@ describe('command tree', () => {
     ['role', ['list', 'show', 'activate', 'set-max-workers', 'pause', 'resume', 'retire', 'charter']],
     ['worker', ['list', 'show', 'pause', 'resume', 'relaunch', 'cancel', 'purge']],
     ['ticket', ['create', 'list', 'show', 'assign', 'set', 'transition', 'comment', 'cancel', 'discard', 'open']],
-    ['decision', ['list', 'show', 'answer']],
+    ['decision', ['list', 'show', 'answer', 'dismiss']],
     ['presentation', ['set', 'open', 'reconcile', 'status']],
     ['weaver', ['show', 'reset-session']],
     // Model selection, whole and entire (VS-77).
@@ -281,6 +281,20 @@ describe('running commands against a stubbed daemon', () => {
     });
     await buildProgram().parseAsync([...base, 'decision', 'answer', 'dec_1', '2']);
     expect(seen).toContain('POST /api/w/acme/decisions/dec_1/answer');
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('dismisses a decision, posting the reason to the dismiss route (VS-806)', async () => {
+    const seen = stubFetch({ '/api/w/acme/decisions/dec_1/dismiss': { id: 'dec_1', status: 'withdrawn' } });
+    const bodies: unknown[] = [];
+    const stubbed = globalThis.fetch;
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(init?.body ? JSON.parse(String(init.body)) : null);
+      return stubbed(input, init);
+    }) as typeof fetch;
+    await buildProgram().parseAsync([...base, 'decision', 'dismiss', 'dec_1', '--reason', 'wrong project']);
+    expect(seen).toEqual(['POST /api/w/acme/decisions/dec_1/dismiss']);
+    expect(bodies).toEqual([{ reason: 'wrong project' }]);
     expect(process.exitCode).toBeUndefined();
   });
 

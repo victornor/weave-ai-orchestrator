@@ -12,7 +12,7 @@
  */
 import { useMemo, useState } from 'react';
 import { projectLabel, type Decision, type DecisionAnswerInputs, type Ticket } from '@weave-ai/shared';
-import { useAnswerDecision, useDecisionsMany, useTicketsMany, useWeaverMany, useWorkersMany, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
+import { useAnswerDecision, useDismissDecision, useDecisionsMany, useTicketsMany, useWeaverMany, useWorkersMany, useWorkspaceProjects, useWorkspaces } from '../api/hooks';
 import { NetworkError } from '../api/client';
 import { enqueue } from '../lib/queue';
 import { decisionCarriesSecret } from '../lib/decisionSecrets';
@@ -109,6 +109,7 @@ export function V2NeedsScreen(): React.ReactElement {
   const weaverQueries = useWeaverMany(ids);
   const workerQueries = useWorkersMany(ids, { includeRetired: true });
   const answer = useAnswerDecision();
+  const dismiss = useDismissDecision();
 
   // Decisions owned by the human are raised by the weaver (or the system), not a worker — a worker's
   // ask goes to the weaver. So a question here reads as the weaver asking when the asker is that
@@ -209,6 +210,14 @@ export function V2NeedsScreen(): React.ReactElement {
     });
   };
 
+  // VS-806: dismiss an agent-raised card, telling the asker why. A card closed elsewhere is not an error.
+  const onDismiss = (decision: Decision, reason: string): void => {
+    setAnswerError(null);
+    dismiss.mutate({ id: decision.id, ws: decision.workspaceId, ...(reason ? { reason } : {}) }, {
+      onError: (e) => { if (!isClosedRefusal(e)) setAnswerError(e.message); },
+    });
+  };
+
   if (workspaces.isError) {
     return <ErrorState code="WORKSPACES_QUERY_FAILED" message="Could not load workspaces." onRetry={() => void workspaces.refetch()} />;
   }
@@ -270,6 +279,7 @@ export function V2NeedsScreen(): React.ReactElement {
                   asker={d.askedByAgentId && weaverByWs.get(d.workspaceId) === d.askedByAgentId ? 'weaver' : undefined}
                   busy={answer.isPending}
                   onAnswer={(a) => onAnswer(d, a)}
+                  onDismiss={(reason) => onDismiss(d, reason)}
                 />
               );
             })}

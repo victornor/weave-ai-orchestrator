@@ -13,6 +13,7 @@
  */
 import { useMemo, useState } from 'react';
 import {
+  ASKABLE_DECISION_KINDS,
   NAMED_CARD_OPTION_KEYS,
   documentTarget,
   isActiveRun,
@@ -64,6 +65,11 @@ export interface V2DecisionCardProps {
   /** The plan under approval, rendered above the actions on a `plan_approval`. */
   plan?: React.ReactNode;
   onAnswer: (a: V2Answer) => void;
+  /**
+   * VS-806: dismiss the card, telling the asker why (the reason is optional, '' when none was given).
+   * Offered only on the kinds an agent may raise; omitted by a surface that cannot dismiss.
+   */
+  onDismiss?: (reason: string) => void;
   /** The chat pane's narrow-pane variant. */
   narrow?: boolean;
   /** Held for one animation while it leaves the list (VS-427's `useExitPresence`), so its removal
@@ -336,6 +342,7 @@ export function V2DecisionCard({
   busy,
   plan,
   onAnswer,
+  onDismiss,
   narrow = false,
   exiting = false,
   delivery,
@@ -349,6 +356,8 @@ export function V2DecisionCard({
   const [revision, setRevision] = useState('');
   const [requestingChanges, setRequestingChanges] = useState(false);
   const [changeText, setChangeText] = useState('');
+  const [dismissing, setDismissing] = useState(false);
+  const [dismissReason, setDismissReason] = useState('');
   const [freeText, setFreeText] = useState(false);
   const [text, setText] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
@@ -384,6 +393,8 @@ export function V2DecisionCard({
   // blocked card cannot be mistaken for an actionable one.
   const approveReady = !blocked && missing.length === 0;
   const destructive = decision.kind === 'discard_approval';
+  // VS-806: only a card an agent raised can be dismissed; a system approval gates a ticket or agent.
+  const dismissible = onDismiss != null && !inert && (ASKABLE_DECISION_KINDS as readonly string[]).includes(decision.kind);
   const docTarget = documentTarget(decision);
   // Never join the raw agent id into captain-visible text (VS-403): the caller resolves the name,
   // and an unresolved asker reads as a neutral label instead.
@@ -719,6 +730,31 @@ export function V2DecisionCard({
           </div>
         ) : null}
 
+        {dismissing && dismissible ? (
+          <div className="mb-2 rounded-r4 border border-line-2 bg-bg-2 p-2.5">
+            <p className="mb-2 text-micro leading-snug text-text-1">
+              Dismissing closes this card without answering it. {askerLabel ? `${askerLabel[0]!.toUpperCase()}${askerLabel.slice(1)} is` : 'The asker is'} told it was dismissed, with your reason if you give one.
+            </p>
+            <textarea
+              autoFocus rows={2} value={dismissReason} onChange={(e) => setDismissReason(e.target.value)}
+              placeholder="Why? (optional)" aria-label="Why dismiss this card? (optional)"
+              className="mb-2 w-full rounded-r4 border border-line-2 bg-bg-input px-2.5 py-1.5 text-meta text-text-1 outline-none placeholder:text-text-4"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                type="button" disabled={busy}
+                onClick={() => { onDismiss!(dismissReason.trim()); setDismissing(false); }}
+                className="h-9 rounded-r4 border-0 bg-text-1 px-2.5 text-meta font-medium text-bg-0 disabled:cursor-not-allowed disabled:opacity-55"
+              >
+                Dismiss
+              </button>
+              <button type="button" onClick={() => setDismissing(false)} className="h-9 rounded-r4 border border-line-2 px-2.5 text-meta text-text-2">
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <div className={cx('flex flex-wrap items-center gap-2', !inert && !blocked ? 'min-h-[34px]' : null)}>
           {inert ? null : destructive ? (
             <button
@@ -817,6 +853,16 @@ export function V2DecisionCard({
               className="h-9 flex-1 rounded-r4 border-0 bg-accent px-3 text-meta font-medium text-white disabled:cursor-not-allowed disabled:opacity-55"
             >
               Send answer
+            </button>
+          ) : null}
+
+          {dismissible ? (
+            <button
+              type="button" disabled={busy} aria-expanded={dismissing}
+              onClick={() => setDismissing((v) => !v)}
+              className="h-9 rounded-r4 border border-line-2 px-3 text-meta text-text-2"
+            >
+              Dismiss…
             </button>
           ) : null}
 

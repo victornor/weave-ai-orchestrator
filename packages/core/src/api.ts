@@ -251,6 +251,12 @@ export interface DecisionsService {
    */
   review(actor: Actor, id: string, input: { status: 'looked' | 'concerns'; note?: string; reviewedHead?: string | null; waitingOn?: string | null }): Promise<S.Decision>;
   withdraw(actor: Actor, id: string, reason: string): S.Decision;
+  /**
+   * VS-806: a human dismisses an open agent-raised card (`ASKABLE_DECISION_KINDS` only) with an optional
+   * reason. Recorded as `withdrawn` with the human as the answerer; the asking agent is woken with a
+   * `decision_answered` wake marked `dismissed` carrying the reason, so it can re-raise or drop.
+   */
+  dismiss(actor: Actor, id: string, reason?: string): S.Decision;
   /** Withdraws every still-open decision scoped to this ticket (e.g. once it reaches a terminal status). Returns the count closed. */
   withdrawForTicket(actor: Actor, ticketId: string, reason: string): number;
   /**

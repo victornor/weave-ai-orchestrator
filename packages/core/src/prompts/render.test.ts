@@ -539,6 +539,41 @@ describe('prompt rendering', () => {
     expect(prompt).toContain('Your previous turn was interrupted');
   });
 
+  it('lists a dismissed decision apart from the answered ones, with the human reason (VS-806)', async () => {
+    const decId = newId();
+    h.db.insert('decisions', {
+      id: decId, workspaceId: h.workspaceId, ticketId, kind: 'question', owner: 'human', title: 'Which store?',
+      context: '', status: 'withdrawn', answerText: 'this belongs on TST-7',
+      askedByAgentId: worker.id, answeredAt: nowIso(), createdAt: '2020-01-01T00:00:00.000Z',
+    });
+    const wake = {
+      id: 'w-dis', workspaceId: h.workspaceId, agentId: worker.id, source: 'decision_answered',
+      reason: 'decision dismissed: Which store?', payload: { decisionId: decId, dismissed: true, reason: 'this belongs on TST-7', ticketId }, status: 'claimed',
+    } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).toContain('## Dismissed decisions');
+    expect(prompt).toContain('"Which store?" — DISMISSED by the human, not answered; their reason: "this belongs on TST-7"');
+    expect(prompt).toContain('Re-raise a corrected card');
+    expect(prompt).not.toContain('## Answered decisions');
+  });
+
+  it('says a dismissal came with no reason when none was given (VS-806)', async () => {
+    const decId = newId();
+    h.db.insert('decisions', {
+      id: decId, workspaceId: h.workspaceId, ticketId, kind: 'question', owner: 'human', title: 'Which store?',
+      context: '', status: 'withdrawn', answerText: '',
+      askedByAgentId: worker.id, answeredAt: nowIso(), createdAt: '2020-01-01T00:00:00.000Z',
+    });
+    const wake = {
+      id: 'w-dis2', workspaceId: h.workspaceId, agentId: worker.id, source: 'decision_answered',
+      reason: 'decision dismissed: Which store?', payload: { decisionId: decId, dismissed: true, ticketId }, status: 'claimed',
+    } as never;
+
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, worker, [wake], {});
+    expect(prompt).toContain('DISMISSED by the human, not answered; no reason given');
+  });
+
   const wakeFor = (id: string) => ({ id, workspaceId: h.workspaceId, agentId: worker.id, source: 'system', reason: 'assigned', payload: {}, status: 'claimed' } as never);
   const promptAt = async (turnCount: number) => {
     h.db.update('agents', worker.id, { turnCount });

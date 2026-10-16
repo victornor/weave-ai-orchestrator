@@ -536,10 +536,16 @@ export async function buildTurnPrompt(
   // `decision_answered` wake, keyed by decision id, so the resumed turn is told what it was steered
   // with even though the row's `finished_at` has already overtaken the answer.
   const wakeAnswers = new Map<string, { key: string | null; text: string | null; dictated: boolean }>();
+  // VS-806: a dismissal rides the same wake source but is not an answer; it is listed apart below.
+  const dismissals = new Map<string, string | null>();
   for (const w of flat) {
     if (w.source !== 'decision_answered') continue;
     const id = w.payload['decisionId'];
     if (typeof id !== 'string') continue;
+    if (w.payload['dismissed'] === true) {
+      dismissals.set(id, typeof w.payload['reason'] === 'string' && w.payload['reason'] ? w.payload['reason'] : null);
+      continue;
+    }
     const a = w.payload['answer'] as { key?: unknown; text?: unknown } | undefined;
     wakeAnswers.set(id, {
       key: typeof a?.key === 'string' ? a.key : null,
@@ -567,6 +573,15 @@ export async function buildTurnPrompt(
       const text = w?.text ?? d.answerText ?? null;
       const dictated = w?.dictated === true || dictatedDecisions.has(d.id);
       return `- ${d.id}${d.ticketId ? ` (${ticket(ctx, d.ticketId)?.identifier ?? d.ticketId})` : ''}: "${d.title}" — answered ${key}${text ? `: "${dictated ? `${VOICE_DICTATED_NOTICE} ` : ''}${text}"` : ''}`;
+    }, 'call `weave_inbox`'));
+  }
+
+  if (dismissals.size) {
+    parts.push('\n## Dismissed decisions');
+    parts.push(bounded([...dismissals], 8, ([id, reason]) => {
+      const d = ctx.db.get<S.Decision>('SELECT * FROM decisions WHERE workspace_id = ? AND id = ?', [ctx.workspaceId, id]);
+      const where = d?.ticketId ? ` (${ticket(ctx, d.ticketId)?.identifier ?? d.ticketId})` : '';
+      return `- ${id}${where}: "${d?.title ?? 'a decision'}" — DISMISSED by the human, not answered; ${reason ? `their reason: "${reason}"` : 'no reason given'}. Do not treat this as consent or an answer. Re-raise a corrected card if the question still matters, or drop it.`;
     }, 'call `weave_inbox`'));
   }
 

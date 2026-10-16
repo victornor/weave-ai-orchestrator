@@ -112,6 +112,22 @@ describe('real core services over HTTP', () => {
     expect((await res.json()).status).toBe('answered');
   });
 
+  it('dismisses an agent-raised decision through the REST route with the reason, and refuses an approval (VS-806)', async () => {
+    const { deps, harness } = boot();
+    const app = createApp(deps);
+    const services = deps.workspaces.get(harness.workspaceId)!.services;
+    const base = `http://127.0.0.1/api/w/${harness.workspaceId}`;
+    const question = services.decisions.create({ kind: 'human', id: null }, { kind: 'question', title: 'Ship it?', options: [{ key: 'yes', label: 'Yes' }] });
+    const res = await app.fetch(new Request(`${base}/decisions/${question.id}/dismiss`, { method: 'POST', headers: H, body: JSON.stringify({ reason: ' wrong project ' }) }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: 'withdrawn', answerText: 'wrong project' });
+
+    const approval = services.decisions.create({ kind: 'human', id: null }, { kind: 'hire_approval', title: 'Hire?', options: [{ key: 'approve', label: 'Approve' }] });
+    const refused = await app.fetch(new Request(`${base}/decisions/${approval.id}/dismiss`, { method: 'POST', headers: H, body: JSON.stringify({}) }));
+    expect(refused.status).toBe(403);
+    expect(services.decisions.get(approval.id).status).toBe('open');
+  });
+
   // ---------- VS-106 ----------
 
   it('a reviewer conversation: queued delivery, approving the merge, then a retired worker is refused', async () => {

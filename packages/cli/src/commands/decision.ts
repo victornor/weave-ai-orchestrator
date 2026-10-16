@@ -148,4 +148,15 @@ export function register(program: Command): void {
       const result = await client.wpost(`/decisions/${encodeURIComponent(id)}/withdraw`, { reason: opts['reason'] ?? '' });
       emit(result, () => write(`${style.ok('withdrawn')} ${id}`));
     }));
+
+  decision
+    .command('dismiss')
+    .argument('<id>')
+    .option('--reason <reason>', 'why the card is being dismissed; the asker is told')
+    .description('dismiss an agent-raised question, concern or gate finding, telling the asker why')
+    .action(async (id: string, opts: Record<string, string>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const result = await client.wpost(`/decisions/${encodeURIComponent(id)}/dismiss`, opts['reason'] ? { reason: opts['reason'] } : {});
+      emit(result, () => write(`${style.ok('dismissed')} ${id}`));
+    }));
 }

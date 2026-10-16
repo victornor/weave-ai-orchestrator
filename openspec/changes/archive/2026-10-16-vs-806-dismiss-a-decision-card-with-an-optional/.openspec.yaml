@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-16
+goal: Dismiss a decision card with an optional reason that is passed to the
+  weaver, so it can re-raise or drop a misplaced card

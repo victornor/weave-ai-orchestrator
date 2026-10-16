@@ -636,3 +636,55 @@ describe('the stale promotion card (VS-632)', () => {
     }
   });
 });
+
+describe('dismissing an agent-raised card (VS-806)', () => {
+  const question = () => makeDecision({
+    kind: 'question', title: 'Which store?', options: [], allowFreeText: true, recommendation: null,
+  });
+
+  it('sends the typed reason', () => {
+    const onDismiss = vi.fn();
+    renderCard({ decision: question(), onDismiss });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss…' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Why dismiss this card? (optional)' }), { target: { value: ' wrong project ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onDismiss).toHaveBeenCalledWith('wrong project');
+  });
+
+  it('dismisses with an empty reason when none is typed', () => {
+    const onDismiss = vi.fn();
+    renderCard({ decision: question(), onDismiss });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(onDismiss).toHaveBeenCalledWith('');
+  });
+
+  it('sends nothing on Cancel', () => {
+    const onDismiss = vi.fn();
+    renderCard({ decision: question(), onDismiss });
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss…' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onDismiss).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox', { name: 'Why dismiss this card? (optional)' })).toBeNull();
+  });
+
+  it('is offered on a concern and a gate finding', () => {
+    for (const kind of ['concern', 'gate_finding'] as const) {
+      const { unmount } = renderCard({ decision: makeDecision({ ...question(), kind }), onDismiss: vi.fn() });
+      expect(screen.getByRole('button', { name: 'Dismiss…' })).toBeInTheDocument();
+      unmount();
+    }
+  });
+
+  it('is not offered on a system approval, a closed card, or a surface that cannot dismiss', () => {
+    const { unmount } = renderCard({ decision: makeDecision({ kind: 'merge_approval' }), onDismiss: vi.fn() });
+    expect(screen.queryByRole('button', { name: 'Dismiss…' })).toBeNull();
+    unmount();
+    const closed = renderCard({ decision: makeDecision({ ...question(), status: 'withdrawn' }), onDismiss: vi.fn() });
+    expect(screen.queryByRole('button', { name: 'Dismiss…' })).toBeNull();
+    closed.unmount();
+    renderCard({ decision: question() });
+    expect(screen.queryByRole('button', { name: 'Dismiss…' })).toBeNull();
+  });
+});

@@ -57,6 +57,7 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | `weave decision list [-s open] [--owner human]` | everything waiting on you |
 | `weave decision show <id>` · `weave decision answer <id> <key\|N\|text> [--text] [--remember] [--yes]` | answer a decision card |
 | `weave decision withdraw <id>` | withdraw one |
+| `weave decision dismiss <id> [--reason <text>]` | dismiss an agent-raised question, concern or gate finding, telling the asker why |
 
 ## Roles, workers, tickets
 

@@ -51,13 +51,13 @@
     "selfsigned": "^5.5.0",
     "ulid": "^3.0.1",
     "web-push": "^3.6.7",
-    "ws": "^8.18.3",
+    "ws": "^8.22.0",
     "yaml": "^2.8.1",
     "zod": "^3.25.76",
     "zod-to-json-schema": "^3.24.5"
   },
   "devDependencies": {
     "@types/web-push": "^3.6.4",
-    "@types/ws": "^8.18.1"
+    "@types/ws": "^8.18.2"
   }
 }

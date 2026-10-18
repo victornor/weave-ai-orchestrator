@@ -574,8 +574,8 @@ importers:
         specifier: ^19.0.0
         version: 19.2.8(react@19.2.8)
       react-force-graph-2d:
-        specifier: ^1.29.1
-        version: 1.29.1(react@19.2.8)
+        specifier: ^1.29.2
+        version: 1.29.2(react@19.2.8)
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.0.0
@@ -2355,8 +2355,8 @@ packages:
     resolution: {integrity: sha512-/kXzuDnnBqyyWyhDMH7+PfP8J/oXiAavGzcRxASOMRHFuReDtofizLLJsf7nnDLAfEaMW4pVWaXrAjtnglpEkg==}
     engines: {node: '>=12'}
 
-  force-graph@1.51.4:
-    resolution: {integrity: sha512-TdJ2KbkoiDQ7NIRx8IPGD0mAXXpLhamS7c+b7W98b0MHG7lphnda1VOQX/98UDTsttIAdH4TcP0l0MauSnLK8w==}
+  force-graph@1.52.0:
+    resolution: {integrity: sha512-0fpxrZzW6qwm9zM7wgh54d7GbxQfQSDV71I0apo+75PVYQPpPHGVPQFLsE9WAu+hOS4VdLd53g0Hua/bxDJKSg==}
     engines: {node: '>=12'}
 
   form-data@4.0.6:
@@ -2975,8 +2975,8 @@ packages:
     peerDependencies:
       react: ^19.2.8
 
-  react-force-graph-2d@1.29.1:
-    resolution: {integrity: sha512-1Rl/1Z3xy2iTHKj6a0jRXGyiI86xUti81K+jBQZ+Oe46csaMikp47L5AjrzA9hY9fNGD63X8ffrqnvaORukCuQ==}
+  react-force-graph-2d@1.29.2:
+    resolution: {integrity: sha512-ofAJXlnOufwViZ9YCV8c5S0ZEb2D1pXnD+j2NbVqSzgg217QiycTPrmKQsmODSg6aSssK5BdAX3vhCxM2YmGCQ==}
     engines: {node: '>=12'}
     peerDependencies:
       react: '*'
@@ -5139,7 +5139,7 @@ snapshots:
     transitivePeerDependencies:
       - preact-render-to-string
 
-  force-graph@1.51.4:
+  force-graph@1.52.0:
     dependencies:
       '@tweenjs/tween.js': 25.0.0
       accessor-fn: 1.5.3
@@ -5731,9 +5731,9 @@ snapshots:
       react: 19.2.8
       scheduler: 0.27.0
 
-  react-force-graph-2d@1.29.1(react@19.2.8):
+  react-force-graph-2d@1.29.2(react@19.2.8):
     dependencies:
-      force-graph: 1.51.4
+      force-graph: 1.52.0
       prop-types: 15.8.1
       react: 19.2.8
       react-kapsule: 2.6.0(react@19.2.8)

@@ -96,6 +96,42 @@ describe('projects', () => {
     expect(updated.maxWorkers).toBe(8);
   });
 
+  it('re-points a project at another repo: row, config and origin follow, the old repo is untouched (VS-811)', async () => {
+    const a = await sourceRepo();
+    const b = await sourceRepo();
+    await git(['commit', '--allow-empty', '-m', 'only on b'], b);
+    const bHead = (await git(['rev-parse', 'HEAD'], b)).stdout.trim();
+    const aHead = (await git(['rev-parse', 'HEAD'], a)).stdout.trim();
+    const project = await projects.add(HUMAN, quick(a));
+
+    const updated = await projects.update(HUMAN, project.id, { url: b });
+    expect(updated.gitUrl).toBe(b);
+    expect(saved.at(-1)!.projects[0]!.url).toBe(b);
+    expect((await git(['remote', 'get-url', 'origin'], project.clonePath)).stdout.trim()).toBe(b);
+    expect((await git(['rev-parse', 'origin/main'], project.clonePath)).stdout.trim()).toBe(bHead);
+    expect((await git(['rev-parse', 'HEAD'], a)).stdout.trim()).toBe(aHead);
+  });
+
+  it('refuses an unreachable URL or one without the default branch, changing nothing (VS-811)', async () => {
+    const a = await sourceRepo();
+    const project = await projects.add(HUMAN, quick(a));
+    const before = saved.length;
+
+    await expect(projects.update(HUMAN, project.id, { url: join(tmpdir(), 'ac-no-such-repo') })).rejects.toThrow(/cannot reach/);
+
+    const other = mkdtempSync(join(tmpdir(), 'ac-src-'));
+    tmps.push(other);
+    await git(['init', '-b', 'trunk'], other);
+    await git(['config', 'user.email', 't@example.com'], other);
+    await git(['config', 'user.name', 'T'], other);
+    await git(['commit', '--allow-empty', '-m', 'init'], other);
+    await expect(projects.update(HUMAN, project.id, { url: other })).rejects.toThrow(/default branch 'main' was not found/);
+
+    expect(projects.get(project.id).gitUrl).toBe(a);
+    expect((await git(['remote', 'get-url', 'origin'], project.clonePath)).stdout.trim()).toBe(a);
+    expect(saved).toHaveLength(before);
+  });
+
   it('flips the OpenSpec mode on an existing project, without bootstrapping when the clone is not ready (VS-578)', async () => {
     const src = await sourceRepo();
     const project = await projects.add(HUMAN, quick(src));

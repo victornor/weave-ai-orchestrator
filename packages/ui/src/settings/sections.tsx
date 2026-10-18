@@ -441,6 +441,17 @@ function ActiveProjectRow({
     },
   });
 
+  // The repo URL (VS-811): the server verifies the new remote and refuses with its reason, which
+  // CommitStatus shows, leaving the draft in place to correct.
+  const repoUrl = useCommittableField({
+    value: p.gitUrl,
+    onCommit: async (raw) => {
+      const url = raw.trim();
+      if (url === '') throw new Error('Repo URL cannot be empty');
+      await patch.mutateAsync({ id: p.id, patch: { url } });
+    },
+  });
+
   // The display name (VS-330): an empty commit clears it, and every label falls back to the slug.
   const displayName = useCommittableField({
     value: p.name ?? '',
@@ -542,6 +553,18 @@ function ActiveProjectRow({
             className="ac-mono h-7 w-14 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
           />
           <CommitStatus status={maxWorkers.status} error={maxWorkers.error} onSave={maxWorkers.commitNow} />
+        </label>
+        <label className="flex flex-wrap items-center gap-1.5">
+          <span className="ac-label">repo URL</span>
+          <input
+            aria-label={`repo URL for ${p.slug}`}
+            value={repoUrl.draft}
+            onChange={(e) => repoUrl.onChange(e.target.value)}
+            onBlur={repoUrl.onBlur}
+            onKeyDown={repoUrl.onKeyDown}
+            className="ac-mono h-7 w-72 rounded-r4 border border-line-2 bg-bg-input px-2 text-micro"
+          />
+          <CommitStatus status={repoUrl.status} error={repoUrl.error} onSave={repoUrl.commitNow} />
         </label>
         <label className="flex flex-wrap items-center gap-1.5">
           <span className="ac-label">landing branch</span>

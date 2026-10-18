@@ -91,6 +91,24 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
     return true;
   }
 
+  /** Check `url` has the project's default branch, then make it the clone's `origin` and fetch it; roll `origin` back if the fetch fails. */
+  async function repointOrigin(project: Project, url: string): Promise<void> {
+    if (project.status !== 'ready') throw new OcError('conflict', `project ${project.slug} is ${project.status}, not ready — its repo URL cannot change now`);
+    if (deps().jobs.running(project.id)) throw new OcError('conflict', `project ${project.slug} already has a job running`);
+    const source = looksLocal(url) ? resolve(url.replace(/^~/, process.env.HOME ?? '~')) : url;
+    const probe = await git(['ls-remote', '--heads', source, `refs/heads/${project.defaultBranch}`], project.clonePath, 60_000);
+    if (!probe.ok) throw new OcError('validation', `cannot reach ${url}: ${(probe.stderr || probe.stdout).trim().slice(0, 300)}`, { url });
+    if (!probe.stdout.trim()) throw new OcError('validation', `default branch '${project.defaultBranch}' was not found on ${url}`, { url });
+    const previous = await git(['remote', 'get-url', 'origin'], project.clonePath, 15_000);
+    const set = await git(['remote', 'set-url', 'origin', source], project.clonePath, 15_000);
+    if (!set.ok) throw new OcError('internal', `git remote set-url failed: ${(set.stderr || set.stdout).trim().slice(0, 300)}`, { url });
+    const fetched = await git(['fetch', '--prune', 'origin'], project.clonePath, 300_000);
+    if (!fetched.ok) {
+      if (previous.ok) await git(['remote', 'set-url', 'origin', previous.stdout.trim()], project.clonePath, 15_000);
+      throw new OcError('validation', `fetching ${url} failed: ${(fetched.stderr || fetched.stdout).trim().slice(0, 300)}`, { url });
+    }
+  }
+
   async function detectDefaultBranch(clonePath: string, declared: string): Promise<string> {
     const head = await git(['symbolic-ref', '--short', 'HEAD'], clonePath, 15_000);
     const actual = head.ok ? head.stdout.trim() : '';
@@ -344,6 +362,11 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
           throw new OcError('validation', `branch '${patch.landingBranch}' was not found on origin as of ${project.slug}'s last fetch — fetch the project first if the branch was just created, then try again`);
         }
       }
+      // Re-pointing (VS-811): verify the new remote and move the clone's `origin` before any row or
+      // config write, so a refusal leaves everything as it was. The old remote is only ever read.
+      const nextUrl = typeof patch.url === 'string' ? githubSshRemote(patch.url.trim()) : undefined;
+      const repoint = nextUrl !== undefined && nextUrl !== '' && nextUrl !== project.gitUrl;
+      if (repoint) await repointOrigin(project, nextUrl);
       const existing = ctx.config.projects.find((p) => p.id === project.slug);
       // A name that is empty once trimmed clears the display name (VS-330), the same empty-string
       // sentinel `landingBranch` uses; readers fall back to the slug. The row column is NOT NULL, so
@@ -351,6 +374,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       const clearingName = typeof patch.name === 'string' && patch.name.trim() === '';
       const trimmedName = typeof patch.name === 'string' ? patch.name.trim() : undefined;
       const patchForMerge: Partial<ProjectConfig> = { ...patch };
+      if (repoint) patchForMerge.url = nextUrl;
       if (patch.landingBranch === '') patchForMerge.landingBranch = undefined;
       if (trimmedName !== undefined) patchForMerge.name = clearingName ? undefined : trimmedName;
       const merged = ProjectConfigSchema.parse({ ...(existing ?? { id: project.slug, url: project.gitUrl }), ...patchForMerge, id: project.slug });
@@ -376,7 +400,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
         }
       }
       ctx.db.update('projects', project.id, {
-        name: nextName, defaultBranch: merged.defaultBranch, landingBranch: merged.landingBranch ?? null, maxWorkers: merged.maxWorkers,
+        name: nextName, ...(repoint ? { gitUrl: nextUrl } : {}), defaultBranch: merged.defaultBranch, landingBranch: merged.landingBranch ?? null, maxWorkers: merged.maxWorkers,
         setupCommand: merged.setupCommand ?? null, warmPathsJson: merged.warmPaths, worktreeProvider: merged.worktrees ?? project.worktreeProvider,
         openspecEnabled: merged.openspec.enabled,
         knowledgeRepoEnabled,

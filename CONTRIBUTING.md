@@ -17,7 +17,7 @@ You need Node 22 or newer to run the daemon; development uses Node 26 and pnpm 1
 `mise.toml` use). With [`mise`](https://mise.jdx.dev): `mise install`.
 
 ```bash
-git clone https://github.com/victornor/agent-conductor.git && cd agent-conductor
+git clone https://github.com/victornor/weave-ai-orchestrator.git && cd weave-ai-orchestrator
 pnpm install
 pnpm build         # tsc -b across every package, and the web app
 pnpm lint          # architecture, console and test-fixture guards

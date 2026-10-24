@@ -112,6 +112,28 @@ describe('projects', () => {
     expect((await git(['rev-parse', 'HEAD'], a)).stdout.trim()).toBe(aHead);
   });
 
+  it('re-pointing moves a distinct pushurl too, and a failed fetch restores both URLs (VS-827)', async () => {
+    const a = await sourceRepo();
+    const b = await sourceRepo();
+    const project = await projects.add(HUMAN, quick(a));
+    await git(['config', 'remote.origin.pushurl', a], project.clonePath);
+    const urls = async (): Promise<[string, string]> => [
+      (await git(['remote', 'get-url', 'origin'], project.clonePath)).stdout.trim(),
+      (await git(['remote', 'get-url', '--push', 'origin'], project.clonePath)).stdout.trim(),
+    ];
+    expect(await urls()).toEqual([a, a]);
+
+    // A remote that lists `main` (ls-remote passes) but whose object is missing, so the fetch fails after the URLs changed.
+    const broken = await sourceRepo();
+    writeFileSync(join(broken, '.git', 'refs', 'heads', 'main'), 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n');
+    await expect(projects.update(HUMAN, project.id, { url: broken })).rejects.toThrow(/fetching/);
+    expect(await urls()).toEqual([a, a]);
+    expect((await git(['config', '--get-all', 'remote.origin.pushurl'], project.clonePath)).stdout.trim()).toBe(a);
+
+    await projects.update(HUMAN, project.id, { url: b });
+    expect(await urls()).toEqual([b, b]);
+  });
+
   it('refuses an unreachable URL or one without the default branch, changing nothing (VS-811)', async () => {
     const a = await sourceRepo();
     const project = await projects.add(HUMAN, quick(a));

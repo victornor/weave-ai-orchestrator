@@ -91,7 +91,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
     return true;
   }
 
-  /** Check `url` has the project's default branch, then make it the clone's `origin` and fetch it; roll `origin` back if the fetch fails. */
+  /** Check `url` has the project's default branch, then make it the clone's `origin` (fetch and push) and fetch it; roll `origin` back if that fails. */
   async function repointOrigin(project: Project, url: string): Promise<void> {
     if (project.status !== 'ready') throw new OcError('conflict', `project ${project.slug} is ${project.status}, not ready — its repo URL cannot change now`);
     if (deps().jobs.running(project.id)) throw new OcError('conflict', `project ${project.slug} already has a job running`);
@@ -99,12 +99,36 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
     const probe = await git(['ls-remote', '--heads', source, `refs/heads/${project.defaultBranch}`], project.clonePath, 60_000);
     if (!probe.ok) throw new OcError('validation', `cannot reach ${url}: ${(probe.stderr || probe.stdout).trim().slice(0, 300)}`, { url });
     if (!probe.stdout.trim()) throw new OcError('validation', `default branch '${project.defaultBranch}' was not found on ${url}`, { url });
-    const previous = await git(['remote', 'get-url', 'origin'], project.clonePath, 15_000);
-    const set = await git(['remote', 'set-url', 'origin', source], project.clonePath, 15_000);
+    const cwd = project.clonePath;
+    const previous = await git(['remote', 'get-url', 'origin'], cwd, 15_000);
+    // `set-url` moves the fetch URL only, and git pushes to `remote.origin.pushurl` when there is one (VS-827).
+    const previousPush = await git(['config', '--get-all', 'remote.origin.pushurl'], cwd, 15_000);
+    const rollback = async (): Promise<void> => {
+      if (previous.ok) await git(['remote', 'set-url', 'origin', previous.stdout.trim()], cwd, 15_000);
+      await git(['config', '--unset-all', 'remote.origin.pushurl'], cwd, 15_000);
+      if (previousPush.ok) {
+        for (const pushUrl of previousPush.stdout.split('\n').map((l) => l.trim()).filter(Boolean)) {
+          await git(['config', '--add', 'remote.origin.pushurl', pushUrl], cwd, 15_000);
+        }
+      }
+    };
+    const set = await git(['remote', 'set-url', 'origin', source], cwd, 15_000);
     if (!set.ok) throw new OcError('internal', `git remote set-url failed: ${(set.stderr || set.stdout).trim().slice(0, 300)}`, { url });
-    const fetched = await git(['fetch', '--prune', 'origin'], project.clonePath, 300_000);
+    // Exit 5 means the key was absent, which is the normal case.
+    const unset = await git(['config', '--unset-all', 'remote.origin.pushurl'], cwd, 15_000);
+    if (!unset.ok && !/^\s*$/.test(unset.stderr + unset.stdout)) {
+      await rollback();
+      throw new OcError('internal', `could not clear remote.origin.pushurl: ${(unset.stderr || unset.stdout).trim().slice(0, 300)}`, { url });
+    }
+    const fetchUrl = await git(['remote', 'get-url', 'origin'], cwd, 15_000);
+    const pushUrl = await git(['remote', 'get-url', '--push', 'origin'], cwd, 15_000);
+    if (!fetchUrl.ok || !pushUrl.ok || fetchUrl.stdout.trim() !== source || pushUrl.stdout.trim() !== source) {
+      await rollback();
+      throw new OcError('internal', `re-point left origin on fetch ${fetchUrl.stdout.trim()} / push ${pushUrl.stdout.trim()}, expected ${source} for both`, { url });
+    }
+    const fetched = await git(['fetch', '--prune', 'origin'], cwd, 300_000);
     if (!fetched.ok) {
-      if (previous.ok) await git(['remote', 'set-url', 'origin', previous.stdout.trim()], project.clonePath, 15_000);
+      await rollback();
       throw new OcError('validation', `fetching ${url} failed: ${(fetched.stderr || fetched.stdout).trim().slice(0, 300)}`, { url });
     }
   }

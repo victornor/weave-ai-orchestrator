@@ -13,7 +13,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/victornor/agent-conductor.git",
+    "url": "git+https://github.com/victornor/weave-ai-orchestrator.git",
     "directory": "packages/plugin-sdk"
   },
   "publishConfig": {

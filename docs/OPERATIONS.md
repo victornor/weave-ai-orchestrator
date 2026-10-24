@@ -385,7 +385,7 @@ restart weave-ai.service` (or stop/start when no unit is installed) → wait for
 ```yaml
 # daemon.yaml
 upgrade:
-  source: git@github.com:victornor/agent-conductor.git   # or a local checkout path
+  source: git@github.com:victornor/weave-ai-orchestrator.git   # or a local checkout path
   ref: main
   keep: 3
   drainTimeoutSec: 30      # `daemon upgrade`: how long its drain waits before restarting anyway

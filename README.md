@@ -153,7 +153,7 @@ prints the `sudo` command for the rest.
 ## Install
 
 ```bash
-git clone https://github.com/victornor/agent-conductor.git && cd agent-conductor
+git clone https://github.com/victornor/weave-ai-orchestrator.git && cd weave-ai-orchestrator
 mise install                 # node + pnpm, if you use mise
 pnpm install
 pnpm build                   # tsc -b across every package, and the web app

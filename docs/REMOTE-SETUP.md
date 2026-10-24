@@ -47,7 +47,7 @@ On your **laptop** (CLI only, no daemon; macOS shown, Linux is the same minus br
 
 ```bash
 brew install mise tailscale            # tailscale: join the same tailnet as the server
-git clone git@github.com:victornor/agent-conductor.git && cd agent-conductor
+git clone git@github.com:victornor/weave-ai-orchestrator.git && cd weave-ai-orchestrator
 mise install && pnpm install && pnpm build
 mkdir -p ~/.local/bin && cat > ~/.local/bin/weave <<EOF
 #!/bin/sh

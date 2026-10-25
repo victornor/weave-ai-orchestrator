@@ -422,6 +422,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     publicUrl: 'http://127.0.0.1:7433', version, uiDir: null,
     updates, upgrades, incidents: createIncidentsService(db),
     voxtype: options.voxtype, daemonConfigDir: options.daemonConfigDir,
+    resolveReleaseRef: options.resolveRemote,
   };
 
   return { runtime, deps, db, bus, calls, tickets, mergeOutcomes, comments, documents, tokens, impls, decisionInputs, roleSecrets, close: async () => { await runtime.services.jobs.stop(); db.close(); } };

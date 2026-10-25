@@ -30,7 +30,7 @@ import {
   type DaemonConfig, type EventType, type ProviderProfile, type WorkspaceEvent,
 } from '@weave-ai/shared';
 import { createApp, type WorkspaceAdmin } from './app.js';
-import { createUpdateChecker, runningReleaseRoot } from './release-info.js';
+import { createUpdateChecker, runningReleaseRoot, type ReleaseProject } from './release-info.js';
 import { createUpgradeService } from './upgrade.js';
 import { toolContractProvider } from './tool-contract.js';
 import { announceRestart, markBooted, observeBoot, recordShutdown, recordStartFailure } from './restart-notice.js';
@@ -155,7 +155,27 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   // Assigned once the listeners are decided below; the loopback app copies `deps` now, so the hook
   // has to exist before that copy is taken.
   let onOperatorConfigured: (() => void) | null = null;
-  const updates = createUpdateChecker({ daemon: daemonCfg, version: VERSION });
+  const updates = createUpdateChecker({
+    daemon: daemonCfg, version: VERSION,
+    // VS-830: every loaded workspace's ready projects, deduplicated — the stale-release-source check
+    // compares them against the repository the running release was built from.
+    staleSources: {
+      projects: () => {
+        const seen = new Set<string>();
+        const out: ReleaseProject[] = [];
+        for (const w of workspaces.values()) {
+          if (seen.has(w.id)) continue;
+          seen.add(w.id);
+          try {
+            for (const p of w.services.projects.list()) {
+              if (p.status === 'ready' && p.gitUrl) out.push({ id: p.id, slug: p.slug, gitUrl: p.gitUrl, clonePath: p.clonePath });
+            }
+          } catch { /* a workspace mid-load simply has no projects to report */ }
+        }
+        return out;
+      },
+    },
+  });
   const upgrades = createUpgradeService({
     db: daemonDb, daemon: daemonCfg, configDir, workspaces, updates, version: VERSION, releaseRoot,
     runtimes: () => [...registries.runtimes.keys()],

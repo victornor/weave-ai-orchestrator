@@ -614,6 +614,18 @@ export function useDaemonUpdate(): UseQueryResult<T.UpdateStatus> {
   });
 }
 
+/**
+ * VS-830: change the daemon's release source. The daemon validates it (reachable, ref present),
+ * persists it to daemon.yaml and applies it live — no restart, so the next poll already shows it.
+ */
+export function useSetReleaseSource(): UseMutationResult<T.UpdateStatus, Error, { source: string | null; ref?: string }> {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body) => api.root<T.UpdateStatus>('/daemon/update/source', { method: 'PATCH', body }),
+    onSuccess: (status) => { qc.setQueryData(qk.daemonUpdate(), status); },
+  });
+}
+
 export function useRefreshDaemonUpdate(): UseMutationResult<T.UpdateStatus, Error, void> {
   const qc = useQueryClient();
   return useMutation({

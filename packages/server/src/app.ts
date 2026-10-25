@@ -73,7 +73,7 @@ export function createApp(deps: AppDeps, admin: WorkspaceAdmin | null = null): H
   ws.route('/events', eventRoutes());
   ws.route('/models', modelRoutes());
   ws.route('/mcp', mcpServerRoutes());
-  ws.route('/projects', projectRoutes());
+  ws.route('/projects', projectRoutes(deps));
   ws.route('/jobs', jobRoutes());
   ws.route('/roles', roleRoutes());
   ws.route('/workers', workerRoutes());

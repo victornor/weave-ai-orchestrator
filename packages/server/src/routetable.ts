@@ -58,6 +58,7 @@ export const ROUTES: RouteRow[] = [
   { method: 'POST', path: '/api/daemon/mcp-servers/secrets/{name}', tag: 'daemon', summary: 'Set a secret a daemon MCP server references, in the daemon secret store; never returned', auth: 'session', mutating: true },
   { method: 'DELETE', path: '/api/daemon/mcp-servers/secrets/{name}', tag: 'daemon', summary: 'Clear a secret a daemon MCP server references', auth: 'session', mutating: true },
   { method: 'GET', path: '/api/daemon/update', tag: 'daemon', summary: 'Running release, the configured source at its ref, and whether an update is available', auth: 'session' },
+  { method: 'PATCH', path: '/api/daemon/update/source', tag: 'daemon', summary: 'Change where releases are built from: validate the source and ref, persist to daemon.yaml, apply without a restart', auth: 'session', mutating: true },
   { method: 'GET', path: '/api/daemon/upgrade', tag: 'daemon', summary: 'The latest upgrade record and, while it is still waiting, the work holding it', auth: 'session' },
   { method: 'POST', path: '/api/daemon/upgrade', tag: 'daemon', summary: 'Queue an upgrade: hold dispatch, wait for zero running work, build, switch and restart', auth: 'session', mutating: true },
   { method: 'POST', path: '/api/daemon/upgrade/cancel', tag: 'daemon', summary: 'Cancel a queued or waiting upgrade and resume dispatch', auth: 'session', mutating: true },

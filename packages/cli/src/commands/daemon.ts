@@ -391,6 +391,33 @@ when the daemon is not answering and has to be replaced from here.`)
     }));
 
   update
+    .command('source')
+    .argument('<url>', 'git URL or local checkout the daemon should build releases from (use --clear to unset)')
+    .description('change where the daemon builds releases from, validated and applied without a restart')
+    .option('--ref <ref>', 'branch, tag or commit (default: leave the daemon\'s upgrade.ref as it is)')
+    .option('--clear', 'unset the release source (the daemon then reports that update checking is not configured)')
+    .addHelpText('after', `
+Changed here rather than by hand-editing daemon.yaml: the daemon validates that the source is
+reachable and that the ref exists on it, writes the change to daemon.yaml, and applies it to the
+running daemon — the next update check and the next upgrade use it with no restart.
+
+A project's repo URL is a separate setting: re-pointing a project does not move the release source.
+\`weave daemon update\` warns when the source still names a repository a project has moved away from.`)
+    .action(async (url: string, opts: Record<string, string | boolean>, command: Command) => run(async () => {
+      const { client } = await session(command, { workspace: 'none' });
+      const body = opts['clear'] === true
+        ? { source: null }
+        : { source: url, ...(typeof opts['ref'] === 'string' ? { ref: opts['ref'] } : {}) };
+      const status = await client.patch<UpdateStatus>('/api/daemon/update/source', body);
+      emit(status, () => {
+        write(status.configured
+          ? `${style.ok('release source')} ${status.source} @ ${status.ref}`
+          : `${style.ok('release source')} ${style.warn('cleared — update checking is not configured')}`);
+        if (status.staleSource) write(staleSourceLine(status.staleSource));
+      });
+    }));
+
+  update
     .command('cancel')
     .description('cancel a queued or waiting upgrade and resume dispatch')
     .action(async (_opts: unknown, command: Command) => run(async () => {
@@ -670,9 +697,12 @@ async function drainAndRestart(command: Command, drainTimeoutSec: number, target
 // ---------- the deferred upgrade's client side ----------
 
 interface RunningRelease { version: string; path: string; sha: string | null }
+/** VS-830: the configured source still names the repository the running release came from. */
+interface StaleSource { configured: string; project: { id: string; slug: string; url: string } }
 interface UpdateStatus {
   configured: boolean; running: RunningRelease; source: string | null; ref: string | null;
   targetSha: string | null; updateAvailable: boolean; checkedAt: string | null; error: string | null;
+  runtimeSource?: string | null; staleSource?: StaleSource | null;
 }
 interface WaitingRun { workspace: string; running: number; runIds: string[] }
 interface UpgradeStatus { upgrade: Upgrade | null; waitingFor: WaitingRun[] }
@@ -691,11 +721,21 @@ function renderUpdate(status: UpdateStatus): void {
     ['checked', status.checkedAt ?? undefined],
     ['error', status.error ? style.bad(status.error) : undefined],
   ]);
+  if (status.staleSource) {
+    write('');
+    write(staleSourceLine(status.staleSource));
+  }
   if (!status.configured) return;
   write('');
   write(status.updateAvailable
     ? `${style.ok('update available')} — \`weave daemon update apply\``
     : style.dim('up to date'));
+}
+
+/** VS-830: the warning a stale source deserves — silence here was the whole bug. */
+function staleSourceLine(stale: StaleSource): string {
+  return style.warn(`stale release source: it still names ${stale.configured}, but project ${stale.project.slug} now lives at ${stale.project.url}`)
+    + `\n  ${style.dim(`weave daemon update source ${stale.project.url}`)}`;
 }
 
 function renderUpgrade(upgrade: Upgrade | null, waitingFor: WaitingRun[]): void {

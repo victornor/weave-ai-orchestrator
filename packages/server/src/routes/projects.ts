@@ -1,8 +1,9 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { OcError, ProjectConfigSchema, ProjectPoliciesSchema, ROADMAP_STATUSES, ROADMAP_BLOCK_STATUSES, TICKET_KINDS, PLAN_DRAFT_KINDS, PLAN_DRAFT_TIERS, TICKET_PRIORITIES, TERMINAL_TICKET_STATUSES, projectLabel } from '@weave-ai/shared';
+import { sameRepoUrl } from '@weave-ai/core';
 import type { CoreServices } from '@weave-ai/core';
-import type { AppEnv } from '../types.js';
+import type { AppDeps, AppEnv } from '../types.js';
 import { body } from '../http.js';
 
 const RoadmapCreateSchema = z.object({
@@ -66,7 +67,7 @@ const AddSchema = z.object({
 // project field — Auto-merge default is policies.autoMergeDefault (VS-153).
 }).strict();
 
-export function projectRoutes(): Hono<AppEnv> {
+export function projectRoutes(deps: AppDeps): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   app.get('/', (c) => c.json(c.get('ws').services.projects.list()));
   /**
@@ -92,7 +93,25 @@ export function projectRoutes(): Hono<AppEnv> {
   });
   /** Re-run a failed add against whatever is already on disk. */
   app.post('/:id/retry', (c) => c.json(c.get('ws').services.projects.retryAdd(c.get('actor'), c.req.param('id')), 202));
-  app.patch('/:id', async (c) => c.json(await c.get('ws').services.projects.update(c.get('actor'), c.req.param('id'), await body(c, ProjectConfigSchema.partial().strict()))));
+  /**
+   * VS-830: a re-point moves the project's repo URL, not the daemon's release source, and the two are
+   * easy to conflate. When the previous URL was the daemon's release source, the answer says so —
+   * `releaseSource: { previousUrl, currentUrl }` — so Settings (or the CLI) can offer to move it. The
+   * release source is never changed here: moving it stays an explicit action.
+   */
+  app.patch('/:id', async (c) => {
+    const ws = c.get('ws');
+    const id = c.req.param('id');
+    const patch = await body(c, ProjectConfigSchema.partial().strict());
+    const before = typeof patch.url === 'string' ? ws.services.projects.get(id) : null;
+    const updated = await ws.services.projects.update(c.get('actor'), id, patch);
+    const previousUrl = before?.gitUrl;
+    const releaseSource = previousUrl && previousUrl !== updated.gitUrl && deps.daemon.upgrade.source
+      && sameRepoUrl(deps.daemon.upgrade.source, previousUrl)
+      ? { previousUrl, currentUrl: updated.gitUrl }
+      : null;
+    return c.json(releaseSource ? { ...updated, releaseSource } : updated);
+  });
   app.delete('/:id', async (c) => { await c.get('ws').services.projects.remove(c.get('actor'), c.req.param('id')); return c.json({ ok: true }); });
   // VS-770: delete the remote branches of done or cancelled tickets that are contained in what landed. `dryRun` (the default) only lists them.
   app.post('/:id/prune-branches', async (c) => {

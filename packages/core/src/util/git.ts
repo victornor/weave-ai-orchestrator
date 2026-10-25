@@ -187,6 +187,28 @@ function githubOwnerRepo(raw: string): { owner: string; repo: string } | null {
   return { owner, repo };
 }
 
+/** Whether two source strings name the same repository. */
+function sameRepo(a: string, b: string): boolean {
+  return a === b || a.toLowerCase() === b.toLowerCase();
+}
+
+/**
+ * VS-830: do these two strings name the same repository? GitHub remotes are compared through
+ * `githubSshRemote`, so `git@github.com:o/r.git` and `https://github.com/o/r` are the same. Anything
+ * else — a local path, another host — is compared as written, ignoring case and a trailing slash.
+ * Used to ask whether a release source names a project's previous URL without knowing which form
+ * each was written in.
+ */
+export function sameRepoUrl(a: string, b: string): boolean {
+  const norm = (s: string): string => {
+    const trimmed = s.trim();
+    const gh = githubSshRemote(trimmed);
+    if (gh !== trimmed) return gh;
+    return trimmed.replace(/\/+$/, '');
+  };
+  return sameRepo(norm(a), norm(b));
+}
+
 /** `<host>/<owner>/<repo>` identifier used by worktrunk's per-project config blocks. */
 export function projectKeyFromUrl(url: string): string {
   let s = url.trim();

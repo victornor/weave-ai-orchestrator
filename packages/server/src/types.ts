@@ -40,6 +40,11 @@ export interface AppDeps {
   incidents: IncidentsService;
   /** Directory holding daemon.yaml; PUT /api/daemon/transcription writes here. */
   daemonConfigDir?: string;
+  /**
+   * VS-830: resolve a commit on a candidate release source, for `PATCH /api/daemon/update/source`.
+   * Tests inject a fake; production uses `resolveRemoteSha` (`git ls-remote`).
+   */
+  resolveReleaseRef?: (source: string, ref: string) => string;
   /** Voxtype probe/transcribe. Tests inject a fake; production uses PATH `voxtype`. */
   voxtype?: VoxtypeProbe;
   /** Directory holding the built web UI (packages/ui/dist). */

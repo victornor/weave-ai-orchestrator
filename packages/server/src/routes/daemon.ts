@@ -5,6 +5,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, runtimeOptionErrors, workerOptionErrors, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@weave-ai/shared';
 import { detectHostToolsCached, clearHostToolCache, ensureHostToolPath, getLogger, listScratchTrees, workspaceLoader, type HostTool } from '@weave-ai/core';
+import { resolveRemoteSha } from '@weave-ai/release';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
 import { cancelRunningRuns } from '../daemon.js';
 import { body } from '../http.js';
@@ -186,6 +187,50 @@ export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<
    * `/api/daemon`: run tokens never reach this path (see `RUN_TOKEN_PATHS` in `auth.ts`).
    */
   app.get('/daemon/update', (c) => c.json(deps.updates.check({ refresh: c.req.query('refresh') === '1' })));
+
+  /**
+   * VS-830: change where releases are built from, from the app instead of by hand-editing `daemon.yaml`
+   * and restarting. The source is validated (reachable, the ref present there), persisted to
+   * `daemon.yaml`, then applied to the live config the update checker and the upgrade service already
+   * hold — so the next check and the next upgrade use it with no restart. `source: null` clears it.
+   * Operator-only for free: `/api/daemon/*` is not on the run-token path list.
+   */
+  app.patch('/daemon/update/source', async (c) => {
+    const input = await body(c, z.object({
+      source: z.string().min(1).nullable().optional(),
+      ref: z.string().min(1).optional(),
+    }).strict());
+    const source = input.source === undefined ? deps.daemon.upgrade.source : (input.source ?? undefined);
+    const ref = input.ref ?? deps.daemon.upgrade.ref;
+    if (input.source === undefined && input.ref === undefined) {
+      throw new OcError('validation', 'nothing to change: pass source and/or ref');
+    }
+    if (source) {
+      try {
+        (deps.resolveReleaseRef ?? resolveRemoteSha)(source, ref);
+      } catch (e) {
+        throw new OcError('validation', `the release source cannot be used: ${(e as Error).message}`, { source, ref });
+      }
+    }
+    if (!deps.daemonConfigDir) {
+      throw new OcError('validation', 'this daemon has no configuration directory, so the release source cannot be persisted');
+    }
+    const current = workspaceLoader.readDaemonConfig(deps.daemonConfigDir);
+    const persisted = DaemonConfigSchema.parse({
+      ...current,
+      upgrade: {
+        ...current.upgrade,
+        ...(input.source !== undefined ? { source: input.source ?? undefined } : {}),
+        ...(input.ref !== undefined ? { ref: input.ref } : {}),
+      },
+    });
+    workspaceLoader.writeDaemonConfig(persisted, deps.daemonConfigDir);
+    // The live object, not a copy: `createUpdateChecker` and `createUpgradeService` both hold it.
+    deps.daemon.upgrade.source = persisted.upgrade.source;
+    deps.daemon.upgrade.ref = persisted.upgrade.ref;
+    deps.updates.invalidate();
+    return c.json(deps.updates.check({ refresh: true }));
+  });
 
   /**
    * The deferred upgrade (PLAN §20). Requesting one records an intent and holds dispatch; the daemon

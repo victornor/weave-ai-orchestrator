@@ -393,6 +393,31 @@ upgrade:
   updateCheckIntervalSec: 900   # how long "is the source ahead" is cached
 ```
 
+### Changing the release source, and why a project re-point does not
+
+`upgrade.source` is a daemon setting, not a project setting. **Re-pointing a project at a different
+repository does not move it**: the project's `gitUrl` and its clone's `origin` follow the new URL, while
+releases keep being built from whatever `upgrade.source` names, and a daemon that still points at the old
+repository reports "up to date" instead of "no such repository" whenever the old one still exists.
+
+Change it from the daemon rather than by editing the file:
+
+```bash
+weave daemon update source git@github.com:victornor/weave-ai-orchestrator.git
+weave daemon update source git@github.com:victornor/weave-ai-orchestrator.git --ref main
+weave daemon update source --clear      # back to "update checking is not configured"
+```
+
+Settings → Release offers the same change. Both validate it first — the source has to be reachable and the
+ref has to exist on it — then write `daemon.yaml` and apply it to the running daemon: the next check and
+the next upgrade use the new source with **no restart**. Writing it rewrites `daemon.yaml` through the
+schema, so comments in that file are lost, exactly as for the other settings written from the app.
+
+When the source still names a repository the project has been re-pointed away from, the Release panel and
+`weave daemon update` say so — this release was built from that repository, and a project that carries its
+commit now lives elsewhere. The warning sits beside the update answer, so it cannot hide behind "up to
+date". After a re-point, `weave project set-url` and Settings → Projects offer the same repair.
+
 Both bounds default short because expiry no longer means giving up: once dispatch is held, waiting
 longer only holds every workspace's dispatch — including the weaver's own — for longer with no
 benefit, since a turn that is not done in 30s is not meaningfully closer to done at 900s either. Both

@@ -221,6 +221,36 @@ describe('weave project set-openspec (VS-578)', () => {
   });
 });
 
+describe('weave project set-url (VS-830)', () => {
+  const oldUrl = 'git@github.com:victornor/agent-conductor.git';
+  const newUrl = 'git@github.com:victornor/weave-ai-orchestrator.git';
+
+  it('patches the URL and reports the move', async () => {
+    routes['PATCH /api/w/ws1/projects/api'] = () => ({ body: project({ status: 'ready', gitUrl: newUrl }) });
+    const { out } = await cli('project', 'set-url', 'api', newUrl);
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ url: newUrl });
+    expect(out).toContain('re-pointed api');
+    expect(out).toContain(newUrl);
+    expect(out).not.toContain('release source still names');
+  });
+
+  it('warns when the re-point left the daemon release source on the old URL', async () => {
+    routes['PATCH /api/w/ws1/projects/api'] = () => ({ body: {
+      ...project({ status: 'ready', gitUrl: newUrl }),
+      releaseSource: { previousUrl: oldUrl, currentUrl: newUrl },
+    } });
+    const { out } = await cli('project', 'set-url', 'api', newUrl);
+    expect(out).toContain(`the daemon's release source still names ${oldUrl}`);
+    expect(out).toContain(`weave daemon update source ${newUrl}`);
+  });
+
+  it('emits the raw project with --json', async () => {
+    routes['PATCH /api/w/ws1/projects/api'] = () => ({ body: project({ status: 'ready', gitUrl: newUrl }) });
+    const { out } = await cli('--json', 'project', 'set-url', 'api', newUrl);
+    expect(JSON.parse(out)).toMatchObject({ gitUrl: newUrl, slug: 'api' });
+  });
+});
+
 describe('weave project retry', () => {
   it('posts the retry and follows the new job', async () => {
     routes['POST /api/w/ws1/projects/api/retry'] = () => ({ status: 202, body: { project: project(), jobId: 'j1' } });

@@ -194,6 +194,30 @@ Example: weave project set-policy api deliveryMode=pr requireCi=false`)
     }));
 
   project
+    .command('set-url')
+    .argument('<id>', 'project id')
+    .argument('<url>', 'git URL the project should be re-pointed at')
+    .description('re-point a project at a different repository (the clone, config and gitUrl move together)')
+    .addHelpText('after', `
+The daemon's release source (upgrade.source) is a separate setting: re-pointing a project does not
+move it. When the source still names the project's previous URL, this prints the command that changes
+it — \`weave daemon update source <new url>\`.`)
+    .action(async (id: string, url: string, _opts: unknown, command: Command) => run(async () => {
+      const { client } = await session(command);
+      const updated = await client.patch<Record<string, unknown> & { releaseSource?: { previousUrl: string; currentUrl: string } }>(
+        client.w(`/projects/${encodeURIComponent(id)}`), { url },
+      );
+      emit(updated, () => {
+        write(`${style.ok('re-pointed')} ${id}: ${updated.releaseSource?.previousUrl ?? '?'} -> ${String(updated['gitUrl'] ?? url)}`);
+        const stale = updated.releaseSource;
+        if (stale) {
+          write(style.warn(`the daemon's release source still names ${stale.previousUrl}`));
+          write(style.dim(`  weave daemon update source ${stale.currentUrl}`));
+        }
+      });
+    }));
+
+  project
     .command('set-openspec')
     .argument('<id>', 'project id')
     .argument('<state>', 'on or off')

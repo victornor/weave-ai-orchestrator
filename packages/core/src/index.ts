@@ -31,7 +31,7 @@ export { attachmentFilePath, writeAttachmentFile, runAttachmentDir, materializeR
 export { baseMemoryMb, effectiveWorkspaceWorkerMemory } from './runs/memory.js';
 export { isWorkerStalled, getWorkerStallState, type WorkerStallState } from './supervisor/stall-state.js';
 export * from './workspace/index.js';
-export { githubSshRemote, projectKeyFromUrl } from './util/git.js';
+export { githubSshRemote, projectKeyFromUrl, sameRepoUrl } from './util/git.js';
 export { registerBuiltinWorktreeProviders, GitWorktreeProvider, WorktrunkProvider, landedWorkTest, renderWtConfig, writeWtConfig, type LandedInput, type LandedVerdict } from './worktrees/index.js';
 export { listScratchTrees, sweepScratchWorktrees, activeScratchWorktrees, scratchRoot, SCRATCH_STALE_MS, type ScratchTarget, type ScratchLand, type ScratchTreeInfo, type ScratchClone } from './tickets/scratch.js';
 export { registerBuiltinForges, GhForge } from './forge/index.js';

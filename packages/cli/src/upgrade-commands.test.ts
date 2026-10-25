@@ -95,6 +95,83 @@ describe('weave daemon update', () => {
   });
 });
 
+describe('weave daemon update — a stale release source (VS-830)', () => {
+  const staleStatus = {
+    configured: true, running: runningRelease, source: 'git@github.com:victornor/old-repo.git', ref: 'main',
+    targetSha: 'a'.repeat(40), updateAvailable: false, checkedAt: '2026-10-25T00:00:00.000Z', error: null,
+    runtimeSource: 'git@github.com:victornor/old-repo.git',
+    staleSource: { configured: 'git@github.com:victornor/old-repo.git', project: { id: 'p1', slug: 'conductor', url: 'git@github.com:victornor/new-repo.git' } },
+  };
+
+  it('warns that the source names a repository a project has moved away from', async () => {
+    routes['GET /api/daemon/update'] = () => ({ body: staleStatus });
+    const out = await cli('daemon', 'update');
+    expect(out).toContain('stale release source');
+    expect(out).toContain('git@github.com:victornor/new-repo.git');
+    expect(out).toContain('weave daemon update source');
+  });
+
+  it('keeps the warning alongside a failed check', async () => {
+    routes['GET /api/daemon/update'] = () => ({ body: { ...staleStatus, error: 'Could not resolve hostname', targetSha: null } });
+    const out = await cli('daemon', 'update');
+    expect(out).toContain('stale release source');
+    expect(out).toContain('Could not resolve hostname');
+  });
+
+  it('says nothing about staleness when the source is fine', async () => {
+    routes['GET /api/daemon/update'] = () => ({ body: { ...staleStatus, staleSource: null } });
+    const out = await cli('daemon', 'update');
+    expect(out).not.toContain('stale release source');
+  });
+});
+
+describe('weave daemon update source (VS-830)', () => {
+  const applied = (over: Record<string, unknown> = {}) => ({
+    configured: true, running: runningRelease, source: 'git@github.com:victornor/new-repo.git', ref: 'main',
+    targetSha: 'c'.repeat(40), updateAvailable: true, checkedAt: '2026-10-25T00:00:00.000Z', error: null,
+    runtimeSource: 'git@github.com:victornor/old-repo.git', staleSource: null, ...over,
+  });
+
+  it('PATCHes the new source and reports it as applied', async () => {
+    routes['PATCH /api/daemon/update/source'] = (body) => ({ body: applied({ ...(body as object) }) });
+    const out = await cli('daemon', 'update', 'source', 'git@github.com:victornor/new-repo.git');
+    expect(calls).toEqual([{ method: 'PATCH', path: '/api/daemon/update/source', body: { source: 'git@github.com:victornor/new-repo.git' } }]);
+    expect(out).toContain('git@github.com:victornor/new-repo.git');
+    expect(out).toContain('main');
+  });
+
+  it('sends the ref when one is given', async () => {
+    routes['PATCH /api/daemon/update/source'] = (body) => ({ body: applied({ ...(body as object) }) });
+    await cli('daemon', 'update', 'source', 'git@github.com:victornor/new-repo.git', '--ref', 'release');
+    expect(calls[0]?.body).toEqual({ source: 'git@github.com:victornor/new-repo.git', ref: 'release' });
+  });
+
+  it('clears the source with --clear', async () => {
+    routes['PATCH /api/daemon/update/source'] = () => ({ body: { configured: false, running: runningRelease, source: null, ref: null, targetSha: null, updateAvailable: false, checkedAt: null, error: null, runtimeSource: null, staleSource: null } });
+    const out = await cli('daemon', 'update', 'source', 'ignored', '--clear');
+    expect(calls[0]?.body).toEqual({ source: null });
+    expect(out).toContain('cleared');
+  });
+
+  it('reports the daemon refusing an unreachable source', async () => {
+    routes['PATCH /api/daemon/update/source'] = () => ({ status: 400, body: { error: { code: 'validation', message: 'the release source cannot be used: Could not resolve hostname', retryable: false } } });
+    await cli('daemon', 'update', 'source', 'git@example.invalid:o/r.git');
+    expect(process.exitCode).not.toBe(0);
+  });
+
+  it('still warns when the change leaves another stale source', async () => {
+    routes['PATCH /api/daemon/update/source'] = () => ({ body: applied({ staleSource: { configured: 'git@github.com:victornor/new-repo.git', project: { id: 'p1', slug: 'conductor', url: 'git@github.com:victornor/third.git' } } }) });
+    const out = await cli('daemon', 'update', 'source', 'git@github.com:victornor/new-repo.git');
+    expect(out).toContain('stale release source');
+  });
+
+  it('emits the raw status with --json', async () => {
+    routes['PATCH /api/daemon/update/source'] = (body) => ({ body: applied({ ...(body as object) }) });
+    const out = await cli('--json', 'daemon', 'update', 'source', 'git@github.com:victornor/new-repo.git');
+    expect(JSON.parse(out)).toMatchObject({ configured: true, source: 'git@github.com:victornor/new-repo.git' });
+  });
+});
+
 describe('weave daemon update apply', () => {
   it('queues the upgrade with the ref and --test it was given', async () => {
     routes['POST /api/daemon/upgrade'] = (body) => ({ status: 202, body: upgrade({ ...(body as object) }) });

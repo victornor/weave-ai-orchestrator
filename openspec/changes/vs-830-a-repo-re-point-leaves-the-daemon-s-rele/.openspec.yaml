@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-10-25
+goal: Surface and allow fixing a stale daemon upgrade.source after a project
+  repo re-point

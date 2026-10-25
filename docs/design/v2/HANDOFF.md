@@ -59,6 +59,14 @@ state is described.
   row rhythm were tightened accordingly.
 - Chat and decision cards are **not full width** — decision cards in chat sit at
   roughly the same width as on Needs you, not stretched to the pane.
+- **Wide screens (VS-829).** A pane of the side-by-side Chats row is already a slice of
+  the window, so a fixed reading column leaves most of it empty on a very wide screen.
+  The conversation's message column and composer share one measure, resolved from the
+  chat region's own width by `conversationMeasure` (`v2/chatSplit.ts`): 720px up to
+  1600px of region, then three quarters of the region, clamped at 1720px. Do not
+  reintroduce a `max-w-[720px]` literal at either site, and put no maximum width on a
+  pane row or a pane — the panes take their share of the window and `globalChatLayout`
+  weights decide that share.
 
 ## 4. Navigation
 

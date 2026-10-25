@@ -299,6 +299,37 @@ describe('chat split geometry', () => {
   });
 });
 
+describe('the conversation measure (VS-829)', () => {
+  const columnMax = (selector: string): string => {
+    const el = document.querySelector(selector) as HTMLElement | null;
+    expect(el, selector).not.toBeNull();
+    return (el as HTMLElement).style.maxWidth;
+  };
+
+  it('keeps the reading width on a normal desktop region', () => {
+    state.width = 900;
+    render(<V2ChatPage />);
+    expect(columnMax('[data-v2-conversation-column]')).toBe('720px');
+    expect(columnMax('[data-v2-composer-column]')).toBe('720px');
+  });
+
+  it('gives the same widened number to the message column and the composer', async () => {
+    // Half of a 5120px window: the region's own width, minus the rail, is still above the threshold.
+    state.width = 2460;
+    render(<V2ChatPage />);
+    await waitFor(() => expect(columnMax('[data-v2-composer-column]')).toBe('1720px'));
+    expect(columnMax('[data-v2-conversation-column]')).toBe('1720px');
+    expect(columnMax('[data-v2-conversation-column]')).not.toBe('720px');
+  });
+
+  it('widens past the reading width just above the threshold', async () => {
+    state.width = 1601;
+    render(<V2ChatPage />);
+    await waitFor(() => expect(columnMax('[data-v2-composer-column]')).toBe('1201px'));
+    expect(columnMax('[data-v2-conversation-column]')).toBe('1201px');
+  });
+});
+
 describe('the V2 Chat screen', () => {
   it('gates the run stream to the focused pane (VS-199)', () => {
     state.lastRun = { id: 'r9', status: 'running' };

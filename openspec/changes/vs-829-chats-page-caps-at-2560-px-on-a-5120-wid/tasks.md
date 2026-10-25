@@ -1,13 +1,13 @@
 ## 1. The width model
 
-- [ ] 1.1 Add `CONVERSATION_READING_WIDTH`, `CONVERSATION_WIDEN_AT`, `CONVERSATION_MAX_WIDTH` and the pure
+- [x] 1.1 Add `CONVERSATION_READING_WIDTH`, `CONVERSATION_WIDEN_AT`, `CONVERSATION_MAX_WIDTH` and the pure
       `conversationMeasure(regionWidth)` to `packages/ui/src/v2/chatSplit.ts`; verify with a table test in
       `packages/ui/src/test/chatSplit.test.ts` covering 320/620/1280/1600/1601/1920/2560/3840/5120,
       monotonicity above the threshold and the clamp (`pnpm --filter @weave-ai/ui test chatSplit`).
 
 ## 2. The two call sites share it
 
-- [ ] 2.1 Feed the conversation column's measured width into `conversationMeasure` in
+- [x] 2.1 Feed the conversation column's measured width into `conversationMeasure` in
       `packages/ui/src/v2/ChatPage.tsx` and pass the result to `ChatConversation`; the composer wrapper and
       the message column both apply `width: 100%`, `margin-inline: auto`, `maxWidth: measure` instead of
       `max-w-[720px]`; verify with a component test rendering `V2ChatsScreen` at a wide viewport that both

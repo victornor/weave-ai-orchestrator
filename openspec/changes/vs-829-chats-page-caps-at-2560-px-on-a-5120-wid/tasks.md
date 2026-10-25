@@ -12,7 +12,7 @@
       the message column both apply `width: 100%`, `margin-inline: auto`, `maxWidth: measure` instead of
       `max-w-[720px]`; verify with a component test rendering `V2ChatsScreen` at a wide viewport that both
       elements carry the same non-720 `maxWidth`.
-- [ ] 2.2 Confirm nothing else in the Chats chain caps width: grep `packages/ui/src` for `max-w-`/`max-width`
+- [x] 2.2 Confirm nothing else in the Chats chain caps width: grep `packages/ui/src` for `max-w-`/`max-width`
       on the Chats route's ancestors and record the result in the PR body; verify `V2Root`, `V2Shell`,
       `V2Page` and the Chats row still carry no width cap.
 

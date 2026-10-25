@@ -28,7 +28,7 @@
 
 ## 4. Docs and delivery
 
-- [ ] 4.1 Record the wide-screen rule (the conversation column widens above a wide region; the pane row
+- [x] 4.1 Record the wide-screen rule (the conversation column widens above a wide region; the pane row
       carries no cap) in `docs/design/v2/HANDOFF.md` §3 and §5; verify the text names the resolver so the
       next screen reuses it.
 - [x] 4.2 Run the UI suite and typecheck (`pnpm --filter @weave-ai/ui typecheck`, `pnpm test`), paste both

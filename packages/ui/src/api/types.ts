@@ -75,6 +75,12 @@ export interface RunningRelease {
   sha: string | null;
 }
 
+/** VS-830: the configured source still names the repository the running release came from. */
+export interface StaleSource {
+  configured: string;
+  project: { id: string; slug: string; url: string };
+}
+
 export interface UpdateStatus {
   /** False when no release source is configured: not an update, and not an error. */
   configured: boolean;
@@ -85,6 +91,10 @@ export interface UpdateStatus {
   updateAvailable: boolean;
   checkedAt: string | null;
   error: string | null;
+  /** VS-830: the repository the running release was built from. */
+  runtimeSource?: string | null;
+  /** VS-830: the stale-source warning. Additive — never a substitute for the update answer. */
+  staleSource?: StaleSource | null;
 }
 
 export type UpgradeState = 'queued' | 'waiting' | 'building' | 'switching' | 'restarting' | 'completed' | 'failed' | 'cancelled';

@@ -38,6 +38,7 @@ import {
   usePutPresentation,
   useRefreshDaemonUpdate,
   useRequestUpgrade,
+  useSetReleaseSource,
   useSetTelegramToken,
   useTelegramPending,
   useTelegramTokenStatus,
@@ -442,13 +443,18 @@ function ActiveProjectRow({
   });
 
   // The repo URL (VS-811): the server verifies the new remote and refuses with its reason, which
-  // CommitStatus shows, leaving the draft in place to correct.
+  // CommitStatus shows, leaving the draft in place to correct. VS-830: a re-point that left the daemon's
+  // release source on the previous URL comes back in `releaseSource`, which the offer below acts on.
+  const setReleaseSource = useSetReleaseSource();
+  const toast = useToast();
+  const [leftSource, setLeftSource] = useState<{ previousUrl: string; currentUrl: string } | null>(null);
   const repoUrl = useCommittableField({
     value: p.gitUrl,
     onCommit: async (raw) => {
       const url = raw.trim();
       if (url === '') throw new Error('Repo URL cannot be empty');
-      await patch.mutateAsync({ id: p.id, patch: { url } });
+      const saved = await patch.mutateAsync({ id: p.id, patch: { url } });
+      setLeftSource((saved as Project & { releaseSource?: { previousUrl: string; currentUrl: string } }).releaseSource ?? null);
     },
   });
 
@@ -566,6 +572,23 @@ function ActiveProjectRow({
           />
           <CommitStatus status={repoUrl.status} error={repoUrl.error} onSave={repoUrl.commitNow} />
         </label>
+        {leftSource ? (
+          <div className="flex flex-wrap items-center gap-2 rounded-r4 border border-line-2 bg-bg-input px-2 py-1.5 text-micro text-text-2" role="status">
+            <span>
+              The daemon's release source still names <span className="ac-mono">{leftSource.previousUrl}</span> — it is a separate setting, so this project's move did not change it.
+            </span>
+            <Button
+              onClick={() => setReleaseSource.mutate({ source: leftSource.currentUrl }, {
+                onSuccess: () => setLeftSource(null),
+                onError: (e) => toast.push({ title: 'Could not change the release source', detail: e.message, status: 'failed', ttl: 8000 }),
+              })}
+              disabled={setReleaseSource.isPending}
+            >
+              {setReleaseSource.isPending ? 'Moving…' : 'Move it to this repo'}
+            </Button>
+            <Button variant="ghost" onClick={() => setLeftSource(null)}>Dismiss</Button>
+          </div>
+        ) : null}
         <label className="flex flex-wrap items-center gap-1.5">
           <span className="ac-label">landing branch</span>
           <input
@@ -1862,6 +1885,7 @@ export function DeviceSection({ themeControl = 'full' }: { themeControl?: 'full'
 
 export function UpdatesSection(): React.ReactElement {
   const update = useDaemonUpdate();
+  const setSource = useSetReleaseSource();
   const status = useDaemonUpgrade();
   const refresh = useRefreshDaemonUpdate();
   const request = useRequestUpgrade();
@@ -1874,6 +1898,9 @@ export function UpdatesSection(): React.ReactElement {
   const data = update.data;
   const upgrade = status.data?.upgrade ?? null;
   const pending = inFlight(upgrade);
+  // VS-830: the source names a repository a project has been re-pointed away from. Shown *above* the
+  // answer, never instead of it — otherwise this is exactly the "up to date" that hid the old repo.
+  const stale = data?.staleSource ?? null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -1885,6 +1912,35 @@ export function UpdatesSection(): React.ReactElement {
           <Row label="Release" value={data?.running.path ?? '—'} mono />
         </div>
       </section>
+
+      {stale ? (
+        <section>
+          <div className="ac-label mb-2">Release source</div>
+          <div className="ac-card px-3.5 py-3" role="alert">
+            <div className="text-body text-text-1">
+              This release was built from <span className="ac-mono">{stale.configured}</span>, and project{' '}
+              <span className="ac-mono">{stale.project.slug}</span> has since moved to <span className="ac-mono">{stale.project.url}</span>.
+            </div>
+            <div className="mt-1 text-meta text-text-3">
+              The release source is a separate daemon setting: a project's repo URL moving does not move it. Left alone,
+              upgrades keep building from the old repository while this page says there is nothing to do.
+            </div>
+            <div className="mt-3 flex items-center gap-2">
+              <Button
+                variant="primary"
+                disabled={setSource.isPending}
+                onClick={() => setSource.mutate({ source: stale.project.url }, {
+                  onSuccess: () => toast.push({ title: 'Release source moved', detail: `Now building from ${stale.project.url}`, status: 'done', ttl: 6000 }),
+                  onError: (e) => toast.push({ title: 'Could not change the release source', detail: e.message, status: 'failed', ttl: 8000 }),
+                })}
+              >
+                {setSource.isPending ? 'Moving…' : `Build from ${stale.project.slug}'s repo`}
+              </Button>
+              <span className="text-meta text-text-3">Validated and applied without a restart.</span>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <section>
         <div className="ac-label mb-2">Release source</div>

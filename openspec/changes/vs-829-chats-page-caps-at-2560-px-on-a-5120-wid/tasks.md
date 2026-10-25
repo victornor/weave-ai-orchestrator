@@ -18,12 +18,12 @@
 
 ## 3. Real-browser verification
 
-- [ ] 3.1 Render the Chats route in headless Chromium at 1280, 1920, 2560 and 5120 px CSS width with the
+- [x] 3.1 Render the Chats route in headless Chromium at 1280, 1920, 2560 and 5120 px CSS width with the
       throwaway harness from `docs/ui-screenshot-harness.md` (outside the worktree), measuring each pane's
       `getBoundingClientRect().width`, the composer's and the message column's, plus `window.innerWidth`
       and `devicePixelRatio`; verify the panes sum to the row width at every size and each is about half at
       5120.
-- [ ] 3.2 Attach the 2560 and 5120 screenshots to the ticket, with a note of the measured viewport,
+- [x] 3.2 Attach the 2560 and 5120 screenshots to the ticket, with a note of the measured viewport,
       device pixel ratio and the per-pane widths.
 
 ## 4. Docs and delivery

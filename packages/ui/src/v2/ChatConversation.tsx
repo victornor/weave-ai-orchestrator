@@ -23,6 +23,7 @@ import type { PartialText } from '../lib/livePartials';
 import { ChatMessage } from './ChatMessage';
 import { ChatTrace, ChatTurnTrace, CompactionRow } from './ChatTrace';
 import { LiveTurnSection } from './LiveTurnSection';
+import { CONVERSATION_READING_WIDTH } from './chatSplit';
 
 /** A finished turn is held on screen this long when no row replaces it (V1's `SETTLE_MS`). */
 export const LIVE_SETTLE_MS = 4000;
@@ -123,6 +124,11 @@ export interface ChatConversationProps {
    * turn is being retried. Not a thread message, so a blip that a retry resolves leaves no trace.
    */
   turnNotice?: React.ReactNode;
+  /**
+   * VS-829: the column's reading measure in px, resolved from the chat region's width by
+   * `conversationMeasure`. The composer applies the same number, so the two never disagree.
+   */
+  measure?: number;
 }
 
 /**
@@ -247,6 +253,7 @@ export function ChatConversation({
   renderAfterTrace,
   footer,
   turnNotice,
+  measure = CONVERSATION_READING_WIDTH,
 }: ChatConversationProps): React.ReactElement {
   const runId = live?.id ?? null;
   const { events: runEvents, status: runStreamStatus, retryNow, partials, lastPartialAt, partialSince } = useRunEventStream(runId, { live: focused && (live?.running ?? false) });
@@ -315,7 +322,7 @@ export function ChatConversation({
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div ref={attachScroll} data-v2-chat-scroll className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-5">
-        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-5">
+        <div data-v2-conversation-column className="mx-auto flex w-full flex-col gap-5" style={{ maxWidth: measure }}>
           {rows.length === 0 && loading ? (
             loading
           ) : rows.length === 0 && error ? (

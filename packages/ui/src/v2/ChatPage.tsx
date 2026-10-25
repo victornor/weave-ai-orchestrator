@@ -54,7 +54,18 @@ import { SearchPanel } from './SearchPanel';
 import { PlanTab } from './PlanTab';
 import { PlanTabStrip, usePlanTabs } from './PlanTabs';
 import { useTicketLink } from './ticket/TicketModal';
-import { DECISIONS_RAIL_WIDTH, DIVIDER_MAX, DIVIDER_MIN, clampDivider, readDivider, shouldSplit, useElementWidth, writeDivider } from './chatSplit';
+import {
+  CONVERSATION_READING_WIDTH,
+  DECISIONS_RAIL_WIDTH,
+  DIVIDER_MAX,
+  DIVIDER_MIN,
+  clampDivider,
+  conversationMeasure,
+  readDivider,
+  shouldSplit,
+  useElementWidth,
+  writeDivider,
+} from './chatSplit';
 
 /** The answer shown in a note: the chosen option's label, else the first line of the free text. */
 function decisionAnswerLabel(decision: Decision): string {
@@ -657,6 +668,13 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
   // reload and the last answer collapses it again.
   const rail = canSplit;
   const paneExpanded = rail && (openDecisionCount > 0 || panePinned);
+  // VS-829: the conversation's reading measure, resolved from the conversation column's own width —
+  // the shell minus the decisions pane and its divider when the split is showing. Both the message
+  // column and the composer carry this one number, so they can never disagree. Before the first
+  // measurement (`shellWidth === 0`, and jsdom has no ResizeObserver) the reading width is used, which
+  // is what a narrow or unmeasured region should show anyway.
+  const conversationWidth = shellWidth > 0 && canSplit && paneExpanded ? Math.max(0, shellWidth - divider - 1) : shellWidth;
+  const measure = shellWidth > 0 ? conversationMeasure(conversationWidth) : CONVERSATION_READING_WIDTH;
   // The inline answerable card renders in exactly the case the pane is absent. It waits for the
   // region to be measured (`width > 0`): `useElementWidth` reads 0 on the first render, and treating
   // that as "phone" would flash the card on desktop for a frame before the pane takes over. Waiting
@@ -842,11 +860,12 @@ export function V2ChatPage({ focused = true }: { focused?: boolean } = {}): Reac
             renderDecisionMessage={renderDecisionMessage}
             renderAfterTrace={renderAfterTrace}
             footer={footer}
+            measure={measure}
             {...(retrying && lastRun ? { turnNotice: <TurnRetryNotice family={lastRun.errorFamily} /> } : {})}
           />
 
           <div className="flex-none border-t border-line-1 bg-bg-0 px-4 py-3">
-            <div className="mx-auto w-full max-w-[720px]">
+            <div data-v2-composer-column className="mx-auto w-full" style={{ maxWidth: measure }}>
               {compacting ? (
                 <div role="status" data-v2-compacting-banner className="mb-2 flex items-start gap-2 rounded-r4 border border-line-1 bg-working/10 px-2.5 py-1.5">
                   <span className="mt-1 size-1.5 flex-none animate-pulse rounded-full bg-working" aria-hidden />

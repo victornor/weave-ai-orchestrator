@@ -77,3 +77,24 @@ export function useElementWidth<T extends HTMLElement>(): { ref: (el: T | null) 
 
   return { ref, width };
 }
+
+/** The conversation's reading width: today's centred column, used while the region is narrow. */
+export const CONVERSATION_READING_WIDTH = 720;
+/** Above this chat-region width the column widens with the region instead of staying centred (VS-829). */
+export const CONVERSATION_WIDEN_AT = 1600;
+/** The widest the conversation column ever gets — past this a line of prose is unreadable. */
+export const CONVERSATION_MAX_WIDTH = 1720;
+
+/**
+ * The message column's and the composer's reading measure, from the chat region's own width (VS-829).
+ *
+ * A pane of the side-by-side Chats row is already a slice of the window, so centring a fixed 720px
+ * strip inside a 2500px pane left most of it empty on a very wide screen. Below the widening
+ * threshold nothing changes; above it the column takes three quarters of the region up to a maximum.
+ * One function for both call sites, so they cannot drift apart again, and geometry-free so it is
+ * testable without a layout engine.
+ */
+export function conversationMeasure(regionWidth: number): number {
+  if (!Number.isFinite(regionWidth) || regionWidth <= CONVERSATION_WIDEN_AT) return CONVERSATION_READING_WIDTH;
+  return Math.min(CONVERSATION_MAX_WIDTH, Math.round(regionWidth * 0.75));
+}

@@ -30,5 +30,5 @@
 ## 5. Verification and measurement
 
 - [x] 5.1 Run the core tests for the touched suites and both full suites per the project conventions; paste both suite blocks in the ticket/PR.
-- [ ] 5.2 Record the pre-flight measurement (read-only survey of the live workspace: candidate count, skip list with reasons, bytes) in the ticket report, for both the default and `--ignore-age` sets.
-- [ ] 5.3 Write the four-measurement first-run procedure (before `du`; dry run; dry run with `--ignore-age`, where VS-486 and VS-831 must appear as refusals; real run with the flag; after `du` and a sample `git worktree list`) into the ticket report so the acceptance is met by measurement after the upgrade.
+- [x] 5.2 Record the pre-flight measurement (read-only survey of the live workspace: candidate count, skip list with reasons, bytes) in the ticket report, for both the default and `--ignore-age` sets.
+- [x] 5.3 Write the four-measurement first-run procedure (before `du`; dry run; dry run with `--ignore-age`, where VS-486 and VS-831 must appear as refusals; real run with the flag; after `du` and a sample `git worktree list`) into the ticket report so the acceptance is met by measurement after the upgrade.

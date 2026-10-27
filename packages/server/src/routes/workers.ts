@@ -58,6 +58,14 @@ export function workerRoutes(): Hono<AppEnv> {
     }));
   });
 
+  // VS-859: run the retention sweep's home reclaim on demand. Dry by default: the first pass over a
+  // workspace is inspected before anything is deleted. Registered before `/:id` so it is never read as
+  // a worker id.
+  app.post('/prune-homes', async (c) => {
+    const { dryRun, ignoreAge } = await body(c, z.object({ dryRun: z.boolean().default(true), ignoreAge: z.boolean().default(false) }).strict());
+    return c.json(await c.get('ws').services.workers.reclaimFinishedHomes(c.get('actor'), { dryRun, ignoreAge }));
+  });
+
   app.get('/:id', (c) => {
     const ws = c.get('ws');
     const s = ws.services;

@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { newId, nowIso } from '@weave-ai/db';
 import {
@@ -7,7 +7,7 @@ import {
 } from '@weave-ai/shared';
 import type { WorktreeProvider } from '@weave-ai/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
-import type { Actor, CoreServices, HandoverEndResult, HandoverStartResult, TicketCreateInput, WorkerMessageOutcome, WorkersService } from '../api.js';
+import type { Actor, CoreServices, HandoverEndResult, HandoverStartResult, ReclaimableHome, ReclaimHomesResult, SkippedHome, TicketCreateInput, WorkerMessageOutcome, WorkersService } from '../api.js';
 import { recordActivity } from '../events.js';
 import { recordHumanInputEvent, runState } from '../runs/active.js';
 import { renderHome } from './home.js';
@@ -23,6 +23,7 @@ import { handoverCommentBody, reconcileHandover, type HandoverSnapshot } from '.
 export { renderHome, ensureHomeCurrent, skillsFor } from './home.js';
 
 const LIVE = "('provisioning','active','running','paused','error')";
+const DAY_MS = 86_400_000;
 
 /** VS-477: a planner whose tab has been unfocused and which has taken no turn for this long is retired by an idle sweep, bounding how many planner worktrees several tabs can hold. */
 export const PLANNER_IDLE_RETIRE_MS = 15 * 60_000;
@@ -1046,6 +1047,140 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       ctx.events.emit('worker.retired', 'agent', workerId, { ticketId: agent.ticketId, name: agent.name });
       log.info({ workerId }, 'worker retired');
       return { retired: true };
+    },
+
+    /**
+     * VS-859: the retention sweep's home reclaim. Retirement archives a landed worker's home, but a
+     * worker that never retires keeps it forever — on 2026-10-27 that was 60 `done` workers holding
+     * 66.9 GB. A home is deleted only when its worktree is completely untouched AND its work has
+     * provably landed; the worktree goes through the provider with `deleteBranch: false`, so the
+     * branch and every commit stay in the project clone and a wrong judgement is recoverable.
+     */
+    async reclaimFinishedHomes(actor: Actor, opts: { dryRun: boolean; now?: number; ignoreAge?: boolean }): Promise<ReclaimHomesResult> {
+      const windowDays = ctx.config.defaults.workerArchiveDays ?? 30;
+      const ignoreAge = opts.ignoreAge === true;
+      const result: ReclaimHomesResult = { dryRun: opts.dryRun, ignoreAge, windowDays, candidates: [], reclaimed: [], skipped: [], failed: [] };
+      if (!existsSync(ctx.paths.workers)) return result;
+      const cutoff = (opts.now ?? Date.now()) - windowDays * DAY_MS;
+      const skip = (row: SkippedHome, logDetail: Record<string, unknown>): void => {
+        result.skipped.push(row);
+        log.warn({ workerId: row.workerId, directory: row.directory, reason: row.reason, ...logDetail }, 'worker home not reclaimed');
+        if (row.workerId) {
+          recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.home_retention_skipped', 'agent', row.workerId, { reason: row.reason, detail: row.detail });
+        }
+      };
+
+      for (const entry of readdirSync(ctx.paths.workers, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const directory = entry.name;
+        const home = join(ctx.paths.workers, directory);
+        const agent = ctx.db.get<Agent>('SELECT * FROM agents WHERE id = ? AND workspace_id = ?', [directory, ctx.workspaceId]);
+        if (!agent) {
+          skip({ workerId: null, directory, name: null, kind: null, status: null, reason: 'no agent row', detail: 'the directory does not match any agent' }, {});
+          continue;
+        }
+        // A session home holds no checkout; the sweep is about finished checkout worktrees.
+        if (agent.kind !== 'worker' && agent.kind !== 'planner') continue;
+        // Only a finished agent is a candidate. Anything live (or paused/provisioning/error) is never touched.
+        if (agent.status !== 'retired' && agent.status !== 'done') continue;
+        const finishedAt = Date.parse(agent.retiredAt ?? agent.lastRunAt ?? agent.updatedAt);
+        // No completion time at all is never a candidate. `ignoreAge` lifts only the window, and is
+        // an explicit operator opt-in: the retention pass always passes false.
+        if (!Number.isFinite(finishedAt)) continue;
+        if (!ignoreAge && finishedAt > cutoff) continue;
+
+        const wt = join(home, 'work');
+        const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) ?? null : null;
+        const row = ctx.db.get<{ id: string; branch: string; provider: string; projectId: string }>(
+          'SELECT id, branch, provider, project_id AS projectId FROM worktrees WHERE agent_id = ? ORDER BY created_at DESC LIMIT 1', [agent.id],
+        );
+        const candidate: ReclaimableHome = {
+          workerId: agent.id, name: agent.name, kind: agent.kind, status: agent.status,
+          ticket: ticket?.identifier ?? null, branch: row?.branch || agent.branch || null, hasWorktree: existsSync(wt),
+        };
+        const project = agent.projectId ? ctx.db.get<Project>('SELECT * FROM projects WHERE id = ?', [agent.projectId]) : null;
+        if (!project) {
+          skip({ workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status, reason: 'project not found', detail: 'the agent has no project to remove a worktree from' }, {});
+          continue;
+        }
+
+        let branch = candidate.branch;
+        if (candidate.hasWorktree) {
+          const changes = await worktreeChanges(wt);
+          if (!changes.ok) {
+            skip({ workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status, reason: 'cannot read worktree status', detail: changes.error ?? 'git status failed' }, {});
+            continue;
+          }
+          if (changes.tracked.length || changes.untracked.length) {
+            const sample = [...changes.tracked, ...changes.untracked].slice(0, 5);
+            skip({
+              workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status,
+              reason: 'worktree has uncommitted changes',
+              detail: `${changes.tracked.length} tracked, ${changes.untracked.length} untracked${sample.length ? `: ${sample.join(', ')}` : ''}`,
+            }, { tracked: changes.tracked.length, untracked: changes.untracked.length });
+            continue;
+          }
+          if (!branch) {
+            const head = await git(['rev-parse', '--abbrev-ref', 'HEAD'], wt, 15_000);
+            const name = head.ok ? head.stdout.trim() : '';
+            if (name && name !== 'HEAD') branch = name;
+          }
+          if (!branch) {
+            skip({ workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status, reason: 'cannot determine the branch', detail: 'the worktree is on a detached HEAD and no branch is recorded' }, {});
+            continue;
+          }
+
+          // A merged pull request is the durable landing proof: a squash merge, a pruned merged branch
+          // or a rewritten history leaves a landed branch looking unlanded to git (VS-798, VS-831).
+          const mergedPr = Boolean(agent.ticketId && ctx.db.get(
+            "SELECT id FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' AND state = 'merged' LIMIT 1", [agent.ticketId],
+          ));
+          if (!mergedPr) {
+            const policies = (project.policies ?? {}) as { deliveryMode?: string };
+            const verdict = await landedWorkTest({
+              repoPath: project.clonePath, worktreePath: wt, branch, landingBranch: landingBranchOf(project, ticket),
+              localBranch: (policies.deliveryMode ?? ctx.config.defaults.deliveryMode) === 'local-branch',
+            });
+            if (!verdict.landed) {
+              skip({ workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status, reason: 'no landed proof', detail: verdict.reason }, { evidence: verdict.evidence });
+              continue;
+            }
+          }
+        }
+        candidate.branch = branch;
+        result.candidates.push(candidate);
+        if (opts.dryRun) continue;
+
+        if (candidate.hasWorktree) {
+          try {
+            // Remove through the provider that created this worktree when it is still registered; the
+            // project's current provider is the fallback (the row may predate a provider change).
+            const provider = (row?.provider ? ctx.registries.worktreeProviders.get(row.provider) : undefined) ?? providerFor(project);
+            await provider.remove({ repoPath: project.clonePath, path: wt, branch: branch!, deleteBranch: false, force: false, configPath: ctx.paths.wtConfig });
+          } catch (e) {
+            result.failed.push({ workerId: agent.id, error: String(e) });
+            skip({ workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status, reason: 'worktree removal failed', detail: String(e) }, {});
+            continue;
+          }
+          ctx.db.run("UPDATE worktrees SET status = 'removed', removed_at = ?, last_verified_at = ? WHERE agent_id = ? AND status != 'removed'", [nowIso(), nowIso(), agent.id]);
+        }
+
+        // Only after the provider succeeded. A home left behind here has no `work/` left, so the next
+        // pass finishes it; the agent id is finished, so no future spawn can collide with it.
+        try {
+          rmSync(home, { recursive: true, force: true });
+        } catch (e) {
+          result.failed.push({ workerId: agent.id, error: String(e) });
+          skip({ workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status, reason: 'home removal failed', detail: String(e) }, {});
+          continue;
+        }
+        result.reclaimed.push(candidate);
+        recordActivity(ctx.db, ctx.workspaceId, actor, 'worker.home_reclaimed', 'agent', agent.id, {
+          status: agent.status, ticket: candidate.ticket, branch: candidate.branch, worktreeRemoved: candidate.hasWorktree,
+        }, agent.ticketId);
+        log.info({ workerId: agent.id, ticket: candidate.ticket, branch: candidate.branch, worktreeRemoved: candidate.hasWorktree }, 'worker home reclaimed');
+      }
+      return result;
     },
 
     sessionResumable(id: string): boolean {

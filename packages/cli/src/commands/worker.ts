@@ -2,7 +2,7 @@
 import type { Command } from 'commander';
 import type { Agent } from '@weave-ai/shared';
 import { workerToCard } from '@weave-ai/render';
-import { emit, fields, heading, style, table, write } from '../output.js';
+import { emit, fields, heading, isJson, style, table, write, writeErr } from '../output.js';
 import { items, run, session } from './util.js';
 
 interface WorkerDetail { agent?: Agent; session?: Record<string, unknown>; ticket?: Record<string, unknown>; lastRun?: Record<string, unknown>; usage?: Record<string, unknown> }
@@ -166,6 +166,52 @@ export function register(program: Command): void {
     }));
 
   worker
+    .command('prune-homes')
+    .description("reclaim home directories and worktrees of finished workers whose work has landed (VS-859)")
+    .option('--dry-run', 'list what would be reclaimed and delete nothing')
+    .option('--ignore-age', 'also reclaim homes inside the retention window; the age rule only, every safety gate still applies')
+    .action(async (opts: Record<string, boolean>, command: Command) => run(async () => {
+      const dryRun = opts['dryRun'] === true;
+      const ignoreAge = opts['ignoreAge'] === true;
+      const { client } = await session(command);
+      const post = (body: { dryRun: boolean; ignoreAge: boolean }): Promise<PruneHomesResult> =>
+        client.wpost<PruneHomesResult>('/workers/prune-homes', body);
+      let r: PruneHomesResult;
+      if (!dryRun && ignoreAge) {
+        // Say what the flag widens before anything is deleted: the same pass without it, then with it.
+        const [base, wide] = await Promise.all([post({ dryRun: true, ignoreAge: false }), post({ dryRun: true, ignoreAge: true })]);
+        const more = wide.candidates.length - base.candidates.length;
+        if (!isJson()) write(style.warn(`ignoring the ${wide.windowDays}-day window: ${more} more home(s) become eligible`));
+        r = await post({ dryRun: false, ignoreAge: true });
+      } else {
+        r = await post({ dryRun, ignoreAge });
+      }
+      emit(r, () => {
+        table(r.candidates, [
+          { header: 'WORKER', get: (w) => w.workerId },
+          { header: 'NAME', get: (w) => w.name },
+          { header: 'STATUS', get: (w) => w.status },
+          { header: 'TICKET', get: (w) => w.ticket ?? '' },
+          { header: 'BRANCH', get: (w) => w.branch ?? '' },
+          { header: 'WORKTREE', get: (w) => (w.hasWorktree ? 'yes' : 'gone') },
+        ], { empty: 'no finished worker home to reclaim' });
+        if (r.skipped.length) {
+          write(style.dim(`${r.skipped.length} kept:`));
+          table(r.skipped, [
+            { header: 'WORKER', get: (s) => s.workerId ?? s.directory },
+            { header: 'STATUS', get: (s) => s.status ?? '' },
+            { header: 'REASON', get: (s) => s.reason },
+            { header: 'DETAIL', get: (s) => s.detail },
+          ]);
+        }
+        for (const f of r.failed) writeErr(`${f.workerId}: ${f.error}`);
+        if (ignoreAge) write(style.dim(`ignoring the ${r.windowDays}-day window`));
+        if (dryRun) write(style.dim(`${r.candidates.length} home(s) would be reclaimed; ${r.skipped.length} kept. Re-run without --dry-run to reclaim.`));
+        else write(`${style.ok('reclaimed')} ${r.reclaimed.length} home(s); ${r.skipped.length} kept; ${r.failed.length} failed`);
+      });
+    }));
+
+  worker
     .command('handover')
     .argument('<id>')
     .description("take a worker's session for your own terminal (VS-249)")
@@ -192,6 +238,16 @@ export function register(program: Command): void {
 }
 
 interface HandoverCommandResult { resumable: boolean; command: string | null; runtime: string; landingLine: string | null; reason: string | null }
+
+interface PruneHomesResult {
+  dryRun: boolean;
+  ignoreAge: boolean;
+  windowDays: number;
+  candidates: Array<{ workerId: string; name: string; status: string; ticket: string | null; branch: string | null; hasWorktree: boolean }>;
+  reclaimed: Array<{ workerId: string }>;
+  skipped: Array<{ workerId: string | null; directory: string; status: string | null; reason: string; detail: string }>;
+  failed: Array<{ workerId: string; error: string }>;
+}
 
 function numberOr(value: unknown, fallback: number | null): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;

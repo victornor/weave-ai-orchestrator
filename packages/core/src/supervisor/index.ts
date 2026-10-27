@@ -1493,8 +1493,11 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
 
   // ---------- retention (PLAN §16.1) ----------
 
-  /** Prune run log directories and worker archives past their retention. DB rows stay; only `log_path` is cleared. */
-  function retentionPass(): void {
+  /**
+   * Prune run log directories and worker archives past their retention (DB rows stay; only `log_path`
+   * is cleared), then reclaim finished workers' homes (VS-859) inside the same pass.
+   */
+  async function retentionPass(): Promise<void> {
     const runCutoff = new Date(Date.now() - (ctx.config.defaults.runLogRetentionDays ?? 30) * DAY_MS).toISOString();
     let runsPruned = 0;
     for (const r of ctx.db.all<{ id: string; logPath: string | null }>(
@@ -1524,6 +1527,17 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         catch (e) { log.warn({ workerId: entry.name, err: String(e) }, 'worker archive removal failed'); }
       }
     }
+    // VS-859: the same pass also reclaims finished workers' homes. A failure here is logged and never
+    // blocks the next pass; the sweep itself already refuses and reports per candidate.
+    if (typeof deps().workers.reclaimFinishedHomes === 'function') {
+      try {
+        const homes = await deps().workers.reclaimFinishedHomes(SYSTEM, { dryRun: false, ignoreAge: false });
+        if (homes.reclaimed.length || homes.skipped.length || homes.failed.length) {
+          log.info({ reclaimed: homes.reclaimed.length, skipped: homes.skipped.length, failed: homes.failed.length }, 'worker home retention');
+        }
+      } catch (e) { log.warn({ err: String(e) }, 'worker home retention failed'); }
+    }
+
     if (runsPruned || archivesPruned) log.info({ runsPruned, archivesPruned }, 'retention sweep');
   }
 
@@ -1581,7 +1595,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         if (due('supervisor:accounts_at', ACCOUNTS_EVERY_MS)) { try { await deps().accounts.refresh(); } catch (e) { log.error({ err: String(e) }, 'runtime account refresh failed'); } }
         if (due('supervisor:login_recheck_at', LOGIN_RECHECK_EVERY_MS)) await loginRecheck().catch((e) => log.error({ err: String(e) }, 'runtime login recheck failed'));
         if (due('supervisor:reconcile_at', RECONCILE_EVERY_MS)) await reconcilePass().catch((e) => log.error({ err: String(e) }, 'reconcile pass failed'));
-        if (due('supervisor:retention_at', RETENTION_EVERY_MS)) { try { retentionPass(); } catch (e) { log.error({ err: String(e) }, 'retention pass failed'); } }
+        if (due('supervisor:retention_at', RETENTION_EVERY_MS)) { try { await retentionPass(); } catch (e) { log.error({ err: String(e) }, 'retention pass failed'); } }
         if (due('supervisor:scratch_at', SCRATCH_SWEEP_EVERY_MS)) await sweepScratch().catch((e) => log.error({ err: String(e) }, 'scratch sweep failed'));
       } finally {
         ticking = false;

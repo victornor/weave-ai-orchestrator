@@ -411,6 +411,36 @@ export interface HandoverReconciliation {
   durationMs: number;
 }
 export interface HandoverEndResult { note: string; reconciliation: HandoverReconciliation }
+/** VS-859: a finished worker whose home the retention sweep may reclaim, or did. */
+export interface ReclaimableHome {
+  workerId: string;
+  name: string;
+  kind: S.AgentKind;
+  status: S.AgentStatus;
+  ticket: string | null;
+  branch: string | null;
+  /** False when the home has no `work/` directory: nothing but rendered files is left to delete. */
+  hasWorktree: boolean;
+}
+/** VS-859: a finished worker (or an unidentified directory) the sweep left alone, and why. */
+export interface SkippedHome {
+  workerId: string | null;
+  directory: string;
+  name: string | null;
+  kind: S.AgentKind | null;
+  status: S.AgentStatus | null;
+  reason: string;
+  /** What the home holds, for a human reading the first pass's output. */
+  detail: string;
+}
+/** VS-859: the whole pass's answer, shared by the retention sweep and `weave worker prune-homes`. */
+export interface ReclaimHomesResult {
+  dryRun: boolean;
+  candidates: ReclaimableHome[];
+  reclaimed: ReclaimableHome[];
+  skipped: SkippedHome[];
+  failed: Array<{ workerId: string; error: string }>;
+}
 export interface WorkersService {
   list(filter?: { status?: S.AgentStatus[]; kinds?: S.AgentKind[]; projectId?: string; roleId?: string; includeRetired?: boolean }): S.Agent[];
   get(id: string): S.Agent;
@@ -498,6 +528,13 @@ export interface WorkersService {
   cancel(actor: Actor, workerId: string, reason: string): Promise<S.Agent>;
   pause(actor: Actor, id: string, reason: string): S.Agent; resume(actor: Actor, id: string): S.Agent;
   retireIfLanded(actor: Actor, workerId: string): Promise<{ retired: boolean; reason?: string }>;
+  /**
+   * VS-859: reclaim the homes of finished workers (`retired` or `done`, past `workerArchiveDays`) whose
+   * worktree is untouched and whose work has landed — through the worktree provider, keeping the
+   * branch — and report every refusal. The retention pass runs it for real; `weave worker prune-homes`
+   * runs the same function, dry by default. `now` is a test seam for the cutoff only.
+   */
+  reclaimFinishedHomes(actor: Actor, opts: { dryRun: boolean; now?: number }): Promise<ReclaimHomesResult>;
   /** Whether this agent's next turn would resume its existing session rather than start a fresh one. */
   sessionResumable(id: string): boolean;
   brief(workerId: string): string;

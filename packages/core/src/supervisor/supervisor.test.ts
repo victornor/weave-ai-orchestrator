@@ -44,7 +44,11 @@ describe('supervisor', () => {
     retireIfLanded = vi.fn(async () => ({ retired: true }));
     ensureWorktree = vi.fn(async (id: string) => ({ path: join(h.ctx.paths.workers, id, 'work'), branch: 'ac/test', provisioned: true }));
     h.services.wake = wake as never;
-    h.services.workers = { spawnForTicket, retireIfLanded, ensureWorktree, conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.workers = {
+      spawnForTicket, retireIfLanded, ensureWorktree, conductor: () => ({ id: h.conductorId }),
+      // VS-859: the retention pass reclaims finished worker homes in the same sweep.
+      reclaimFinishedHomes: vi.fn(async () => ({ dryRun: false, candidates: [], reclaimed: [], skipped: [], failed: [] })),
+    } as never;
     h.services.tickets = { livenessViolations: () => [] } as never;
     h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
@@ -277,7 +281,10 @@ describe('supervisor scheduled passes', () => {
     h = makeHarness();
     wake = fakeWake();
     h.services.wake = wake as never;
-    h.services.workers = { spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }) } as never;
+    h.services.workers = {
+      spawnForTicket: vi.fn(), retireIfLanded: vi.fn(), conductor: () => ({ id: h.conductorId }),
+      reclaimFinishedHomes: vi.fn(async () => ({ dryRun: false, candidates: [], reclaimed: [], skipped: [], failed: [] })),
+    } as never;
     h.services.tickets = { livenessViolations: () => [], autoMergeSweep: async () => 0 } as never;
     h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
     h.services.projects = { fetch: vi.fn(async () => ({ head: 'abc', fastForwarded: false })) } as never;
@@ -1270,6 +1277,22 @@ describe('supervisor scheduled passes', () => {
       await supervisor.tick();
       expect(existsSync(join(h.ctx.paths.archive, oldWorker))).toBe(false);
       expect(existsSync(join(h.ctx.paths.archive, newWorker))).toBe(true);
+    });
+
+    it('reclaims finished worker homes inside the same retention pass (VS-859)', async () => {
+      const reclaim = h.services.workers!.reclaimFinishedHomes as ReturnType<typeof vi.fn>;
+      await supervisor.tick();
+      expect(reclaim).toHaveBeenCalledWith(expect.objectContaining({ kind: 'system' }), { dryRun: false });
+    });
+
+    it('still prunes archives when the home reclaim fails (VS-859)', async () => {
+      const reclaim = h.services.workers!.reclaimFinishedHomes as ReturnType<typeof vi.fn>;
+      reclaim.mockRejectedValueOnce(new Error('home sweep exploded'));
+      const oldWorker = h.addWorker(null, { status: 'retired', retiredAt: new Date(Date.now() - 60 * 86_400_000).toISOString() });
+      mkdirSync(join(h.ctx.paths.archive, oldWorker), { recursive: true });
+
+      await supervisor.tick();
+      expect(existsSync(join(h.ctx.paths.archive, oldWorker))).toBe(false);
     });
 
     it('does not repeat the sweep inside the 24-hour window', async () => {

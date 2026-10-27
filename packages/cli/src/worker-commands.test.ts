@@ -97,3 +97,30 @@ describe('weave worker handback', () => {
     expect(posted?.body).toMatchObject({ note: 'attached Frida to the device' });
   });
 });
+
+describe('weave worker prune-homes (VS-859)', () => {
+  const result = (dryRun: boolean) => ({
+    dryRun,
+    candidates: [{ workerId: 'w1', name: 'Backend Engineer #1', kind: 'worker', status: 'done', ticket: 'VS-1', branch: 'ac/vs-1-done', hasWorktree: true }],
+    reclaimed: dryRun ? [] : [{ workerId: 'w1', name: 'Backend Engineer #1', kind: 'worker', status: 'done', ticket: 'VS-1', branch: 'ac/vs-1-done', hasWorktree: true }],
+    skipped: [{ workerId: 'w2', directory: 'w2', name: 'Old Worker', kind: 'worker', status: 'done', reason: 'no landed proof', detail: 'no merged pull request' }],
+    failed: [],
+  });
+
+  it('defaults to a real run and reports what was reclaimed and kept', async () => {
+    routes['POST /api/w/ws1/workers/prune-homes'] = () => ({ body: result(false) });
+    const { out } = await cli('worker', 'prune-homes');
+    expect(calls.find((c) => c.path.endsWith('/workers/prune-homes'))?.body).toEqual({ dryRun: false });
+    expect(out).toContain('reclaimed');
+    expect(out).toContain('w1');
+    expect(out).toContain('no landed proof');
+  });
+
+  it('deletes nothing with --dry-run and says what it would do', async () => {
+    routes['POST /api/w/ws1/workers/prune-homes'] = () => ({ body: result(true) });
+    const { out } = await cli('worker', 'prune-homes', '--dry-run');
+    expect(calls.find((c) => c.path.endsWith('/workers/prune-homes'))?.body).toEqual({ dryRun: true });
+    expect(out).toContain('would be reclaimed');
+    expect(out).toContain('ac/vs-1-done');
+  });
+});

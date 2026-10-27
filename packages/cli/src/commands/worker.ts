@@ -2,7 +2,7 @@
 import type { Command } from 'commander';
 import type { Agent } from '@weave-ai/shared';
 import { workerToCard } from '@weave-ai/render';
-import { emit, fields, heading, style, table, write } from '../output.js';
+import { emit, fields, heading, style, table, write, writeErr } from '../output.js';
 import { items, run, session } from './util.js';
 
 interface WorkerDetail { agent?: Agent; session?: Record<string, unknown>; ticket?: Record<string, unknown>; lastRun?: Record<string, unknown>; usage?: Record<string, unknown> }
@@ -166,6 +166,38 @@ export function register(program: Command): void {
     }));
 
   worker
+    .command('prune-homes')
+    .description("reclaim home directories and worktrees of finished workers whose work has landed (VS-859)")
+    .option('--dry-run', 'list what would be reclaimed and delete nothing')
+    .action(async (opts: Record<string, boolean>, command: Command) => run(async () => {
+      const dryRun = opts['dryRun'] === true;
+      const { client } = await session(command);
+      const r = await client.wpost<PruneHomesResult>('/workers/prune-homes', { dryRun });
+      emit(r, () => {
+        table(r.candidates, [
+          { header: 'WORKER', get: (w) => w.workerId },
+          { header: 'NAME', get: (w) => w.name },
+          { header: 'STATUS', get: (w) => w.status },
+          { header: 'TICKET', get: (w) => w.ticket ?? '' },
+          { header: 'BRANCH', get: (w) => w.branch ?? '' },
+          { header: 'WORKTREE', get: (w) => (w.hasWorktree ? 'yes' : 'gone') },
+        ], { empty: 'no finished worker home to reclaim' });
+        if (r.skipped.length) {
+          write(style.dim(`${r.skipped.length} kept:`));
+          table(r.skipped, [
+            { header: 'WORKER', get: (s) => s.workerId ?? s.directory },
+            { header: 'STATUS', get: (s) => s.status ?? '' },
+            { header: 'REASON', get: (s) => s.reason },
+            { header: 'DETAIL', get: (s) => s.detail },
+          ]);
+        }
+        for (const f of r.failed) writeErr(`${f.workerId}: ${f.error}`);
+        if (dryRun) write(style.dim(`${r.candidates.length} home(s) would be reclaimed; ${r.skipped.length} kept. Re-run without --dry-run to reclaim.`));
+        else write(`${style.ok('reclaimed')} ${r.reclaimed.length} home(s); ${r.skipped.length} kept; ${r.failed.length} failed`);
+      });
+    }));
+
+  worker
     .command('handover')
     .argument('<id>')
     .description("take a worker's session for your own terminal (VS-249)")
@@ -192,6 +224,14 @@ export function register(program: Command): void {
 }
 
 interface HandoverCommandResult { resumable: boolean; command: string | null; runtime: string; landingLine: string | null; reason: string | null }
+
+interface PruneHomesResult {
+  dryRun: boolean;
+  candidates: Array<{ workerId: string; name: string; status: string; ticket: string | null; branch: string | null; hasWorktree: boolean }>;
+  reclaimed: Array<{ workerId: string }>;
+  skipped: Array<{ workerId: string | null; directory: string; status: string | null; reason: string; detail: string }>;
+  failed: Array<{ workerId: string; error: string }>;
+}
 
 function numberOr(value: unknown, fallback: number | null): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;

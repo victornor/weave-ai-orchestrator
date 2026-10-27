@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newId, nowIso } from '@weave-ai/db';
@@ -461,6 +461,174 @@ describe('workers', () => {
     expect(after.retiredAt).toBeTruthy();
     expect(h.db.get<{ status: string }>('SELECT status FROM worktrees WHERE agent_id = ?', [worker.id])!.status).toBe('removed');
     expect(h.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [ticket.id])!.workerId).toBeNull();
+  });
+
+  /** VS-859: a finished worker with a real worktree and a merged-PR work product (the landing proof). */
+  let finishedNumber = 100;
+  async function finishedWorker(opts: { status?: 'done' | 'retired'; mergedPr?: boolean; lastRunAt?: string | null; retiredAt?: string | null } = {}) {
+    const n = finishedNumber++;
+    const ticket = seedTicket({ status: 'done', number: n, identifier: `TST-${n}` });
+    const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+    if (opts.mergedPr !== false) {
+      h.db.insert('ticket_work_products', {
+        id: newId(), ticketId: ticket.id, type: 'pull_request', provider: 'github', url: 'https://github.com/acme/api/pull/9',
+        title: 'PR 9', state: 'merged', isPrimary: 1, createdAt: nowIso(), updatedAt: nowIso(),
+      });
+    }
+    h.db.update('agents', worker.id, {
+      status: opts.status ?? 'done',
+      retiredAt: opts.retiredAt ?? null,
+      lastRunAt: opts.lastRunAt ?? new Date(Date.now() - 60 * 86_400_000).toISOString(),
+      updatedAt: new Date(Date.now() - 60 * 86_400_000).toISOString(),
+    });
+    return { ticket, worker, home: worker.homePath, wt: worker.worktreePath! };
+  }
+
+  describe('reclaimFinishedHomes (VS-859)', () => {
+    it('reclaims a done worker past the window: provider removal, metadata gone, branch kept, home deleted', async () => {
+      const { worker, home, wt } = await finishedWorker();
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+
+      expect(r.reclaimed.map((w) => w.workerId)).toEqual([worker.id]);
+      expect(existsSync(home)).toBe(false);
+      expect(existsSync(wt)).toBe(false);
+      const trees = await new GitWorktreeProvider().list(clonePath);
+      expect(trees.some((t) => t.path === wt)).toBe(false);
+      expect((await git(['rev-parse', '--verify', worker.branch!], clonePath)).ok).toBe(true);
+      expect(h.db.get<{ status: string }>('SELECT status FROM worktrees WHERE agent_id = ?', [worker.id])!.status).toBe('removed');
+      const reclaimed = h.db.get("SELECT * FROM activity WHERE action = 'worker.home_reclaimed' AND entity_id = ?", [worker.id]);
+      expect(reclaimed).toBeTruthy();
+    });
+
+    it('reclaims a retired worker, and an idempotent second pass does nothing', async () => {
+      const { worker, home } = await finishedWorker({ status: 'retired', retiredAt: new Date(Date.now() - 60 * 86_400_000).toISOString() });
+      expect((await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false })).reclaimed.map((w) => w.workerId)).toEqual([worker.id]);
+      expect(existsSync(home)).toBe(false);
+      const second = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(second.reclaimed).toEqual([]);
+      expect(second.skipped).toEqual([]);
+    });
+
+    it('accepts landedWorkTest as the proof when there is no merged PR', async () => {
+      h.db.update('projects', h.projectId, { policiesJson: { deliveryMode: 'local-branch' } });
+      const { worker, home, wt } = await finishedWorker({ mergedPr: false });
+      writeFileSync(join(wt, 'landed.txt'), 'ok', 'utf8');
+      await git(['add', '.'], wt);
+      await git(['commit', '-m', 'feat: landed'], wt);
+      await git(['merge', '--ff-only', worker.branch!], clonePath);
+
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed.map((w) => w.workerId)).toEqual([worker.id]);
+      expect(existsSync(home)).toBe(false);
+    });
+
+    it('refuses a worktree with a modified tracked file and keeps the rest sweeping', async () => {
+      const dirty = await finishedWorker();
+      writeFileSync(join(dirty.wt, 'README.md'), '# changed\n', 'utf8');
+      const clean = await finishedWorker();
+
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed.map((w) => w.workerId)).toEqual([clean.worker.id]);
+      const skipped = r.skipped.find((s) => s.workerId === dirty.worker.id)!;
+      expect(skipped.reason).toMatch(/uncommitted changes/);
+      expect(skipped.detail).toMatch(/1 tracked/);
+      expect(existsSync(dirty.home)).toBe(true);
+      expect(existsSync(dirty.wt)).toBe(true);
+    });
+
+    it('refuses a worktree holding only untracked files', async () => {
+      const { worker, home, wt } = await finishedWorker();
+      mkdirSync(join(wt, '.review-screenshots'), { recursive: true });
+      writeFileSync(join(wt, '.review-screenshots', 'a.png'), 'png', 'utf8');
+
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed).toEqual([]);
+      const skipped = r.skipped.find((s) => s.workerId === worker.id)!;
+      expect(skipped.reason).toMatch(/uncommitted changes/);
+      expect(skipped.detail).toMatch(/1 untracked/);
+      expect(existsSync(home)).toBe(true);
+    });
+
+    it('refuses a clean worktree with no landed proof', async () => {
+      const { worker, home } = await finishedWorker({ mergedPr: false });
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed).toEqual([]);
+      expect(r.skipped.find((s) => s.workerId === worker.id)!.reason).toBe('no landed proof');
+      expect(existsSync(home)).toBe(true);
+    });
+
+    it('keeps a finished worker inside the retention window', async () => {
+      const { worker, home } = await finishedWorker({ lastRunAt: nowIso() });
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.candidates).toEqual([]);
+      expect(r.skipped).toEqual([]);
+      expect(existsSync(home)).toBe(true);
+    });
+
+    it('never touches an active worker, even with an ancient directory mtime', async () => {
+      const { worker, home } = await finishedWorker();
+      h.db.update('agents', worker.id, { status: 'active' });
+      const ancient = new Date(Date.now() - 900 * 86_400_000);
+      utimesSync(home, ancient, ancient);
+
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.candidates).toEqual([]);
+      expect(r.skipped).toEqual([]);
+      expect(existsSync(home)).toBe(true);
+    });
+
+    it('reclaims a done worker whose directory mtime is fresh because the cutoff is the last turn', async () => {
+      const { worker, home } = await finishedWorker();
+      utimesSync(home, new Date(), new Date());
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed.map((w) => w.workerId)).toEqual([worker.id]);
+      expect(existsSync(home)).toBe(false);
+    });
+
+    it('reports a directory with no agent row and keeps it', async () => {
+      const orphan = join(h.ctx.paths.workers, 'no-such-agent');
+      mkdirSync(orphan, { recursive: true });
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed).toEqual([]);
+      expect(r.skipped.find((s) => s.directory === 'no-such-agent')!.reason).toBe('no agent row');
+      expect(existsSync(orphan)).toBe(true);
+    });
+
+    it('deletes a home whose worktree is already gone without a provider call', async () => {
+      const { worker, home, wt } = await finishedWorker();
+      rmSync(wt, { recursive: true, force: true });
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed.map((w) => w.workerId)).toEqual([worker.id]);
+      expect(existsSync(home)).toBe(false);
+    });
+
+    it('deletes nothing when the provider refuses the removal', async () => {
+      const failing: WorktreeProvider = {
+        id: 'boom', detect: async () => ({ available: true }),
+        create: async () => { throw new Error('unused'); }, list: async () => [],
+        remove: async () => { throw new Error('provider said no'); },
+      };
+      const { worker, home, wt } = await finishedWorker();
+      // Spawned with the real provider, then the registry entry is swapped so only the removal fails.
+      h.ctx.registries.worktreeProviders.set('git', failing);
+
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed).toEqual([]);
+      expect(r.failed.map((f) => f.workerId)).toEqual([worker.id]);
+      expect(r.skipped.find((s) => s.workerId === worker.id)!.reason).toBe('worktree removal failed');
+      expect(existsSync(home)).toBe(true);
+      expect(existsSync(wt)).toBe(true);
+    });
+
+    it('dry run lists the candidate and deletes nothing', async () => {
+      const { worker, home, wt } = await finishedWorker();
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: true });
+      expect(r.dryRun).toBe(true);
+      expect(r.candidates.map((w) => w.workerId)).toEqual([worker.id]);
+      expect(r.reclaimed).toEqual([]);
+      expect(existsSync(home)).toBe(true);
+      expect(existsSync(wt)).toBe(true);
+    });
   });
 
   it('relaunches with a progress note derived from the ticket and worktree', async () => {

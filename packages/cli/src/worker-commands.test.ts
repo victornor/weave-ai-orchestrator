@@ -99,9 +99,11 @@ describe('weave worker handback', () => {
 });
 
 describe('weave worker prune-homes (VS-859)', () => {
-  const result = (dryRun: boolean) => ({
+  const result = (dryRun: boolean, ignoreAge = false, candidates = 1) => ({
     dryRun,
-    candidates: [{ workerId: 'w1', name: 'Backend Engineer #1', kind: 'worker', status: 'done', ticket: 'VS-1', branch: 'ac/vs-1-done', hasWorktree: true }],
+    ignoreAge,
+    windowDays: 30,
+    candidates: Array.from({ length: candidates }, (_, i) => ({ workerId: `w${i + 1}`, name: `Worker ${i + 1}`, kind: 'worker', status: 'done', ticket: `VS-${i + 1}`, branch: `ac/vs-${i + 1}-done`, hasWorktree: true })),
     reclaimed: dryRun ? [] : [{ workerId: 'w1', name: 'Backend Engineer #1', kind: 'worker', status: 'done', ticket: 'VS-1', branch: 'ac/vs-1-done', hasWorktree: true }],
     skipped: [{ workerId: 'w2', directory: 'w2', name: 'Old Worker', kind: 'worker', status: 'done', reason: 'no landed proof', detail: 'no merged pull request' }],
     failed: [],
@@ -110,7 +112,7 @@ describe('weave worker prune-homes (VS-859)', () => {
   it('defaults to a real run and reports what was reclaimed and kept', async () => {
     routes['POST /api/w/ws1/workers/prune-homes'] = () => ({ body: result(false) });
     const { out } = await cli('worker', 'prune-homes');
-    expect(calls.find((c) => c.path.endsWith('/workers/prune-homes'))?.body).toEqual({ dryRun: false });
+    expect(calls.find((c) => c.path.endsWith('/workers/prune-homes'))?.body).toEqual({ dryRun: false, ignoreAge: false });
     expect(out).toContain('reclaimed');
     expect(out).toContain('w1');
     expect(out).toContain('no landed proof');
@@ -119,8 +121,32 @@ describe('weave worker prune-homes (VS-859)', () => {
   it('deletes nothing with --dry-run and says what it would do', async () => {
     routes['POST /api/w/ws1/workers/prune-homes'] = () => ({ body: result(true) });
     const { out } = await cli('worker', 'prune-homes', '--dry-run');
-    expect(calls.find((c) => c.path.endsWith('/workers/prune-homes'))?.body).toEqual({ dryRun: true });
+    expect(calls.find((c) => c.path.endsWith('/workers/prune-homes'))?.body).toEqual({ dryRun: true, ignoreAge: false });
     expect(out).toContain('would be reclaimed');
     expect(out).toContain('ac/vs-1-done');
+  });
+
+  it('--ignore-age says what it widens before deleting, then runs with the flag', async () => {
+    routes['POST /api/w/ws1/workers/prune-homes'] = (raw) => {
+      const b = raw as { dryRun: boolean; ignoreAge: boolean };
+      return { body: result(b.dryRun, b.ignoreAge, b.ignoreAge ? 3 : 1) };
+    };
+    const { out } = await cli('worker', 'prune-homes', '--ignore-age');
+    expect(out).toContain('ignoring the 30-day window: 2 more home(s) become eligible');
+    const posts = calls.filter((c) => c.path.endsWith('/workers/prune-homes')).map((c) => c.body);
+    expect(posts).toEqual([
+      { dryRun: true, ignoreAge: false },
+      { dryRun: true, ignoreAge: true },
+      { dryRun: false, ignoreAge: true },
+    ]);
+  });
+
+  it('--dry-run --ignore-age lists the wider set and deletes nothing', async () => {
+    routes['POST /api/w/ws1/workers/prune-homes'] = (raw) => ({ body: result(true, (raw as { ignoreAge: boolean }).ignoreAge, 3) });
+    const { out } = await cli('worker', 'prune-homes', '--dry-run', '--ignore-age');
+    expect(calls.filter((c) => c.path.endsWith('/workers/prune-homes'))).toHaveLength(1);
+    expect(calls[0]!.body).toEqual({ dryRun: true, ignoreAge: true });
+    expect(out).toContain('ignoring the 30-day window');
+    expect(out).toContain('would be reclaimed');
   });
 });

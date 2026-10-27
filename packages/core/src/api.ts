@@ -436,6 +436,10 @@ export interface SkippedHome {
 /** VS-859: the whole pass's answer, shared by the retention sweep and `weave worker prune-homes`. */
 export interface ReclaimHomesResult {
   dryRun: boolean;
+  /** VS-859: an explicit operator opt-in that lifts the age window for this invocation only. */
+  ignoreAge: boolean;
+  /** The configured `workerArchiveDays`, so a caller can say what it is bypassing. */
+  windowDays: number;
   candidates: ReclaimableHome[];
   reclaimed: ReclaimableHome[];
   skipped: SkippedHome[];
@@ -532,9 +536,11 @@ export interface WorkersService {
    * VS-859: reclaim the homes of finished workers (`retired` or `done`, past `workerArchiveDays`) whose
    * worktree is untouched and whose work has landed — through the worktree provider, keeping the
    * branch — and report every refusal. The retention pass runs it for real; `weave worker prune-homes`
-   * runs the same function, dry by default. `now` is a test seam for the cutoff only.
+   * runs the same function, dry by default. `ignoreAge` skips only the `workerArchiveDays` cutoff
+   * (an explicit operator opt-in for a one-off backlog reclaim); it never relaxes a safety gate. The
+   * retention pass always passes false. `now` is a test seam for the cutoff only.
    */
-  reclaimFinishedHomes(actor: Actor, opts: { dryRun: boolean; now?: number }): Promise<ReclaimHomesResult>;
+  reclaimFinishedHomes(actor: Actor, opts: { dryRun: boolean; now?: number; ignoreAge?: boolean }): Promise<ReclaimHomesResult>;
   /** Whether this agent's next turn would resume its existing session rather than start a fresh one. */
   sessionResumable(id: string): boolean;
   brief(workerId: string): string;

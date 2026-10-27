@@ -1531,7 +1531,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     // blocks the next pass; the sweep itself already refuses and reports per candidate.
     if (typeof deps().workers.reclaimFinishedHomes === 'function') {
       try {
-        const homes = await deps().workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+        const homes = await deps().workers.reclaimFinishedHomes(SYSTEM, { dryRun: false, ignoreAge: false });
         if (homes.reclaimed.length || homes.skipped.length || homes.failed.length) {
           log.info({ reclaimed: homes.reclaimed.length, skipped: homes.skipped.length, failed: homes.failed.length }, 'worker home retention');
         }

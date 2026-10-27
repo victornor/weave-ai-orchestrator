@@ -33,9 +33,10 @@ pull-request work product** in the database, not git ancestry.
 - Skips produce a finding — a `log.warn`, a `worker.home_retention_skipped` activity row, and an entry
   in the pass's return value — naming the worker, its status and what it holds. No ticket comments: a
   first pass legitimately skips 60 workers.
-- `weave worker prune-homes [--dry-run]` (route `POST /workers/prune-homes`, service
+- `weave worker prune-homes [--dry-run] [--ignore-age]` (route `POST /workers/prune-homes`, service
   `workers.reclaimFinishedHomes`) runs the same function, so the operator can inspect the candidate
-  and skip lists before anything is deleted.
+  and skip lists before anything is deleted. `--ignore-age` is an explicit one-off opt-in that lifts
+  only the age window (the automatic pass always keeps it) and relaxes no safety gate.
 - The `archive/` sweep, retirement, and `bin/`/`node_modules` handling are unchanged. Build output is
   **not** stripped at turn end: a resumed worker running a no-build test would fail confusingly, and
   `node_modules` is the expensive one to restore.

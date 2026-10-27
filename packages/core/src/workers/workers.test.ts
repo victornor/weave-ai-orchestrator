@@ -620,6 +620,44 @@ describe('workers', () => {
       expect(existsSync(wt)).toBe(true);
     });
 
+    it('ignoreAge lifts only the age window, and is off by default', async () => {
+      const { worker, home } = await finishedWorker({ lastRunAt: nowIso() });
+      const off = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(off.candidates).toEqual([]);
+      expect(existsSync(home)).toBe(true);
+
+      const on = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false, ignoreAge: true });
+      expect(on.ignoreAge).toBe(true);
+      expect(on.reclaimed.map((w) => w.workerId)).toEqual([worker.id]);
+      expect(existsSync(home)).toBe(false);
+    });
+
+    it('ignoreAge still refuses a dirty worktree: it is not force', async () => {
+      const { worker, home, wt } = await finishedWorker({ lastRunAt: nowIso() });
+      writeFileSync(join(wt, 'README.md'), '# changed\n', 'utf8');
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false, ignoreAge: true });
+      expect(r.reclaimed).toEqual([]);
+      expect(r.skipped.find((s) => s.workerId === worker.id)!.reason).toMatch(/uncommitted changes/);
+      expect(existsSync(home)).toBe(true);
+    });
+
+    it('removes through the provider with deleteBranch false and force false', async () => {
+      const { worker } = await finishedWorker();
+      const calls: Array<{ deleteBranch: boolean; force: boolean; path: string }> = [];
+      const real = new GitWorktreeProvider();
+      const recording: WorktreeProvider = {
+        id: 'git', detect: () => real.detect(), create: (i) => real.create(i), list: (r) => real.list(r),
+        remove: async (i) => { calls.push({ deleteBranch: i.deleteBranch, force: i.force, path: i.path }); await real.remove(i); },
+      };
+      h.ctx.registries.worktreeProviders.set('git', recording);
+
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed.map((w) => w.workerId)).toEqual([worker.id]);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.deleteBranch).toBe(false);
+      expect(calls[0]!.force).toBe(false);
+    });
+
     it('dry run lists the candidate and deletes nothing', async () => {
       const { worker, home, wt } = await finishedWorker();
       const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: true });

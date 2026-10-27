@@ -16,6 +16,8 @@
 - [x] 3.1 Add `POST /workers/prune-homes` (`{ dryRun }`, default `true`) and its route-table entry, returning the service result.
 - [x] 3.2 Add `weave worker prune-homes [--dry-run]` printing candidates, reclaimed and skipped-with-reason.
 - [x] 3.3 Test the CLI dry run and real run through the route body: `--dry-run` sends `dryRun: true`, the default sends `false`, and the skip list is printed.
+- [x] 3.4 Add the explicit `--ignore-age` opt-in to `reclaimFinishedHomes`, the route and the CLI: it skips only the `workerArchiveDays` cutoff, the retention pass always passes `ignoreAge: false`, and a real run announces the window and how many more homes it widens to before deleting.
+- [x] 3.5 Test that `ignoreAge` reclaims an in-window landed home, still refuses a dirty one (it is not force), and that provider removal keeps `deleteBranch: false, force: false`.
 
 ## 4. Tests for every refusal and cutoff
 
@@ -28,5 +30,5 @@
 ## 5. Verification and measurement
 
 - [x] 5.1 Run the core tests for the touched suites and both full suites per the project conventions; paste both suite blocks in the ticket/PR.
-- [ ] 5.2 Record the pre-flight measurement (read-only survey of the live workspace: candidate count, skip list with reasons, bytes) in the ticket report; the verb's own live `--dry-run` runs after the upgrade, since it needs the new daemon.
-- [ ] 5.3 Write the first-run procedure (dry run, real run, after `du`, `git worktree list` sample) into the ticket report so the acceptance is met by measurement after the upgrade.
+- [ ] 5.2 Record the pre-flight measurement (read-only survey of the live workspace: candidate count, skip list with reasons, bytes) in the ticket report, for both the default and `--ignore-age` sets.
+- [ ] 5.3 Write the four-measurement first-run procedure (before `du`; dry run; dry run with `--ignore-age`, where VS-486 and VS-831 must appear as refusals; real run with the flag; after `du` and a sample `git worktree list`) into the ticket report so the acceptance is met by measurement after the upgrade.

@@ -1056,10 +1056,12 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
      * provably landed; the worktree goes through the provider with `deleteBranch: false`, so the
      * branch and every commit stay in the project clone and a wrong judgement is recoverable.
      */
-    async reclaimFinishedHomes(actor: Actor, opts: { dryRun: boolean; now?: number }): Promise<ReclaimHomesResult> {
-      const result: ReclaimHomesResult = { dryRun: opts.dryRun, candidates: [], reclaimed: [], skipped: [], failed: [] };
+    async reclaimFinishedHomes(actor: Actor, opts: { dryRun: boolean; now?: number; ignoreAge?: boolean }): Promise<ReclaimHomesResult> {
+      const windowDays = ctx.config.defaults.workerArchiveDays ?? 30;
+      const ignoreAge = opts.ignoreAge === true;
+      const result: ReclaimHomesResult = { dryRun: opts.dryRun, ignoreAge, windowDays, candidates: [], reclaimed: [], skipped: [], failed: [] };
       if (!existsSync(ctx.paths.workers)) return result;
-      const cutoff = (opts.now ?? Date.now()) - (ctx.config.defaults.workerArchiveDays ?? 30) * DAY_MS;
+      const cutoff = (opts.now ?? Date.now()) - windowDays * DAY_MS;
       const skip = (row: SkippedHome, logDetail: Record<string, unknown>): void => {
         result.skipped.push(row);
         log.warn({ workerId: row.workerId, directory: row.directory, reason: row.reason, ...logDetail }, 'worker home not reclaimed');
@@ -1082,7 +1084,10 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         // Only a finished agent is a candidate. Anything live (or paused/provisioning/error) is never touched.
         if (agent.status !== 'retired' && agent.status !== 'done') continue;
         const finishedAt = Date.parse(agent.retiredAt ?? agent.lastRunAt ?? agent.updatedAt);
-        if (!Number.isFinite(finishedAt) || finishedAt > cutoff) continue;
+        // No completion time at all is never a candidate. `ignoreAge` lifts only the window, and is
+        // an explicit operator opt-in: the retention pass always passes false.
+        if (!Number.isFinite(finishedAt)) continue;
+        if (!ignoreAge && finishedAt > cutoff) continue;
 
         const wt = join(home, 'work');
         const ticket = agent.ticketId ? ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [agent.ticketId]) ?? null : null;

@@ -1282,7 +1282,7 @@ describe('supervisor scheduled passes', () => {
     it('reclaims finished worker homes inside the same retention pass (VS-859)', async () => {
       const reclaim = h.services.workers!.reclaimFinishedHomes as ReturnType<typeof vi.fn>;
       await supervisor.tick();
-      expect(reclaim).toHaveBeenCalledWith(expect.objectContaining({ kind: 'system' }), { dryRun: false });
+      expect(reclaim).toHaveBeenCalledWith(expect.objectContaining({ kind: 'system' }), { dryRun: false, ignoreAge: false });
     });
 
     it('still prunes archives when the home reclaim fails (VS-859)', async () => {

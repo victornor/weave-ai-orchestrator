@@ -62,8 +62,8 @@ export function workerRoutes(): Hono<AppEnv> {
   // workspace is inspected before anything is deleted. Registered before `/:id` so it is never read as
   // a worker id.
   app.post('/prune-homes', async (c) => {
-    const { dryRun } = await body(c, z.object({ dryRun: z.boolean().default(true) }).strict());
-    return c.json(await c.get('ws').services.workers.reclaimFinishedHomes(c.get('actor'), { dryRun }));
+    const { dryRun, ignoreAge } = await body(c, z.object({ dryRun: z.boolean().default(true), ignoreAge: z.boolean().default(false) }).strict());
+    return c.json(await c.get('ws').services.workers.reclaimFinishedHomes(c.get('actor'), { dryRun, ignoreAge }));
   });
 
   app.get('/:id', (c) => {

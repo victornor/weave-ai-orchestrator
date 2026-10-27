@@ -102,10 +102,28 @@ VS-486, VS-831 and anything dirty, and 60 comments is not a report.
 
 ### Operator trigger
 
-`POST /workers/prune-homes` with `{ dryRun }` (default `true`), route-table entry, and
-`weave worker prune-homes [--dry-run]`, modelled on `weave project prune-branches`. It calls
-`workers.reclaimFinishedHomes` directly, so there is one implementation. The response shape is
-`{ dryRun, candidates: [...], reclaimed: [...], skipped: [{ workerId, name, status, reason, detail }], failed: [...] }`.
+`POST /workers/prune-homes` with `{ dryRun, ignoreAge }` (default `true`, `false`), route-table entry,
+and `weave worker prune-homes [--dry-run] [--ignore-age]`, modelled on
+`weave project prune-branches`. It calls `workers.reclaimFinishedHomes` directly, so there is one
+implementation. The response shape is
+`{ dryRun, ignoreAge, windowDays, candidates: [...], reclaimed: [...], skipped: [{ workerId, name, status, reason, detail }], failed: [...] }`.
+
+### The age window, and the explicit one-off bypass
+
+Measured on 2026-10-27 (20:25Z snapshot), the bulk of the backlog is younger than
+`workerArchiveDays` (30): 29 dirs / 8.1 GB are past the window, while 70 dirs / 73.6 GB belong to
+finished workers when the window is ignored (VS-817…VS-853, mostly 3 GB of build output each). A
+first run under the window would reclaim 8.1 GB and look like a failure against the ticket's
+"reclaim the majority" acceptance.
+
+`ignoreAge` is therefore an explicit opt-in on the operator verb only, and only for the age rule:
+`reclaimFinishedHomes({ dryRun, now?, ignoreAge })` defaults it to false, the retention pass always
+passes false, and nothing else changes — kind/status eligibility, the clean-worktree rule, the landed
+proof and `deleteBranch: false, force: false` all still apply. It is not `--force`; a dirty worktree
+is still refused. Before a real run with the flag, the CLI performs the same dry run with and without
+it and prints "ignoring the 30-day window: N more homes become eligible", so the wider set is seen
+first. Lowering `workerArchiveDays` was rejected: that would change every future pass's steady state
+to solve a one-off backlog.
 
 ## Rejected alternatives
 
@@ -145,13 +163,23 @@ records that number rather than promising a smaller one.
 
 ## First run and measurement
 
-The change ships the sweep and the verb. After it is merged and the daemon has upgraded:
+The change ships the sweep and the verb. The pre-flight below is measured read-only from the live
+workspace (the verb itself needs the upgraded daemon):
 
-1. record `du -sh /home/v/agent-conductor/v-services/workers` and
-   `weave worker prune-homes --dry-run` (candidate count and the skip list);
-2. run `weave worker prune-homes` once;
-3. record the after `du` and `git worktree list` in a sample project.
+- without `--ignore-age`: 29 dirs / 8.1 GB eligible, 1 refusal (VS-486, cancelled, no merged PR);
+- with `--ignore-age`: 70 dirs / 73.6 GB eligible, refusing VS-486 and VS-831 (force-push delivery,
+  no PR work product) — the two names that prove the flag skips the age rule and nothing else.
+- expected after: about 7 GB of live workers left; the long-run steady state under the 30-day window
+  is still ~45 GB (12 GB live + ~33 GB of the last 30 days' finished homes).
 
-That run is an operator action against the live workspace; the ticket records its output. The apply
-phase of this change performs only the read-only dry run against the live workspace, so the plan's
-numbers are checked against reality before the code lands.
+After the merge and the upgrade, the operator records four measurements on the ticket:
+
+1. `du -sh /home/v/agent-conductor/v-services/workers`;
+2. `weave worker prune-homes --dry-run` (29 / 8.1 GB) and its skip list;
+3. `weave worker prune-homes --dry-run --ignore-age` (~67 GB) and its skip list — VS-486 and VS-831
+   must both appear there, which proves the flag skips the age rule and nothing else;
+4. `weave worker prune-homes --ignore-age` for real, then the after `du` and `git worktree list` in a
+   sample project.
+
+The real run is an operator action against the live workspace; a worker cannot execute it against the
+live daemon, so the ticket records the pre-flight and the exact commands for the four readings.

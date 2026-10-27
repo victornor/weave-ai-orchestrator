@@ -37,6 +37,11 @@ A directory with no matching agent row SHALL be left in place and reported; it S
 - **WHEN** a `done` worker's directory has an old mtime but its last turn is inside the window
 - **THEN** it is kept, and a `done` worker whose directory mtime is fresh but whose last turn is past the window is reclaimed
 
+#### Scenario: The retention pass never bypasses the window
+
+- **WHEN** the supervisor runs the retention pass
+- **THEN** it calls the reclaim with the age window in force, whatever any operator command did
+
 #### Scenario: A directory without an agent row is reported and kept
 
 - **WHEN** a directory exists under `workers/` whose name matches no agent
@@ -132,9 +137,16 @@ reclaim SHALL be recorded to the activity log. The sweep SHALL NOT post a ticket
 
 ### Requirement: The operator can run the same pass on demand
 
-`weave worker prune-homes [--dry-run]` SHALL run the same selection, safety checks and removal the
-retention pass uses. With `--dry-run` it SHALL list candidates and refusals and delete nothing;
-without it, it SHALL reclaim them and report what it did.
+`weave worker prune-homes [--dry-run] [--ignore-age]` SHALL run the same selection, safety checks and
+removal the retention pass uses. With `--dry-run` it SHALL list candidates and refusals and delete
+nothing; without it, it SHALL reclaim them and report what it did.
+
+`--ignore-age` SHALL be an explicit opt-in that skips only the `workerArchiveDays` cutoff for that
+invocation. It SHALL NOT be implied by a dry run, a config value or any other flag, and it SHALL
+change nothing else: the kind and status eligibility, the clean-worktree rule, the landed proof and
+`deleteBranch: false` all stay in force, and it is not `--force`. Before deleting, a run with the
+flag SHALL say what it widens (the window in days and how many more homes become eligible). A dry run
+SHALL honour it, so the wider candidate and refusal lists can be inspected first.
 
 #### Scenario: Dry run deletes nothing
 
@@ -145,6 +157,21 @@ without it, it SHALL reclaim them and report what it did.
 
 - **WHEN** the command runs without `--dry-run`
 - **THEN** each candidate is reclaimed and the output lists what was reclaimed and what was skipped and why
+
+#### Scenario: Ignoring the age window is deliberate and announced
+
+- **WHEN** the command runs with `--ignore-age`
+- **THEN** it states the window it is ignoring and how many more homes the flag makes eligible before anything is deleted
+
+#### Scenario: Ignoring the age window relaxes nothing else
+
+- **WHEN** a home inside the window has a dirty worktree and the command runs with `--ignore-age`
+- **THEN** that home is refused exactly as it would be without the flag, and the rest still run
+
+#### Scenario: A dry run shows the wider set
+
+- **WHEN** the command runs with `--dry-run --ignore-age`
+- **THEN** candidates inside the window are listed and nothing is deleted
 
 ### Requirement: The existing archive sweep is unchanged
 

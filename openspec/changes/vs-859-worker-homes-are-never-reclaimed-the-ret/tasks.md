@@ -1,0 +1,32 @@
+## 1. Service
+
+- [ ] 1.1 Add `reclaimFinishedHomes(actor, { dryRun, now? })` to `WorkersService` (and `api.ts`), iterating `paths.workers` and joining each directory to its agent row; eligibility `kind IN ('worker','planner')`, status `retired` or `done`, `COALESCE(retired_at, last_run_at, updated_at)` past `workerArchiveDays`; unknown directories reported and kept.
+- [ ] 1.2 Add the safety gate: `worktreeChanges` must be clean (tracked and untracked empty), and landed proof must be either a `merged` pull-request work product for the agent's ticket or `landedWorkTest` returning landed; a missing/undeterminable branch, an unreadable worktree and any dirty state are refusals.
+- [ ] 1.3 Remove through the registered provider with `deleteBranch: false, force: false`, mark the worktrees row `removed`, delete the home only afterwards, and retry a left-behind home (no `work/`) on the next pass.
+- [ ] 1.4 Record findings: `log.warn` plus a `worker.home_retention_skipped` activity row per refusal and `worker.home_reclaimed` per reclaim, and return `{ dryRun, candidates, reclaimed, skipped, failed }`.
+- [ ] 1.5 Add a test that a reclaimed home's branch still resolves and `git worktree list` no longer names the worktree.
+
+## 2. Retention pass
+
+- [ ] 2.1 Make `retentionPass` async and call `deps().workers.reclaimFinishedHomes(SYSTEM, { dryRun: false })` after the archive pruning, awaiting it from `supervisor.tick` under the existing `supervisor:retention_at` guard.
+- [ ] 2.2 Keep the run-log and `archive/` pruning unchanged; keep their tests green.
+
+## 3. Operator command
+
+- [ ] 3.1 Add `POST /workers/prune-homes` (`{ dryRun }`, default `true`) and its route-table entry, returning the service result.
+- [ ] 3.2 Add `weave worker prune-homes [--dry-run]` printing candidates, reclaimed and skipped-with-reason.
+- [ ] 3.3 Test the route default and the CLI dry run: no provider call and nothing deleted.
+
+## 4. Tests for every refusal and cutoff
+
+- [ ] 4.1 Reclaim a `retired` worker past the cutoff and a `done` worker past the cutoff; keep one inside the window.
+- [ ] 4.2 Refuse: tracked change, untracked-only file, no landed proof, unreadable worktree, undeterminable branch, directory with no agent row; assert each is reported and untouched.
+- [ ] 4.3 Prove the sweep continues after a refusal (one refused + one reclaimed in the same pass).
+- [ ] 4.4 Prove the cutoff uses the agent's time, not the directory's: old mtime + recent last turn kept, fresh mtime + old last turn reclaimed, `active`/`running` never touched.
+- [ ] 4.5 Prove a failed provider removal deletes nothing, and a home left without `work/` is finished by the next pass.
+
+## 5. Verification and measurement
+
+- [ ] 5.1 Run the core tests for the touched suites and both full suites per the project conventions; paste both suite blocks in the ticket/PR.
+- [ ] 5.2 Run `weave worker prune-homes --dry-run` against the live workspace (read-only) and record the candidate count, the skip list with reasons, and `du -sh workers` in the ticket report; confirm VS-486 and VS-831 are skipped.
+- [ ] 5.3 Write the first-run procedure (dry run, real run, after `du`, `git worktree list` sample) into the ticket report so the acceptance is met by measurement after the upgrade.

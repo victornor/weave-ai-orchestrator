@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-10-27
+goal: Reclaim finished worker homes (retired or done) through the worktree
+  provider once their work has landed, inside the existing retention pass, so
+  workers/ stops growing forever.

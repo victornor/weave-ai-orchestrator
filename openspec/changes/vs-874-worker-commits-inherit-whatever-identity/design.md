@@ -29,7 +29,8 @@ through `db.camel`.
 
 - Repairing the existing clone or 37 worktrees (VS-833 owns the host change).
 - Changing the identity the daemon itself commits with when it archives or merges.
-- Deriving an identity for a non-GitHub forge from that forge's own noreply convention.
+- Deriving a GitHub account-linked noreply address from a clone URL: the numeric id it needs is not in
+  the URL.
 - A UI control: the field is part of the documented workspace/project configuration.
 
 ## Decisions
@@ -39,7 +40,7 @@ through `db.camel`.
 A workspace-level default answers "set this once" for the common case, and a project override answers
 "this repository wants different attribution". A project can be added long after the workspace exists,
 so an absent project value must mean "inherit the workspace", and an absent workspace value must mean
-"use the derived default" — never "read the clone".
+"use the generic default" — never "read the clone".
 
 *Alternatives:* workspace-only (cannot attribute different repos differently); project-only (every
 new project silently gets the generic bot address, and there is no single place to set the operator's
@@ -50,19 +51,27 @@ goes in `projects[].workerGitIdentity` (absent = inherit) and is mirrored into a
 `projects.worker_identity_json` column so a project row carries its own value without a config lookup
 on every provision.
 
-### The default is derived from the repository URL, not a single shared address
+### The default is one generic non-personal address, for every remote
 
-`Weave AI <owner@users.noreply.github.com>` for a GitHub remote is GitHub's conventional
-non-personal address: it is publishable, attributes the commit to the repository owner's account, and
-contains no private information. For a non-GitHub remote there is no such convention, so the fallback
-is `Weave AI <weave-ai@users.noreply.github.com>`. Parsing the owner from `https://`, `ssh://` and
-`git@host:owner/repo` forms is a small, tested pure function; anything unrecognised falls back rather
-than guessing.
+With nothing configured, the default is `Weave AI <weave-ai@users.noreply.github.com>` — for a GitHub
+remote and for any other remote alike. It is publishable, contains no private information, and is
+honest about what it does: it will not link to a GitHub account.
 
-*Alternatives:* one shared `weave-ai@users.noreply.github.com` everywhere (simplest, but loses the
-owner attribution GitHub supports); refuse to provision until configured (makes first use of a project
-fail for a setting whose safe default is obvious); use the git user's GitHub login (a second lookup,
-and still personal-ish).
+Deriving `owner@users.noreply.github.com` from the URL was considered and rejected. That is GitHub's
+legacy noreply form; since 2017 the address that actually links to an account is
+`<numeric-id>+<login>@users.noreply.github.com`, and the numeric id is not derivable from a clone URL.
+URL derivation can therefore only ever produce an address that usually links to nothing — a promise
+the code cannot keep, baked into every workspace that never configures the field. A default that does
+not claim attribution is cheaper to live with than one that half-keeps it.
+
+The operator who wants commits to link to their account sets the exact
+`<numeric-id>+<login>@users.noreply.github.com` address themselves (only they can look the id up);
+`docs/CONFIGURATION.md` says so. The daemon never guesses it.
+
+*Alternatives:* derive the legacy owner form (rejected above: it cannot attribute, so it is a false
+promise); refuse to provision until configured (makes first use of a project fail for a setting whose
+safe default is obvious); use the git user's GitHub login from a second lookup (still not the id, and
+still personal-ish).
 
 ### Apply at worktree creation, and stop reading identity in the engine
 
@@ -108,8 +117,9 @@ worktrees, which VS-833 owns; the one-time operator action is documented in `doc
 - **An operator who deliberately wanted their clone's identity on worker commits loses it.** Mitigated
   by the project/workspace setting, which is the deliberate opt-in; a personal address now requires
   typing it, never inheriting it.
-- **A derived owner noreply may not resolve to a GitHub account** (an org slug, or a login that never
-  enabled the address). Harmless: the commit is still non-personal; attribution is a nicety.
+- **The generic default does not link to any GitHub account.** That is deliberate rather than a bug:
+  the daemon never claims an attribution it cannot compute. Operators who want linked commits set the
+  `ID+login` form explicitly; documented in `docs/CONFIGURATION.md`.
 - **The personal-address heuristic can flag a shared team address** (e.g. `dev@company.com`).
   Mitigated by firing once and being informational only.
 - **Existing worktrees still leak until replaced.** Documented as the required one-time operator
@@ -124,8 +134,9 @@ worktrees, which VS-833 owns; the one-time operator action is documented in `doc
 2. Deploy/restart. Existing worktrees are unchanged; new worktrees use the configured or derived
    identity.
 3. Operator action (documented, once): set `defaults.workerGitIdentity` and/or per-project
-   `workerGitIdentity` if the derived default is not wanted; retires/replaces existing worker
-   worktrees for tickets in flight if their history must not carry the old address.
+   `workerGitIdentity` if the generic default is not wanted — including an account-linked
+   `<numeric-id>+<login>@users.noreply.github.com` if commits should be attributed; retire or replace
+   existing worker worktrees for tickets in flight if their history must not carry the old address.
 
 Rollback is a code rollback: the new column is nullable and ignored by an older daemon; older workers
 resume reading the clone as before.

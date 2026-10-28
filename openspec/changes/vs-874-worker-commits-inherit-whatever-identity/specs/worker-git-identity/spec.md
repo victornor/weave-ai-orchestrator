@@ -8,10 +8,11 @@ workspace's `defaults.workerGitIdentity`, and a non-personal default derived fro
 The project's value SHALL win when both are configured. The repository's own `user.name` and
 `user.email` SHALL NOT be used for a worker's identity, whether or not they are configured.
 
-With neither the project nor the workspace configured, the default SHALL be `Weave AI` with
-`<owner>@users.noreply.github.com` when the repository URL names a GitHub owner, and
-`weave-ai@users.noreply.github.com` otherwise. It SHALL never be the identity the repository happens
-to have configured for the person who cloned it.
+With neither the project nor the workspace configured, the default SHALL be `Weave AI
+<weave-ai@users.noreply.github.com>`, whatever the repository URL is. It SHALL never be the identity
+the repository happens to have configured for the person who cloned it, and the system SHALL NOT
+derive an account-linked GitHub address from the URL, because the numeric id such an address needs is
+not part of it.
 
 Provisioning SHALL NOT fail because the repository has an incomplete or absent identity: the
 repository's identity no longer takes part in provisioning a worker's checkout.
@@ -26,10 +27,10 @@ repository's identity no longer takes part in provisioning a worker's checkout.
 - **WHEN** the project sets no `workerGitIdentity`, the workspace sets `defaults.workerGitIdentity`, and the clone is configured as a personal identity
 - **THEN** the worker's commits use the workspace's identity, not the clone's
 
-#### Scenario: Nothing configured derives a non-personal default from a GitHub remote
+#### Scenario: Nothing configured uses the generic non-personal default
 
-- **WHEN** neither the project nor the workspace sets a worker identity, and the repository URL is `git@github.com:acme/api.git`
-- **THEN** the worker's identity is `Weave AI <acme@users.noreply.github.com>`
+- **WHEN** neither the project nor the workspace sets a worker identity, and the repository URL is any remote, GitHub or not
+- **THEN** the worker's identity is `Weave AI <weave-ai@users.noreply.github.com>`
 
 #### Scenario: Repository identity is configured
 

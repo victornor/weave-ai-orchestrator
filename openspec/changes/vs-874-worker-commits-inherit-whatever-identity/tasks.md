@@ -6,11 +6,11 @@
 
 ## 2. Resolve, then write it at provisioning
 
-- [ ] 2.1 Add to `packages/core/src/util/git.ts`: `githubOwnerFromUrl`, `defaultWorkerGitIdentity`, `looksPersonalGitEmail` and `resolveWorkerIdentity` (project → workspace → derived default, with the source returned), as pure functions.
+- [ ] 2.1 Add to `packages/core/src/util/git.ts`: `defaultWorkerGitIdentity` (one generic `Weave AI <weave-ai@users.noreply.github.com>` for every remote), `looksPersonalGitEmail` and `resolveWorkerIdentity` (project → workspace → default, with the source returned), as pure functions.
 - [ ] 2.2 Replace `requireGitIdentity(project.clonePath)` at the three provisioning sites in `packages/core/src/workers/index.ts` with the resolver, still writing the result through `configureGitWorktreeIdentity`; remove `requireGitIdentity`.
 - [ ] 2.3 Replace the worktree/clone identity read in `packages/core/src/runs/engine.ts` with the same resolver for the turn's `GIT_AUTHOR_*`/`GIT_COMMITTER_*` environment.
-- [ ] 2.4 Test, through `workers.spawnForTicket`, that `git var GIT_AUTHOR_IDENT` inside the new worktree (with `GIT_AUTHOR_*`/`GIT_COMMITTER_*` unset) reports the resolved identity: project override beats workspace and clone; workspace beats clone; a personal clone identity with nothing configured yields the derived default; an identity-less clone still provisions.
-- [ ] 2.5 Test the pure functions: GitHub owner parsing for https/ssh/scp forms, the non-GitHub fallback, and the personal-address heuristic (personal, `users.noreply.github.com`, `noreply@`).
+- [ ] 2.4 Test, through `workers.spawnForTicket`, that `git var GIT_AUTHOR_IDENT` inside the new worktree (with `GIT_AUTHOR_*`/`GIT_COMMITTER_*` unset) reports the resolved identity: project override beats workspace and clone; workspace beats clone; a personal clone identity with nothing configured yields the generic default; an identity-less clone still provisions.
+- [ ] 2.5 Test the pure functions: one generic default for a GitHub and a non-GitHub remote alike, and the personal-address heuristic (personal, `users.noreply.github.com`, `noreply@`).
 - [ ] 2.6 Update the engine test so the turn environment carries the configured/resolved identity rather than the worktree's legacy config.
 
 ## 3. One-time existing-state signal
@@ -21,7 +21,7 @@
 
 ## 4. Documentation
 
-- [ ] 4.1 Document `defaults.workerGitIdentity` and `projects[].workerGitIdentity` in `docs/CONFIGURATION.md`, including precedence and the derived default.
+- [ ] 4.1 Document `defaults.workerGitIdentity` and `projects[].workerGitIdentity` in `docs/CONFIGURATION.md`, including precedence, the generic default, and how an operator sets an account-linked `<numeric-id>+<login>@users.noreply.github.com` address themselves.
 - [ ] 4.2 Add an `docs/OPERATIONS.md` section: where to set the identity, what the startup warning means, and the one-time action for a workspace whose existing clone/worktrees carry a personal address.
 
 ## 5. Verification

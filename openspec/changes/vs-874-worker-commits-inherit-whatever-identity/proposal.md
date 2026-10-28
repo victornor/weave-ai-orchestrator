@@ -16,9 +16,10 @@ public.
 - A worker's commit identity becomes **configured**, not inherited: a workspace default
   (`defaults.workerGitIdentity`) and a per-project override (`projects[].workerGitIdentity`), the
   project winning when both are set.
-- With neither configured, the daemon derives a non-personal default from the repository URL —
-  `Weave AI <owner@users.noreply.github.com>` for a GitHub remote, otherwise
+- With neither configured, the daemon uses one generic non-personal default for every remote —
   `Weave AI <weave-ai@users.noreply.github.com>` — and never falls back to the clone's `user.email`.
+  A commit only links to a GitHub account through the `<numeric-id>+<login>@users.noreply.github.com`
+  form, and that id is not present in a clone URL, so the daemon does not pretend to derive it.
 - The resolved identity is applied **when the worktree is created**, written as `--worktree` config,
   so `git var GIT_AUTHOR_IDENT` inside a worker's checkout already answers correctly for anything the
   worker shells out to. The same identity is passed to the runtime environment. The engine stops

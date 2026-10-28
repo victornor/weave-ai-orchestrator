@@ -26,4 +26,4 @@
 
 ## 5. Verification
 
-- [ ] 5.1 Run the touched test suites, then `pnpm test` for both core and UI; paste both suite blocks verbatim in the ticket and PR.
+- [x] 5.1 Run the touched test suites, then `pnpm test` for both core and UI; paste both suite blocks verbatim in the ticket and PR.

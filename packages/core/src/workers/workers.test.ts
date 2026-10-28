@@ -313,20 +313,50 @@ describe('workers', () => {
     expect(h.db.all('SELECT * FROM worktrees')).toHaveLength(0);
   });
 
-  it('refuses to provision a worker before creating a worktree when Git identity is missing', async () => {
-    await git(['config', '--local', '--unset', 'user.name'], clonePath);
-    await git(['config', '--local', '--unset', 'user.email'], clonePath);
-    vi.stubEnv('GIT_CONFIG_GLOBAL', join(h.ctx.paths.root, 'missing-global-gitconfig'));
-    vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
-    const ticket = seedTicket();
+  describe('worker commit identity (VS-874)', () => {
+    /** The identity Git itself resolves inside the checkout, with the turn's env out of the way. */
+    async function authorIdent(worktreePath: string): Promise<string> {
+      for (const k of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']) vi.stubEnv(k, undefined);
+      const r = await git(['var', 'GIT_AUTHOR_IDENT'], worktreePath);
+      expect(r.ok).toBe(true);
+      return r.stdout.trim();
+    }
+    const setWorkspaceIdentity = (identity: { name: string; email: string } | null): void => {
+      h.ctx.config = { ...h.ctx.config, defaults: { ...h.ctx.config.defaults, workerGitIdentity: identity } };
+    };
 
-    await expect(workers.spawnForTicket(SYSTEM, ticket.id)).rejects.toMatchObject({
-      code: 'validation',
-      message: expect.stringContaining('user.name and user.email'),
+    it("does not inherit the clone's personal identity and uses the generic default", async () => {
+      await git(['config', 'user.name', 'Victor Nor'], clonePath);
+      await git(['config', 'user.email', '1-1@hotmail.dk'], clonePath);
+
+      const worker = await workers.spawnForTicket(SYSTEM, seedTicket().id);
+      const ident = await authorIdent(worker.worktreePath!);
+      expect(ident).toContain('Weave AI <weave-ai@users.noreply.github.com>');
+      expect(ident).not.toContain('hotmail.dk');
     });
-    expect(h.db.all("SELECT * FROM agents WHERE kind = 'worker'")).toHaveLength(0);
-    expect(h.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [ticket.id])!.workerId).toBeNull();
-    expect(h.db.all('SELECT * FROM worktrees')).toHaveLength(0);
+
+    it("uses the workspace identity, not the clone's", async () => {
+      setWorkspaceIdentity({ name: 'Acme Bot', email: 'bot@acme.test' });
+      const worker = await workers.spawnForTicket(SYSTEM, seedTicket().id);
+      expect(await authorIdent(worker.worktreePath!)).toContain('Acme Bot <bot@acme.test>');
+    });
+
+    it("lets the project's identity win over the workspace and the clone", async () => {
+      setWorkspaceIdentity({ name: 'Workspace Bot', email: 'workspace@acme.test' });
+      h.db.update('projects', h.projectId, { workerIdentityJson: { name: 'Project Bot', email: 'project@acme.test' } });
+      const worker = await workers.spawnForTicket(SYSTEM, seedTicket().id);
+      expect(await authorIdent(worker.worktreePath!)).toContain('Project Bot <project@acme.test>');
+    });
+
+    it('provisions a worker when the clone has no identity at all', async () => {
+      await git(['config', '--local', '--unset', 'user.name'], clonePath);
+      await git(['config', '--local', '--unset', 'user.email'], clonePath);
+      vi.stubEnv('GIT_CONFIG_GLOBAL', join(h.ctx.paths.root, 'missing-global-gitconfig'));
+      vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
+
+      const worker = await workers.spawnForTicket(SYSTEM, seedTicket().id);
+      expect(await authorIdent(worker.worktreePath!)).toContain('Weave AI <weave-ai@users.noreply.github.com>');
+    });
   });
 
   it('keeps a worker with a modified tracked file and marks its worktree dirty', async () => {
@@ -1423,19 +1453,17 @@ describe('workers', () => {
       expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM agents WHERE plan_id = ? AND kind = 'planner'", [plan.id])!.n).toBe(1);
     });
 
-    it('refuses to provision a planner when Git identity is missing', async () => {
+    it('provisions a planner with the resolved identity when the clone has none (VS-874)', async () => {
       await git(['config', '--local', '--unset', 'user.name'], clonePath);
       await git(['config', '--local', '--unset', 'user.email'], clonePath);
       vi.stubEnv('GIT_CONFIG_GLOBAL', join(h.ctx.paths.root, 'missing-global-gitconfig'));
       vi.stubEnv('GIT_CONFIG_NOSYSTEM', '1');
       const plan = startPlan();
 
-      await expect(workers.ensurePlanner(HUMAN, plan.id)).rejects.toMatchObject({
-        code: 'validation',
-        message: expect.stringContaining('user.name and user.email'),
-      });
-      expect(h.db.all("SELECT * FROM agents WHERE kind = 'planner'")).toHaveLength(0);
-      expect(h.db.all('SELECT * FROM worktrees')).toHaveLength(0);
+      const planner = await workers.ensurePlanner(HUMAN, plan.id);
+      for (const k of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']) vi.stubEnv(k, undefined);
+      const ident = await git(['var', 'GIT_AUTHOR_IDENT'], planner.worktreePath!);
+      expect(ident.stdout).toContain('Weave AI <weave-ai@users.noreply.github.com>');
     });
 
     it('runs the planner on the weaver\'s own model, not a worker option (VS-398)', async () => {

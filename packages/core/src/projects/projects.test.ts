@@ -188,6 +188,22 @@ describe('projects', () => {
     expect(saved.at(-1)!.projects.find((p) => p.id === 'api')!.knowledgeRepo).toEqual({ enabled: true });
   });
 
+  it('round-trips a project worker identity through the row and workspace.yaml (VS-874)', async () => {
+    const src = await sourceRepo();
+    const identity = { name: 'Project Bot', email: 'project@acme.test' };
+    const project = await projects.add(HUMAN, quick(src, { workerGitIdentity: identity }));
+    expect(project.workerIdentity).toEqual(identity);
+    expect(saved.at(-1)!.projects[0]!.workerGitIdentity).toEqual(identity);
+
+    const other = { name: 'Other Bot', email: 'other@acme.test' };
+    const updated = await projects.update(HUMAN, project.id, { workerGitIdentity: other });
+    expect(updated.workerIdentity).toEqual(other);
+    expect(saved.at(-1)!.projects[0]!.workerGitIdentity).toEqual(other);
+
+    const cleared = await projects.update(HUMAN, project.id, { workerGitIdentity: null });
+    expect(cleared.workerIdentity).toBeNull();
+  });
+
   describe('turning knowledgeRepo on or off for an existing project (VS-359)', () => {
     /** A forge whose PRs are recorded, so `update` can start a switch without a real GitHub. */
     function fakeForge(): { opened: Array<{ branch: string; base: string }> } {

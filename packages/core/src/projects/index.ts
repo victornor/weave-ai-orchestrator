@@ -219,6 +219,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       maxWorkers: project.maxWorkers,
       ...(project.setupCommand ? { setupCommand: project.setupCommand } : {}),
       ...(project.landingBranch ? { landingBranch: project.landingBranch } : {}),
+      ...(project.workerIdentity ? { workerGitIdentity: project.workerIdentity } : {}),
       worktrees: project.worktreeProvider, openspec: { enabled: Boolean(project.openspecEnabled) },
       knowledgeRepo: { enabled: Boolean(project.knowledgeRepoEnabled) }, policies: project.policies,
     });
@@ -239,6 +240,7 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       id, workspaceId: ctx.workspaceId, slug: cfg.id, name: cfg.name ?? cfg.id, gitUrl: cfg.url, defaultBranch: cfg.defaultBranch,
       landingBranch: cfg.landingBranch ?? null,
       clonePath: join(ctx.paths.projects, cfg.id), maxWorkers: cfg.maxWorkers, setupCommand: cfg.setupCommand ?? null, warmPathsJson: cfg.warmPaths,
+      workerIdentityJson: cfg.workerGitIdentity ?? null,
       worktreeProvider: cfg.worktrees ?? ctx.config.defaults.worktrees, openspecEnabled: cfg.openspec.enabled,
       knowledgeRepoEnabled: cfg.knowledgeRepo.enabled, policiesJson: toLegacyPolicies(cfg.policies),
       status: 'cloning', createdAt: now, updatedAt: now,
@@ -425,7 +427,8 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       }
       ctx.db.update('projects', project.id, {
         name: nextName, ...(repoint ? { gitUrl: nextUrl } : {}), defaultBranch: merged.defaultBranch, landingBranch: merged.landingBranch ?? null, maxWorkers: merged.maxWorkers,
-        setupCommand: merged.setupCommand ?? null, warmPathsJson: merged.warmPaths, worktreeProvider: merged.worktrees ?? project.worktreeProvider,
+        setupCommand: merged.setupCommand ?? null, warmPathsJson: merged.warmPaths, workerIdentityJson: merged.workerGitIdentity ?? null,
+        worktreeProvider: merged.worktrees ?? project.worktreeProvider,
         openspecEnabled: merged.openspec.enabled,
         knowledgeRepoEnabled,
         policiesJson: toLegacyPolicies(merged.policies), updatedAt: nowIso(),

@@ -203,6 +203,16 @@ export function promotionPrTitleOf(policies: Record<string, unknown> | null | un
   return trimmed ? trimmed : null;
 }
 
+/**
+ * VS-874: the identity agents commit as. Explicitly configured — never read from the repository —
+ * so machine work is not attributed to whoever happened to clone the repo.
+ */
+export const WorkerGitIdentitySchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  email: z.string().trim().min(3).max(320).regex(/^[^\s@]+@[^\s@]+$/, 'must look like an email address'),
+});
+export type WorkerGitIdentity = z.infer<typeof WorkerGitIdentitySchema>;
+
 export const ProjectConfigSchema = z.object({
   id: slug,
   url: z.string().min(1),
@@ -214,6 +224,8 @@ export const ProjectConfigSchema = z.object({
   setupCommand: z.string().optional(),
   warmPaths: z.array(z.string()).default([]),
   worktrees: z.enum(WORKTREE_PROVIDERS).optional(),
+  /** VS-874: what this project's agents commit as; `null`/absent inherits `defaults.workerGitIdentity`. */
+  workerGitIdentity: WorkerGitIdentitySchema.nullable().optional(),
   openspec: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
   /** VS-358: opt-in per project to also committing its knowledge into `.weave/knowledge/` in its own repo. Off unless a human turns it on. */
   knowledgeRepo: z.object({ enabled: z.boolean().default(false) }).default({ enabled: false }),
@@ -446,6 +458,12 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
   autoMerge: z.boolean().default(false),
   /** VS-770: the workspace default for `policies.deleteBranchAfterMerge`; a project's own value wins. */
   deleteBranchAfterMerge: z.boolean().default(true),
+  /**
+   * VS-874: the identity every project's agents commit as, unless the project sets its own. `null`
+   * means "not configured", which resolves to a generic non-personal bot identity — never to the
+   * clone's `user.email`.
+   */
+  workerGitIdentity: WorkerGitIdentitySchema.nullable().default(null),
   worktrees: z.enum(WORKTREE_PROVIDERS).default('worktrunk'),
   maxConcurrentRuns: z.number().int().min(1).default(6),
   /**

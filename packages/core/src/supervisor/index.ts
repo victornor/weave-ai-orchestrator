@@ -18,6 +18,7 @@ import { sessionActivitySignal } from '../workers/activity-signal.js';
 import { handoverCommentBody, reconcileHandover, type HandoverSnapshot } from '../workers/handover-reconcile.js';
 import { sweepScratchWorktrees } from '../tickets/scratch.js';
 import { requestedRunnerLabels, runnerGaps } from '../forge/runners.js';
+import { reportInheritedWorkerIdentities } from '../projects/identity.js';
 
 const TICK_MS = 15_000;
 const LIVENESS_EVERY_MS = 60_000;
@@ -1550,6 +1551,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
           bootRecovered = true;
           await bootRecovery().catch((e) => log.error({ err: String(e) }, 'boot recovery failed'));
           await reprovisionMissingWorktrees().catch((e) => log.error({ err: String(e) }, 'worktree reprovision at boot failed'));
+          await reportInheritedWorkerIdentities(ctx).catch((e) => log.error({ err: String(e) }, 'worker identity warning pass failed'));
           await sweepScratch().catch((e) => log.error({ err: String(e) }, 'scratch sweep at boot failed'));
           try { nudgeIdleConductor(); } catch (e) { log.warn({ err: String(e) }, 'idle conductor nudge failed'); }
         }

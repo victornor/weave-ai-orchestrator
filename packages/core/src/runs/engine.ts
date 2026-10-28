@@ -21,7 +21,7 @@ import { buildTurnPrompt, flattenWakes, type TurnPromptOptions } from '../prompt
 import { ensureHomeCurrent } from '../workers/home.js';
 import { agentNeedsCheckout } from '../workers/index.js';
 import { recordUsage } from '../usage/index.js';
-import { git, readGitIdentity } from '../util/git.js';
+import { git, resolveWorkerGitIdentity } from '../util/git.js';
 import { emitRunEvent, runState } from './active.js';
 import { PartialBuffer } from './partials.js';
 import { effectiveModels, modelSettingFor, modelsFor } from '../models/resolve.js';
@@ -598,9 +598,11 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     const storeKey = providerStoreKey(ctx, setting.model);
     redactionSecrets = [token, ...secrets.values, ...(storeKey ? [storeKey] : []), ...mcpSecretValues];
     redact = makeRedactor(redactionSecrets);
-    const worktreeIdentity = agent.worktreePath ? (await readGitIdentity(agent.worktreePath)).identity : null;
-    const projectIdentity = !worktreeIdentity && project ? (await readGitIdentity(project.clonePath)).identity : null;
-    const gitIdentity = worktreeIdentity ?? projectIdentity;
+    // VS-874: the identity is configured, never read back from the worktree or the clone; a stale
+    // checkout or a ticketless session's project can no longer lend a worker the operator's address.
+    const gitIdentity = project
+      ? resolveWorkerGitIdentity({ project: project.workerIdentity, workspace: ctx.config.defaults.workerGitIdentity }).identity
+      : null;
     const env: Record<string, string> = {
       [AC_ENV.API_URL]: ctx.loopbackUrl,
       [AC_ENV.RUN_TOKEN]: token,

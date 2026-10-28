@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-10-28
+goal: Make a worker's commit identity configured (workspace default + project
+  override) and applied when its worktree is created, never inherited from the
+  clone's user.email, with a derived non-personal default and a one-time warning
+  for existing personal-identity clones

@@ -13,5 +13,5 @@
 ## 3. Full verification and delivery
 
 - [x] 3.1 Run lint and typecheck for the touched packages and fix anything they report. Verify: the project's lint/typecheck commands exit 0.
-- [ ] 3.2 Run the full core/server suite and the full UI suite, one at a time, capped at 4 workers, and paste both blocks verbatim in the ticket report. Verify: both suites pass.
+- [x] 3.2 Run the full core/server suite and the full UI suite, one at a time, capped at 4 workers, and paste both blocks verbatim in the ticket report. Verify: both suites pass.
 - [ ] 3.3 Commit, push the branch, open the PR (which this change makes non-draft), and transition the ticket to `in_review` with the PR as the work product.

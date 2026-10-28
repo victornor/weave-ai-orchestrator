@@ -873,6 +873,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       }
     }
     let planBody: string | null = null;
+    // VS-889: no merge approval is ever raised for a draft pull request. The check runs before the
+    // write so a refused transition leaves the ticket where it was, with no card to answer.
+    if (to === 'in_review' && !t.autoMerge && !opts.quiet) await ensurePullRequestMergeable(t);
     if (to === 'proposed' && t.kind === 'change') {
       // VS-578: the ticket's own binding decides its path, never the project's live mode, so a flip
       // cannot strand a ticket in flight. A bound ticket validates OpenSpec as before; an unbound one
@@ -1091,6 +1094,46 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       "SELECT url FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' AND url IS NOT NULL ORDER BY created_at DESC LIMIT 1",
       [ticketId],
     )?.url ?? null;
+  }
+
+  /**
+   * VS-889: a merge approval must never point at a pull request the forge reports as a draft — a
+   * draft cannot be merged, and CI runs no job on it, so the card would be reviewable by nobody and
+   * landable by nobody. The opener no longer creates drafts; this is the gate for one that reached the
+   * ticket another way (a worker opened it out of band, or an existing draft was reused). It brings
+   * the pull request out of draft itself, and when it cannot, throws `pull_request_draft` naming the
+   * pull request so the worker can act and no card is raised. A ticket with no pull request, a
+   * `local-branch` project, a missing clone, or a forge that cannot be read is left exactly as before:
+   * this gate refuses only on a positively reported draft.
+   */
+  async function ensurePullRequestMergeable(t: Ticket): Promise<void> {
+    const p = projectFor(t);
+    if (!p || !existsSync(p.clonePath)) return;
+    const mode = (p.policies as { deliveryMode?: string } | null)?.deliveryMode ?? ctx.config.defaults.deliveryMode;
+    if (mode !== 'pr') return;
+    const forge = ctx.registries.forges.get('github');
+    if (!forge?.prState) return;
+    const url = db.get<{ url: string }>(
+      "SELECT url FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' AND url IS NOT NULL ORDER BY created_at DESC LIMIT 1",
+      [t.id],
+    )?.url;
+    if (!url) return;
+    const state = await forge.prState(p.clonePath, url).catch((e: unknown) => {
+      log.warn({ err: String(e), ticketId: t.id, url }, 'could not read the pull request before raising a merge approval');
+      return null;
+    });
+    if (!state || state.state !== 'open' || state.isDraft !== true) return;
+    const draftError = (reason: string): OcError => new OcError(
+      'pull_request_draft',
+      `${t.identifier}'s pull request ${url} is still a draft and cannot be merged; bring it out of draft and transition to in_review again (${reason})`,
+      { url, ticketId: t.id },
+    );
+    if (!forge.markPullRequestReady) throw draftError('the forge cannot mark a pull request ready');
+    try {
+      await forge.markPullRequestReady(p.clonePath, url);
+    } catch (e) {
+      throw draftError(`marking it ready failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   const service: TicketsService = {
@@ -1665,8 +1708,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       return row;
     },
 
-    // VS-393: the one path a ticket's pull request is opened by, so the draft flag and the work
-    // product are the daemon's job, not each worker's memory. Draft only where the daemon lands it.
+    // VS-393: the one path a ticket's pull request is opened by, so the work product is the
+    // daemon's job, not each worker's memory. VS-889: opened ready for review, never as a draft —
+    // a draft cannot be merged and its checks do not run, so a merge card raised on it is dead.
     async openPullRequest(actor, id, input) {
       const t = get(id);
       if (!t.projectId) throw new OcError('validation', `${t.identifier} has no project to open a pull request against`, { ticketId: t.id });
@@ -1685,7 +1729,7 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       // same branch, and must never flip an existing non-draft one back to draft.
       const existing = forge.pullRequestForBranch ? await forge.pullRequestForBranch(project.clonePath, branch) : null;
       const pr = existing ?? await forge.createPullRequest(project.clonePath, {
-        branch, base: landingBranchOf(project, t), title: input.title, body: input.body ?? '', draft: true,
+        branch, base: landingBranchOf(project, t), title: input.title, body: input.body ?? '',
       });
       service.addWorkProduct(actor, t.id, { type: 'pull_request', url: pr.url, title: input.title, state: 'open', provider: forge.id });
       recordActivity(db, ws, actor, 'ticket.pr_opened', 'ticket', t.id, { url: pr.url, number: pr.number, reused: Boolean(existing) }, t.id);
@@ -2230,6 +2274,14 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
         .filter((t) => !t.autoMerge);
       for (const t of inReview) {
         if (openApproval(t.id, 'merge_approval')) continue;
+        // VS-889: a repaired card obeys the same rule as a fresh one — never for a draft pull
+        // request. A pass that cannot make it ready raises nothing and is retried by the next sweep.
+        try {
+          await ensurePullRequestMergeable(get(t.id));
+        } catch (e) {
+          log.warn({ err: String(e), ticketId: t.id }, 'not re-raising a merge approval for a draft pull request');
+          continue;
+        }
         const wp = db.get<{ url: string | null }>("SELECT url FROM ticket_work_products WHERE ticket_id = ? ORDER BY created_at DESC LIMIT 1", [t.id]);
         deps().decisions.create(SYSTEM, {
           ticketId: t.id, kind: 'merge_approval', owner: 'human',

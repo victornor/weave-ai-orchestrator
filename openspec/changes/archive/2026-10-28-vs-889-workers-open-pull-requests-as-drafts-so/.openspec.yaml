@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-10-28
+goal: A worker's PR arrives as a draft, the system raises a merge approval on
+  it, and the human cannot merge it; charter rules telling workers not to do
+  this have not stopped it.

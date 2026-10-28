@@ -22,3 +22,14 @@ describe('openspec_archive_blocked (VS-298)', () => {
     expect(OcError.status('openspec_archive_blocked')).toBe(OcError.status('openspec_validation_failed'));
   });
 });
+
+describe('pull_request_draft (VS-889)', () => {
+  it('is a known error code', () => {
+    expect(ERROR_CODES).toContain('pull_request_draft');
+  });
+
+  it('maps to 422, alongside worktree_not_landed', () => {
+    expect(OcError.status('pull_request_draft')).toBe(422);
+    expect(OcError.status('pull_request_draft')).toBe(OcError.status('worktree_not_landed'));
+  });
+});

@@ -2035,15 +2035,17 @@ describe('tickets', () => {
       } as never;
     };
 
-    it('opens a draft against the landing branch and records the work product', async () => {
-      const create = vi.fn(async () => ({ url: 'https://example.com/pr/7', number: 7 }));
+    it('opens a pull request ready for review against the landing branch and records the work product (VS-889)', async () => {
+      const create = vi.fn(async (_cwd: string, _opts: Record<string, unknown>) => ({ url: 'https://example.com/pr/7', number: 7 }));
       h.ctx.registries.forges.set('github', forgeWith({ createPullRequest: create }));
       setProject({ landingBranch: 'edge' });
       const t = make();
 
       const pr = await tickets.openPullRequest(AGENT, t.id, { title: 'TST-1: Add dark mode', body: 'body' });
       expect(pr).toEqual({ url: 'https://example.com/pr/7', number: 7 });
-      expect(create).toHaveBeenCalledWith('/tmp/clone', expect.objectContaining({ branch: 'ac/tst-1-add-dark-mode', base: 'edge', title: 'TST-1: Add dark mode', draft: true }));
+      const opts = create.mock.calls[0]?.[1];
+      expect(opts).toMatchObject({ branch: 'ac/tst-1-add-dark-mode', base: 'edge', title: 'TST-1: Add dark mode' });
+      expect(opts).not.toHaveProperty('draft');
       const wp = tickets.workProducts(t.id).find((w) => w['type'] === 'pull_request');
       expect(wp).toMatchObject({ url: 'https://example.com/pr/7', title: 'TST-1: Add dark mode' });
     });
@@ -2088,6 +2090,109 @@ describe('tickets', () => {
       const t = make();
 
       await expect(tickets.openPullRequest(AGENT, t.id, { title: 'x' })).rejects.toMatchObject({ code: 'validation' });
+    });
+  });
+
+  describe('a merge approval is never raised for a draft pull request (VS-889)', () => {
+    const PR_URL = 'https://example.com/pr/7';
+    const forgeWith = (over: Partial<ForgeAdapter> = {}): ForgeAdapter => ({
+      id: 'github',
+      detect: async () => true,
+      prState: async () => ({ state: 'open' as const, ciState: 'none' as const }),
+      mergePr: async () => ({}),
+      ...over,
+    });
+    const inProgressWithPr = () => {
+      const t = make({ kind: 'task' });
+      tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: PR_URL });
+      h.db.update('tickets', t.id, { status: 'in_progress' });
+      return t;
+    };
+    const useClone = (): string => {
+      const clone = mkdtempSync(join(tmpdir(), 'ac-vs889-'));
+      h.db.update('projects', h.projectId, { clonePath: clone, policiesJson: { deliveryMode: 'pr' } });
+      return clone;
+    };
+
+    it('brings a draft out of draft before it creates the merge approval', async () => {
+      const clone = useClone();
+      const order: string[] = [];
+      const markPullRequestReady = vi.fn(async () => { order.push('ready'); return { changed: true }; });
+      h.ctx.registries.forges.set('github', forgeWith({
+        prState: async () => ({ state: 'open' as const, ciState: 'none' as const, isDraft: true }),
+        markPullRequestReady,
+      }));
+      decisions.create.mockImplementation((() => { order.push('card'); return { id: newId() }; }) as never);
+      const t = inProgressWithPr();
+
+      try {
+        expect((await tickets.transition(AGENT, t.id, { to: 'in_review' })).status).toBe('in_review');
+        expect(markPullRequestReady).toHaveBeenCalledWith(clone, PR_URL);
+        expect(order).toEqual(['ready', 'card']);
+      } finally { rmSync(clone, { recursive: true, force: true }); }
+    });
+
+    it('refuses in_review and raises no card when the draft cannot be brought out of draft', async () => {
+      const clone = useClone();
+      h.ctx.registries.forges.set('github', forgeWith({
+        prState: async () => ({ state: 'open' as const, ciState: 'none' as const, isDraft: true }),
+      }));
+      const t = inProgressWithPr();
+
+      try {
+        await expect(tickets.transition(AGENT, t.id, { to: 'in_review' }))
+          .rejects.toMatchObject({ code: 'pull_request_draft', details: { url: PR_URL } });
+        expect(tickets.get(t.id).status).toBe('in_progress');
+        expect(decisions.create).not.toHaveBeenCalled();
+      } finally { rmSync(clone, { recursive: true, force: true }); }
+    });
+
+    it('refuses in_review when marking the draft ready fails', async () => {
+      const clone = useClone();
+      h.ctx.registries.forges.set('github', forgeWith({
+        prState: async () => ({ state: 'open' as const, ciState: 'none' as const, isDraft: true }),
+        markPullRequestReady: vi.fn(async () => { throw new Error('gh pr ready failed'); }),
+      }));
+      const t = inProgressWithPr();
+
+      try {
+        await expect(tickets.transition(AGENT, t.id, { to: 'in_review' }))
+          .rejects.toMatchObject({ code: 'pull_request_draft', message: /gh pr ready failed/ });
+        expect(tickets.get(t.id).status).toBe('in_progress');
+        expect(decisions.create).not.toHaveBeenCalled();
+      } finally { rmSync(clone, { recursive: true, force: true }); }
+    });
+
+    it('leaves a pull request that is not a draft alone and raises the card', async () => {
+      const clone = useClone();
+      const markPullRequestReady = vi.fn(async () => ({ changed: true }));
+      h.ctx.registries.forges.set('github', forgeWith({
+        prState: async () => ({ state: 'open' as const, ciState: 'success' as const, isDraft: false }),
+        markPullRequestReady,
+      }));
+      const t = inProgressWithPr();
+
+      try {
+        expect((await tickets.transition(AGENT, t.id, { to: 'in_review' })).status).toBe('in_review');
+        expect(markPullRequestReady).not.toHaveBeenCalled();
+        expect(decisions.create).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'merge_approval', ticketId: t.id }));
+      } finally { rmSync(clone, { recursive: true, force: true }); }
+    });
+
+    it('raises no repaired merge approval for a draft it cannot bring out of draft', async () => {
+      const clone = useClone();
+      h.ctx.registries.forges.set('github', forgeWith({
+        prState: async () => ({ state: 'open' as const, ciState: 'none' as const, isDraft: true }),
+      }));
+      const t = make({ kind: 'task' });
+      tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: PR_URL });
+      h.db.update('tickets', t.id, { status: 'in_review' });
+
+      try {
+        const repaired = await tickets.repairApprovals();
+        expect(repaired.some((r) => r.id === t.id)).toBe(false);
+        expect(decisions.create).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: 'merge_approval', ticketId: t.id }));
+      } finally { rmSync(clone, { recursive: true, force: true }); }
     });
   });
 });

@@ -650,6 +650,37 @@ migrated; finish or discard the tickets that own them first. With `worktrunk` pr
 always passes `--config <workspace>/.weave/wt.toml`, so your personal worktrunk config is
 never read or written.
 
+### Worker commits carry a personal address
+
+Symptom: a merged pull request is authored by the operator's personal email, or the daemon logged
+once at startup:
+
+```
+project <slug>'s clone commits as <address>, a personal address, and no worker identity is
+configured: worker commits would have inherited it.
+```
+
+Workers no longer read the clone's identity: they commit as the project's `workerGitIdentity`, else
+`defaults.workerGitIdentity`, else `Weave AI <weave-ai@users.noreply.github.com>`. An existing clone
+or worktree is never rewritten by this. To fix a workspace that already carries a personal address:
+
+1. Set the identity once in `workspace.yaml` (or per project), then restart the daemon:
+
+   ```yaml
+   defaults:
+     workerGitIdentity:
+       name: Acme Bot
+       email: 8156679+acme@users.noreply.github.com   # for linked GitHub commits; see CONFIGURATION.md
+   ```
+
+2. Existing worktrees keep their old `--worktree` config. New worktrees — and every repaired or
+   re-provisioned one — use the configured identity; retire the workers whose history must not carry
+   the old address and let their tickets re-provision, or replace the worktrees yourself.
+
+3. Removing the address from commits that are already published is a history rewrite, done
+   separately with `git filter-repo` / GitHub Support. This setting cannot retroactively change an
+   existing commit.
+
 ### `openspec` is missing
 
 Everything keeps working — a missing binary is never fatal — but `change` tickets degrade:

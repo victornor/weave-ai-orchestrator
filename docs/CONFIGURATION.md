@@ -86,6 +86,7 @@ defaults:
   hireApproval: human
   deliveryMode: pr            # pr | local-branch
   autoMerge: false            # per-ticket flag's default; off means a merge decision every time
+  workerGitIdentity: null     # { name, email } agents commit as; null = Weave AI <weave-ai@users.noreply.github.com>
   worktrees: worktrunk        # worktrunk | git
   maxConcurrentRuns: 6
   turnTimeoutSec: 2700
@@ -106,6 +107,7 @@ projects:
     setupCommand: pnpm install   # run once per new worktree
     warmPaths: [node_modules]    # gitignored caches copied into a new worktree (git provider)
     worktrees: worktrunk         # per-project override
+    workerGitIdentity: null      # { name, email }; null/absent inherits defaults.workerGitIdentity
     openspec: { enabled: true }
     policies:
       proposalApproval: conductor
@@ -135,6 +137,16 @@ plugins: []                   # npm package names, or ./paths relative to the wo
 ```
 
 **`requireCi` and the landing gate.** With the default `requireCi: true`, the daemon never merges a pull request on an absent, all-skipped, cancelled or wrong-head check rollup of a repository that has GitHub Actions workflow files: it waits for a successful run on the exact head it lands. A repository with **no** workflow files (dynamic workflows such as Dependabot updates and disabled workflows do not count) has nothing that can ever report, so it lands without waiting and the ticket gets one comment saying it landed without CI because the repository has none. If the forge cannot say (the query keeps failing), the daemon retries it and otherwise waits at most ten minutes, measured from its first attempt for that head, before landing as for a repository with no CI. `requireCi: false` is the explicit override: the daemon merges on an absent rollup without asking the forge at all.
+
+**Worker commit identity.** Agents never commit as whoever cloned the repository. A worker's identity is resolved when its worktree is created:
+
+1. the project's `workerGitIdentity`;
+2. `defaults.workerGitIdentity`;
+3. otherwise `Weave AI <weave-ai@users.noreply.github.com>`.
+
+The project's value wins. The clone's `user.name`/`user.email` are not consulted at all — a personal address becomes a worker's identity only if you type it into one of these settings. The resolved identity is written into the worktree's own Git config, so `git var GIT_AUTHOR_IDENT` inside it is correct even for a tool that shells out to `git`, and the same identity is passed to the worker turn.
+
+If you want commits to link to a GitHub account, set the address GitHub assigns to that account: `<numeric-id>+<login>@users.noreply.github.com` (for example `8156679+victornor@users.noreply.github.com`). Only you can look the numeric id up; the legacy `<login>@users.noreply.github.com` form usually links to nothing, so the daemon does not derive it from the repository URL. A workspace whose existing clone commits under a personal address gets one startup warning, once per project; see [`OPERATIONS.md`](OPERATIONS.md#worker-commits-carry-a-personal-address).
 
 ## `<workspace>/roles/<id>/role.yaml`
 

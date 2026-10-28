@@ -357,12 +357,13 @@ describe('run engine', () => {
     expect(runtime.inputs.at(-1)!.outputSchema).toBeTruthy();
   });
 
-  it('passes a worker worktree Git identity to the runtime environment', async () => {
+  it('passes the configured worker identity, never the worktree\'s legacy config (VS-874)', async () => {
     const worktree = join(h.ctx.paths.root, 'identity-worktree');
     mkdirSync(worktree, { recursive: true });
     await git(['init', '-b', 'main'], worktree);
-    await git(['config', 'user.name', 'Worker Identity'], worktree);
-    await git(['config', 'user.email', 'worker@example.com'], worktree);
+    await git(['config', 'user.name', 'Inherited Identity'], worktree);
+    await git(['config', 'user.email', 'inherited@example.com'], worktree);
+    h.ctx.config = { ...h.ctx.config, defaults: { ...h.ctx.config.defaults, workerGitIdentity: { name: 'Configured Bot', email: 'bot@acme.test' } } };
     const ticketId = seedTicket(h);
     const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: worktree, branch: 'ac/tst-identity' });
     runtime.queue.push({ structured: { state: 'idle', summary: 'identity checked', tickets: [], knowledge: { recorded: false, reason: 'test' } } });
@@ -371,10 +372,25 @@ describe('run engine', () => {
     await runOnce(workerId);
 
     const input = runtime.inputs.at(-1)!;
-    expect(input.env.GIT_AUTHOR_NAME).toBe('Worker Identity');
-    expect(input.env.GIT_AUTHOR_EMAIL).toBe('worker@example.com');
-    expect(input.env.GIT_COMMITTER_NAME).toBe('Worker Identity');
-    expect(input.env.GIT_COMMITTER_EMAIL).toBe('worker@example.com');
+    expect(input.env.GIT_AUTHOR_NAME).toBe('Configured Bot');
+    expect(input.env.GIT_AUTHOR_EMAIL).toBe('bot@acme.test');
+    expect(input.env.GIT_COMMITTER_NAME).toBe('Configured Bot');
+    expect(input.env.GIT_COMMITTER_EMAIL).toBe('bot@acme.test');
+  });
+
+  it('falls back to the generic non-personal identity when nothing is configured (VS-874)', async () => {
+    const worktree = join(h.ctx.paths.root, 'no-config-worktree');
+    mkdirSync(worktree, { recursive: true });
+    const ticketId = seedTicket(h);
+    const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: worktree, branch: 'ac/tst-default-identity' });
+    runtime.queue.push({ structured: { state: 'idle', summary: 'identity checked', tickets: [], knowledge: { recorded: false, reason: 'test' } } });
+    h.services.wake!.enqueue(workerId, { source: 'ticket_comment', reason: 'check default identity' });
+
+    await runOnce(workerId);
+
+    const input = runtime.inputs.at(-1)!;
+    expect(input.env.GIT_AUTHOR_NAME).toBe('Weave AI');
+    expect(input.env.GIT_AUTHOR_EMAIL).toBe('weave-ai@users.noreply.github.com');
   });
 
   it('bundles every queued wake for one agent into a single run', async () => {

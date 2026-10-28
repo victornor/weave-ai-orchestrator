@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GitWorktreeProvider } from './git.js';
 import { landedWorkTest, unlandedCommitCount } from './landed.js';
 import { renderWtConfig } from './wtconfig.js';
-import { configureGitWorktreeIdentity, git, readGitIdentity } from '../util/git.js';
+import { configureGitWorktreeIdentity, git, looksPersonalGitEmail, readGitIdentity, resolveWorkerGitIdentity } from '../util/git.js';
 import { projectKeyFromUrl } from '../util/git.js';
 
 const tmps: string[] = [];
@@ -74,6 +74,30 @@ describe('git identity', () => {
 
     const metadata = await git(['show', '-s', '--format=%an|%ae|%cn|%ce', 'HEAD'], target);
     expect(metadata.stdout.trim()).toBe('Test|test@example.com|Test|test@example.com');
+  });
+});
+
+describe('worker git identity resolution (VS-874)', () => {
+  it('prefers the project, then the workspace, then one generic non-personal default', () => {
+    const project = { name: 'Project Bot', email: 'project@acme.test' };
+    const workspace = { name: 'Workspace Bot', email: 'workspace@acme.test' };
+
+    expect(resolveWorkerGitIdentity({ project, workspace })).toEqual({ identity: project, source: 'project' });
+    expect(resolveWorkerGitIdentity({ project: null, workspace })).toEqual({ identity: workspace, source: 'workspace' });
+    expect(resolveWorkerGitIdentity({})).toEqual({
+      identity: { name: 'Weave AI', email: 'weave-ai@users.noreply.github.com' },
+      source: 'default',
+    });
+  });
+
+  it('treats a normal address as personal and both GitHub noreply forms as not', () => {
+    expect(looksPersonalGitEmail('1-1@hotmail.dk')).toBe(true);
+    expect(looksPersonalGitEmail('dev@company.com')).toBe(true);
+    expect(looksPersonalGitEmail('weave-ai@users.noreply.github.com')).toBe(false);
+    expect(looksPersonalGitEmail('8156679+victornor@users.noreply.github.com')).toBe(false);
+    expect(looksPersonalGitEmail('noreply@example.com')).toBe(false);
+    expect(looksPersonalGitEmail('no-reply@example.com')).toBe(false);
+    expect(looksPersonalGitEmail('not-an-address')).toBe(false);
   });
 });
 

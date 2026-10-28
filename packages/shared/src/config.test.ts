@@ -142,6 +142,26 @@ describe('liveInput default (VS-99)', () => {
   });
 });
 
+describe('worker git identity configuration (VS-874)', () => {
+  it('defaults the workspace value to null, so nothing falls back to a clone identity', () => {
+    expect(WorkspaceDefaultsSchema.parse({}).workerGitIdentity).toBeNull();
+    const set = WorkspaceDefaultsSchema.parse({ workerGitIdentity: { name: 'Acme Bot', email: 'bot@acme.test' } });
+    expect(set.workerGitIdentity).toEqual({ name: 'Acme Bot', email: 'bot@acme.test' });
+  });
+
+  it('accepts a per-project override, null, or neither', () => {
+    const base = { id: 'api', url: 'git@github.com:acme/api.git' };
+    expect(ProjectConfigSchema.parse(base).workerGitIdentity).toBeUndefined();
+    expect(ProjectConfigSchema.parse({ ...base, workerGitIdentity: null }).workerGitIdentity).toBeNull();
+    expect(ProjectConfigSchema.parse({ ...base, workerGitIdentity: { name: 'Project Bot', email: 'project@acme.test' } }).workerGitIdentity)
+      .toEqual({ name: 'Project Bot', email: 'project@acme.test' });
+  });
+
+  it('rejects a malformed address', () => {
+    expect(ProjectConfigSchema.safeParse({ id: 'api', url: 'u', workerGitIdentity: { name: 'Bot', email: 'not-an-address' } }).success).toBe(false);
+  });
+});
+
 describe('stalledWorkerTimeoutSec default (VS-202)', () => {
   it('defaults to 300 seconds, and accepts an override', () => {
     expect(WorkspaceDefaultsSchema.parse({}).stalledWorkerTimeoutSec).toBe(300);

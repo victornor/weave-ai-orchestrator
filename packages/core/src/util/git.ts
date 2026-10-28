@@ -87,17 +87,41 @@ export async function readGitIdentity(cwd: string): Promise<GitIdentityResolutio
   };
 }
 
-/** Requires a complete Git identity before provisioning an isolated worker checkout. */
-export async function requireGitIdentity(cwd: string): Promise<GitIdentity> {
-  const result = await readGitIdentity(cwd);
-  if (!result.identity) {
-    throw new OcError(
-      'validation',
-      `Git identity is not configured for ${cwd}; set ${result.missing.join(' and ')}`,
-      { cwd, missing: result.missing },
-    );
-  }
-  return result.identity;
+/**
+ * VS-874: the identity an agent commits as when neither the project nor the workspace configures
+ * one. A GitHub noreply address that links to an account needs the numeric id, which a clone URL
+ * does not carry; rather than promise attribution it cannot compute, the default is one generic,
+ * publishable bot address for every remote.
+ */
+export const DEFAULT_WORKER_GIT_IDENTITY: GitIdentity = { name: 'Weave AI', email: 'weave-ai@users.noreply.github.com' };
+
+/**
+ * VS-874: whether an address is plausibly a person's rather than a forge/bot noreply. Deliberately
+ * broad — one false positive costs an informational line, a false negative publishes a private
+ * address. Both GitHub noreply forms end in `users.noreply.github.com`.
+ */
+export function looksPersonalGitEmail(email: string): boolean {
+  const address = email.trim().toLowerCase();
+  const at = address.lastIndexOf('@');
+  if (at < 1 || at === address.length - 1) return false;
+  const local = address.slice(0, at);
+  const domain = address.slice(at + 1);
+  if (domain === 'users.noreply.github.com') return false;
+  if (local === 'noreply' || local === 'no-reply') return false;
+  return true;
+}
+
+export type WorkerGitIdentitySource = 'project' | 'workspace' | 'default';
+export interface ResolvedWorkerGitIdentity { identity: GitIdentity; source: WorkerGitIdentitySource }
+
+/**
+ * VS-874: decides what an agent commits as. It never reads the repository's identity: a project's
+ * explicit value wins, then the workspace default, then the generic non-personal default.
+ */
+export function resolveWorkerGitIdentity(input: { project?: GitIdentity | null; workspace?: GitIdentity | null }): ResolvedWorkerGitIdentity {
+  if (input.project) return { identity: input.project, source: 'project' };
+  if (input.workspace) return { identity: input.workspace, source: 'workspace' };
+  return { identity: DEFAULT_WORKER_GIT_IDENTITY, source: 'default' };
 }
 
 /** Stores the source repo's identity in the linked worktree config, independent of HOME. */

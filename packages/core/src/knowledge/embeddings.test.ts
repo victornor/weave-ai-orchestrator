@@ -155,9 +155,135 @@ describe('knowledge embeddings (VS-493)', () => {
     });
 
     it('loads neither model nor extension until a call is made', () => {
-      const index = createEmbeddingIndex(h.ctx, { embed: fakeEmbed, loadExtension: okLoad });
+      let loads = 0;
+      const index = createEmbeddingIndex(h.ctx, { embed: fakeEmbed, loadExtension: () => { loads += 1; } });
       expect(index.available()).toBe(false);
       expect(index.reason()).toBeNull();
+      expect(index.status()).toEqual({ status: 'not_loaded', reason: null });
+      expect(loads).toBe(0);
+    });
+
+    it('the knowledge service reports ready after a search and unavailable with the reason after a failed load', async () => {
+      knowledge.note(WORKER, 'project', 'Learnings', 'Quartz deployment runs nightly.', h.projectId);
+      expect(knowledge.semanticStatus()).toEqual({ status: 'not_loaded', reason: null });
+      await knowledge.semanticSearch('quartz deployment', h.projectId, 5);
+      expect(knowledge.semanticStatus()).toEqual({ status: 'ready', reason: null });
+
+      const failing = createKnowledgeService(h.ctx, h.deps, {
+        loadExtension: udfLoad,
+        loadEmbedder: async () => { throw new Error('Unable to get model file path or buffer.'); },
+      });
+      expect(failing.semanticStatus()).toEqual({ status: 'not_loaded', reason: null });
+      await expect(failing.semanticSearch('quartz deployment', h.projectId, 5)).rejects.toMatchObject({ code: 'unavailable' });
+      expect(failing.semanticStatus().status).toBe('unavailable');
+      expect(failing.semanticStatus().reason).toContain('Unable to get model file path or buffer.');
+    });
+
+    it('retries a failed model load after the cooldown and recovers without a restart', async () => {
+      let clock = 0;
+      let calls = 0;
+      const index = createEmbeddingIndex(h.ctx, {
+        loadExtension: udfLoad,
+        nowMs: () => clock,
+        retryBaseMs: 1_000,
+        loadEmbedder: async () => {
+          calls += 1;
+          if (calls === 1) throw new Error('Unable to get model file path or buffer.');
+          return fakeEmbed;
+        },
+      });
+
+      await expect(index.search('anything', { projectId: null, limit: 5 })).rejects.toThrow(/weave_knowledge_search/);
+      expect(index.status()).toMatchObject({ status: 'unavailable' });
+      expect(index.status().reason).toContain('Unable to get model file path or buffer.');
+
+      // Before the cooldown: the same failure, with no second load attempt.
+      await expect(index.search('anything', { projectId: null, limit: 5 })).rejects.toMatchObject({ code: 'unavailable' });
+      expect(calls).toBe(1);
+
+      clock = 1_000;
+      await index.search('anything', { projectId: null, limit: 5 });
+      expect(calls).toBe(2);
+      expect(index.status()).toEqual({ status: 'ready', reason: null });
+    });
+
+    it('logs each failed model attempt with its retry delay, then logs the recovery', async () => {
+      const warnings: Array<Record<string, unknown>> = [];
+      const infos: Array<Record<string, unknown>> = [];
+      const ctx = {
+        ...h.ctx,
+        log: () => ({
+          warn: (o: Record<string, unknown>) => { warnings.push(o); },
+          info: (o: Record<string, unknown>) => { infos.push(o); },
+          debug: () => {},
+          error: () => {},
+        }),
+      } as unknown as typeof h.ctx;
+
+      let clock = 0;
+      let calls = 0;
+      const index = createEmbeddingIndex(ctx, {
+        loadExtension: udfLoad,
+        nowMs: () => clock,
+        retryBaseMs: 1_000,
+        loadEmbedder: async () => {
+          calls += 1;
+          if (calls === 1) throw new Error('boom');
+          return fakeEmbed;
+        },
+      });
+
+      await expect(index.search('anything', { projectId: null, limit: 5 })).rejects.toMatchObject({ code: 'unavailable' });
+      expect(warnings.at(-1)).toMatchObject({ err: 'boom', attempt: 1, retryInMs: 1_000 });
+
+      clock = 1_000;
+      await index.search('anything', { projectId: null, limit: 5 });
+      expect(infos.at(-1)).toMatchObject({ failedAttempts: 1 });
+    });
+
+    it('backs off exponentially and caps the wait between model-load retries', async () => {
+      let clock = 0;
+      let calls = 0;
+      const index = createEmbeddingIndex(h.ctx, {
+        loadExtension: udfLoad,
+        nowMs: () => clock,
+        retryBaseMs: 1_000,
+        loadEmbedder: async () => {
+          calls += 1;
+          throw new Error(`download failed ${calls}`);
+        },
+      });
+      const attempt = async (): Promise<void> => {
+        await expect(index.search('anything', { projectId: null, limit: 5 })).rejects.toMatchObject({ code: 'unavailable' });
+      };
+
+      await attempt(); // failure 1, next retry after 1s
+      clock = 500;
+      await attempt();
+      expect(calls).toBe(1);
+      clock = 1_000;
+      await attempt(); // failure 2, next retry after 2s
+      expect(calls).toBe(2);
+      clock = 2_000;
+      await attempt();
+      expect(calls).toBe(2);
+      clock = 3_000;
+      await attempt(); // failure 3
+      expect(calls).toBe(3);
+    });
+
+    it('reports the extension failure as unavailable and keeps it latched', async () => {
+      let calls = 0;
+      const index = createEmbeddingIndex(h.ctx, {
+        embed: fakeEmbed,
+        loadExtension: () => { calls += 1; throw new Error('no sqlite-vec here'); },
+      });
+      await expect(index.search('anything', { projectId: null, limit: 5 })).rejects.toMatchObject({ code: 'unavailable' });
+      expect(index.status()).toMatchObject({ status: 'unavailable' });
+      expect(index.status().reason).toContain('no sqlite-vec here');
+      expect(index.reason()).toContain('no sqlite-vec here');
+      await expect(index.search('anything', { projectId: null, limit: 5 })).rejects.toMatchObject({ code: 'unavailable' });
+      expect(calls).toBe(1);
     });
 
     it('never touches the embedder on the turn/boot path', () => {

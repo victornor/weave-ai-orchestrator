@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-10-29
+goal: Semantic knowledge search fails for every caller with a non-retryable
+  model-load error, so curation silently falls back to keyword matching and
+  misses the near-duplicates it exists to catch.

@@ -638,6 +638,10 @@ export function createKnowledgeService(ctx: WorkspaceContext, deps: () => CoreSe
       return embeddings.backfill(projectId ?? null);
     },
 
+    semanticStatus() {
+      return embeddings.status();
+    },
+
     reindex() {
       // Documents edited or added on disk: pick them up, and drop rows whose file is gone.
       for (const raw of db.all<Record<string, unknown>>('SELECT * FROM knowledge_files WHERE workspace_id = ?', [ws])) {

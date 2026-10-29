@@ -325,6 +325,13 @@ export type KnowledgeScope = (typeof KNOWLEDGE_SCOPES)[number];
 export const KNOWLEDGE_REVISION_REASONS = ['note', 'curation', 'human', 'expiry', 'seed', 'merge-sync'] as const;
 export type KnowledgeRevisionReason = (typeof KNOWLEDGE_REVISION_REASONS)[number];
 
+/**
+ * VS-892: whether the opt-in semantic index can answer on this daemon. `not_loaded` means no call
+ * has tried yet and reports nothing about the model; `unavailable` means a load attempt failed.
+ */
+export const SEMANTIC_SEARCH_STATUSES = ['ready', 'unavailable', 'not_loaded'] as const;
+export type SemanticSearchStatus = (typeof SEMANTIC_SEARCH_STATUSES)[number];
+
 export const CHANNEL_KINDS = ['web', 'cli', 'telegram'] as const;
 export type ChannelKind = (typeof CHANNEL_KINDS)[number] | (string & {});
 

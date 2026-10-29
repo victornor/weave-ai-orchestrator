@@ -56,6 +56,8 @@ The daemon runs `openspec status --change <c> --json` and `openspec validate <c>
 
 Concerns or steering can also reach you while the ticket is still `proposed`. You change the artifacts the same way, but you do not transition the ticket: leaving it `proposed` is correct, and the daemon republishes the changed plan at the end of your turn — a new plan revision and a fresh approval that supersedes the held one. Never move the ticket back to `proposing` by hand to publish a revision; requesting `proposed` applies only when the ticket is in `proposing` (the `revise` path).
 
+The same holds after approval: if the plan must change while the ticket is `approved` and you have not started delivering, change the artifacts, re-validate, comment on what changed, and stop. The daemon publishes the new revision at the end of your turn, moves the ticket back to `proposed` and raises a fresh approval; do not implement the revised plan until that approval wakes you. Task checkbox state is ignored when deciding whether the plan changed.
+
 ## Never
 
 - **Never run `openspec archive` or `/opsx:archive`.** The daemon archives your change onto your own branch as part of landing it, before the merge — not you, and not after a merge that already happened. Running it yourself corrupts that.

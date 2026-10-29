@@ -162,4 +162,106 @@ describe('TicketsService.republishRevisedPlan', () => {
     expect(tickets.getDocument(ticketId, 'plan')!.revision).toBe(1);
     expect(planApprovals().filter((d) => d.status === 'open')).toHaveLength(0);
   });
+
+  describe('after approval (VS-907)', () => {
+    const planPath = () => join(worktree, 'openspec', 'changes', CHANGE);
+    const tasksPath = () => join(planPath(), 'tasks.md');
+    const status = () => h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status;
+    const approvedWithPlan = () => {
+      setup(VALID_CASES, { status: 'approved' });
+      tickets.putDocument(SYSTEM, ticketId, 'plan', renderPlan(planPath(), CHANGE), { system: true });
+    };
+
+    it('publishes a revised plan, sends the ticket back to proposed and raises a card on the new revision', async () => {
+      approvedWithPlan();
+      writeFileSync(tasksPath(), '- [x] add tokens\n- [ ] wire the toggle\n- [ ] write docs\n');
+
+      expect(await tickets.republishRevisedPlan(SYSTEM, ticketId)).toEqual({ republished: true, reason: 'republished' });
+
+      expect(status()).toBe('proposed');
+      expect(tickets.getDocument(ticketId, 'plan')!.revision).toBe(2);
+      const open = planApprovals().filter((d) => d.status === 'open');
+      expect(open).toHaveLength(1);
+      expect((open[0]!.target as { revision?: number } | null)?.revision).toBe(2);
+      expect(open[0]!.context).toContain('revised after it was approved (revision 1)');
+      expect(open[0]!.context).toContain('this is revision 2');
+      expect(tickets.comments(ticketId).some((c) => c.body.includes('revised after approval') && c.body.includes('approved: revision 1'))).toBe(true);
+    });
+
+    it('approving the fresh card returns the ticket to approved and wakes the worker', async () => {
+      approvedWithPlan();
+      writeFileSync(tasksPath(), '- [x] add tokens\n- [ ] wire the toggle\n- [ ] write docs\n');
+      await tickets.republishRevisedPlan(SYSTEM, ticketId);
+      const card = planApprovals().find((d) => d.status === 'open')!;
+      await h.services.decisions!.review({ kind: 'agent', id: h.conductorId, runId: 'run-c' }, card.id, { status: 'looked', note: 'ok' });
+      wake.calls.length = 0;
+
+      await h.services.decisions!.answer(SYSTEM, card.id, { key: 'approve' });
+
+      expect(status()).toBe('approved');
+      expect(wake.calls.some((c) => c.input.source === 'ticket_assigned' && String(c.input.reason).includes('plan approved'))).toBe(true);
+    });
+
+    it.each(['approved', 'proposed'])('ticking every task box on a %s ticket republishes nothing', async (from) => {
+      setup(VALID_CASES, { status: from });
+      tickets.putDocument(SYSTEM, ticketId, 'plan', renderPlan(planPath(), CHANGE), { system: true });
+      writeFileSync(tasksPath(), '- [X] add tokens\n- [x] wire the toggle\n');
+
+      expect(await tickets.republishRevisedPlan(SYSTEM, ticketId)).toEqual({ republished: false, reason: 'unchanged' });
+
+      expect(status()).toBe(from);
+      expect(tickets.getDocument(ticketId, 'plan')!.revision).toBe(1);
+      expect(planApprovals()).toHaveLength(0);
+    });
+
+    it.each([
+      ['reworded', '- [x] add colour tokens\n- [ ] wire the toggle\n'],
+      ['removed', '- [x] add tokens\n'],
+      ['reordered', '- [ ] wire the toggle\n- [x] add tokens\n'],
+      ['reworded and ticked', '- [x] add tokens\n- [x] wire the switch\n'],
+    ])('a %s task is a plan change', async (_name, tasks) => {
+      approvedWithPlan();
+      writeFileSync(tasksPath(), tasks);
+
+      expect(await tickets.republishRevisedPlan(SYSTEM, ticketId)).toEqual({ republished: true, reason: 'republished' });
+      expect(status()).toBe('proposed');
+    });
+
+    it('leaves an approved ticket alone when the revision is invalid', async () => {
+      setup(INVALID_CASES, { status: 'approved' });
+      writeFileSync(tasksPath(), '- [ ] something else\n');
+
+      expect(await tickets.republishRevisedPlan(SYSTEM, ticketId)).toEqual({ republished: false, reason: 'validation failed' });
+      expect(status()).toBe('approved');
+      expect(planApprovals()).toHaveLength(0);
+    });
+
+    it('writes nothing when the ticket moves on while validation is running', async () => {
+      approvedWithPlan();
+      writeFileSync(tasksPath(), '- [x] add tokens\n- [ ] write docs\n');
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const real = h.services.openspec!.validateForProposed.bind(h.services.openspec);
+      vi.spyOn(h.services.openspec!, 'validateForProposed').mockImplementation(async (id: string) => { await gate; return real(id); });
+
+      const pending = tickets.republishRevisedPlan(SYSTEM, ticketId);
+      await tickets.transition({ kind: 'agent', id: 'w' }, ticketId, { to: 'in_progress' });
+      release();
+
+      expect(await pending).toEqual({ republished: false, reason: 'no longer proposed' });
+      expect(status()).toBe('in_progress');
+      expect(tickets.getDocument(ticketId, 'plan')!.revision).toBe(1);
+    });
+
+    it('still refuses a requested approved → proposed or proposing, naming the allowed set', async () => {
+      approvedWithPlan();
+      for (const to of ['proposed', 'proposing'] as const) {
+        await expect(tickets.transition({ kind: 'agent', id: 'w' }, ticketId, { to })).rejects.toMatchObject({
+          code: 'invalid_disposition',
+          details: { from: 'approved', allowed: ['in_progress', 'in_review', 'blocked', 'cancelled'] },
+        });
+      }
+      expect(status()).toBe('approved');
+    });
+  });
 });

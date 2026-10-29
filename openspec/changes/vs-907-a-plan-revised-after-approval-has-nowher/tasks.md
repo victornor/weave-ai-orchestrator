@@ -13,4 +13,4 @@
 - [x] 3.1 Document the post-approval revision path in `skills/weave-ai-worker/SKILL.md` and `skills/weave-ai-openspec/SKILL.md`
 
 ## 4. Verify
-- [ ] 4.1 Run the changed test files, then the full core and UI suites once
+- [x] 4.1 Run the changed test files, then the full core and UI suites once

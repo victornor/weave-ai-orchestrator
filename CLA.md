@@ -60,8 +60,8 @@ You acknowledge and agree that the Owner may licence and sublicense Your Contrib
 works derived from them, under **any licence terms the Owner chooses**, including but not
 limited to the GNU Affero General Public License version 3, other open source licences,
 proprietary commercial licences, and dual-licensing arrangements. This includes relicensing
-the Project or any part of it in the future, and including Your Contributions in the
-commercially licensed portions of the Project (the `ee/` directory). The Owner is under no
+the Project or any part of it in the future, and including Your Contributions in any part
+of the Project that the Owner licenses on commercial terms, whether or not such a part exists today. The Owner is under no
 obligation to use or distribute Your Contributions.
 
 ## 5. Your representations

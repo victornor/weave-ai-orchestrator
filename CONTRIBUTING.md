@@ -4,9 +4,8 @@ Thanks for helping. This page covers what you need to build the project, propose
 
 ## Before you start
 
-- **Contributor licence agreement.** Weave AI is AGPL-3.0, and some paid features live in `ee/` under a
-  separate licence. By submitting a contribution you accept [`CLA.md`](CLA.md), which lets the project
-  relicense it, including into `ee/`. If you cannot accept that, please do not submit code.
+- **Contributor licence agreement.** Weave AI is AGPL-3.0. By submitting a contribution you accept
+  [`CLA.md`](CLA.md), which lets the project relicense it, including under commercial terms. If you cannot accept that, please do not submit code.
 - **Security issues** do not go in public issues. See [`SECURITY.md`](SECURITY.md).
 - **Conduct.** Participation is governed by [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md).
 - For anything larger than a small fix, open an issue first so we can agree on the approach.

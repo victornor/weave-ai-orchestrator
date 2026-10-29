@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-10-29
+goal: Delete the empty ee/ directory and fix every pointer

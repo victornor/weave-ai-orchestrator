@@ -666,6 +666,8 @@ export interface KnowledgeService {
   semanticSearch(query: string, projectId?: string | null, limit?: number): Promise<SemanticSearchHit[]>;
   /** VS-493: idempotent backfill of the derived embedding index over the caller's visible tree. */
   backfillEmbeddings(projectId?: string | null): Promise<EmbeddingBackfillReport>;
+  /** VS-892: whether semantic search can answer here, readable without loading the model. */
+  semanticStatus(): EmbeddingStatus;
   reindex(): void;
   /** Recompute every row's stored token count from the file on disk, without reindex's revisions/links. */
   recountSizes(): void;
@@ -692,8 +694,8 @@ export interface KnowledgeService {
   duplicates(filter?: { scope?: S.KnowledgeScope; projectId?: string | null }): KnowledgeDuplicateReport;
 }
 /** VS-493: one semantic-search hit (a chunk) and the idempotent backfill report. */
-import type { SemanticHit as SemanticSearchHit, EmbeddingBackfillReport } from './knowledge/embeddings.js';
-export type { SemanticHit as SemanticSearchHit, EmbeddingBackfillReport } from './knowledge/embeddings.js';
+import type { SemanticHit as SemanticSearchHit, EmbeddingBackfillReport, EmbeddingStatus } from './knowledge/embeddings.js';
+export type { SemanticHit as SemanticSearchHit, EmbeddingBackfillReport, EmbeddingStatus } from './knowledge/embeddings.js';
 export interface KnowledgeDuplicateEntry {
   path: string; scope: S.KnowledgeScope; projectId: string | null; slug: string | null;
   section: string; text: string; line: string;

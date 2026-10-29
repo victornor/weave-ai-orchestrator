@@ -790,10 +790,12 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: 'weave_knowledge_search', scope: 'all', input: z.object({ query: z.string().min(2), limit: z.number().int().min(1).max(50).optional() }),
-    description: 'Full-text search over the knowledge bases and documents you can read. Returns the file path (ref), title and a snippet; read the hit with weave_knowledge_get or weave_knowledge_doc_get.',
+    description: 'Full-text search over the knowledge bases and documents you can read. Returns `{ hits, semantic }`: each hit names the file path (ref), title and a snippet; `semantic.status` is `ready`, `unavailable` or `not_loaded`, and `semantic.reason` says why when it is `unavailable`. Anything but `ready` means this search ran without the meaning-based fallback — say so when you report a search or curation. Read a hit with weave_knowledge_get or weave_knowledge_doc_get.',
     handler: (ctx, i) => {
-      const hits = svc(ctx).knowledge.search(i.query, isConductor(ctx) ? null : ctx.claims.projectId, i.limit ?? 20);
-      return isConductor(ctx) ? hits : hits.filter((h) => workerVisibleKnowledgeRef(h.ref));
+      const knowledge = svc(ctx).knowledge;
+      const hits = knowledge.search(i.query, isConductor(ctx) ? null : ctx.claims.projectId, i.limit ?? 20);
+      const visible = isConductor(ctx) ? hits : hits.filter((h) => workerVisibleKnowledgeRef(h.ref));
+      return { hits: visible, semantic: knowledge.semanticStatus() };
     },
   },
   {

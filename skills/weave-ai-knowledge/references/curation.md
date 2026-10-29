@@ -18,7 +18,7 @@ Curation makes a file smaller and truer. It never makes it newer.
 8. **Tighten.** Cut hedging, background and prose. Every entry should read as one fact.
 9. **Rebalance.** Keep each section inside its share of the budget. Learnings is the section that grows and the first that should shrink; Overview and Stack & commands are stable and should survive intact. When Landmines or Conventions has become a wall of one-off facts on the same few subjects, this is where a **move**, not an addition, belongs: extend an existing document (`weave_knowledge_docs` first — update one on the subject if it exists) or create a new one (`weave_knowledge_doc_put`) with the entries verbatim, and leave a one-line pointer in the hub section in their place. This is exactly the shape of VS-109's initial hub restructuring; a hub section that has grown this way again is a normal curation move, not a reason to file a new `change` ticket.
 10. **Submit.** `weave_knowledge_replace(scope, body, supersedes)` with the complete new file — the same headings, in the same order, none dropped even if empty. When this rewrite corrects an entry (step 6), name that entry in `supersedes` — a distinctive fragment of it. The revision then records that the new text replaced that specific claim, so the fact reads as corrected, not quietly dropped. A claim that matches no existing entry is rejected and nothing is written.
-11. **Account for it.** Comment on the ticket: every removed entry and its reason, one line each. Then `weave_ticket_transition(id, "done")`.
+11. **Account for it.** Comment on the ticket: every removed entry and its reason, one line each. If semantic search was unavailable — `weave_knowledge_semantic_search` returned `unavailable`, or a `weave_knowledge_search` result reported `semantic.status` other than `ready` — say the pass was keyword-only and why; a quiet fallback reports success while doing the weaker job. Then `weave_ticket_transition(id, "done")`.
 
 ## Guarantees you are upholding
 
@@ -26,6 +26,7 @@ Curation makes a file smaller and truer. It never makes it newer.
 - Nothing was deleted without an archive copy carrying its provenance.
 - No fact in the file is one you invented during curation.
 - Every section heading the file started with is still there.
+- If the lookup ran without semantic search, the ticket says so.
 
 ## For a workspace file
 

@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { newId, nowIso, type Db } from '@weave-ai/db';
-import { OcError, type KnowledgeScope } from '@weave-ai/shared';
+import { OcError, type KnowledgeScope, type SemanticSearchStatus } from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
 import { docSummary, docTitle, parseDoc, sha256 } from './files.js';
 
@@ -15,8 +15,11 @@ import { docSummary, docTitle, parseDoc, sha256 } from './files.js';
  * `vec_distance_cosine`; there is no server, no sidecar, no second database and no ANN index.
  *
  * Both the SQLite extension and the embedding model are loaded lazily on the first real call and
- * guarded: a failure is remembered, logged once, and makes semantic search throw `unavailable`
- * (naming the keyword fallback) rather than disturbing the daemon or keyword search.
+ * guarded. An extension failure is remembered and makes semantic search throw `unavailable` (naming
+ * the keyword fallback). VS-892: a *model* failure is remembered too, but only until a backoff
+ * cooldown elapses, because the model is downloaded from the Hugging Face Hub on first use and one
+ * failed download must not disable semantic search for the daemon's lifetime. `status()` reports
+ * either state without loading anything, so keyword search can tell its caller it fell back.
  */
 
 /** The local model: 384-dimension `bge-small-en-v1.5` ONNX, quantized. */
@@ -24,12 +27,18 @@ export const EMBEDDING_MODEL = 'Xenova/bge-small-en-v1.5';
 export const EMBEDDING_DIM = 384;
 /** `@huggingface/transformers`' own quantization selector for the ONNX artifact to download. */
 export const EMBEDDING_DTYPE = 'q8';
+/** VS-892: first model-load retry delay; doubles per consecutive failure, capped by the max. */
+export const EMBEDDING_RETRY_BASE_MS = 60_000;
+export const EMBEDDING_RETRY_MAX_MS = 30 * 60_000;
 
 export interface Embedder {
   readonly dim: number;
   readonly model: string;
   embed(texts: string[]): Promise<Float32Array[]>;
 }
+
+/** VS-892: the index's state, readable without triggering a load. */
+export interface EmbeddingStatus { status: SemanticSearchStatus; reason: string | null }
 
 export interface SemanticHit {
   ref: string; scope: KnowledgeScope; projectId: string | null; title: string;
@@ -43,6 +52,8 @@ export interface EmbeddingIndex {
   /** True once the extension and the model have both loaded — never true before the first call. */
   available(): boolean;
   reason(): string | null;
+  /** VS-892: `ready` / `unavailable` / `not_loaded`, plus the last failure reason. Never loads. */
+  status(): EmbeddingStatus;
   search(query: string, opts: { projectId: string | null; limit: number }): Promise<SemanticHit[]>;
   backfill(projectId: string | null): Promise<EmbeddingBackfillReport>;
 }
@@ -50,10 +61,15 @@ export interface EmbeddingIndex {
 export interface EmbeddingIndexOptions {
   /** Test seam: replaces the ONNX model. */
   embed?: Embedder;
+  /** VS-892: test seam: replaces `createTransformersEmbedder` so a load can fail and then succeed. */
+  loadEmbedder?: () => Promise<Embedder>;
   /** Test seam: replaces the guarded `sqlite-vec` load; throw to simulate a missing extension. */
   loadExtension?: (db: Db) => void;
   /** Overrides `<daemonConfigDir>/embedding-models`, where downloaded weights are cached. */
   cacheDir?: string;
+  /** VS-892: test seams for the retry clock and its base delay. */
+  nowMs?: () => number;
+  retryBaseMs?: number;
 }
 
 /** One float32 little-endian blob, the compact layout `sqlite-vec`'s distance functions read. */
@@ -129,40 +145,85 @@ export function createEmbeddingIndex(ctx: WorkspaceContext, opts: EmbeddingIndex
   const ws = ctx.workspaceId;
   const log = ctx.log('knowledge');
   const cacheDir = opts.cacheDir ?? join(ctx.daemonConfigDir, 'embedding-models');
+  const now = opts.nowMs ?? Date.now;
+  const retryBaseMs = opts.retryBaseMs ?? EMBEDDING_RETRY_BASE_MS;
 
   let ready: Embedder | null = null;
-  let failure: string | null = null;
+  let extensionLoaded = false;
+  let extensionFailure: string | null = null;
+  let modelFailure: string | null = null;
+  let failedAt: number | null = null;
+  let failedAttempts = 0;
   let initializing: Promise<Embedder | null> | null = null;
 
+  /** The delay after the latest failed model attempt: base, doubling per consecutive failure. */
+  function retryDelayMs(): number {
+    return Math.min(retryBaseMs * 2 ** Math.max(failedAttempts - 1, 0), EMBEDDING_RETRY_MAX_MS);
+  }
+
+  function retryDue(): boolean {
+    return failedAt !== null && now() - failedAt >= retryDelayMs();
+  }
+
   async function initialize(): Promise<Embedder | null> {
-    try {
-      (opts.loadExtension ?? loadSqliteVecExtension)(db);
-    } catch (e) {
-      failure = `the sqlite-vec extension could not be loaded (${messageOf(e)})`;
-      log.warn({ err: messageOf(e), cacheDir }, 'semantic search unavailable: sqlite-vec failed to load; keyword search is unaffected');
-      return null;
+    if (!extensionLoaded) {
+      try {
+        (opts.loadExtension ?? loadSqliteVecExtension)(db);
+        extensionLoaded = true;
+      } catch (e) {
+        extensionFailure = `the sqlite-vec extension could not be loaded (${messageOf(e)})`;
+        log.warn({ err: messageOf(e), cacheDir }, 'semantic search unavailable: sqlite-vec failed to load; keyword search is unaffected');
+        return null;
+      }
     }
     try {
-      ready = opts.embed ?? await createTransformersEmbedder(cacheDir);
-      log.info({ model: ready.model, dim: ready.dim, cacheDir }, 'semantic search model loaded');
+      ready = opts.embed ?? await (opts.loadEmbedder ?? (() => createTransformersEmbedder(cacheDir)))();
+      if (failedAttempts > 0) {
+        log.info({ model: ready.model, dim: ready.dim, cacheDir, failedAttempts }, 'semantic search model loaded after a failed attempt');
+      } else {
+        log.info({ model: ready.model, dim: ready.dim, cacheDir }, 'semantic search model loaded');
+      }
+      modelFailure = null;
+      failedAt = null;
+      failedAttempts = 0;
       return ready;
     } catch (e) {
-      failure = `the embedding model could not be loaded (${messageOf(e)})`;
-      log.warn({ err: messageOf(e), model: EMBEDDING_MODEL, cacheDir }, 'semantic search unavailable: model failed to load; keyword search is unaffected');
+      failedAttempts += 1;
+      failedAt = now();
+      modelFailure = `the embedding model could not be loaded (${messageOf(e)})`;
+      log.warn(
+        { err: messageOf(e), model: EMBEDDING_MODEL, cacheDir, attempt: failedAttempts, retryInMs: retryDelayMs() },
+        'semantic search unavailable: model failed to load; keyword search is unaffected',
+      );
       return null;
     }
   }
 
-  /** Lazy and single-flight: the first call loads the extension and the model; a failure is remembered. */
+  /**
+   * Lazy and single-flight: the first call loads the extension and the model. An extension failure
+   * is latched; a model failure is retried once its backoff cooldown has elapsed, so a transient
+   * first-use download failure heals without a daemon restart but does not retry on every call.
+   */
   function ensure(): Promise<Embedder | null> {
     if (ready) return Promise.resolve(ready);
-    if (failure) return Promise.resolve(null);
-    if (!initializing) initializing = initialize();
+    if (extensionFailure) return Promise.resolve(null);
+    if (modelFailure && !retryDue()) return Promise.resolve(null);
+    if (!initializing) {
+      initializing = initialize().finally(() => { initializing = null; });
+    }
     return initializing;
+  }
+
+  function status(): EmbeddingStatus {
+    if (ready) return { status: 'ready', reason: null };
+    const failure = extensionFailure ?? modelFailure;
+    if (failure) return { status: 'unavailable', reason: failure };
+    return { status: 'not_loaded', reason: null };
   }
 
   function requireReady(embed: Embedder | null): Embedder {
     if (embed) return embed;
+    const failure = extensionFailure ?? modelFailure;
     throw new OcError('unavailable', `semantic search is unavailable: ${failure ?? 'it has not been initialised'}. Use weave_knowledge_search instead.`, { reason: failure ?? 'not initialised' });
   }
 
@@ -221,7 +282,8 @@ export function createEmbeddingIndex(ctx: WorkspaceContext, opts: EmbeddingIndex
 
   return {
     available: () => ready !== null,
-    reason: () => failure,
+    reason: () => extensionFailure ?? modelFailure,
+    status,
 
     async search(query, o) {
       const embed = requireReady(await ensure());

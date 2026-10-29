@@ -38,13 +38,15 @@ A rejection is information, not an obstacle. The daemon rejects near-duplicates,
 
 ## Reading before writing
 
-`weave_knowledge_docs` lists every document you can read with a one-line summary; `weave_knowledge_search(query)` finds hub entries and documents by text; `weave_knowledge_semantic_search(query)` is the meaning-based fallback for when the exact words you tried find nothing but you know roughly what you want; `weave_knowledge_doc_get(slug)` returns a document with `linksTo` and `linkedFrom`, so you can walk the graph as deep as the question needs. Read first, then update the existing page rather than writing a near-duplicate.
+`weave_knowledge_docs` lists every document you can read with a one-line summary; `weave_knowledge_search(query)` finds hub entries and documents by text and returns `{ hits, semantic }` — `semantic.status` is `ready`, `unavailable` or `not_loaded`, so a keyword-only search can tell you it ran without the fallback; `weave_knowledge_semantic_search(query)` is the meaning-based fallback for when the exact words you tried find nothing but you know roughly what you want; `weave_knowledge_doc_get(slug)` returns a document with `linksTo` and `linkedFrom`, so you can walk the graph as deep as the question needs. Read first, then update the existing page rather than writing a near-duplicate.
 
 ## Curation
 
 A curation turn is triggered when a file crosses 80% of its budget, 14 days after the last one, on `weave knowledge curate`, or after an over-budget rejection. Workspace files are curated by the weaver; a project KB is curated by a curation worker on a "Curate project knowledge" ticket with no worktree of its own.
 
 **You may merge, move, tighten, archive and remove. You may never add a fact.** Full procedure: `references/curation.md`.
+
+If semantic search was unavailable during the pass — `weave_knowledge_semantic_search` returned `unavailable`, or a `weave_knowledge_search` result carried `semantic.status` other than `ready` — say in the ticket comment that the pass was keyword-only and why. A curation that quietly used weaker search still reports success, and that is how near-duplicates survive.
 
 Submit the rewritten file with `weave_knowledge_replace(scope, body, supersedes)`. `supersedes` names the specific existing entries the rewrite corrects — a distinctive fragment of each; a claim that matches no entry is rejected. The daemon diffs it, archives every removed entry with its provenance, records the superseded claims on the revision, and records the diff on the ticket so the human can review or revert. Then comment on the ticket listing every removed entry with its reason, and transition to `done`.
 

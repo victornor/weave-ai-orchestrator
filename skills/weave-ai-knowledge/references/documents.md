@@ -42,7 +42,7 @@ the file instead), code walkthroughs that go stale with every PR, or secrets of 
      yet.
    - Reach for `weave_knowledge_doc_get` + edit + `weave_knowledge_doc_put` on an existing document only
      when the change is more than one entry (restructuring, rewriting the summary, fixing links).
-2. `weave_knowledge_search("<topic>")` — the hub entries and other documents that touch it. When the exact words find nothing, `weave_knowledge_semantic_search("<what you mean>")` matches by meaning instead; a local model answers it, and if it reports `unavailable` the index is not built on this host — fall back to keyword search.
+2. `weave_knowledge_search("<topic>")` — the hub entries and other documents that touch it; its `semantic.status` says whether the meaning-based fallback is usable here. When the exact words find nothing, `weave_knowledge_semantic_search("<what you mean>")` matches by meaning instead; a local model answers it, and if it reports `unavailable` the index is not built on this host — fall back to keyword search and say that you did.
 
 ## Writing
 

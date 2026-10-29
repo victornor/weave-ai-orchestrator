@@ -52,3 +52,51 @@ describe('weave_knowledge_semantic_search scoping (VS-493)', () => {
     expect(refs(hits)).toHaveLength(HITS.length);
   });
 });
+
+/**
+ * VS-892: a caller that falls back to keyword search must be able to tell from that tool's own
+ * result, without this path loading the model.
+ */
+const keywordTool = TOOLS.find((t) => t.name === 'weave_knowledge_search')!;
+
+function keywordCtxFor(semantic: { status: string; reason: string | null }): { ctx: ToolCtx; calls: { semantic: number; search: number } } {
+  const calls = { semantic: 0, search: 0 };
+  const ctx = {
+    ws: {
+      services: {
+        knowledge: {
+          search: () => {
+            calls.search += 1;
+            return [{ kind: 'knowledge', projectId: 'api', ref: 'projects/api/PROJECT.md', title: 'API', snippet: 'quartz' }];
+          },
+          semanticStatus: () => {
+            calls.semantic += 1;
+            return semantic;
+          },
+        },
+      },
+    },
+    claims: { agentKind: 'worker', projectId: 'api' },
+    actor: { kind: 'agent', id: 'agent-1' },
+    incidents: {},
+  } as unknown as ToolCtx;
+  return { ctx, calls };
+}
+
+describe('weave_knowledge_search reports semantic availability (VS-892)', () => {
+  it('returns its hits with the semantic status, without attempting a semantic search', async () => {
+    const probe = keywordCtxFor({ status: 'not_loaded', reason: null });
+    const result = await keywordTool!.handler(probe.ctx, { query: 'quartz' }) as { hits: unknown[]; semantic: { status: string } };
+    expect(result.hits).toHaveLength(1);
+    expect(result.semantic).toEqual({ status: 'not_loaded', reason: null });
+    expect(probe.calls.semantic).toBe(1);
+    expect(probe.calls.search).toBe(1);
+  });
+
+  it('carries the failure reason when semantic search is unavailable', async () => {
+    const probe = keywordCtxFor({ status: 'unavailable', reason: 'the embedding model could not be loaded (Unable to get model file path or buffer.)' });
+    const result = await keywordTool!.handler(probe.ctx, { query: 'quartz' }) as { semantic: { status: string; reason: string } };
+    expect(result.semantic.status).toBe('unavailable');
+    expect(result.semantic.reason).toContain('Unable to get model file path or buffer.');
+  });
+});

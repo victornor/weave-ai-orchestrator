@@ -207,6 +207,40 @@ describe('knowledge embeddings (VS-493)', () => {
       expect(index.status()).toEqual({ status: 'ready', reason: null });
     });
 
+    it('logs each failed model attempt with its retry delay, then logs the recovery', async () => {
+      const warnings: Array<Record<string, unknown>> = [];
+      const infos: Array<Record<string, unknown>> = [];
+      const ctx = {
+        ...h.ctx,
+        log: () => ({
+          warn: (o: Record<string, unknown>) => { warnings.push(o); },
+          info: (o: Record<string, unknown>) => { infos.push(o); },
+          debug: () => {},
+          error: () => {},
+        }),
+      } as unknown as typeof h.ctx;
+
+      let clock = 0;
+      let calls = 0;
+      const index = createEmbeddingIndex(ctx, {
+        loadExtension: udfLoad,
+        nowMs: () => clock,
+        retryBaseMs: 1_000,
+        loadEmbedder: async () => {
+          calls += 1;
+          if (calls === 1) throw new Error('boom');
+          return fakeEmbed;
+        },
+      });
+
+      await expect(index.search('anything', { projectId: null, limit: 5 })).rejects.toMatchObject({ code: 'unavailable' });
+      expect(warnings.at(-1)).toMatchObject({ err: 'boom', attempt: 1, retryInMs: 1_000 });
+
+      clock = 1_000;
+      await index.search('anything', { projectId: null, limit: 5 });
+      expect(infos.at(-1)).toMatchObject({ failedAttempts: 1 });
+    });
+
     it('backs off exponentially and caps the wait between model-load retries', async () => {
       let clock = 0;
       let calls = 0;

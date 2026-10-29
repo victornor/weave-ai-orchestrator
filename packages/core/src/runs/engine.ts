@@ -1072,7 +1072,8 @@ function conductorNoticeThreadId(deps: () => CoreServices, agent: Agent, wakes: 
 /**
  * The daemon's end-of-worker-turn side effects, in order and each isolated, so neither can fail the
  * finished run. First republish a plan revised while the ticket stayed `proposed` (VS-364 — answering
- * weaver concerns or steering moves no ticket, so no transition published the new artifacts), then
+ * weaver concerns or steering moves no ticket, so no transition published the new artifacts) or was
+ * already `approved` (VS-907 — the daemon sends it back to `proposed` for a fresh approval), then
  * tell the weaver when a held merge card's delivery head has moved since its review (VS-365). Only
  * worker turns with a ticket.
  */

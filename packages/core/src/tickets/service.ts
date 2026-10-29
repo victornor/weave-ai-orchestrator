@@ -518,6 +518,15 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     return `# Plan for ${t.identifier}\n\n${body}\n`;
   }
 
+  /**
+   * The plan with task checkbox state removed. `renderPlan` inlines `tasks.md` verbatim, so ticking a
+   * box while doing the work changes the body without changing the plan; the republish comparison
+   * must see only decisions (added, removed, reworded or reordered tasks), never progress.
+   */
+  function planWithoutTaskState(body: string): string {
+    return body.replace(/^([ \t]*[-*+][ \t]+)\[[xX]\]/gm, '$1[ ]');
+  }
+
   /** The context line every plan-approval card carries; a caller may append its own suffix. */
   function planApprovalContext(t: Ticket): string {
     if (!t.openspecChangeName) return 'A short plan is recorded and ready for review. Review the plan document.';
@@ -2327,10 +2336,17 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
      * publish nothing and surface their issues; an unchanged plan is a no-op. VS-578 extends this to
      * an unbound (`change`, OpenSpec-off) ticket, whose plan is its short `approach` document. Never
      * throws: a republish failure must not fail the finished run.
+     *
+     * VS-907: also runs for an `approved` ticket (work not yet delivered). A changed plan there is
+     * published as a new revision and the daemon itself moves the ticket `approved → proposed` in the
+     * same write, so a fresh card carries the new revision to the approver and the approval on file
+     * can never point at a plan other than the one built. That edge is not in TRANSITIONS: no worker
+     * or tool can ask for it. "Changed" ignores task checkbox state (`planWithoutTaskState`), which
+     * also stops a ticked box on a `proposed` ticket raising a needless fresh card.
      */
     async republishRevisedPlan(actor: Actor, ticketId: string) {
       const t = get(ticketId);
-      if (t.status !== 'proposed' || t.kind !== 'change') {
+      if ((t.status !== 'proposed' && t.status !== 'approved') || t.kind !== 'change') {
         return { republished: false, reason: 'not proposed' } as const;
       }
       try {
@@ -2351,30 +2367,41 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
           if (!body) return { republished: false, reason: 'no plan' } as const;
           plan = `# Plan for ${t.identifier}\n\n${body}\n`;
         }
-        const current = db.get<{ body: string }>(
-          `SELECT r.body FROM ticket_documents d JOIN ticket_document_revisions r ON r.document_id = d.id AND r.revision = d.current_revision
+        const current = db.get<{ body: string; revision: number }>(
+          `SELECT r.body, d.current_revision AS revision FROM ticket_documents d JOIN ticket_document_revisions r ON r.document_id = d.id AND r.revision = d.current_revision
             WHERE d.ticket_id = ? AND d.key = 'plan'`,
           [t.id],
         );
-        if (current?.body === plan) return { republished: false, reason: 'unchanged' } as const;
+        if (current && planWithoutTaskState(current.body) === planWithoutTaskState(plan)) return { republished: false, reason: 'unchanged' } as const;
         // `validateForProposed` shells out and takes seconds; the human can approve the still-open card
         // during that await, moving the ticket to `approved` (or beyond). Re-read the status *inside*
         // the write transaction, so a republish can never land a new plan revision or a fresh card on a
         // ticket that has moved on — which would also re-run YOLO's auto-approval a second time.
         const written = tx(db, () => {
           const still = db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [t.id])?.status;
-          if (still !== 'proposed') return null;
+          if (still !== t.status) return null;
           const w = putDocument(actor, t.id, 'plan', plan, { system: true });
-          recordActivity(db, ws, actor, 'ticket.plan_republished', 'ticket', t.id, { revision: w.revision }, t.id);
+          if (t.status === 'approved') {
+            const updated = touch(t.id, { status: 'proposed' });
+            recordActivity(db, ws, actor, 'ticket.plan_republished', 'ticket', t.id, { revision: w.revision, previousRevision: current?.revision ?? null, fromStatus: 'approved' }, t.id);
+            ctx.events.emit('ticket.status', 'ticket', t.id, updated);
+          } else {
+            recordActivity(db, ws, actor, 'ticket.plan_republished', 'ticket', t.id, { revision: w.revision }, t.id);
+          }
           return w;
         });
         if (!written) return { republished: false, reason: 'no longer proposed' } as const;
         // VS-474: the fresh card is raised and left open and unseen; under YOLO it is granted only
         // after the weaver marks it looked at, through `onReviewLooked`.
+        const afterApproval = t.status === 'approved';
         raisePlanApproval(actor, t, {
-          context: `${planApprovalContext(t)} The worker revised the plan while the ticket was still proposed; this is revision ${written.revision}.`,
+          context: afterApproval
+            ? `${planApprovalContext(t)} The plan was revised after it was approved (revision ${current?.revision ?? '?'}); this is revision ${written.revision}. The earlier approval no longer covers the plan, so the ticket is back to proposed until this one is answered.`
+            : `${planApprovalContext(t)} The worker revised the plan while the ticket was still proposed; this is revision ${written.revision}.`,
         });
-        systemComment(t.id, `a revised plan was published as revision ${written.revision}; the previous approval is superseded and a fresh one is open.`, actor);
+        systemComment(t.id, afterApproval
+          ? `the plan was revised after approval and published as revision ${written.revision} (approved: revision ${current?.revision ?? '?'}); the ticket is back to proposed and a fresh approval is open.`
+          : `a revised plan was published as revision ${written.revision}; the previous approval is superseded and a fresh one is open.`, actor);
         return { republished: true, reason: 'republished' } as const;
       } catch (e) {
         log.warn({ err: e, ticketId: t.id }, 'republishing a revised plan failed');

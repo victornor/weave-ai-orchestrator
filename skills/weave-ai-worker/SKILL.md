@@ -40,6 +40,8 @@ You are a worker. One ticket, one worktree, one turn at a time. This skill is th
 
 While a `change` ticket is `proposed`, you can be woken to answer weaver concerns or steering. Revise the planning artifacts; you do not transition the ticket. The daemon republishes the changed plan at the end of your turn, superseding the held approval with a fresh one. Never move the ticket back to `proposing` by hand — requesting `proposed` applies only when the ticket is already in `proposing` (the `revise` path).
 
+**If the plan changes after it was approved** (`approved`, work not yet delivered) — the human changed their mind, or the weaver steers you — edit the planning artifacts (or the `approach` document) the same way, keep `openspec validate --strict` clean, say on the ticket what changed and why, and end the turn. You cannot transition `approved` back yourself and must not try. At the end of your turn the daemon publishes the revised plan as a new revision, moves the ticket to `proposed` and raises a fresh approval on it; its approval wakes you again. Do not write code against the unapproved revision meanwhile. Ticking task boxes is not a revision; adding, removing, rewording or reordering tasks is. Once the ticket is `in_progress` there is no republish: raise it with `weave_ask`.
+
 ## A task's ending matches what it produced
 
 - **You produced a diff that should land** → deliver per `references/delivery.md` → `in_review`, exactly as always.

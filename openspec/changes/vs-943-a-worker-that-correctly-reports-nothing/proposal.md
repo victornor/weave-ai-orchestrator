@@ -1,29 +1,33 @@
 ## Why
 
-The empty-turn detector (VS-653, `runs/engine.ts` `finalize`) fails a worker turn as `empty_turn` when
-the daemon holds no parseable report for it and the run left no comment, document, work product,
-knowledge write or status change on its ticket. On 2026-10-30 a worker on a `merging` ticket,
-correctly waiting in the serial merge queue, filed a `StructuredOutput` report ("paused, position 2")
-and was failed anyway: the worker was paused and the ticket moved from `merging` to `blocked`, with a
-retry approval raised to the human. The message also told the reader the worker "may have no way to
-report", which the transcript contradicts.
+On 2026-10-30 a worker on a `merging` ticket (VS-937), correctly waiting in the merge queue, filed a
+`StructuredOutput` report and was failed as `empty_turn`: the worker was paused and the ticket moved
+from `merging` to `blocked`.
+
+**Finding.** The run's stored `summary` is the report's complete JSON text. `finalize` sets
+`summary = f.report?.summary ?? … ?? r.finalText.slice(0, 1000)`, so a stored summary that is the raw
+JSON means `f.report` was null and the text came from the `finalText` fallback. It is not a race:
+`collect_result` is awaited before `finalize` and `finalize` reads `f.report` directly. The report was
+well-formed JSON that `RunReportSchema` rejected. The one rule in that schema that rejects an otherwise
+complete report is `knowledge` (VS-102): `recorded:false` with no `reason` (or a `reason`/`where` over
+200 characters) makes the whole report parse as "no report". The ticket's quote elides the `knowledge`
+object, so which of those it was is not confirmed; the ticket's transcript is needed to say.
+
+The detector's premise ("no report, so the worker may have no way to report") is therefore false for a
+report that arrived but failed validation, and the daemon throws away *why* it was rejected.
 
 ## What Changes
 
-- A worker turn whose run called `StructuredOutput` is never an `empty_turn`: the worker did file its
-  report, so the "no way to report" premise is false. The run stays `succeeded`, the worker is not
-  paused and the ticket's status is untouched.
-- The `empty_turn` failure message states what was actually observed (no readable report, no ticket
-  trace, `StructuredOutput` never called) instead of asserting the worker cannot report.
+- When the strict parse fails but the payload is report-shaped (a valid `state`), the engine records a
+  `run.report.invalid` run event carrying the schema issues. The rejection is no longer silent.
+- Such a turn is not failed as `empty_turn`: the worker demonstrably reported, so it is not paused and
+  its ticket's status is untouched. Its liveness stays `empty`, because no usable report was stored.
+- The `empty_turn` message states what was observed and no longer asserts the worker cannot report.
 
-Not changed: a turn with no report, no evidence and no `StructuredOutput` call on an action-expecting
-ticket still fails as `empty_turn` (VS-653); liveness classification and the three-empty-turns gate
-are untouched.
+Deliberately not changed: the schema itself (VS-102's required `knowledge` stays; relaxing it is a
+separate decision), and the exemption is keyed on an invalid-but-state-bearing report, not on "the
+worker called `StructuredOutput`", so a turn with no report at all still fails as `empty_turn`.
 
 ## Impact
 
-`packages/core/src/runs/engine.ts` and its test. No schema, API or UI change.
-
-Open point: I could not see the VS-937 transcript, so I do not know whether the report failed to
-parse or the runtime's result line carried no `structured_output`. This change makes the outcome safe
-either way; it does not claim to explain why the report was unreadable.
+`packages/core/src/runs/engine.ts`, its test, and the `empty-turn-detection` spec. No schema, API or UI change.

@@ -1,31 +1,38 @@
 ## Purpose
 
 Defines when the run engine fails a worker turn as `empty_turn`, so a worker that did report is never
-paused or moved off its ticket's status by the detector.
+paused or moved off its ticket's status by the detector, and a rejected report is never silent.
 
 ## ADDED Requirements
 
-### Requirement: A turn that filed a structured report is not empty
+### Requirement: A report that fails validation is recorded, not erased
 
-A worker turn SHALL NOT be failed as `empty_turn` when its run called the runtime's `StructuredOutput`
-tool, whether or not the daemon could read the resulting report. Such a run SHALL be recorded
-`succeeded`, the worker SHALL NOT be paused, and the ticket's status SHALL NOT change.
+When a worker turn's final payload is report-shaped (carries a valid `state`) but fails `RunReportSchema`, the engine SHALL record a `run.report.invalid` run event listing the schema issues.
 
-#### Scenario: A queued worker reports and waits
+#### Scenario: Knowledge reason missing
 
-- **WHEN** a worker on a `merging` ticket ends a turn having called `StructuredOutput` and nothing else
-- **THEN** the run is `succeeded` with no error code, the worker is not paused, and the ticket stays `merging`
+- **WHEN** a turn's structured output has a valid `state` and `knowledge: {recorded: false}` with no `reason`
+- **THEN** a `run.report.invalid` event is recorded naming `knowledge.reason`
+
+### Requirement: A turn that filed a report-shaped payload is not empty
+
+A worker turn SHALL NOT be failed as `empty_turn` when it produced a report-shaped payload, whether or not it validated. Such a run SHALL be `succeeded`, the worker SHALL NOT be paused, and the ticket's status SHALL NOT change. A payload that failed validation leaves liveness `empty`, so repeated unusable reports still count toward the three-empty-turns gate.
+
+#### Scenario: A queued worker files a report the schema rejects
+
+- **WHEN** a worker on a `merging` ticket ends a turn with a report-shaped payload that fails validation and changes nothing on the ticket
+- **THEN** the run is `succeeded` with no error code, the worker is not paused, the ticket stays `merging`, and the run's liveness is `empty`
 
 #### Scenario: A genuinely inert turn still fails
 
-- **WHEN** a worker on an `in_progress` ticket ends a turn with no readable report, no ticket evidence and no `StructuredOutput` call
+- **WHEN** a worker on an `in_progress` ticket ends a turn with no report-shaped payload and no ticket evidence
 - **THEN** the run fails as `empty_turn` and the worker is paused
 
 ### Requirement: The empty-turn message states what was observed
 
-The `empty_turn` failure message SHALL say that no readable report was produced, that nothing was left on the ticket, and that `StructuredOutput` was never called. It SHALL NOT assert that the worker has no way to report.
+The `empty_turn` failure message SHALL say that no report-shaped payload was produced and nothing was left on the ticket. It SHALL NOT assert that the worker has no way to report.
 
 #### Scenario: Message wording
 
 - **WHEN** a run fails as `empty_turn`
-- **THEN** its error message names the missing `StructuredOutput` call and does not say the worker "may have no way to report"
+- **THEN** its error message does not say the worker "may have no way to report"

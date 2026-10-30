@@ -490,11 +490,13 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       deps().workers.resume(actor, target.agentId);
       return;
     }
+    // VS-946: a ticket blocked out of `merging` rejoins the merge queue before the worker runs, so the
+    // retried turn never starts against a queue entry that is not there; any other block is restored
+    // after. A refusal is reported on the ticket by `restoreForRetry`.
+    const blockedFromMerge = target.ticketId ? deps().tickets.get(target.ticketId).blockedFromStatus === 'merging' : false;
+    if (target.ticketId && blockedFromMerge) await deps().tickets.restoreForRetry(actor, target.ticketId, 'retrying');
     await deps().workers.relaunch(actor, target.agentId, 'the human asked for a retry');
-    if (target.ticketId) {
-      const t = deps().tickets.get(target.ticketId);
-      if (t.status === 'blocked') await deps().tickets.transition(actor, t.id, { to: (t.blockedFromStatus ?? 'todo') as TicketStatus, note: 'retrying' }).catch(() => undefined);
-    }
+    if (target.ticketId && !blockedFromMerge) await deps().tickets.restoreForRetry(actor, target.ticketId, 'retrying');
   }
 
   /**

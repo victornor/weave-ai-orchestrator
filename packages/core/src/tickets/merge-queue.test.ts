@@ -12,7 +12,7 @@ describe('merge queue', () => {
   let h: TestHarness;
   let tickets: TicketsService;
   let wake: ReturnType<typeof fakeWake>;
-  let workers: { spawnForTicket: ReturnType<typeof vi.fn> };
+  let workers: { spawnForTicket: ReturnType<typeof vi.fn>; [k: string]: unknown };
 
   beforeEach(() => {
     h = makeHarness();
@@ -516,6 +516,51 @@ describe('merge queue', () => {
 
       expect(tickets.get(a.id).mergeStartedAt).not.toBeNull();
       expect(tickets.get(b.id).mergeStartedAt).toBeNull();
+    });
+  });
+  describe('a ticket blocked out of merging (VS-946)', () => {
+    async function stranded(): Promise<Ticket> {
+      const a = approved('Stranded');
+      await approve(a);
+      await tickets.transition(AGENT, a.id, { to: 'blocked', unblock: { owner: 'human', action: 'retry' } });
+      const t = tickets.get(a.id);
+      expect(t).toMatchObject({ status: 'blocked', blockedFromStatus: 'merging', mergeQueuedAt: null, mergeStartedAt: null });
+      return t;
+    }
+
+    it('rejoins the queue when the block is answered', async () => {
+      const t = await stranded();
+      const back = await tickets.resumeIfBlocked({ kind: 'system', id: null }, t.id, 'resumed');
+      expect(back.status).toBe('merging');
+      expect(back.mergeQueuedAt).not.toBeNull();
+      expect(back.mergeStartedAt).not.toBeNull();
+      expect(mergeWakes(t.id)).toBe(2);
+    });
+
+    it('rejoins the queue on a retry, before the worker is relaunched', async () => {
+      const t = await stranded();
+      const seen: Array<string | null> = [];
+      Object.assign(workers, {
+        get: vi.fn(() => ({ id: 'w', status: 'paused' })),
+        relaunch: vi.fn(async () => { seen.push(tickets.get(t.id).mergeQueuedAt); }),
+      });
+      const back = await tickets.retry(HUMAN, t.id, 'again');
+      expect(back.status).toBe('merging');
+      expect(back.mergeQueuedAt).not.toBeNull();
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).not.toBeNull();
+    });
+
+    it('says on the ticket, with the repair, when a retry cannot restore it', async () => {
+      const t = await stranded();
+      h.db.run("UPDATE decisions SET answer_key = 'changes' WHERE ticket_id = ? AND kind = 'merge_approval'", [t.id]);
+      Object.assign(workers, { get: vi.fn(() => ({ id: 'w', status: 'paused' })), relaunch: vi.fn(async () => undefined) });
+
+      const back = await tickets.retry(HUMAN, t.id, 'again');
+
+      expect(back.status).toBe('blocked');
+      const note = tickets.comments(t.id).find((c) => c.kind === 'status' && c.body.includes('could not return'));
+      expect(note?.body).toContain(`weave_ticket_transition("${t.identifier}", "merging")`);
     });
   });
 });

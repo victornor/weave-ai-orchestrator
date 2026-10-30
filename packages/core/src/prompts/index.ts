@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { carriesWeaverReview, estimateTokens, landingBranchOf, projectLabel, sliceToTokens, yoloEnabled } from '@weave-ai/shared';
+import { carriesWeaverReview, estimateTokens, isStrandedMergeBlock, landingBranchOf, projectLabel, sliceToTokens, yoloEnabled } from '@weave-ai/shared';
 import { formatAge } from '@weave-ai/render';
 import type * as S from '@weave-ai/shared';
 import type { WorkspaceContext } from '../context.js';
@@ -506,6 +506,13 @@ export async function buildTurnPrompt(
       const w = workers.find((x) => x.ticketId === t.id);
       return `- ${t.identifier} [${t.status}] ${t.title}${w ? ` — ${w.name} (${workerStatusLine(w)})` : ''}`;
     }, 'call `weave_ticket_list`'));
+    // VS-946: a ticket blocked out of `merging` has no queue entry, so its worker can only wait for
+    // an admission that cannot come. Name it with the repair instead of leaving it as a paused worker.
+    const stranded = open.filter((t) => isStrandedMergeBlock(t));
+    if (stranded.length) {
+      parts.push('\n## Needs attention: stranded out of the merge queue');
+      parts.push(bounded(stranded, 8, (t) => `- ${t.identifier} was blocked out of \`merging\` and holds no queue place; its worker waits for an admission that cannot come. Repair: \`weave_ticket_transition("${t.identifier}", "merging")\` re-queues it`, 'call `weave_ticket_list`'));
+    }
     // VS-306: age and ticket identity/status on each line, so a card that outlived its ticket is
     // distinguishable from one raised a minute ago. The age stays last, where the eye lands.
     const pending = ctx.db.all<S.Decision & { ticketIdentifier: string | null; ticketStatus: string | null }>(

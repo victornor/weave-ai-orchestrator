@@ -1423,6 +1423,10 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     async retry(actor, id, note) {
       const t = get(id);
       if (t.status === 'done' || t.status === 'cancelled') throw new OcError('wrong_status', `${t.identifier} is ${t.status}; reply to it or reopen it instead`);
+      // VS-946: a ticket blocked out of `merging` is back in the queue before its worker runs, so the
+      // turn never starts against a queue entry that is not there; any other block is restored after.
+      const blockedFromMerge = t.status === 'blocked' && t.blockedFromStatus === 'merging';
+      if (blockedFromMerge) await service.restoreForRetry(actor, t.id, note ?? 'retrying');
       const worker = t.workerId ? deps().workers.get(t.workerId) : latestWorkerFor(t.id);
       if (worker && worker.status !== 'retired') {
         await deps().workers.relaunch(actor, worker.id, note ?? 'retry requested');
@@ -1431,12 +1435,25 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       } else {
         throw new OcError('validation', `${t.identifier} has no role; assign one first`);
       }
-      if (t.status === 'blocked') {
-        const back = t.blockedFromStatus ?? 'todo';
-        try { await service.transition(actor, t.id, { to: back as TicketStatus, note: note ?? 'retrying' }); } catch { /* keep blocked if the machine says so */ }
-      }
+      if (!blockedFromMerge) await service.restoreForRetry(actor, t.id, note ?? 'retrying');
       recordActivity(db, ws, actor, 'ticket.retry', 'ticket', t.id, { note: note ?? null }, t.id);
       return get(t.id);
+    },
+
+    async restoreForRetry(actor, id, note) {
+      const t = get(id);
+      if (t.status !== 'blocked') return;
+      const back = (t.blockedFromStatus ?? 'todo') as TicketStatus;
+      try {
+        await service.transition(actor, t.id, { to: back, note });
+      } catch (e) {
+        log.warn({ err: String(e), ticketId: t.id, to: back }, 'a retry could not restore its blocked ticket');
+        try {
+          service.comment({ kind: 'system', id: null }, t.id,
+            `The retry could not return ${t.identifier} to \`${back}\` (${e instanceof Error ? e.message : String(e)}). It stays blocked${back === 'merging' ? ' and holds no merge queue place' : ''} until \`weave_ticket_transition("${t.identifier}", "${back}")\` succeeds.`,
+            'status', 'trusted');
+        } catch { /* the warning above already holds it */ }
+      }
     },
 
     /**

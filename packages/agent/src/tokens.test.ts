@@ -8,7 +8,9 @@ describe('token accounting', () => {
   it('samples a long text instead of encoding it whole, and a run of one character is fast', () => {
     const t0 = Date.now();
     const n = messagesTokens([{ role: 'toolResult', toolCallId: 'a', name: 'bash', text: '-'.repeat(200_000), isError: false }]);
-    expect(Date.now() - t0).toBeLessThan(2000);
+    // A smoke check that sampling does not go quadratic on a 200k run, not a benchmark: the bound is
+    // generous because the CI runner is shared (it took 0.75 s locally and 2.1-2.5 s on the runner).
+    expect(Date.now() - t0).toBeLessThan(10_000);
     expect(n).toBeGreaterThan(1000);
   });
   it('counts the tool schemas: about 40 weaver tools cost thousands of tokens', () => {

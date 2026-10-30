@@ -36,3 +36,17 @@ The `empty_turn` failure message SHALL say that no report-shaped payload was pro
 
 - **WHEN** a run fails as `empty_turn`
 - **THEN** its error message does not say the worker "may have no way to report"
+
+### Requirement: An over-long report field does not discard the report
+
+A report that is structurally valid but has a string field longer than its limit (`summary` 4000, `knowledge.where` 200, `knowledge.reason` 200) SHALL be accepted with that field truncated to the limit and ending in `…`, and the engine SHALL record a `run.report.truncated` event naming each field, its original length and its limit. A malformed report (wrong shape, missing or invalid `state`, missing `knowledge`, empty `where`/`reason`, unparseable) SHALL still be rejected.
+
+#### Scenario: A 220-character knowledge reason
+
+- **WHEN** a report has a valid shape and `knowledge: {recorded: false, reason: <220 characters>}`
+- **THEN** the report is accepted, its stored `reason` is 200 characters ending in `…`, and a `run.report.truncated` event names `knowledge.reason`, 220 and 200
+
+#### Scenario: A malformed report is still rejected
+
+- **WHEN** a report has `knowledge: {recorded: false}` with no `reason`
+- **THEN** it is not accepted as a report and a `run.report.invalid` event records the issue

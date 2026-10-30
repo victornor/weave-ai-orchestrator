@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
 import {
-  AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, estimateCostCents, OcError, landingBranchOf,
+  AC_ENV, RUN_REPORT_JSON_SCHEMA, RunReportSchema, extractReport, extractReportWithRaw, findInvalidReport, overlongReportFields, estimateCostCents, OcError, landingBranchOf,
   isWorkerOptionConfigured, isProgressRunEvent, MCP_SERVER_NAME, PLANNER_TOOLS, FIRST_TURN_TOOLS,
   TERMINAL_TICKET_STATUSES, resolveWorkerMemoryMb,
   type Agent, type AgentKind, type Role, type Project, type Run, type RunEvent, type RunErrorFamily, type RunLiveness,
@@ -796,18 +796,26 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   state.partials.delete(runId);
 
   // 6. collect result
+  let reportRaw: unknown = null;
   const report = await phase('collect_result', async () => {
     if (!result) return null;
     if (result.structured) {
       const parsed = RunReportSchema.safeParse(result.structured);
-      if (parsed.success) return parsed.data;
+      if (parsed.success) { reportRaw = result.structured; return parsed.data; }
     }
-    return extractReport(result.finalText);
+    const extracted = extractReportWithRaw(result.finalText);
+    reportRaw = extracted?.raw ?? null;
+    return extracted?.report ?? null;
   });
+  // VS-943: an over-long field was truncated by the parse; say which, so the cut is never silent.
+  const truncatedFields = report ? overlongReportFields(reportRaw) : [];
+  if (truncatedFields.length > 0) record('runtime.raw', { originalType: 'run.report.truncated', data: { fields: truncatedFields } }, 'system', 'warn');
+  const invalidReportIssues = !report && result ? findInvalidReport(result.structured, result.finalText) : null;
+  if (invalidReportIssues) record('runtime.raw', { originalType: 'run.report.invalid', data: { issues: invalidReportIssues } }, 'system', 'warn');
 
   // 7. finalize
   const finished = finalize(ctx, deps, sessions, {
-    run, agent, role, project, ticket, wakes, result, failure, report,
+    run, agent, role, project, ticket, wakes, result, failure, report, reportAttempted: invalidReportIssues !== null,
     durationMs: Date.now() - started,
     sessionId: sessions.active(agent.id)?.id ?? null,
     cancelled: state.active.get(runId)?.cancelled ?? null,
@@ -1094,6 +1102,8 @@ async function afterTurnHooks(ctx: WorkspaceContext, deps: () => CoreServices, a
 export interface FinalizeInput {
   run: Run; agent: Agent; role: Role | null; project: Project | null; ticket: Ticket | null; wakes: Wakeup[];
   result: TurnResult | null; failure: { code: string; family: RunErrorFamily; message: string } | null; report: RunReport | null;
+  /** VS-943: no report parsed, but the turn produced a report-shaped payload the schema rejected. */
+  reportAttempted?: boolean;
   durationMs: number; sessionId: string | null; cancelled: { mode: 'interrupt' | 'kill'; cause?: 'message' } | null;
   /** VS-518: this turn's runtime reported compacting the session, so its context observation is not trustworthy. */
   compactedInTurn?: boolean;
@@ -1151,7 +1161,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   // was in a status where the worker is expected to act, did not do its job: recording it
   // `succeeded` hid a worker that could not act (no tools, no report path) behind a green run and
   // let the supervisor resume it forever. It is a tooling failure, which parks the worker for a human.
-  if (status === 'succeeded' && f.agent.kind === 'worker' && f.ticket && !f.report && !f.cancelled && !shuttingDown
+  if (status === 'succeeded' && f.agent.kind === 'worker' && f.ticket && !f.report && !f.reportAttempted && !f.cancelled && !shuttingDown
     && !TICKET_STATUSES_NOT_EXPECTING_ACTION.has(f.ticket.status)
     && !(TERMINAL_TICKET_STATUSES as readonly string[]).includes(f.ticket.status)
     && !runProducedEvidence(ctx, runId, f.ticket.id)) {
@@ -1177,7 +1187,7 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   const memoryMessage = memoryKilled && f.memory
     ? `worker exceeded its memory limit (peak ${fmtMemoryMb(f.memory.peakBytes)} of ${f.memory.limitMb} MB)`
     : null;
-  const failureMessage = memoryMessage ?? f.failure?.message ?? r?.error?.message ?? (errorCode === EMPTY_TURN_ERROR_CODE ? 'the turn ended without a report and left nothing on its ticket; the worker may have no way to report (check the run\'s tools.offered event)' : null);
+  const failureMessage = memoryMessage ?? f.failure?.message ?? r?.error?.message ?? (errorCode === EMPTY_TURN_ERROR_CODE ? 'the turn produced no report-shaped payload and left nothing on its ticket (no comment, document, work product or status change); if the run shows no StructuredOutput call, check its tools.offered event' : null);
   const summary = f.report?.summary ?? memoryMessage ?? (r?.finalText ? r.finalText.slice(0, 1000) : f.failure?.message ?? null);
 
   // VS-137: an authentication failure that keeps recurring on one worker, with the runtime confirmed

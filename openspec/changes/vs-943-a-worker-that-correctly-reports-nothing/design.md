@@ -17,3 +17,17 @@ repetition, is what the detector tests; supervision of a long wait belongs to th
 
 Rejected: exempting `merging` wholesale; relaxing `knowledge` in the schema (VS-102 decision, separate
 ticket if wanted); recovering a degraded report from the invalid payload.
+
+## Revision 3: truncate, don't discard
+
+`KnowledgeReportSchema` and `RunReportSchema.summary` swap `.max(n)` for a transform that cuts to `n-1`
+characters and appends `…` when longer (the limit is unchanged, so the stored value is never longer than
+before). The `.refine` on `where`/`reason` presence is untouched, so a missing or empty one is still
+rejected. A new `overlongReportFields(raw)` in `shared/report.ts` reads the raw payload and lists
+`{field, length, limit}`; `collect_result` records them as a `runtime.raw` event with
+`originalType: 'run.report.truncated'` (same carrier as `run.report.invalid`, no new enum value).
+
+**Read back.** The stored report (`runs.result_json`, the summary shown to the weaver, the knowledge
+decision) holds the truncated text with its trailing `…`. The full original is not kept in the report;
+it survives in the run's `finalText`/transcript and the truncation event gives the original length. A
+reader seeing `…` at exactly the limit knows it was cut.

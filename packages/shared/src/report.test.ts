@@ -93,3 +93,17 @@ describe('strict structured report compatibility', () => {
     expect(RunReportSchema.safeParse({ state: 'idle', summary: null, knowledge: { recorded: false, reason: 'x' } }).success).toBe(false);
   });
 });
+
+describe('over-long fields (VS-943)', () => {
+  it('truncates an over-long knowledge.reason to the limit, ending in an ellipsis, and keeps the report', () => {
+    const r = RunReportSchema.safeParse(base({ recorded: false, reason: 'x'.repeat(220) }));
+    expect(r.success && r.data.knowledge.reason).toBe(`${'x'.repeat(199)}…`);
+  });
+  it('truncates an over-long summary', () => {
+    const r = RunReportSchema.safeParse({ ...base({ recorded: false, reason: 'ok' }), summary: 's'.repeat(4500) });
+    expect(r.success && r.data.summary.length).toBe(4000);
+  });
+  it('still rejects a missing reason', () => {
+    expect(RunReportSchema.safeParse(base({ recorded: false })).success).toBe(false);
+  });
+});

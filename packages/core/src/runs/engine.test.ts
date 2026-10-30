@@ -1951,6 +1951,38 @@ describe('run engine', () => {
       expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('paused');
     });
 
+    it('does not fail a report the schema rejected as empty_turn: records why, keeps a merging ticket in merging (VS-943)', async () => {
+      const ticketId = seedTicket(h, { status: 'merging' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      // knowledge.recorded:false with no reason fails RunReportSchema (VS-102).
+      runtime.queue.push({ structured: { state: 'paused', summary: 'queued at position 2', tickets: [], knowledge: { recorded: false } }, finalText: '' });
+      const run = await runWorkerTurn(workerId, ticketId);
+      expect(run.status).toBe('succeeded');
+      expect(run.errorCode).toBeNull();
+      expect(run.liveness).toBe('empty');
+      expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('merging');
+      expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).not.toBe('paused');
+      const ev = h.db.get<{ payload: { originalType: string; data: { issues: string[] } } }>(
+        "SELECT payload_json FROM run_events WHERE run_id = ? AND type = 'runtime.raw' AND json_extract(payload_json, '$.originalType') = 'run.report.invalid'", [run.id]);
+      expect(ev!.payload.data.issues.join('|')).toContain('knowledge');
+    });
+
+    it('accepts a report whose knowledge.reason is over the limit, truncated and recorded, and never pauses the worker (VS-943)', async () => {
+      const ticketId = seedTicket(h, { status: 'merging' });
+      const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });
+      const reason = 'r'.repeat(220);
+      runtime.queue.push({ structured: { state: 'paused', summary: 'queued at position 2', tickets: [], knowledge: { recorded: false, reason } }, finalText: '' });
+      const run = await runWorkerTurn(workerId, ticketId);
+      expect(run.status).toBe('succeeded');
+      expect(run.liveness).toBe('advanced');
+      expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])!.status).toBe('merging');
+      const stored = h.db.get<{ result: { knowledge: { reason: string } } }>('SELECT result_json FROM runs WHERE id = ?', [run.id])!;
+      expect(stored.result.knowledge.reason).toBe(`${'r'.repeat(199)}…`);
+      const ev = h.db.get<{ payload: { data: { fields: unknown[] } } }>(
+        "SELECT payload_json FROM run_events WHERE run_id = ? AND json_extract(payload_json, '$.originalType') = 'run.report.truncated'", [run.id]);
+      expect(ev!.payload.data.fields).toEqual([{ field: 'knowledge.reason', length: 220, limit: 200 }]);
+    });
+
     it('does not fail an empty turn as empty_turn while the ticket awaits someone else (VS-653)', async () => {
       const ticketId = seedTicket(h, { status: 'in_review' });
       const workerId = h.addWorker(ticketId, { runtimeId: 'fake', worktreePath: null });

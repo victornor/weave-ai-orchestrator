@@ -294,7 +294,9 @@ describe('bash', () => {
   it('kills the process tree on timeout', async () => {
     const started = Date.now();
     const r = await bashTool.run({ command: 'sleep 30 & echo $! > pid; wait', timeout: 1 }, ctx());
-    expect(Date.now() - started).toBeLessThan(10_000);
+    // Hang guard, not a benchmark (VS-945): the command's own `sleep 30` outlives the 1 s timeout, so
+    // returning inside 25 s shows the timeout cut it short; the 25 s leaves headroom for a loaded runner.
+    expect(Date.now() - started).toBeLessThan(25_000);
     expect(r.text).toContain('[timed out after 1s]');
     const pid = Number(readFileSync(join(wt, 'pid'), 'utf8').trim());
     await new Promise((r2) => setTimeout(r2, 200));

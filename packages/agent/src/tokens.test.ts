@@ -1,16 +1,35 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { estimateTokens, messagesTokens, RequestSizer, TOKEN_MARGIN, toolsTokens } from './tokens.js';
 import type { Message } from './types.js';
+
+// Counts the characters that reach the encoder, so the sampling test can assert on the work done.
+const encoded = vi.hoisted(() => ({ chars: 0 }));
+vi.mock('js-tiktoken', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('js-tiktoken')>();
+  return {
+    ...actual,
+    getEncoding: (name: Parameters<typeof actual.getEncoding>[0]) => {
+      const enc = actual.getEncoding(name);
+      return new Proxy(enc, {
+        get(target, prop) {
+          if (prop === 'encode') return (text: string, ...rest: []) => { encoded.chars += text.length; return target.encode(text, ...rest); };
+          const v = Reflect.get(target, prop);
+          return typeof v === 'function' ? v.bind(target) : v;
+        },
+      });
+    },
+  };
+});
 
 const tool = (i: number) => ({ name: `weave_tool_${i}`, description: `Does thing ${i} in the workspace with a long enough description to cost tokens`, parameters: { type: 'object', properties: { id: { type: 'string', description: 'the id' }, note: { type: 'string' } }, required: ['id'] } });
 
 describe('token accounting', () => {
-  it('samples a long text instead of encoding it whole, and a run of one character is fast', () => {
-    const t0 = Date.now();
+  it('samples a long text instead of encoding it whole, so a run of one character is never encoded in full', () => {
+    // Asserts the work, not the clock (VS-945): BPE is quadratic on a run of one character, so what
+    // matters is that only the head and tail samples reach the encoder, however fast the runner is.
+    encoded.chars = 0;
     const n = messagesTokens([{ role: 'toolResult', toolCallId: 'a', name: 'bash', text: '-'.repeat(200_000), isError: false }]);
-    // A smoke check that sampling does not go quadratic on a 200k run, not a benchmark: the bound is
-    // generous because the CI runner is shared (it took 0.75 s locally and 2.1-2.5 s on the runner).
-    expect(Date.now() - t0).toBeLessThan(10_000);
+    expect(encoded.chars).toBe(2 * 2_000);
     expect(n).toBeGreaterThan(1000);
   });
   it('counts the tool schemas: about 40 weaver tools cost thousands of tokens', () => {

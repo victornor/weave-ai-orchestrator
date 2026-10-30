@@ -116,21 +116,26 @@ describe('stopDaemon (VS-262)', () => {
     const pid = await spawnStandIn(50, marker);
 
     const started = Date.now();
-    const result = await stopDaemon(2000);
+    const result = await stopDaemon(20_000);
     expect(result.stopped).toBe(true);
-    expect(Date.now() - started).toBeLessThan(1000);
+    // Hang guard, not a benchmark (VS-945): the stand-in exits after 50 ms, so `stopDaemon` returning
+    // before its 20 s timeout shows it did not sit the timeout out. The marker below is the proof of
+    // a graceful exit, not a SIGKILL.
+    expect(Date.now() - started).toBeLessThan(20_000);
     expect(existsSync(marker)).toBe(true);
     expect(isRunning(pid)).toBe(false);
-  });
+  }, 30_000);
 
   it('sends SIGKILL once the given timeout elapses with the process still running', async () => {
     const marker = join(stateDir, 'marker-b');
-    const pid = await spawnStandIn(3000, marker);
+    const pid = await spawnStandIn(30_000, marker);
 
     const started = Date.now();
     const result = await stopDaemon(150);
     expect(result.stopped).toBe(true);
-    expect(Date.now() - started).toBeLessThan(3000);
+    // Hang guard, not a benchmark (VS-945): the stand-in would only exit by itself after 30 s, so
+    // returning sooner shows `stopDaemon` escalated to SIGKILL at its own 150 ms timeout.
+    expect(Date.now() - started).toBeLessThan(30_000);
     // Killed before it ever reached its own graceful-exit path. `stopDaemon` does not itself wait to
     // confirm the kill landed, so give the OS a moment before checking.
     expect(existsSync(marker)).toBe(false);

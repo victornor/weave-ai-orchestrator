@@ -93,9 +93,14 @@ describe('daemon start', () => {
     await new Promise<void>((res) => blocker!.listen(0, '127.0.0.1', () => res()));
     const port = (blocker.address() as AddressInfo).port;
     const configDir = await configure(`127.0.0.1:${port}`);
-    const started = Date.now();
-    await expect(startDaemon({ configDir, listenWait: { timeoutMs: 20_000, initialDelayMs: 1000 } })).rejects.toMatchObject({ code: 'EADDRINUSE' });
-    expect(Date.now() - started).toBeLessThan(10_000);
+    // Asserts the work, not the clock (VS-945): a retry would ask for the host a second time, so a
+    // single call shows it failed on the first attempt instead of waiting out the 20 s bound.
+    const hosts: string[] = [];
+    await expect(startDaemon({
+      configDir,
+      listenWait: { timeoutMs: 20_000, initialDelayMs: 1000, hostForAttempt: () => { hosts.push('127.0.0.1'); return '127.0.0.1'; } },
+    })).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    expect(hosts).toEqual(['127.0.0.1']);
     expect(failedStarts(configDir).count).toBe(1);
   }, 30_000);
 });

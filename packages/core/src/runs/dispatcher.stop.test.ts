@@ -15,6 +15,7 @@ let h: TestHarness;
 let runtime: FakeRuntime;
 let dispatcher: CoreDispatcher;
 let resolveTurn: (() => void) | undefined;
+let turnSettled = false;
 
 function setup(): void {
   h = makeHarness();
@@ -29,7 +30,8 @@ function setup(): void {
 
 /** A turn that never finishes on its own, only when the test calls the returned resolver. */
 function queueStuckTurn(): void {
-  runtime.queue.push(() => new Promise((resolve) => { resolveTurn = () => resolve({}); }));
+  turnSettled = false;
+  runtime.queue.push(() => new Promise((resolve) => { resolveTurn = () => { turnSettled = true; resolve({}); }; }));
 }
 
 afterEach(async () => {
@@ -57,9 +59,10 @@ describe('Dispatcher.stop(timeoutMs) (VS-262)', () => {
     await dispatcher.tick();
     expect(dispatcher.running()).toBe(1);
 
-    const started = Date.now();
+    // Asserts the work, not the clock (VS-945): the turn can only settle when the test resolves it, so
+    // `stop` returning false while it is still unsettled shows it did not wait for the turn.
     await expect(dispatcher.stop(50)).resolves.toBe(false);
-    expect(Date.now() - started).toBeLessThan(1000);
+    expect(turnSettled).toBe(false);
     // The turn is still running — stop(timeoutMs) reports the timeout, it does not cancel anything itself.
     expect(dispatcher.running()).toBe(1);
   });

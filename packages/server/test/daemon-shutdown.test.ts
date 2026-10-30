@@ -82,13 +82,16 @@ describe('graceful shutdown (VS-262)', () => {
     workspaceLoader.writeRegistry({ workspaces: [{ id: 'stuck', path: wsDir }] }, configDir);
     workspaceLoader.writeDaemonConfig({ ...workspaceLoader.readDaemonConfig(configDir), http: { listen: '127.0.0.1:0', trustProxy: false, tls: { mode: 'none', domains: [] } } }, configDir);
 
-    daemon = await startDaemon({ configDir, shutdownGraceMs: { drain: 100, cancel: 2000 } });
+    daemon = await startDaemon({ configDir, shutdownGraceMs: { drain: 100, cancel: 20_000 } });
     const runtime = await workspaceWithStuckTurn(daemon, 'stuck', wsDir, 'fake');
     const dbPath = daemon.workspaces.get('stuck')!.ctx.paths.db;
 
     const started = Date.now();
     await daemon.stop('test');
-    expect(Date.now() - started).toBeLessThan(3000);
+    // Hang guard, not a benchmark (VS-945): the fake's `cancel()` releases the stuck turn at once, so
+    // the second stage should cost ~0; finishing inside the 20 s cancel grace shows it did not sit
+    // that out. `runtime.cancelled` below is the proof the cancel stage actually ran.
+    expect(Date.now() - started).toBeLessThan(20_000);
     daemon = null;
 
     expect(runtime.cancelled).toEqual(['interrupt']);
@@ -117,7 +120,7 @@ describe('graceful shutdown (VS-262)', () => {
     } finally {
       daemonDb.close();
     }
-  }, 15_000);
+  }, 30_000);
 
   it('records a failed start so the next boot can report it (VS-339)', async () => {
     const configDir = mkdtempSync(join(tmpdir(), 'ac-cfg-'));
@@ -162,18 +165,27 @@ describe('graceful shutdown (VS-262)', () => {
     workspaceLoader.writeRegistry({ workspaces: ids.map((id, i) => ({ id, path: wsDirs[i]! })) }, configDir);
     workspaceLoader.writeDaemonConfig({ ...workspaceLoader.readDaemonConfig(configDir), http: { listen: '127.0.0.1:0', trustProxy: false, tls: { mode: 'none', domains: [] } } }, configDir);
 
-    // The drain grace period is what dominates here (the fake's `cancel()` resolves its stuck turn
-    // instantly, so the second stage costs ~0) — sized so a serial loop's 3x multiplier (~2100ms) is
-    // unambiguously distinguishable from concurrent draining's ~700ms total.
+    // Asserts the order of events, not the clock (VS-945): a stuck turn holds each workspace's first
+    // `stop(drain)` open for the whole drain grace period, so a concurrent shutdown has called `stop` on
+    // all three workspaces before the first one returns, while a serial loop would call the second only
+    // after the first returned.
     daemon = await startDaemon({ configDir, shutdownGraceMs: { drain: 700, cancel: 1000 } });
+    const events: string[] = [];
+    for (const id of ids) {
+      const dispatcher = daemon.workspaces.get(id)!.services.dispatcher;
+      const realStop = dispatcher.stop.bind(dispatcher);
+      dispatcher.stop = async (timeoutMs?: number) => {
+        // Only the drain-stage call (the first, with the drain grace) matters for the ordering.
+        if (timeoutMs !== 700) return realStop(timeoutMs);
+        events.push(`start:${id}`);
+        try { return await realStop(timeoutMs); } finally { events.push(`end:${id}`); }
+      };
+    }
     const runtimes = await Promise.all(ids.map((id, i) => workspaceWithStuckTurn(daemon!, id, wsDirs[i]!, `fake-${id}`)));
 
-    const started = Date.now();
     await daemon.stop('test');
-    const elapsed = Date.now() - started;
-    // Concurrent draining takes roughly one workspace's own bound regardless of how many are
-    // registered; a serial loop over three workspaces would take roughly 3x that (~2100ms).
-    expect(elapsed).toBeLessThan(1500);
+    expect(events.slice(0, 3).sort()).toEqual(ids.map((id) => `start:${id}`).sort());
+    expect(events).toHaveLength(6);
     for (const runtime of runtimes) expect(runtime.cancelled).toEqual(['interrupt']);
     daemon = null;
   }, 20_000);

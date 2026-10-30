@@ -966,6 +966,18 @@ describe('prompt rendering', () => {
     expect(prompt).toMatch(/- d2 \[merge_approval, owner human, TST-42 approved, \d+[smhdw]\] Merge TST-42\?/);
   });
 
+  it('names a ticket stranded out of the merge queue, with the repair (VS-946)', async () => {
+    const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
+    h.db.update('tickets', ticketId, { status: 'blocked', blockedFromStatus: 'merging', mergeQueuedAt: null, mergeStartedAt: null });
+    const prompt = await buildTurnPrompt(h.ctx, h.deps, conductor, [{ id: 'w2', source: 'system', reason: 'digest', payload: {} } as never], {});
+    expect(prompt).toContain('## Needs attention: stranded out of the merge queue');
+    expect(prompt).toContain('weave_ticket_transition("TST-42", "merging")');
+
+    h.db.update('tickets', ticketId, { mergeQueuedAt: '2026-09-05T11:00:00.000Z' });
+    const queued = await buildTurnPrompt(h.ctx, h.deps, conductor, [{ id: 'w3', source: 'system', reason: 'digest', payload: {} } as never], {});
+    expect(queued).not.toContain('stranded out of the merge queue');
+  });
+
   it('marks an open approval the weaver has not reviewed, and only that one (VS-469)', async () => {
     const conductor = h.db.get<Agent>('SELECT * FROM agents WHERE id = ?', [h.conductorId])!;
     h.db.insert('decisions', {

@@ -490,11 +490,28 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       deps().workers.resume(actor, target.agentId);
       return;
     }
-    await deps().workers.relaunch(actor, target.agentId, 'the human asked for a retry');
-    if (target.ticketId) {
+    // VS-946: a ticket blocked out of `merging` rejoins the merge queue before the worker runs, so the
+    // retried turn never starts against a queue entry that is not there. A refusal is said on the
+    // ticket with the repair, because the worker would otherwise wait for an admission that cannot come.
+    const restore = async (): Promise<void> => {
+      if (!target.ticketId) return;
       const t = deps().tickets.get(target.ticketId);
-      if (t.status === 'blocked') await deps().tickets.transition(actor, t.id, { to: (t.blockedFromStatus ?? 'todo') as TicketStatus, note: 'retrying' }).catch(() => undefined);
-    }
+      if (t.status !== 'blocked') return;
+      const back = (t.blockedFromStatus ?? 'todo') as TicketStatus;
+      try { await deps().tickets.transition(actor, t.id, { to: back, note: 'retrying' }); }
+      catch (e) {
+        if (back !== 'merging') return;
+        try {
+          deps().tickets.comment({ kind: 'system', id: null }, t.id,
+            `The retry could not return ${t.identifier} to the merge queue (${String(e)}). It holds no queue place until \`weave_ticket_transition("${t.identifier}", "merging")\` succeeds.`,
+            'status', 'trusted');
+        } catch { /* the activity record is best effort here */ }
+      }
+    };
+    const blockedFromMerge = target.ticketId ? deps().tickets.get(target.ticketId).blockedFromStatus === 'merging' : false;
+    if (blockedFromMerge) await restore();
+    await deps().workers.relaunch(actor, target.agentId, 'the human asked for a retry');
+    if (!blockedFromMerge) await restore();
   }
 
   /**

@@ -53,3 +53,11 @@ export function compareMergeQueue(a: MergeQueueOrderable, b: MergeQueueOrderable
   }
   return mergeQueueJoinedAt(a) - mergeQueueJoinedAt(b) || a.number - b.number;
 }
+
+/**
+ * VS-946: a ticket blocked out of `merging` has lost its queue entry, so nothing can admit it until
+ * it is returned to `merging`. Waiting for a merge wake on such a ticket can never end.
+ */
+export function isStrandedMergeBlock(t: { status: string; blockedFromStatus: string | null; mergeQueuedAt: string | null; mergeStartedAt: string | null }): boolean {
+  return t.status === 'blocked' && t.blockedFromStatus === 'merging' && !t.mergeQueuedAt && !t.mergeStartedAt;
+}

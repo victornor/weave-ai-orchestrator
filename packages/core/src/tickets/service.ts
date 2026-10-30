@@ -1423,6 +1423,11 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
     async retry(actor, id, note) {
       const t = get(id);
       if (t.status === 'done' || t.status === 'cancelled') throw new OcError('wrong_status', `${t.identifier} is ${t.status}; reply to it or reopen it instead`);
+      // VS-946: a ticket blocked out of `merging` is back in the queue before its worker runs, so the
+      // turn never starts against a queue entry that is not there.
+      if (t.status === 'blocked' && t.blockedFromStatus === 'merging') {
+        try { await service.transition(actor, t.id, { to: 'merging', note: note ?? 'retrying' }); } catch { /* the restore after the relaunch reports it */ }
+      }
       const worker = t.workerId ? deps().workers.get(t.workerId) : latestWorkerFor(t.id);
       if (worker && worker.status !== 'retired') {
         await deps().workers.relaunch(actor, worker.id, note ?? 'retry requested');
@@ -1431,8 +1436,9 @@ export function createTicketsService(ctx: WorkspaceContext, deps: () => CoreServ
       } else {
         throw new OcError('validation', `${t.identifier} has no role; assign one first`);
       }
-      if (t.status === 'blocked') {
-        const back = t.blockedFromStatus ?? 'todo';
+      const cur = get(t.id);
+      if (cur.status === 'blocked') {
+        const back = cur.blockedFromStatus ?? 'todo';
         try { await service.transition(actor, t.id, { to: back as TicketStatus, note: note ?? 'retrying' }); } catch { /* keep blocked if the machine says so */ }
       }
       recordActivity(db, ws, actor, 'ticket.retry', 'ticket', t.id, { note: note ?? null }, t.id);

@@ -408,6 +408,57 @@ describe('decisions', () => {
     expect(tickets.get(t.id).status).toBe('in_progress');
   });
 
+  describe('retry on a ticket blocked out of merging (VS-946)', () => {
+    /** A ticket that was `merging` with an answered merge approval, then blocked: no queue place left. */
+    async function strandedMerge(): Promise<{ id: string; identifier: string; workerId: string }> {
+      h.services.workers = { spawnForTicket: vi.fn(async () => ({ id: 'unused' })), relaunch: vi.fn(async () => undefined) } as never;
+      const t = ticket();
+      const workerId = h.addWorker(t.id);
+      tickets.addWorkProduct(AGENT, t.id, { type: 'pull_request', url: 'https://example.com/pr/1' });
+      h.db.update('tickets', t.id, { status: 'in_review' });
+      h.db.insert('decisions', {
+        id: newId(), workspaceId: h.workspaceId, ticketId: t.id, kind: 'merge_approval', owner: 'human', title: 'Merge?',
+        context: '', optionsJson: [], allowFreeText: 1, status: 'answered', answerKey: 'approve', createdAt: new Date().toISOString(),
+      });
+      await tickets.transition(HUMAN, t.id, { to: 'merging' });
+      await tickets.transition(SYSTEM, t.id, { to: 'blocked', unblock: { owner: 'human', action: 'retry' } });
+      expect(tickets.get(t.id)).toMatchObject({ status: 'blocked', blockedFromStatus: 'merging', mergeQueuedAt: null, mergeStartedAt: null });
+      h.db.update('agents', workerId, { status: 'paused' });
+      return { id: t.id, identifier: t.identifier, workerId };
+    }
+    const retryCard = (t: { id: string; workerId: string }) => decisions.create(SYSTEM, {
+      kind: 'retry_approval', owner: 'human', ticketId: t.id, title: 'Worker stopped',
+      target: { agentId: t.workerId, ticketId: t.id },
+    });
+
+    it('is back in the merge queue by the time the worker is relaunched', async () => {
+      const t = await strandedMerge();
+      const seen: Array<{ status: string; queuedAt: string | null }> = [];
+      (h.services.workers as unknown as { relaunch: unknown }).relaunch = vi.fn(async () => {
+        const cur = tickets.get(t.id);
+        seen.push({ status: cur.status, queuedAt: cur.mergeQueuedAt });
+      });
+
+      await decisions.answer(HUMAN, retryCard(t).id, { key: 'retry' });
+
+      expect(seen).toEqual([{ status: 'merging', queuedAt: expect.any(String) }]);
+      expect(tickets.get(t.id).status).toBe('merging');
+    });
+
+    it('says on the ticket, with the repair, when the restore is refused', async () => {
+      const t = await strandedMerge();
+      h.db.run("UPDATE decisions SET answer_key = 'changes' WHERE ticket_id = ? AND kind = 'merge_approval'", [t.id]);
+      const relaunch = (h.services.workers as unknown as { relaunch: ReturnType<typeof vi.fn> }).relaunch;
+
+      await decisions.answer(HUMAN, retryCard(t).id, { key: 'retry' });
+
+      expect(relaunch).toHaveBeenCalledTimes(1);
+      expect(tickets.get(t.id).status).toBe('blocked');
+      const note = tickets.comments(t.id).find((c) => c.kind === 'status' && c.body.includes('could not return'));
+      expect(note?.body).toContain(`weave_ticket_transition("${t.identifier}", "merging")`);
+    });
+  });
+
   it('answering switch:deep writes the option and resumes without booking a retry (VS-238)', async () => {
     h.ctx.config.models.workerOptions = [
       { id: 'standard', description: 'Specified work.', runtime: 'opencode', model: 'glm' },

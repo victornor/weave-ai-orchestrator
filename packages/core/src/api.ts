@@ -41,6 +41,13 @@ export interface TicketsService {
    * blocked) and never throws for a refused restore.
    */
   resumeIfBlocked(actor: Actor, id: string, reason: string): Promise<S.Ticket>;
+  /**
+   * VS-946: a retry's restore of a `blocked` ticket to the status it was blocked from. Unlike a bare
+   * `transition` it never throws: a refusal is said on the ticket as a status comment naming the
+   * error and the `weave_ticket_transition` repair, because a ticket blocked out of `merging` that
+   * stays blocked holds no queue place. A ticket that is not blocked is left alone.
+   */
+  restoreForRetry(actor: Actor, id: string, note: string): Promise<void>;
   cancel(actor: Actor, id: string, reason: string): S.Ticket;
   comment(actor: Actor, id: string, body: string, kind?: S.CommentKind, sourceTrust?: S.SourceTrust, opts?: { dictated?: boolean }): S.TicketComment;
   /** Relaunch the ticket's worker (or spawn one) after a failure or a pause; blocked tickets go back to work. */

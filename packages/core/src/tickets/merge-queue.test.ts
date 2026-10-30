@@ -550,5 +550,17 @@ describe('merge queue', () => {
       expect(seen).toHaveLength(1);
       expect(seen[0]).not.toBeNull();
     });
+
+    it('says on the ticket, with the repair, when a retry cannot restore it', async () => {
+      const t = await stranded();
+      h.db.run("UPDATE decisions SET answer_key = 'changes' WHERE ticket_id = ? AND kind = 'merge_approval'", [t.id]);
+      Object.assign(workers, { get: vi.fn(() => ({ id: 'w', status: 'paused' })), relaunch: vi.fn(async () => undefined) });
+
+      const back = await tickets.retry(HUMAN, t.id, 'again');
+
+      expect(back.status).toBe('blocked');
+      const note = tickets.comments(t.id).find((c) => c.kind === 'status' && c.body.includes('could not return'));
+      expect(note?.body).toContain(`weave_ticket_transition("${t.identifier}", "merging")`);
+    });
   });
 });

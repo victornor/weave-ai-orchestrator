@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-10-30
+goal: Do not treat a worker that filed a StructuredOutput report as an empty turn

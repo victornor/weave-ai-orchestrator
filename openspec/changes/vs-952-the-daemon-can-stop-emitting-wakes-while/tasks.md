@@ -9,7 +9,7 @@
 
 - [x] 2.1 `/api/health`: add a per-workspace `supervisor` block (no titles), `ok` false only when a workspace is `stalled`, and HTTP 503 for `?strict=1` when not ok. Server route test.
 - [x] 2.2 `weave daemon status`: add supervisor state, last-tick age, last-wake age and open-human-decision count columns to the workspace table; `--json` carries the block unchanged. CLI test.
-- [ ] 2.3 Document the new fields in `docs/API.md`.
+- [x] 2.3 Document the new fields in `docs/API.md`.
 
 ## 3. Stall exit
 
@@ -24,6 +24,6 @@
 
 ## 5. Docs and verification
 
-- [ ] 5.1 `docs/OPERATIONS.md`: add "What a healthy daemon looks like from outside" next to the unit. Cover the supervisor states, that silence is normal while everything waits on a human, the one command that tells idle from stalled (`curl … /api/health | jq`), the SQL for operators with DB access, the stall exit and its systemd dependency, and the event-loop-block limit. Fix the documented unit to `Restart=always`. Add a troubleshooting entry, "No wakes for hours", that links to it.
-- [ ] 5.2 `docs/CONFIGURATION.md`: add `defaults.humanReminderAfterSec`, `defaults.humanReminderEverySec` and `supervisor.stallExitSec`.
+- [x] 5.1 `docs/OPERATIONS.md`: add "What a healthy daemon looks like from outside" next to the unit. Cover the supervisor states, that silence is normal while everything waits on a human, the one command that tells idle from stalled (`curl … /api/health | jq`), the SQL for operators with DB access, the stall exit and its systemd dependency, and the event-loop-block limit. Fix the documented unit to `Restart=always`. Add a troubleshooting entry, "No wakes for hours", that links to it.
+- [x] 5.2 `docs/CONFIGURATION.md`: add `defaults.humanReminderAfterSec`, `defaults.humanReminderEverySec` and `supervisor.stallExitSec`.
 - [ ] 5.3 Run `pnpm lint`, `pnpm typecheck` and both test suites (per-directory with `--maxWorkers=1` if the turn's memory limit requires it). Paste both suite blocks into the PR, with the corrected premise at the top of the PR description.

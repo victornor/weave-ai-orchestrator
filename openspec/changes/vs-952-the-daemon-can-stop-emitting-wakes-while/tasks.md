@@ -20,7 +20,7 @@
 
 - [x] 4.1 Add a migration for `decisions.human_reminder_key`; add the `decision.reminder` event type; add `defaults.humanReminderAfterSec` (14400) and `defaults.humanReminderEverySec` (86400) to the workspace config.
 - [x] 4.2 Add `humanReminderScan()` on the liveness cadence: the clock starts at `weaver_reviewed_at` for review-carrying kinds (unseen cards skipped) and at `created_at` otherwise. Compare the stage key, then store the key, write the `decision.reminded` activity row and emit the event in one transaction. Tests: reviewed merge card at 4 h, unseen card, human question, disabled, answered, repeat scan, stage 1 at 28 h, re-review resetting the clock.
-- [ ] 4.3 Make `ChannelManager` post the text follow-up on `decision.reminder` (re-read the decision; never a card) and make `PushDispatcher` send a push. Tests assert the message text contains the identifier, kind, age and `/d <id>`, and that nothing is posted for a closed card.
+- [x] 4.3 Make `ChannelManager` post the text follow-up on `decision.reminder` (re-read the decision; never a card) and make `PushDispatcher` send a push. Tests assert the message text contains the identifier, kind, age and `/d <id>`, and that nothing is posted for a closed card.
 
 ## 5. Docs and verification
 

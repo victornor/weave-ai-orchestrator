@@ -28,12 +28,14 @@ export class PushDispatcher {
   }
 
   private async onEvent(ev: WorkspaceEvent): Promise<void> {
-    if (ev.type !== 'decision.created') return;
+    // VS-952: a reminder for a card still waiting on the human pushes again, marked as a reminder.
+    const reminder = ev.type === 'decision.reminder';
+    if (ev.type !== 'decision.created' && !reminder) return;
     try {
       const decision = this.services.decisions.get(ev.entityId);
       if (decision.owner !== 'human' || decision.status !== 'open') return;
       await sendPush(this.ctx.db, this.getKeys(), 'decisions', {
-        title: decision.title,
+        title: reminder ? `Still waiting: ${decision.title}` : decision.title,
         body: decision.context || decision.title,
         path: `/w/${this.ctx.config.id}/needs`,
       });

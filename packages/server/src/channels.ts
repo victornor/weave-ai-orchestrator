@@ -9,7 +9,7 @@ import type { Actor, CoreServices, SecretsService, WorkspaceContext } from '@wea
 import { getLogger } from '@weave-ai/core';
 import { newId, nowIso } from '@weave-ai/db';
 import { UNRESOLVED_ENV_REF } from '@weave-ai/channel-telegram';
-import { progressLine, type LiveTurnState } from '@weave-ai/render';
+import { formatAge, progressLine, type LiveTurnState } from '@weave-ai/render';
 import { OcError, TELEGRAM_BOT_TOKEN_SECRET_NAME, WorkspaceConfigSchema, type ChannelThread, type Decision, type WorkerActivitySummary, type WorkspaceEvent } from '@weave-ai/shared';
 
 const log = getLogger('channel');
@@ -218,6 +218,7 @@ export class ChannelManager {
     if ((ev.type as string) === 'worker.activity') { this.onWorkerActivity(ev.payload as WorkerActivitySummary); return; }
     if (ev.type === 'decision.created') await this.pushDecisionCard(ev.entityId);
     if (ev.type === 'decision.updated') await this.pushDecisionReviewFollowUp(ev.entityId);
+    if (ev.type === 'decision.reminder') await this.pushDecisionReminder(ev.entityId, ev.payload as { ageMs?: number } | null);
     if (ev.type === 'workspace.updated') await this.reconcileChannels();
   }
 
@@ -322,6 +323,26 @@ export class ChannelManager {
       await this.services.threads.outbound(SYSTEM, thread.id, message.text, { parts: message.parts });
     } catch (e) {
       log.warn({ err: e, decisionId }, 'could not push a decision card');
+    }
+  }
+
+  /**
+   * VS-952: a human-owned card that has waited past a reminder stage is re-announced as one text line
+   * on the primary thread — never a second answerable card (VS-223) — naming the ticket, how long it
+   * has waited and the `/d` command that answers it. A card closed since the event says nothing.
+   */
+  private async pushDecisionReminder(decisionId: string, payload: { ageMs?: number } | null): Promise<void> {
+    try {
+      const decision = this.services.decisions.get(decisionId);
+      if (decision.owner !== 'human' || decision.status !== 'open') return;
+      const thread = this.services.threads.primaryThread();
+      if (!thread) { log.debug({ decisionId }, 'no primary thread for the decision reminder'); return; }
+      const identifier = decision.ticketId
+        ? this.ctx.db.get<{ identifier: string }>('SELECT identifier FROM tickets WHERE id = ?', [decision.ticketId])?.identifier ?? null
+        : null;
+      await this.services.threads.outbound(SYSTEM, thread.id, decisionReminderText(decision, { identifier, ageMs: payload?.ageMs ?? null }));
+    } catch (e) {
+      log.warn({ err: e, decisionId }, 'could not push a decision reminder');
     }
   }
 
@@ -503,6 +524,18 @@ export class ChannelManager {
     await this.ctx.saveConfig(merged.data);
     await this.reconcileChannels();
   }
+}
+
+/**
+ * VS-952: the reminder line for a card still waiting on the human, e.g.
+ * `Still waiting on you · 4h — VS-951 merge: "Merge VS-951". Answer with /d <id> approve|reject, or open Needs you.`
+ */
+export function decisionReminderText(decision: Pick<Decision, 'id' | 'kind' | 'title' | 'options'>, at: { identifier: string | null; ageMs: number | null }): string {
+  const age = at.ageMs === null ? '' : ` · ${formatAge(Date.now() - at.ageMs)}`;
+  const kind = decision.kind.replace(/_approval$/, '').replace(/_/g, ' ');
+  const scope = at.identifier ? `${at.identifier} ${kind}` : kind;
+  const keys = (decision.options ?? []).map((o) => o.key).filter(Boolean);
+  return `Still waiting on you${age} — ${scope}: "${decision.title}". Answer with /d ${decision.id} ${keys.length ? keys.join('|') : '<answer>'}, or open Needs you.`;
 }
 
 export function decisionCard(decision: Decision): CanonicalMessage {

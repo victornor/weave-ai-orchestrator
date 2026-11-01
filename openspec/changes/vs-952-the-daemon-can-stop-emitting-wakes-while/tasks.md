@@ -14,7 +14,7 @@
 ## 3. Stall exit
 
 - [x] 3.1 Add `supervisor.stallExitSec` (default 600, 0 disables) to `DaemonConfigSchema`.
-- [ ] 3.2 Add the stall watchdog in `server/src/daemon.ts`: a 60 s unref'd interval that tracks when each workspace's stall began. Under `INVOCATION_ID`, log fatal, `stop('supervisor_stalled')`, exit 1, forced after 30 s; otherwise log one error per episode. Add an exit/env seam, and tests for the systemd and non-systemd cases plus idle-is-not-stalled.
+- [x] 3.2 Add the stall watchdog in `server/src/daemon.ts`: a 60 s unref'd interval that tracks when each workspace's stall began. Under `INVOCATION_ID`, log fatal, `stop('supervisor_stalled')`, exit 1, forced after 30 s; otherwise log one error per episode. Add an exit/env seam, and tests for the systemd and non-systemd cases plus idle-is-not-stalled.
 
 ## 4. Reminders for unanswered human cards
 

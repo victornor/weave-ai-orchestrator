@@ -93,4 +93,17 @@ describe('PushDispatcher', () => {
     await vi.waitFor(() => expect(sendPush).toHaveBeenCalledTimes(1));
     dispatcher.stop();
   });
+
+  // VS-952: a card still waiting on the human after a reminder stage pushes again, marked as such.
+  it('pushes a reminder for a card still waiting on the human', async () => {
+    harness = makeHarness();
+    harness.impls['decisions']!.get = vi.fn().mockReturnValue(fakeDecision());
+    const dispatcher = new PushDispatcher(harness.runtime.ctx, harness.runtime.services, () => null);
+    dispatcher.start();
+
+    harness.bus.emit('decision.reminder', 'decision', 'dec1', { stage: 0, ageMs: 14_460_000 });
+    await vi.waitFor(() => expect(sendPush).toHaveBeenCalledTimes(1));
+    expect((sendPush.mock.calls[0]?.[3] as { title: string }).title).toBe('Still waiting: Approve X');
+    dispatcher.stop();
+  });
 });

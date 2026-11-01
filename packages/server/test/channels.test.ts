@@ -187,6 +187,35 @@ describe('ChannelManager', () => {
     expect(followUp).not.toContain('/d dec_rev');
   });
 
+  // VS-952: a card left waiting on the human is re-announced as text, never as a second card.
+  it('posts a reminder line naming the ticket, the wait and the /d command, and nothing for a closed card', async () => {
+    const { h, adapter } = await boot();
+    h.runtime.services.threads.bindOrGet('test', 'chat1', 'u1');
+    h.db.insert('tickets', {
+      id: 'tk_951', workspaceId: 'ws1', projectId: null, number: 951, identifier: 'VS-951', kind: 'change', title: 'Stop the alert storm',
+      description: '', status: 'in_review', priority: 'critical', createdByKind: 'agent', createdAt: 't0', updatedAt: 't0',
+    });
+    const card = decision({
+      id: 'dec_951', ticketId: 'tk_951', kind: 'merge_approval', title: 'Merge VS-951', weaverReviewStatus: 'looked',
+      options: [{ key: 'approve', label: 'Approve' }, { key: 'reject', label: 'Reject' }],
+    });
+    (h.impls.decisions!.get as unknown) = () => card;
+    const before = adapter.sent.length;
+    h.bus.emit('decision.reminder', 'decision', 'dec_951', { decisionId: 'dec_951', stage: 0, ageMs: 4 * 3_600_000 + 60_000 });
+    await new Promise((r) => setTimeout(r, 20));
+    await manager!.drain();
+    expect(adapter.sent.length).toBe(before + 1);
+    const sent = adapter.sent.at(-1)!.message;
+    expect(sent.text).toBe('Still waiting on you · 4h — VS-951 merge: "Merge VS-951". Answer with /d dec_951 approve|reject, or open Needs you.');
+    expect((sent.parts ?? []).map((p) => (p as { type: string }).type)).not.toContain('card');
+
+    (h.impls.decisions!.get as unknown) = () => ({ ...card, status: 'answered' });
+    h.bus.emit('decision.reminder', 'decision', 'dec_951', { decisionId: 'dec_951', stage: 1, ageMs: 28 * 3_600_000 });
+    await new Promise((r) => setTimeout(r, 20));
+    await manager!.drain();
+    expect(adapter.sent.length).toBe(before + 1);
+  });
+
   it('retries a retryable failure and gives up after MAX_ATTEMPTS', async () => {
     const { h, adapter } = await boot();
     adapter.fail = true;

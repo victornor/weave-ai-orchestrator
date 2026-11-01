@@ -42,8 +42,10 @@ import { localApiClient, resolveTailscaleCert, startCertRenewal, type RenewalHan
 import { generateSelfSigned } from './selfSignedCert.js';
 import type { AppDeps, WorkspaceRuntime } from './types.js';
 import { registerDemoAdapters, startDemoPlayer } from './demo/adapters.js';
+import { createStallWatchdog } from './stallWatchdog.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
+
 const log = getLogger('daemon');
 
 /** VS-783: an interface IP (Tailscale's) can be assigned after the daemon starts; wait this long for it. */
@@ -258,11 +260,13 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   const cancelGraceMs = opts.shutdownGraceMs?.cancel ?? SHUTDOWN_CANCEL_GRACE_MS;
 
   let stopping: Promise<void> | null = null;
+  let stopStallWatchdog = (): void => {};
   let demoPlayer: { stop(): void } | null = null;
   const stop = (reason = 'shutdown'): Promise<void> => (stopping ??= shutdown(reason));
 
   async function shutdown(reason: string): Promise<void> {
     log.info({ reason }, 'daemon shutting down');
+    stopStallWatchdog();
     demoPlayer?.stop();
     // VS-339: mark every workspace and record the deliberate shutdown before the first await. systemd
     // signals the whole control group, so a runtime child can exit and its turn finalize before the
@@ -308,6 +312,24 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
 
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.once(signal, () => { void stop(signal).then(() => process.exit(0)); });
+  }
+
+  // VS-952: a workspace supervisor that stops finishing ticks leaves a process that looks healthy and
+  // does nothing. Under systemd (`INVOCATION_ID`) a stall past `supervisor.stallExitSec` exits non-zero
+  // so `Restart=always` brings the daemon back; elsewhere it is only logged. Never in demo mode, where
+  // no supervisor runs.
+  if (!opts.demo) {
+    const stallWatchdog = createStallWatchdog({
+      workspaces: () => [...new Set(workspaces.values())],
+      stallExitSec: daemonCfg.supervisor?.stallExitSec ?? 600,
+      underServiceManager: Boolean(process.env.INVOCATION_ID),
+      exit: () => {
+        setTimeout(() => process.exit(1), 30_000).unref();
+        void stop('supervisor_stalled').finally(() => process.exit(1));
+      },
+    });
+    stallWatchdog.start();
+    stopStallWatchdog = () => stallWatchdog.stop();
   }
 
   // VS-770: the scripted live progress that makes a demo's running views move; stopped with the daemon.

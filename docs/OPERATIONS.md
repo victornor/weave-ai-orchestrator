@@ -216,7 +216,7 @@ Wants=network-online.target
 Type=simple
 ExecStart=/path/to/node /path/to/packages/server/dist/bin.js
 Environment=AC_CONFIG_HOME=/home/you/.config/weave
-Restart=on-failure
+Restart=always
 RestartSec=3
 KillSignal=SIGTERM
 TimeoutStopSec=30
@@ -255,6 +255,38 @@ Notes before you enable it:
 systemd use `systemctl --user stop weave-ai.service`.
 
 `weave daemon start --listen host:port` exports `AC_LISTEN`, which the daemon honours (it overrides `http.listen` in `daemon.yaml`); `node packages/server/dist/bin.js --listen 127.0.0.1:9000` does the same.
+
+### What a healthy daemon looks like from outside
+
+An `active` unit, `NRestarts=0` and a live process do not show that a workspace is getting anything done, and nor does silence in the logs. Read the **supervisor state** instead. It comes from each workspace supervisor's own 15 s tick, so it is right even when no wake has been created for hours:
+
+```bash
+weave daemon status                                   # SUPERVISOR · LAST TICK · LAST WAKE · NEEDS YOU per workspace
+curl -s http://127.0.0.1:7433/api/health | jq '.ok, (.workspaces[] | {id, s: .supervisor})'
+curl -sf 'http://127.0.0.1:7433/api/health?strict=1' >/dev/null || echo stalled   # for an uptime monitor: 503 only on a stall
+```
+
+| `supervisor.state` | What it means | Action |
+|---|---|---|
+| `active` | A turn is running, or a wake is queued or claimed. | None. |
+| `idle_waiting_on_human` | Nothing is running, and an open decision is yours to answer (`openHumanDecisions`). | Answer it (Needs you, or `/d <id> <option>` in chat). |
+| `idle` | Nothing is running and nothing is waiting on you. | None. |
+| `starting` | No tick has finished since the daemon started. | None, unless it lasts minutes. |
+| `stalled` | No tick has finished for 10 minutes, or one step has been pending for 30 (`stepsInFlight`). | Read the journal for `supervisor step timed out`. Under systemd the daemon restarts itself (below). |
+
+**Silence is normal when everything is parked on you.** The weaver's digest is driven by events and skips the weaver's own activity. When every open item waits on a human, no wake is created for hours, and that is correct. On 2026-10-31 a workspace sat 20h42m with no wake. It looked like an outage, but it was `idle_waiting_on_human`, with one reviewed merge card unanswered (VS-952). Since then a card that is yours to answer is re-announced in chat and by push 4 h after it became yours, then every 24 h (`defaults.humanReminderAfterSec`, `defaults.humanReminderEverySec`).
+
+Without the HTTP endpoint, the same distinction from the workspace database (read-only) is:
+
+```sql
+SELECT (SELECT MAX(created_at) FROM wakeups) AS last_wake,
+       (SELECT COUNT(*) FROM runs WHERE status = 'running') AS running,
+       (SELECT COUNT(*) FROM decisions WHERE status = 'open' AND owner = 'human') AS open_human_decisions;
+```
+
+An old `last_wake` with `running = 0` and `open_human_decisions > 0` is a workspace waiting on you, not a dead daemon.
+
+**Self-restart on a stall.** Each awaited supervisor step has a 2-minute timeout. A step that hangs is left running in the background, and later ticks skip it until it settles, so one hung forge or git call cannot freeze the others. If a workspace stays `stalled` for `supervisor.stallExitSec` (daemon.yaml, default 600 s), a daemon running under systemd (`INVOCATION_ID` set) logs a `fatal` line and exits non-zero. The unit's `Restart=always` brings it back, and boot recovery resumes the interrupted turns. A daemon started by `weave daemon start` only logs the stall, because nothing would restart it. One limit remains: a process whose event loop is blocked outright (a synchronous infinite loop) cannot run any timer, so neither check fires. systemd's `WatchdogSec=` would catch that, but the daemon does not speak `sd_notify`.
 
 ---
 
@@ -764,6 +796,10 @@ that the role is `active` (`weave role list`), and that the workspace is
 not paused (`POST /api/w/<ws>/resume`; there is no `weave workspace pause|resume` yet).
 `weave role show <id>` prints the project's effective concurrency; raise throughput from the
 project's Settings max-workers field, not `weave role set-max-workers`.
+
+### No wakes for hours
+
+Read the supervisor state first ([What a healthy daemon looks like from outside](#what-a-healthy-daemon-looks-like-from-outside)). `idle_waiting_on_human` means the workspace is correctly waiting on a decision that is yours. Answer it, and work resumes. Only `stalled` is a fault.
 
 ### Nothing is reachable
 

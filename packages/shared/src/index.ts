@@ -25,3 +25,4 @@ export * from './daemon-shutdown.js';
 export { estimateTokens, sliceToTokens } from './tokens.js';
 export * from './scoped-config.js';
 export * from './runtime-login.js';
+export * from './supervisor-health.js';

@@ -475,6 +475,13 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
   silenceTimeoutSec: z.number().int().min(60).default(600),
   spawnWaitWarnSec: z.number().int().default(600),
   weaverDigestIntervalSec: z.number().int().default(120),
+  /**
+   * VS-952: how long a human-owned decision may wait on the human before they are reminded of it,
+   * then the wait between later reminders. The clock starts when the card became the human's to
+   * answer: the weaver's review for a review-carrying approval, its creation otherwise. 0 disables.
+   */
+  humanReminderAfterSec: z.number().int().min(0).default(14_400),
+  humanReminderEverySec: z.number().int().min(60).default(86_400),
   sessionMaxIdleDays: z.number().int().default(14),
   /**
    * How long an interactive session's ticket (VS-101) may go with no human message and no turn
@@ -862,6 +869,12 @@ export const DaemonConfigSchema = z.object({
    * a deployment resolves its host tools with no configuration, from the user's login-shell PATH.
    */
   hostToolPaths: z.array(z.string()).default([]),
+  /**
+   * VS-952: a workspace supervisor `stalled` for this long makes a daemon running under systemd
+   * (`INVOCATION_ID` set) exit non-zero so the unit's `Restart=always` brings it back. 0 disables;
+   * outside systemd a stall is only logged, because nothing would restart the process.
+   */
+  supervisor: z.object({ stallExitSec: z.number().int().min(0).default(600) }).default({}),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   otlpEndpoint: z.string().optional(),
   /**

@@ -59,6 +59,8 @@ transcription:
   model: ""                   # Voxtype model id when backend is voxtype
   provider: none              # none | command (yaml-only stdin transcribe)
   command: ""                 # reads audio on stdin, prints the transcript
+supervisor:
+  stallExitSec: 600           # a workspace supervisor `stalled` this long exits the daemon under systemd (INVOCATION_ID) so Restart=always restarts it; 0 = only log
 logLevel: info
 otlpEndpoint: ""              # unset = no export; there is no phone-home
 ```
@@ -91,6 +93,8 @@ defaults:
   maxConcurrentRuns: 6
   turnTimeoutSec: 2700
   silenceTimeoutSec: 600      # the stuck-worker watchdog window
+  humanReminderAfterSec: 14400  # remind the human of a card still theirs to answer after 4 h; 0 = never
+  humanReminderEverySec: 86400  # then again every 24 h; the clock starts at the weaver's review for plan/merge/action approvals
   bootstrapBudgetTokens: 16000
   knowledgeBudgetTokens:        # tokens per knowledge file; curation is triggered at 80% of it
     workspace: 10000

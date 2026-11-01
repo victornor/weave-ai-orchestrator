@@ -460,4 +460,12 @@ export type PushCategory = (typeof PUSH_CATEGORIES)[number];
 /** What a subscription that has never touched the toggles gets, matching Settings' own defaults. */
 export const DEFAULT_PUSH_CATEGORIES: PushCategory[] = ['decisions', 'landed'];
 
+/**
+ * VS-952: a workspace supervisor's state as `/api/health` reports it, derived by `supervisorState()`
+ * in this fixed order. `idle_waiting_on_human` is a healthy quiet — every open item is the human's —
+ * and is deliberately distinct from `stalled`, the only state that makes `/api/health` say `ok: false`.
+ */
+export const SUPERVISOR_STATES = ['stalled', 'starting', 'active', 'idle_waiting_on_human', 'idle'] as const;
+export type SupervisorState = (typeof SUPERVISOR_STATES)[number];
+
 export { makeEnum };

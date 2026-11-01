@@ -7,13 +7,13 @@
 
 ## 2. Health report
 
-- [ ] 2.1 `/api/health`: add a per-workspace `supervisor` block (no titles), `ok` false only when a workspace is `stalled`, and HTTP 503 for `?strict=1` when not ok. Server route test.
-- [ ] 2.2 `weave daemon status`: add supervisor state, last-tick age, last-wake age and open-human-decision count columns to the workspace table; `--json` carries the block unchanged. CLI test.
+- [x] 2.1 `/api/health`: add a per-workspace `supervisor` block (no titles), `ok` false only when a workspace is `stalled`, and HTTP 503 for `?strict=1` when not ok. Server route test.
+- [x] 2.2 `weave daemon status`: add supervisor state, last-tick age, last-wake age and open-human-decision count columns to the workspace table; `--json` carries the block unchanged. CLI test.
 - [ ] 2.3 Document the new fields in `docs/API.md`.
 
 ## 3. Stall exit
 
-- [ ] 3.1 Add `supervisor.stallExitSec` (default 600, 0 disables) to `DaemonConfigSchema`.
+- [x] 3.1 Add `supervisor.stallExitSec` (default 600, 0 disables) to `DaemonConfigSchema`.
 - [ ] 3.2 Add the stall watchdog in `server/src/daemon.ts`: a 60 s unref'd interval that tracks when each workspace's stall began. Under `INVOCATION_ID`, log fatal, `stop('supervisor_stalled')`, exit 1, forced after 30 s; otherwise log one error per episode. Add an exit/env seam, and tests for the systemd and non-systemd cases plus idle-is-not-stalled.
 
 ## 4. Reminders for unanswered human cards

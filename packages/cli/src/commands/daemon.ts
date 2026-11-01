@@ -11,7 +11,7 @@ import { followLog, installLaunchdAgent, installService, isRunning, listenPort, 
 import { buildRelease, currentLink, findPortHolder, listReleases, previousLink, pruneReleases, readLink, releaseSha, releaseStamp, resolveInstalledUnit, resolveWorkspaceStateDir, switchRelease, writeShimsFromRelease, writeUserShims, type ShimWriteResult } from '../release.js';
 import { existsSync, mkdirSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { AC_ENV, isTerminalUpgrade, type Upgrade } from '@weave-ai/shared';
+import { AC_ENV, isTerminalUpgrade, type SupervisorHealth, type Upgrade } from '@weave-ai/shared';
 import { run, session, warnDeprecatedConductor } from './util.js';
 import { runUpgradeRunner } from '../upgrade-runner.js';
 
@@ -19,10 +19,26 @@ interface Health {
   ok?: boolean;
   version?: string;
   release?: { version?: string; path?: string; sha?: string | null };
-  workspaces?: Array<{ id?: string; name?: string; status?: string }>;
+  workspaces?: Array<{ id?: string; name?: string; status?: string; supervisor?: SupervisorHealth | null }>;
   operatorConfigured?: boolean;
   tlsMode?: string;
   publicUrl?: string;
+}
+
+/** VS-952: "12s ago" from an ISO stamp, or `—` when there is none. */
+function sinceLabel(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
+  if (!Number.isFinite(s)) return '—';
+  if (s < 120) return `${s}s ago`;
+  if (s < 7200) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
+}
+
+/** VS-952: a stall is the one supervisor state worth a colour; idle waiting on a human is healthy. */
+function supervisorLabel(state: string | undefined): string {
+  if (!state) return '—';
+  return state === 'stalled' ? style.bad(state) : state;
 }
 
 function displayVersion(version: string | null | undefined, path?: string | null): string {
@@ -198,6 +214,11 @@ export function register(program: Command): void {
             { header: 'WORKSPACE', get: (w) => String(w.id ?? '') },
             { header: 'NAME', get: (w) => String(w.name ?? '') },
             { header: 'STATUS', get: (w) => String(w.status ?? '') },
+            // VS-952: idle_waiting_on_human and stalled look the same from systemd; they do not here.
+            { header: 'SUPERVISOR', get: (w) => supervisorLabel(w.supervisor?.state) },
+            { header: 'LAST TICK', get: (w) => sinceLabel(w.supervisor?.lastTickFinishedAt) },
+            { header: 'LAST WAKE', get: (w) => sinceLabel(w.supervisor?.lastWakeAt) },
+            { header: 'NEEDS YOU', get: (w) => (w.supervisor ? String(w.supervisor.openHumanDecisions) : '—') },
           ]);
         }
       });

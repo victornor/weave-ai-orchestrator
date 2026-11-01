@@ -3,7 +3,7 @@ import { homedir, hostname } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, runtimeOptionErrors, workerOptionErrors, type DaemonModels, type ModelSetting, type WorkerModelOption } from '@weave-ai/shared';
+import { DaemonConfigSchema, DaemonModelsPutSchema, INCIDENT_REPORTER_KINDS, OcError, runtimeOptionErrors, workerOptionErrors, type DaemonModels, type ModelSetting, type SupervisorHealth, type WorkerModelOption } from '@weave-ai/shared';
 import { detectHostToolsCached, clearHostToolCache, ensureHostToolPath, getLogger, listScratchTrees, workspaceLoader, type HostTool } from '@weave-ai/core';
 import { resolveRemoteSha } from '@weave-ai/release';
 import type { AppDeps, AppEnv, WorkspaceRuntime } from '../types.js';
@@ -43,25 +43,43 @@ const needsYouCount = (w: WorkspaceRuntime): number =>
     [w.ctx.workspaceId],
   )?.n ?? 0;
 
+/**
+ * VS-952: a workspace supervisor's self-report, read from its own tick clock. Null only when the
+ * supervisor cannot answer at all, which is not evidence of a stall and so never flips `ok`.
+ */
+const supervisorHealth = (w: WorkspaceRuntime): SupervisorHealth | null => {
+  try { return w.services.supervisor.health(); }
+  catch (e) { log.warn({ err: e, ws: w.id }, 'supervisor health read failed'); return null; }
+};
+
 export function daemonRoutes(deps: AppDeps, admin: WorkspaceAdmin | null): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
-  app.get('/health', async (c) => c.json({
-    ok: true,
-    version: deps.version,
-    // VS-316: lets an upgrade's restart runner tell this process apart from a stray one that happens to
-    // answer on the target release — see `confirmsReplacement` in `packages/cli/src/upgrade-runner.ts`.
-    pid: process.pid,
-    // The release this process is executing, so an upgrade's restart runner can tell whether the daemon
-    // that answered is the one it switched to. Derived from the process, never from `current`.
-    release: deps.updates.running(),
-    workspaces: uniqueWorkspaces(deps).map((w) => ({ id: w.id, name: w.ctx.config.name, status: 'active' })),
-    operatorConfigured: deps.auth.hasOperator(),
-    tlsMode: deps.daemon.http.tls.mode,
-    publicUrl: deps.publicUrl,
-    transcription: await transcriptionHealth(deps),
-    host: { platform: process.platform, hostname: hostname(), home: homedir(), defaultWorkspaceRoot: join(homedir(), 'weave'), tools: await detectHostToolsCached() },
-  }));
+  // VS-952: `ok` is false only when a workspace's supervisor is `stalled` — idle, or idle waiting on
+  // a human, is a healthy quiet and must not look like an outage. `?strict=1` turns `ok: false` into a
+  // 503 for monitors that read only the status code; a plain request stays 200 so the upgrade runner's
+  // `health.ok && onTarget(...)` read is unchanged (a just-restarted daemon is `starting`, never `stalled`).
+  app.get('/health', async (c) => {
+    const workspaces = uniqueWorkspaces(deps).map((w) => ({ id: w.id, name: w.ctx.config.name, status: 'active', supervisor: supervisorHealth(w) }));
+    const ok = !workspaces.some((w) => w.supervisor?.state === 'stalled');
+    const strict = ['1', 'true'].includes(c.req.query('strict') ?? '');
+    return c.json({
+      ok,
+      version: deps.version,
+      // VS-316: lets an upgrade's restart runner tell this process apart from a stray one that happens to
+      // answer on the target release — see `confirmsReplacement` in `packages/cli/src/upgrade-runner.ts`.
+      pid: process.pid,
+      // The release this process is executing, so an upgrade's restart runner can tell whether the daemon
+      // that answered is the one it switched to. Derived from the process, never from `current`.
+      release: deps.updates.running(),
+      workspaces,
+      operatorConfigured: deps.auth.hasOperator(),
+      tlsMode: deps.daemon.http.tls.mode,
+      publicUrl: deps.publicUrl,
+      transcription: await transcriptionHealth(deps),
+      host: { platform: process.platform, hostname: hostname(), home: homedir(), defaultWorkspaceRoot: join(homedir(), 'weave'), tools: await detectHostToolsCached() },
+    }, strict && !ok ? 503 : 200);
+  });
 
   app.get('/workspaces', (c) => c.json(uniqueWorkspaces(deps).map((w) => ({
     id: w.id, internalId: w.ctx.workspaceId, name: w.ctx.config.name, ticketPrefix: w.ctx.config.ticketPrefix, root: w.ctx.paths.root,

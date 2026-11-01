@@ -232,6 +232,26 @@ describe('weave daemon status', () => {
     expect(out).not.toContain('v0.1.0');
     expect(out).not.toContain('vabc1234def');
   });
+
+  // VS-952: the one read that would have told a quiet night from an outage on 2026-10-31.
+  it('prints each workspace supervisor state, last tick, last wake and open human decisions', async () => {
+    const now = Date.now();
+    routes['GET /api/health'] = () => ({ body: {
+      ok: true, version: 'abc1234def', tlsMode: 'none', operatorConfigured: true,
+      workspaces: [{ id: 'v-services', name: 'V Services', status: 'active', supervisor: {
+        state: 'idle_waiting_on_human', startedAt: null, lastTickStartedAt: null,
+        lastTickFinishedAt: new Date(now - 12_000).toISOString(), stepsInFlight: [],
+        lastWakeAt: new Date(now - 20 * 3_600_000).toISOString(), activeRuns: 0, queuedWakes: 0, openHumanDecisions: 1, oldestHumanDecisionAgeMs: 72_000_000,
+      } }],
+    } });
+    const out = await cli('daemon', 'status');
+    expect(out).toMatch(/SUPERVISOR/);
+    const row = out.split('\n').find((l) => l.includes('v-services'))!;
+    expect(row).toContain('idle_waiting_on_human');
+    expect(row).toMatch(/1[23]s ago/);
+    expect(row).toContain('20h ago');
+    expect(row.trim().endsWith('1')).toBe(true);
+  });
 });
 
 describe('weave daemon update cancel', () => {

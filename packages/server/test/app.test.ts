@@ -492,6 +492,48 @@ describe('routes', () => {
     expect(body.transcription).toEqual({ backend: 'chrome', configured: false });
   });
 
+  // VS-952: the health view tells a quiet workspace waiting on a human apart from a stalled one, and
+  // only the stall flips `ok` — otherwise the endpoint would cry wolf on every quiet night.
+  describe('supervisor health (VS-952)', () => {
+    const block = (state: string) => ({
+      state, startedAt: '2026-11-01T00:00:00.000Z', lastTickStartedAt: '2026-11-01T01:00:00.000Z', lastTickFinishedAt: '2026-11-01T01:00:01.000Z',
+      stepsInFlight: [], lastWakeAt: '2026-10-31T04:33:21.000Z', activeRuns: 0, queuedWakes: 0, openHumanDecisions: 1, oldestHumanDecisionAgeMs: 72_000_000,
+    });
+
+    it('reports each workspace supervisor and stays ok while it waits on a human, strict or not', async () => {
+      const { h, fetch } = app();
+      h.impls['supervisor']!['health'] = () => block('idle_waiting_on_human');
+      for (const path of ['/api/health', '/api/health?strict=1']) {
+        const res = await fetch(path);
+        expect(res.status).toBe(200);
+        const body = await res.json() as { ok: boolean; workspaces: Array<{ supervisor: { state: string; openHumanDecisions: number } }> };
+        expect(body.ok).toBe(true);
+        expect(body.workspaces[0]!.supervisor).toEqual(block('idle_waiting_on_human'));
+      }
+    });
+
+    it('says ok false for a stalled supervisor, 200 by default and 503 with strict', async () => {
+      const { h, fetch } = app();
+      h.impls['supervisor']!['health'] = () => block('stalled');
+      const plain = await fetch('/api/health');
+      expect(plain.status).toBe(200);
+      expect((await plain.json() as { ok: boolean }).ok).toBe(false);
+      const strict = await fetch('/api/health?strict=1');
+      expect(strict.status).toBe(503);
+      expect((await strict.json() as { ok: boolean }).ok).toBe(false);
+    });
+
+    it('keeps ok true when a supervisor cannot report at all', async () => {
+      const { h, fetch } = app();
+      h.impls['supervisor']!['health'] = () => { throw new Error('no health'); };
+      const res = await fetch('/api/health?strict=1');
+      expect(res.status).toBe(200);
+      const body = await res.json() as { ok: boolean; workspaces: Array<{ supervisor: unknown }> };
+      expect(body.ok).toBe(true);
+      expect(body.workspaces[0]!.supervisor).toBeNull();
+    });
+  });
+
   // The chat finds the run to stream from this one request, so the envelope is part of the contract.
   it('serves the conductor as a detail envelope carrying its latest run', async () => {
     const { h, fetch } = app();

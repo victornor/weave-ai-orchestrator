@@ -1,9 +1,9 @@
 ## 1. Supervisor tick resilience
 
-- [ ] 1.1 Add `runStep(name, fn)` to `supervisor/index.ts`: 2-min timeout, an `inFlight` map that skips a still-pending step on later ticks, and logs for failed, timed-out and settled-after-timeout steps. Route every awaited tick step through it.
-- [ ] 1.2 Record `startedAt`, `lastTickStartedAt` and `lastTickFinishedAt` and expose `supervisor.health()` (type in `core/api.ts`).
-- [ ] 1.3 Add `SUPERVISOR_STATES` and the pure `supervisorState()` to `packages/shared`, with a unit test for every state and the order between them.
-- [ ] 1.4 Supervisor tests. (a) The digest step throws once; the same tick still runs later steps, and the next tick enqueues the digest wake. (b) A step that never settles; the tick finishes, the next tick skips only that step while the digest and routines still run, `health()` lists it in flight, and when it settles it runs again.
+- [x] 1.1 Add `runStep(name, fn)` to `supervisor/index.ts`: 2-min timeout, an `inFlight` map that skips a still-pending step on later ticks, and logs for failed, timed-out and settled-after-timeout steps. Route every awaited tick step through it.
+- [x] 1.2 Record `startedAt`, `lastTickStartedAt` and `lastTickFinishedAt` and expose `supervisor.health()` (type in `core/api.ts`).
+- [x] 1.3 Add `SUPERVISOR_STATES` and the pure `supervisorState()` to `packages/shared`, with a unit test for every state and the order between them.
+- [x] 1.4 Supervisor tests. (a) The digest step throws once; the same tick still runs later steps, and the next tick enqueues the digest wake. (b) A step that never settles; the tick finishes, the next tick skips only that step while the digest and routines still run, `health()` lists it in flight, and when it settles it runs again.
 
 ## 2. Health report
 
@@ -18,8 +18,8 @@
 
 ## 4. Reminders for unanswered human cards
 
-- [ ] 4.1 Add a migration for `decisions.human_reminder_key`; add the `decision.reminder` event type; add `defaults.humanReminderAfterSec` (14400) and `defaults.humanReminderEverySec` (86400) to the workspace config.
-- [ ] 4.2 Add `humanReminderScan()` on the liveness cadence: the clock starts at `weaver_reviewed_at` for review-carrying kinds (unseen cards skipped) and at `created_at` otherwise. Compare the stage key, then store the key, write the `decision.reminded` activity row and emit the event in one transaction. Tests: reviewed merge card at 4 h, unseen card, human question, disabled, answered, repeat scan, stage 1 at 28 h, re-review resetting the clock.
+- [x] 4.1 Add a migration for `decisions.human_reminder_key`; add the `decision.reminder` event type; add `defaults.humanReminderAfterSec` (14400) and `defaults.humanReminderEverySec` (86400) to the workspace config.
+- [x] 4.2 Add `humanReminderScan()` on the liveness cadence: the clock starts at `weaver_reviewed_at` for review-carrying kinds (unseen cards skipped) and at `created_at` otherwise. Compare the stage key, then store the key, write the `decision.reminded` activity row and emit the event in one transaction. Tests: reviewed merge card at 4 h, unseen card, human question, disabled, answered, repeat scan, stage 1 at 28 h, re-review resetting the clock.
 - [ ] 4.3 Make `ChannelManager` post the text follow-up on `decision.reminder` (re-read the decision; never a card) and make `PushDispatcher` send a push. Tests assert the message text contains the identifier, kind, age and `/d <id>`, and that nothing is posted for a closed card.
 
 ## 5. Docs and verification

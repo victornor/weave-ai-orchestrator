@@ -1,13 +1,15 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
-import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, SELF_WAKE_STALL_GRACE_MS, incompleteDelivery, type Agent, type KnowledgeScope, type Run, type Ticket } from '@weave-ai/shared';
+import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, SELF_WAKE_STALL_GRACE_MS, incompleteDelivery, supervisorState, type Agent, type KnowledgeScope, type Run, type SupervisorHealth, type Ticket } from '@weave-ai/shared';
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 import { scopeUnitName, stopScope, systemdScopeAvailable } from '@weave-ai/runtime-sdk';
 import { formatAge } from '@weave-ai/render';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
+import { recordActivity } from '../events.js';
+import { tx } from '../tickets/tx.js';
 import { parkForHuman, runProducedEvidence } from '../runs/engine.js';
 import { recheckRuntimeLogin } from '../runs/authgate.js';
 import { allWorkerStallStates, createWorkerStallState, deleteWorkerStallState, getWorkerStallState, recordEscalation, recordRecoveryAttempt } from './stall-state.js';
@@ -76,6 +78,16 @@ const REVIEW_REMINDER_FIRST_MS = 10 * 60_000;
 const REVIEW_REMINDER_SECOND_MS = 40 * 60_000;
 const REVIEW_REMINDER_EVERY_MS = 60 * 60_000;
 
+/**
+ * VS-952: how long one awaited supervisor step may hold the tick. A step still pending at this point
+ * keeps running, but the tick moves on without it and later ticks skip it until it settles — so a
+ * forge or git call with no timeout of its own can no longer freeze every other step behind the
+ * `ticking` guard while the process and `/api/health` look healthy.
+ */
+const STEP_TIMEOUT_MS = 2 * 60_000;
+/** The approvals a weaver reviews before they become the human's to answer (VS-469's review-carrying kinds). */
+const REVIEW_CARRYING_KINDS = new Set(['plan_approval', 'merge_approval', 'action_approval']);
+
 const SYSTEM: Actor = { kind: 'system', id: null };
 
 /** The backoff stage a card of `ageMs` is due a reminder at, or null before the first one is due. */
@@ -129,8 +141,11 @@ async function worktreeTouchedSince(path: string, since: Date): Promise<boolean>
   return r.ok && r.stdout.trim().length > 0;
 }
 
+/** Test seams; production uses the defaults. */
+export interface SupervisorOptions { stepTimeoutMs?: number }
+
 /** PLAN §7.5: daemon-side supervision. Zero LLM tokens; every action is recorded as a supervisor event. */
-export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices): Supervisor {
+export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices, opts: SupervisorOptions = {}): Supervisor {
   const log = ctx.log('supervisor');
   const state = runState(ctx);
   const interrupted = new Map<string, number>();
@@ -149,6 +164,13 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   let bootRecovered = false;
   let lastLiveness = 0;
   let lastDigestAt = 0;
+  // VS-952: the tick's own clock, read by `health()` — never a wake, an event or a run.
+  const stepTimeoutMs = opts.stepTimeoutMs ?? STEP_TIMEOUT_MS;
+  let startedAt: number | null = null;
+  let lastTickStartedAt: number | null = null;
+  let lastTickFinishedAt: number | null = null;
+  /** Steps still pending past their timeout: skipped on later ticks until their promise settles. */
+  const inFlight = new Map<string, { since: number; skipLogged: boolean }>();
 
   const meta = (key: string): string | null => ctx.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', [key])?.value ?? null;
   const setMeta = (key: string, value: string): void => { ctx.db.run('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value]); };
@@ -606,6 +628,71 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         });
         log.info({ decisionId: d.id, kind: d.kind, stage, ageMs }, 'reminded the weaver of an unreviewed approval');
       } catch (e) { log.warn({ decisionId: d.id, err: String(e) }, 'review reminder wake failed'); }
+    }
+  }
+
+  interface HumanDecisionClock { id: string; kind: string; ticketId: string | null; identifier: string | null; title: string; clockStart: string; ageMs: number; reminderKey: string | null }
+
+  /**
+   * VS-952: every open human-owned decision that is the human's to answer now, with the moment it
+   * became theirs. A review-carrying approval becomes the human's when the weaver records its review
+   * (`weaver_reviewed_at`); while it is still `unseen` it is waiting on the weaver — VS-469's
+   * `reviewReminderScan` covers it — and is left out. Every other human-owned kind is the human's from
+   * `created_at`. Shared by the reminder scan and `health()`, so both read the same clock.
+   */
+  function humanDecisionClocks(now: number): HumanDecisionClock[] {
+    const rows = ctx.db.all<{ id: string; kind: string; ticketId: string | null; identifier: string | null; title: string; createdAt: string; reviewStatus: string; reviewedAt: string | null; reminderKey: string | null }>(
+      `SELECT d.id AS id, d.kind AS kind, d.ticket_id AS ticketId, t.identifier AS identifier, d.title AS title, d.created_at AS createdAt,
+              d.weaver_review_status AS reviewStatus, d.weaver_reviewed_at AS reviewedAt, d.human_reminder_key AS reminderKey
+         FROM decisions d LEFT JOIN tickets t ON t.id = d.ticket_id
+        WHERE d.workspace_id = ? AND d.status = 'open' AND d.owner = 'human'
+        ORDER BY d.created_at`,
+      [ctx.workspaceId],
+    );
+    const out: HumanDecisionClock[] = [];
+    for (const r of rows) {
+      const reviewCarrying = REVIEW_CARRYING_KINDS.has(r.kind);
+      if (reviewCarrying && r.reviewStatus === 'unseen') continue;
+      const clockStart = (reviewCarrying ? r.reviewedAt : null) ?? r.createdAt;
+      const ageMs = now - Date.parse(clockStart);
+      if (!Number.isFinite(ageMs)) continue;
+      out.push({ id: r.id, kind: r.kind, ticketId: r.ticketId, identifier: r.identifier, title: r.title, clockStart, ageMs: Math.max(0, ageMs), reminderKey: r.reminderKey });
+    }
+    return out;
+  }
+
+  /**
+   * VS-952: a human-owned card that has waited on the human past `humanReminderAfterSec`, and every
+   * `humanReminderEverySec` after, is announced again through a `decision.reminder` event, which the
+   * channels deliver as a text follow-up and a push. On 2026-10-31 a reviewed merge card (VS-951)
+   * waited 20h42m one tap from landing because nothing ever re-raised it to the human. The stage
+   * sent is stored on the decision as `<clockStart>#<stage>`, so a repeated scan or a restart never
+   * sends a stage twice, and a re-review that moves the clock starts the stages again.
+   */
+  function humanReminderScan(): void {
+    const afterMs = (ctx.config.defaults.humanReminderAfterSec ?? 14_400) * 1000;
+    const everyMs = Math.max(60, ctx.config.defaults.humanReminderEverySec ?? 86_400) * 1000;
+    if (afterMs <= 0) return;
+    const now = Date.now();
+    for (const d of humanDecisionClocks(now)) {
+      if (d.ageMs < afterMs) continue;
+      const stage = Math.floor((d.ageMs - afterMs) / everyMs);
+      const key = `${d.clockStart}#${stage}`;
+      if (d.reminderKey === key) continue;
+      try {
+        tx(ctx.db, () => {
+          // Guarded on the key still being the one read, so two scans cannot both send a stage.
+          const res = ctx.db.run(
+            "UPDATE decisions SET human_reminder_key = ? WHERE id = ? AND status = 'open' AND human_reminder_key IS ?",
+            [key, d.id, d.reminderKey],
+          );
+          if (!res.changes) return;
+          const details = { decisionId: d.id, ticketId: d.ticketId, kind: d.kind, stage, ageMs: d.ageMs };
+          recordActivity(ctx.db, ctx.workspaceId, SYSTEM, 'decision.reminded', 'decision', d.id, details, d.ticketId);
+          ctx.events.emit('decision.reminder', 'decision', d.id, details);
+        });
+        log.info({ decisionId: d.id, kind: d.kind, ticket: d.identifier, stage, ageMs: d.ageMs }, 'reminded the human of an unanswered decision');
+      } catch (e) { log.warn({ decisionId: d.id, err: String(e) }, 'human reminder failed'); }
     }
   }
 
@@ -1542,39 +1629,76 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     if (runsPruned || archivesPruned) log.info({ runsPruned, archivesPruned }, 'retention sweep');
   }
 
+  /**
+   * VS-952: run one awaited tick step. A rejection is logged as `<name> failed` (as every step's own
+   * `.catch` did before). A step still pending after `stepTimeoutMs` is logged and left running in the
+   * background; the tick continues, and later ticks skip that step alone until its promise settles,
+   * so it is never re-entered while its previous call is live (a re-entered merge pump could
+   * double-act). `quiet` keeps the old silent catch of a service a test harness may not provide.
+   */
+  async function runStep(name: string, fn: () => unknown, quiet = false): Promise<void> {
+    const pending = inFlight.get(name);
+    if (pending) {
+      if (!pending.skipLogged) {
+        pending.skipLogged = true;
+        log.warn({ step: name, inFlightMs: Date.now() - pending.since }, 'supervisor step still in flight; skipped until it settles');
+      }
+      return;
+    }
+    const since = Date.now();
+    let work: Promise<unknown>;
+    try { work = Promise.resolve(fn()); } catch (e) { work = Promise.reject(e); }
+    const settled = work.then(
+      () => 'settled' as const,
+      (e: unknown) => { if (!quiet) log.error({ step: name, err: String(e) }, `${name} failed`); return 'settled' as const; },
+    );
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = new Promise<'timeout'>((resolve) => { timer = setTimeout(() => resolve('timeout'), stepTimeoutMs); });
+    const outcome = await Promise.race([settled, timedOut]);
+    clearTimeout(timer);
+    if (outcome === 'settled') return;
+    inFlight.set(name, { since, skipLogged: false });
+    log.error({ step: name, timeoutMs: stepTimeoutMs }, 'supervisor step timed out; the tick continues without it');
+    void settled.then(() => {
+      inFlight.delete(name);
+      log.warn({ step: name, durationMs: Date.now() - since }, 'supervisor step settled after timeout');
+    });
+  }
+
   const supervisor: Supervisor = {
     async tick(): Promise<void> {
       if (ticking) return;
       ticking = true;
+      lastTickStartedAt = Date.now();
       try {
         if (!bootRecovered) {
           bootRecovered = true;
-          await bootRecovery().catch((e) => log.error({ err: String(e) }, 'boot recovery failed'));
-          await reprovisionMissingWorktrees().catch((e) => log.error({ err: String(e) }, 'worktree reprovision at boot failed'));
-          await reportInheritedWorkerIdentities(ctx).catch((e) => log.error({ err: String(e) }, 'worker identity warning pass failed'));
-          await sweepScratch().catch((e) => log.error({ err: String(e) }, 'scratch sweep at boot failed'));
+          await runStep('boot recovery', bootRecovery);
+          await runStep('worktree reprovision at boot', reprovisionMissingWorktrees);
+          await runStep('worker identity warning pass', () => reportInheritedWorkerIdentities(ctx));
+          await runStep('scratch sweep at boot', sweepScratch);
           try { nudgeIdleConductor(); } catch (e) { log.warn({ err: String(e) }, 'idle conductor nudge failed'); }
         }
-        await watchdog().catch((e) => log.error({ err: String(e) }, 'watchdog failed'));
-        await spawnPending().catch((e) => log.error({ err: String(e) }, 'spawn pass failed'));
-        { const sweep = deps().tickets.autoMergeSweep; if (typeof sweep === 'function') await sweep.call(deps().tickets).catch((e: unknown) => log.error({ err: String(e) }, 'auto-merge sweep failed')); }
+        await runStep('watchdog', watchdog);
+        await runStep('spawn pass', spawnPending);
+        { const sweep = deps().tickets.autoMergeSweep; if (typeof sweep === 'function') await runStep('auto-merge sweep', () => sweep.call(deps().tickets)); }
         // VS-670: the decision-centric safety net, so a reviewed card the merge sweep cannot see is
         // still caught and surfaced rather than sitting silently for hours.
-        { const sweep = deps().tickets.staleReviewSweep; if (typeof sweep === 'function') await sweep.call(deps().tickets).catch((e: unknown) => log.error({ err: String(e) }, 'stale-review sweep failed')); }
-        await pumpMergeQueues().catch((e) => log.error({ err: String(e) }, 'merge queue pump failed'));
+        { const sweep = deps().tickets.staleReviewSweep; if (typeof sweep === 'function') await runStep('stale-review sweep', () => sweep.call(deps().tickets)); }
+        await runStep('merge queue pump', pumpMergeQueues);
         if (due('supervisor:merge_ci_at', MERGE_POLL_EVERY_MS)) {
-          await wakeMergingOnProgress().catch((e) => log.error({ err: String(e) }, 'merge-slot progress wake failed'));
+          await runStep('merge-slot progress wake', wakeMergingOnProgress);
           // VS-584: complete a promotion pull request whose checks have resolved — the human's
           // approval is already recorded, so no card is waiting to be answered again.
-          await deps().promotion.advance().catch((e) => log.error({ err: String(e) }, 'promotion advance failed'));
+          await runStep('promotion advance', () => deps().promotion.advance());
         }
-        await retireFinished().catch((e) => log.error({ err: String(e) }, 'retire pass failed'));
-        await retireIdleSessions().catch((e) => log.error({ err: String(e) }, 'idle session retire pass failed'));
-        await reconcileAbandonedHandovers().catch((e) => log.error({ err: String(e) }, 'abandoned handover sweep failed'));
+        await runStep('retire pass', retireFinished);
+        await runStep('idle session retire pass', retireIdleSessions);
+        await runStep('abandoned handover sweep', reconcileAbandonedHandovers);
         if (Date.now() - lastLiveness > LIVENESS_EVERY_MS) {
           lastLiveness = Date.now();
           try { livenessScan(); } catch (e) { log.error({ err: String(e) }, 'liveness scan failed'); }
-          await approvalIntegrityScan().catch((e) => log.error({ err: String(e) }, 'approval integrity scan failed'));
+          await runStep('approval integrity scan', approvalIntegrityScan);
           // VS-306: withdraw stale open decisions on already-terminal tickets. Disjoint from the
           // repair scan above — that one raises approvals only for non-terminal tickets.
           try { deps().decisions.sweepTerminalTickets(SYSTEM, TERMINAL_DECISION_GRACE_MS); }
@@ -1584,38 +1708,71 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
           try { stallRecoveryScan(); } catch (e) { log.error({ err: String(e) }, 'stall recovery scan failed'); }
           // VS-469: re-wake the weaver for an approval it left unreviewed past the first threshold.
           try { reviewReminderScan(); } catch (e) { log.error({ err: String(e) }, 'review reminder scan failed'); }
+          // VS-952: remind the human of a card that has been theirs to answer past a reminder stage.
+          try { humanReminderScan(); } catch (e) { log.error({ err: String(e) }, 'human reminder scan failed'); }
           // VS-632: an open card whose landing head moved is recomputed in place and the weaver is
           // woken to review the new head, so a stale review cannot leave it unapprovable. On the
           // liveness cadence, not the faster merge-CI one, because each refresh fetches the remote.
-          await deps().promotion.refresh().catch((e) => log.error({ err: String(e) }, 'promotion refresh failed'));
+          await runStep('promotion refresh', () => deps().promotion.refresh());
         }
-        try { await deps().decisions.expireDue(); } catch { /* decisions service unavailable */ }
+        await runStep('decision expiry', () => deps().decisions.expireDue(), true);
         try { deps().routines.fireDue(); } catch { /* routines service unavailable */ }
         try { conductorDigest(); } catch (e) { log.error({ err: String(e) }, 'digest failed'); }
-        if (due('supervisor:curation_at', CURATION_EVERY_MS)) await curationPass().catch((e) => log.error({ err: String(e) }, 'curation pass failed'));
-        if (due('supervisor:knowledge_health_at', KNOWLEDGE_HEALTH_EVERY_MS)) await knowledgeHealthPass().catch((e) => log.error({ err: String(e) }, 'knowledge health pass failed'));
-        if (due('supervisor:accounts_at', ACCOUNTS_EVERY_MS)) { try { await deps().accounts.refresh(); } catch (e) { log.error({ err: String(e) }, 'runtime account refresh failed'); } }
-        if (due('supervisor:login_recheck_at', LOGIN_RECHECK_EVERY_MS)) await loginRecheck().catch((e) => log.error({ err: String(e) }, 'runtime login recheck failed'));
-        if (due('supervisor:reconcile_at', RECONCILE_EVERY_MS)) await reconcilePass().catch((e) => log.error({ err: String(e) }, 'reconcile pass failed'));
-        if (due('supervisor:retention_at', RETENTION_EVERY_MS)) { try { await retentionPass(); } catch (e) { log.error({ err: String(e) }, 'retention pass failed'); } }
-        if (due('supervisor:scratch_at', SCRATCH_SWEEP_EVERY_MS)) await sweepScratch().catch((e) => log.error({ err: String(e) }, 'scratch sweep failed'));
+        if (due('supervisor:curation_at', CURATION_EVERY_MS)) await runStep('curation pass', curationPass);
+        if (due('supervisor:knowledge_health_at', KNOWLEDGE_HEALTH_EVERY_MS)) await runStep('knowledge health pass', knowledgeHealthPass);
+        if (due('supervisor:accounts_at', ACCOUNTS_EVERY_MS)) await runStep('runtime account refresh', () => deps().accounts.refresh());
+        if (due('supervisor:login_recheck_at', LOGIN_RECHECK_EVERY_MS)) await runStep('runtime login recheck', loginRecheck);
+        if (due('supervisor:reconcile_at', RECONCILE_EVERY_MS)) await runStep('reconcile pass', reconcilePass);
+        if (due('supervisor:retention_at', RETENTION_EVERY_MS)) await runStep('retention pass', retentionPass);
+        if (due('supervisor:scratch_at', SCRATCH_SWEEP_EVERY_MS)) await runStep('scratch sweep', sweepScratch);
       } finally {
         ticking = false;
+        lastTickFinishedAt = Date.now();
       }
     },
 
     start(): void {
       if (timer) return;
+      startedAt = Date.now();
       timer = setInterval(() => { void supervisor.tick(); }, TICK_MS);
       timer.unref?.();
     },
 
     stop(): void {
       if (timer) { clearInterval(timer); timer = null; }
+      startedAt = null;
     },
 
     running(): boolean {
       return timer !== null;
+    },
+
+    health(): SupervisorHealth {
+      const now = Date.now();
+      const stepsInFlight = [...inFlight].map(([step, e]) => ({ step, sinceMs: now - e.since }));
+      const activeRuns = ctx.db.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM runs WHERE workspace_id = ? AND status = 'running'", [ctx.workspaceId],
+      )?.n ?? 0;
+      // A wake held for a paused or finished agent is not work in progress, so it does not make the
+      // workspace `active`. Driven from `agents` so the per-agent `wakeups_agent_status` index serves it.
+      const queuedWakes = ctx.db.get<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM agents a JOIN wakeups w ON w.agent_id = a.id
+          WHERE a.workspace_id = ? AND a.status NOT IN ('paused', 'retired', 'done')
+            AND (w.status = 'claimed' OR (w.status = 'queued' AND (w.not_before IS NULL OR w.not_before <= ?)))`,
+        [ctx.workspaceId, new Date(now).toISOString()],
+      )?.n ?? 0;
+      const lastWakeAt = ctx.db.get<{ createdAt: string }>(
+        'SELECT created_at FROM wakeups WHERE workspace_id = ? ORDER BY rowid DESC LIMIT 1', [ctx.workspaceId],
+      )?.createdAt ?? null;
+      const human = humanDecisionClocks(now);
+      const oldest = human.reduce<number | null>((m, d) => (m === null || d.ageMs > m ? d.ageMs : m), null);
+      const iso = (t: number | null): string | null => (t === null ? null : new Date(t).toISOString());
+      return {
+        state: supervisorState({ now, startedAt, lastTickFinishedAt, stepsInFlight, activeRuns, queuedWakes, openHumanDecisions: human.length }),
+        startedAt: iso(startedAt), lastTickStartedAt: iso(lastTickStartedAt), lastTickFinishedAt: iso(lastTickFinishedAt),
+        stepsInFlight, lastWakeAt, activeRuns, queuedWakes,
+        openHumanDecisions: human.length, oldestHumanDecisionAgeMs: oldest,
+      };
     },
   };
   return supervisor;

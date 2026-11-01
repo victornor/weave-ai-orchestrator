@@ -2571,3 +2571,201 @@ describe('supervisor silence watchdog (VS-461)', () => {
     });
   });
 });
+
+// VS-952: the 2026-10-31 "outage" was a workspace parked on the human, not a dead tick — but a step
+// that never settles *would* freeze every later tick behind the `ticking` guard. These pin both shapes.
+describe('supervisor tick resilience (VS-952)', () => {
+  let h: TestHarness;
+  let wake: ReturnType<typeof fakeWake>;
+  let fireDue: ReturnType<typeof vi.fn>;
+  const digestWakes = (): unknown[] => wake.calls.filter((c) => String((c.input as { reason: string }).reason).startsWith('digest'));
+
+  beforeEach(() => {
+    h = makeHarness();
+    wake = fakeWake();
+    fireDue = vi.fn(() => []);
+    h.services.wake = wake as never;
+    h.services.workers = {
+      spawnForTicket: vi.fn(async () => ({ id: 'w1' })), retireIfLanded: vi.fn(async () => ({ retired: true })),
+      ensureWorktree: vi.fn(), conductor: () => ({ id: h.conductorId }),
+      reclaimFinishedHomes: vi.fn(async () => ({ dryRun: false, candidates: [], reclaimed: [], skipped: [], failed: [] })),
+    } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
+    h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
+    h.services.routines = { fireDue } as never;
+    h.services.tickets = { livenessViolations: () => [] } as never;
+  });
+  afterEach(() => { h.cleanup(); });
+
+  it('runs the digest again on the next tick after it threw, and finishes the tick it threw in', async () => {
+    const supervisor = createSupervisor(h.ctx, h.deps, { stepTimeoutMs: 50 });
+    const since = vi.spyOn(h.ctx.events, 'since').mockImplementationOnce(() => { throw new Error('digest boom'); });
+    h.ctx.events.emit('ticket.status', 'ticket', 't1', { status: 'blocked' });
+
+    await supervisor.tick();
+    expect(digestWakes()).toHaveLength(0);
+    // Steps after the digest still ran in the tick that threw.
+    expect(h.services.accounts!.refresh).toHaveBeenCalledTimes(1);
+    expect(supervisor.health().lastTickFinishedAt).not.toBeNull();
+
+    await supervisor.tick();
+    expect(since).toHaveBeenCalledTimes(2);
+    expect(digestWakes()).toHaveLength(1);
+    expect((digestWakes()[0] as { agentId: string }).agentId).toBe(h.conductorId);
+  });
+
+  it('a step that never settles no longer wedges the tick: it is skipped alone until it settles', async () => {
+    let release!: () => void;
+    const hang = new Promise<number>((resolve) => { release = () => resolve(0); });
+    const autoMergeSweep = vi.fn(() => hang);
+    h.services.tickets = { livenessViolations: () => [], autoMergeSweep } as never;
+    const supervisor = createSupervisor(h.ctx, h.deps, { stepTimeoutMs: 20 });
+
+    await supervisor.tick();
+    const first = supervisor.health();
+    expect(first.lastTickFinishedAt).not.toBeNull();
+    expect(first.stepsInFlight.map((s) => s.step)).toEqual(['auto-merge sweep']);
+    expect(fireDue).toHaveBeenCalledTimes(1);
+
+    // The next tick still runs the digest and the routines, and does not re-enter the pending sweep.
+    h.ctx.events.emit('ticket.status', 'ticket', 't1', { status: 'blocked' });
+    await supervisor.tick();
+    expect(autoMergeSweep).toHaveBeenCalledTimes(1);
+    expect(fireDue).toHaveBeenCalledTimes(2);
+    expect(digestWakes()).toHaveLength(1);
+    expect(Date.parse(supervisor.health().lastTickFinishedAt!)).toBeGreaterThanOrEqual(Date.parse(first.lastTickFinishedAt!));
+
+    // Once the hung promise settles, the step rejoins the tick.
+    release();
+    await hang;
+    await new Promise((r) => setImmediate(r));
+    expect(supervisor.health().stepsInFlight).toEqual([]);
+    await supervisor.tick();
+    expect(autoMergeSweep).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports idle_waiting_on_human for a quiet workspace whose only open item is a reviewed card', async () => {
+    const supervisor = createSupervisor(h.ctx, h.deps, { stepTimeoutMs: 50 });
+    const reviewedAt = new Date(Date.now() - 20 * 3_600_000).toISOString();
+    h.db.insert('decisions', {
+      id: newId(), workspaceId: h.workspaceId, kind: 'merge_approval', owner: 'human', title: 'Merge VS-951', status: 'open',
+      createdAt: reviewedAt, weaverReviewStatus: 'looked', weaverReviewedAt: reviewedAt,
+    });
+    supervisor.start();
+    expect(supervisor.health().state).toBe('starting');
+    await supervisor.tick();
+    supervisor.stop();
+    supervisor.start();
+    await supervisor.tick();
+    const health = supervisor.health();
+    supervisor.stop();
+    expect(health.state).toBe('idle_waiting_on_human');
+    expect(health.openHumanDecisions).toBe(1);
+    expect(health.oldestHumanDecisionAgeMs).toBeGreaterThanOrEqual(20 * 3_600_000);
+    expect(health.oldestHumanDecisionAgeMs).toBeLessThan(20 * 3_600_000 + 60_000);
+    expect(health.activeRuns).toBe(0);
+  });
+});
+
+// VS-952: a card that is the human's to answer is re-announced, once per stage, across restarts.
+describe('human reminder scan (VS-952)', () => {
+  let h: TestHarness;
+  const HOUR = 3_600_000;
+
+  beforeEach(() => {
+    h = makeHarness();
+    h.services.wake = fakeWake() as never;
+    h.services.workers = {
+      spawnForTicket: vi.fn(async () => ({ id: 'w1' })), retireIfLanded: vi.fn(async () => ({ retired: true })),
+      ensureWorktree: vi.fn(), conductor: () => ({ id: h.conductorId }),
+      reclaimFinishedHomes: vi.fn(async () => ({ dryRun: false, candidates: [], reclaimed: [], skipped: [], failed: [] })),
+    } as never;
+    h.services.decisions = { expireDue: vi.fn(async () => []), sweepTerminalTickets: vi.fn(() => 0) } as never;
+    h.services.accounts = { list: () => [], get: () => null, refresh: vi.fn(async () => []) } as never;
+    h.services.tickets = { livenessViolations: () => [] } as never;
+  });
+  afterEach(() => { h.cleanup(); });
+
+  const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+  function seedDecision(over: Record<string, unknown>): string {
+    const id = newId();
+    h.db.insert('decisions', { id, workspaceId: h.workspaceId, kind: 'question', owner: 'human', title: 'Which one?', status: 'open', createdAt: nowIso(), ...over });
+    return id;
+  }
+  /** One liveness pass, on a fresh supervisor — the same as a later tick or a restarted daemon. */
+  async function scan(): Promise<void> { await createSupervisor(h.ctx, h.deps, { stepTimeoutMs: 50 }).tick(); }
+  const reminders = (id?: string) => h.events.filter((e) => e.type === 'decision.reminder' && (!id || e.entityId === id));
+
+  it('reminds the human of a reviewed merge card four hours after the review, from the review time', async () => {
+    const ticketId = seedTicket(h, { identifier: 'TST-951' });
+    const id = seedDecision({ kind: 'merge_approval', title: 'Merge TST-951', ticketId, createdAt: ago(30 * HOUR), weaverReviewStatus: 'looked', weaverReviewedAt: ago(4 * HOUR + 60_000) });
+    await scan();
+    const sent = reminders(id);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.payload).toMatchObject({ decisionId: id, ticketId, kind: 'merge_approval', stage: 0 });
+    const activity = h.db.all<{ action: string; ticketId: string }>("SELECT action, ticket_id FROM activity WHERE action = 'decision.reminded' AND entity_id = ?", [id]);
+    expect(activity).toHaveLength(1);
+    expect(activity[0]!.ticketId).toBe(ticketId);
+  });
+
+  it('does not remind before the review is four hours old, even when the card is older', async () => {
+    seedDecision({ kind: 'merge_approval', createdAt: ago(30 * HOUR), weaverReviewStatus: 'looked', weaverReviewedAt: ago(3 * HOUR) });
+    await scan();
+    expect(reminders()).toHaveLength(0);
+  });
+
+  it('leaves a card still waiting on the weaver alone', async () => {
+    seedDecision({ kind: 'merge_approval', createdAt: ago(30 * HOUR), weaverReviewStatus: 'unseen' });
+    await scan();
+    expect(reminders()).toHaveLength(0);
+  });
+
+  it('measures a human-owned question from its creation', async () => {
+    const id = seedDecision({ kind: 'question', createdAt: ago(4 * HOUR + 60_000) });
+    await scan();
+    expect(reminders(id)).toHaveLength(1);
+  });
+
+  it('never reminds an answered card or a weaver-owned one', async () => {
+    seedDecision({ kind: 'question', createdAt: ago(10 * HOUR), status: 'answered', answeredAt: ago(HOUR) });
+    seedDecision({ kind: 'question', owner: 'weaver', createdAt: ago(10 * HOUR) });
+    await scan();
+    expect(reminders()).toHaveLength(0);
+  });
+
+  it('is off when humanReminderAfterSec is 0', async () => {
+    (h.ctx.config.defaults as { humanReminderAfterSec: number }).humanReminderAfterSec = 0;
+    seedDecision({ kind: 'question', createdAt: ago(48 * HOUR) });
+    await scan();
+    expect(reminders()).toHaveLength(0);
+  });
+
+  it('sends each stage once across repeated scans and restarts, then the next stage a day later', async () => {
+    const created = ago(4 * HOUR + 60_000);
+    const id = seedDecision({ kind: 'question', createdAt: created });
+    await scan();
+    await scan();
+    expect(reminders(id)).toHaveLength(1);
+    expect(h.db.get<{ key: string }>('SELECT human_reminder_key AS key FROM decisions WHERE id = ?', [id])!.key).toBe(`${created}#0`);
+
+    const later = ago(28 * HOUR + 60_000);
+    h.db.run('UPDATE decisions SET created_at = ?, human_reminder_key = ? WHERE id = ?', [later, `${later}#0`, id]);
+    await scan();
+    expect(reminders(id)).toHaveLength(2);
+    expect(reminders(id)[1]!.payload).toMatchObject({ stage: 1 });
+  });
+
+  it('restarts the stages when the weaver re-reviews and so moves the clock', async () => {
+    const firstReview = ago(5 * HOUR);
+    const id = seedDecision({ kind: 'plan_approval', createdAt: ago(6 * HOUR), weaverReviewStatus: 'looked', weaverReviewedAt: firstReview });
+    await scan();
+    expect(reminders(id)).toHaveLength(1);
+    h.db.run('UPDATE decisions SET weaver_reviewed_at = ? WHERE id = ?', [ago(HOUR), id]);
+    await scan();
+    expect(reminders(id)).toHaveLength(1);
+    h.db.run('UPDATE decisions SET weaver_reviewed_at = ? WHERE id = ?', [ago(4 * HOUR + 1_000), id]);
+    await scan();
+    expect(reminders(id)).toHaveLength(2);
+    expect(reminders(id)[1]!.payload).toMatchObject({ stage: 0 });
+  });
+});

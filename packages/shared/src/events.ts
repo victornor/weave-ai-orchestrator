@@ -5,6 +5,8 @@ export const EVENT_TYPES = [
   'worker.spawned', 'worker.status', 'worker.retired', 'worker.stalled', 'worker.relaunched',
   'ticket.created', 'ticket.updated', 'ticket.assigned', 'ticket.status', 'ticket.comment', 'ticket.document', 'ticket.work_product', 'ticket.attachment', 'ticket.merged',
   'decision.created', 'decision.answered', 'decision.expired', 'decision.superseded', 'decision.updated',
+  /** VS-952: a human-owned decision has waited on the human past a reminder stage; channels re-announce it as text. */
+  'decision.reminder',
   'wake.queued', 'wake.skipped', 'run.started', 'run.finished',
   'job.started', 'job.finished',
   'routine.created', 'routine.updated', 'routine.removed', 'routine.fired',

@@ -642,7 +642,8 @@ export interface Dispatcher {
   beginShutdown(reason: string): void;
 }
 /** `running()` is the daemon's own health check: is the tick timer installed (VS-76)? */
-export interface Supervisor { tick(): Promise<void>; start(): void; stop(): void; running(): boolean }
+/** PLAN §7.5; `health()` is VS-952's self-report for `/api/health`, read from the tick's own clock. */
+export interface Supervisor { tick(): Promise<void>; start(): void; stop(): void; running(): boolean; health(): S.SupervisorHealth }
 
 // ---------- knowledge / specs ----------
 /**

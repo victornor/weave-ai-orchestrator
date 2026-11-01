@@ -26,4 +26,4 @@
 
 - [x] 5.1 `docs/OPERATIONS.md`: add "What a healthy daemon looks like from outside" next to the unit. Cover the supervisor states, that silence is normal while everything waits on a human, the one command that tells idle from stalled (`curl … /api/health | jq`), the SQL for operators with DB access, the stall exit and its systemd dependency, and the event-loop-block limit. Fix the documented unit to `Restart=always`. Add a troubleshooting entry, "No wakes for hours", that links to it.
 - [x] 5.2 `docs/CONFIGURATION.md`: add `defaults.humanReminderAfterSec`, `defaults.humanReminderEverySec` and `supervisor.stallExitSec`.
-- [ ] 5.3 Run `pnpm lint`, `pnpm typecheck` and both test suites (per-directory with `--maxWorkers=1` if the turn's memory limit requires it). Paste both suite blocks into the PR, with the corrected premise at the top of the PR description.
+- [x] 5.3 Run `pnpm lint`, `pnpm typecheck` and both test suites (per-directory with `--maxWorkers=1` if the turn's memory limit requires it). Paste both suite blocks into the PR, with the corrected premise at the top of the PR description.

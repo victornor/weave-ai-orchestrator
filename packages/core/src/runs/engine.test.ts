@@ -11,6 +11,7 @@ import type { Actor } from '../api.js';
 import { createDecisionsService } from '../decisions/service.js';
 import { createTicketsService } from '../tickets/service.js';
 import { createThreadsService } from '../threads/service.js';
+import { createPlanningService } from '../planning/index.js';
 import { createProjectsService } from '../projects/index.js';
 import { createWakeService } from '../wake/index.js';
 import { createAccountsService } from '../usage/accounts.js';
@@ -678,6 +679,78 @@ describe('run engine', () => {
       });
       return id;
     }
+
+    describe('a planner answer written as final text is delivered (VS-954)', () => {
+      let threadId: string;
+      let plannerId: string;
+      function seedPlan(): void {
+        h.services.threads = createThreadsService(h.ctx, h.deps);
+        h.services.projects = createProjectsService(h.ctx, h.deps);
+        h.services.planning = createPlanningService(h.ctx, h.deps);
+        plannerId = seedPlanner();
+        threadId = h.services.threads.createOwned(plannerId, { humanLabel: 'Planner' }).id;
+        const plan = h.services.planning.create({ kind: 'human', id: 'victor' }, h.projectId, { threadId });
+        h.db.run('UPDATE agents SET plan_id = ? WHERE id = ?', [plan.id, plannerId]);
+      }
+      const outbound = (): Array<{ body: string; authorId: string | null; runId: string | null }> => h.db.all(
+        "SELECT body, author_id AS authorId, run_id AS runId FROM thread_messages WHERE thread_id = ? AND direction = 'outbound' ORDER BY created_at, rowid", [threadId]);
+      const eventTypes = (runId: string): string[] => h.db.all<{ p: string }>(
+        "SELECT payload_json AS p FROM run_events WHERE run_id = ? AND type = 'runtime.raw'", [runId]).map((r) => JSON.parse(r.p).originalType);
+
+      it('posts a multi-thousand-character final answer in full and records the fallback', async () => {
+        seedPlan();
+        h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'plan it' });
+        // Past the 1000-character summary cap, ending mid-sentence like the runs that were lost.
+        const long = `${'Pipeline lifecycle, ticket graph and assumptions. '.repeat(100)}No `;
+        runtime.queue.push({ finalText: long, structured: undefined } as never);
+        const run = await runOnce(plannerId);
+
+        expect(run.status).toBe('succeeded');
+        expect(run.summary).toHaveLength(1000);
+        const rows = outbound();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.body).toBe(long.trim());
+        expect(rows[0]).toMatchObject({ authorId: plannerId, runId: run.id });
+        expect(eventTypes(run.id)).toContain('run.delivery.fallback');
+      });
+
+      it.each([
+        ['a timed-out turn', { status: 'timed_out' }, /took too long/],
+        ['a failed turn', { status: 'failed', errorCode: 'boom', errorFamily: 'tooling' }, /The turn failed/],
+      ] as const)('leaves a notice for %s', async (_n, over, re) => {
+        seedPlan();
+        h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'plan it' });
+        runtime.queue.push({ finalText: null, structured: undefined, timedOut: over.status === 'timed_out', ...(over.status === 'failed' ? { exitCode: 1, error: { code: 'boom', family: 'tooling', message: 'it broke' } } : {}) } as never);
+        const run = await runOnce(plannerId);
+        expect(run.status).toBe(over.status);
+        const rows = outbound();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.body).toMatch(re);
+      });
+
+      it('stays silent for a failure with a retry scheduled', async () => {
+        seedPlan();
+        h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'plan it' });
+        runtime.queue.push({ finalText: null, structured: undefined, exitCode: 1, error: { code: 'rate_limited', family: 'transient_upstream', message: 'slow down', retryAfterMs: 60000, status: 429 } } as never);
+        const run = await runOnce(plannerId);
+        expect(run.status).toBe('failed');
+        expect(outbound()).toHaveLength(0);
+      });
+
+      it('leaves a turn that already replied through the tool alone', async () => {
+        seedPlan();
+        h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'plan it' });
+        // The reply tool carries the run id; the fake turn does the same mid-turn.
+        runtime.queue.push(async (input) => {
+          await h.services.threads!.outbound({ kind: 'agent', id: plannerId, runId: input.runId }, threadId, 'the real reply', { runId: input.runId });
+          return { finalText: 'Replied above.', structured: undefined } as never;
+        });
+        const run = await runOnce(plannerId);
+        expect(run.status).toBe('succeeded');
+        expect(outbound().map((m) => m.body)).toEqual(['the real reply']);
+        expect(eventTypes(run.id)).not.toContain('run.delivery.fallback');
+      });
+    });
 
     it('restricts every turn to the planner allowlist, mode restricted, no built-in write tool', async () => {
       const plannerId = seedPlanner();

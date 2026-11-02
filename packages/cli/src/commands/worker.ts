@@ -1,7 +1,7 @@
-/** `weave worker list|show|pause|resume|relaunch|cancel|purge` (PLAN §11, §20). */
+/** `weave worker list|show|pause|resume|relaunch|cancel|purge|prune-homes|retained|reclaim` (PLAN §11, §20). */
 import type { Command } from 'commander';
-import type { Agent } from '@weave-ai/shared';
-import { workerToCard } from '@weave-ai/render';
+import { RETAINED_COPY_CLASSES, type Agent, type RetainedCopiesReport, type RetainedCopy, type RetainedReclaimOffer } from '@weave-ai/shared';
+import { formatBytes, workerToCard } from '@weave-ai/render';
 import { emit, fields, heading, isJson, style, table, write, writeErr } from '../output.js';
 import { items, run, session } from './util.js';
 
@@ -212,6 +212,70 @@ export function register(program: Command): void {
     }));
 
   worker
+    .command('retained')
+    .description('worker copies kept because their work has not landed: size, class, age and why (VS-955)')
+    .option('--scan', 'rescan first (git state and disk usage of every kept copy) and wait for it')
+    .action(async (opts: Record<string, boolean>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      if (opts['scan'] === true) {
+        await client.wpost('/workers/retained/scan', {});
+        const deadline = Date.now() + 30 * 60_000;
+        while ((await client.wget<RetainedCopiesReport>('/workers/retained')).scanning && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, RETAINED_POLL_MS));
+        }
+      }
+      const r = await client.wget<RetainedCopiesReport>('/workers/retained');
+      emit(r, () => {
+        if (r.disk) {
+          const pct = r.disk.totalBytes ? Math.round((r.disk.freeBytes / r.disk.totalBytes) * 100) : 0;
+          const line = `${r.disk.path}: ${formatBytes(r.disk.freeBytes)} free of ${formatBytes(r.disk.totalBytes)} (${pct}%)`;
+          write(r.disk.low ? style.warn(`${line} — below the warning threshold`) : style.dim(line));
+        }
+        table(r.copies, [
+          { header: 'SIZE', get: (c) => formatBytes(c.bytes), align: 'right' },
+          { header: 'DIRECTORY', get: (c) => c.directory },
+          { header: 'TICKET', get: (c) => c.ticketIdentifier ?? '' },
+          { header: 'STATUS', get: (c) => c.ticketStatus ?? '' },
+          { header: 'CLASS', get: (c) => `${c.class}${c.offerable ? ' *' : ''}` },
+          { header: 'AGE', get: (c) => ageDays(c), align: 'right' },
+          { header: 'WHY KEPT', get: (c) => whyKept(c) },
+          { header: 'APPROVAL', get: (c) => (c.needsOwnApproval ? 'own card' : 'shared') },
+        ], { empty: r.scannedAt ? 'no retained worker copies' : 'not scanned yet — run with --scan' });
+        write(style.dim(`${r.totals.count} retained ${r.totals.count === 1 ? 'copy' : 'copies'}, ${formatBytes(r.totals.bytes)}; ${r.totals.offerable.count} offerable (*, terminal ≥ ${r.offerDays} days), ${formatBytes(r.totals.offerable.bytes)}. Scanned ${r.scannedAt ?? 'never'}${r.scanning ? ' (a scan is running)' : ''}.`));
+        if (r.totals.offerable.count) write(style.dim('Offer a reclaim with `weave worker reclaim --offerable`; nothing is removed until you approve its card.'));
+      });
+    }));
+
+  worker
+    .command('reclaim [directories...]')
+    .description('offer a reclaim of retained worker copies: raises discard-approval cards, removes nothing (VS-955)')
+    .option('--class <class>', `only copies of this class (${RETAINED_COPY_CLASSES.filter((c) => c !== 'open').join(', ')})`)
+    .option('--offerable', 'only copies whose ticket has been terminal for the offer window')
+    .action(async (directories: string[], opts: Record<string, string | boolean>, command: Command) => run(async () => {
+      const { client } = await session(command);
+      let selected = directories;
+      const cls = typeof opts['class'] === 'string' ? opts['class'] : undefined;
+      if (cls !== undefined && !(RETAINED_COPY_CLASSES as readonly string[]).includes(cls)) throw new Error(`unknown class "${cls}"`);
+      if (cls !== undefined || opts['offerable'] === true) {
+        const r = await client.wget<RetainedCopiesReport>('/workers/retained');
+        const pool = r.copies.filter((c) => (cls === undefined || c.class === cls) && (opts['offerable'] !== true || c.offerable));
+        selected = [...new Set([...selected, ...pool.map((c) => c.directory)])];
+      }
+      if (selected.length === 0) throw new Error('name the copies to reclaim, or use --class / --offerable (see `weave worker retained`)');
+      const offer = await client.wpost<RetainedReclaimOffer>('/workers/retained/reclaim', { directories: selected });
+      emit(offer, () => {
+        table(offer.cards, [
+          { header: 'CARD', get: (c) => c.decisionId },
+          { header: 'COPIES', get: (c) => String(c.directories.length), align: 'right' },
+          { header: 'FREES', get: (c) => formatBytes(c.bytes), align: 'right' },
+          { header: 'KIND', get: (c) => (c.own ? 'own card (unpushed or copy-only commits)' : 'shared card') },
+        ], { empty: 'no card raised' });
+        for (const s of offer.skipped) write(style.dim(`not offered ${s.directory}: ${s.reason}`));
+        if (offer.cards.length) write(`${style.ok('offered')} — nothing has been removed. Approve or keep each card in Needs you.`);
+      });
+    }));
+
+  worker
     .command('handover')
     .argument('<id>')
     .description("take a worker's session for your own terminal (VS-249)")
@@ -258,4 +322,25 @@ function sumTokens(usage: Record<string, unknown>): number | null {
   const output = numberOr(usage['outputTokens'] ?? usage['tokensOut'], null);
   if (input === null && output === null) return null;
   return (input ?? 0) + (output ?? 0);
+}
+
+const RETAINED_POLL_MS = 2_000;
+
+function ageDays(c: RetainedCopy): string {
+  if (!c.ageFrom) return '';
+  const days = Math.floor((Date.now() - Date.parse(c.ageFrom)) / 86_400_000);
+  return Number.isFinite(days) ? `${days}d` : '';
+}
+
+/** `2 modified, 3 untracked; 4 commits not landed (1 unpushed); branch gone`. */
+export function whyKept(c: RetainedCopy): string {
+  const parts: string[] = [];
+  if (c.reasons.includes('uncommitted') && c.uncommitted) parts.push(`${c.uncommitted.tracked} modified, ${c.uncommitted.untracked} untracked`);
+  if (c.reasons.includes('commits_not_on_landing_branch')) {
+    const n = Math.max(c.commitsNotOnLandingBranch ?? 0, c.commitsOnlyHere ?? 0);
+    parts.push(`${n} commit(s) not landed${c.commitsOnNoRemote ? ` (${c.commitsOnNoRemote} unpushed)` : ''}`);
+  }
+  if (c.reasons.includes('branch_gone')) parts.push('branch gone from the clone');
+  if (c.reasons.includes('unreadable')) parts.push(`unreadable${c.error ? `: ${c.error.slice(0, 60)}` : ''}`);
+  return parts.join('; ') || (c.class === 'orphan' ? 'no agent or ticket' : '');
 }

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { describeLiveInput, isWorkerStalled } from '@weave-ai/core';
-import { TICKET_KINDS } from '@weave-ai/shared';
+import { TICKET_KINDS, type DiskCheck } from '@weave-ai/shared';
 import type { AppEnv } from '../types.js';
 import { body, csv, query } from '../http.js';
 import { scheduledWake } from '../inspect.js';
@@ -64,6 +64,23 @@ export function workerRoutes(): Hono<AppEnv> {
   app.post('/prune-homes', async (c) => {
     const { dryRun, ignoreAge } = await body(c, z.object({ dryRun: z.boolean().default(true), ignoreAge: z.boolean().default(false) }).strict());
     return c.json(await c.get('ws').services.workers.reclaimFinishedHomes(c.get('actor'), { dryRun, ignoreAge }));
+  });
+
+  // VS-955: the workspace's retained worker copies — kept because their work has not landed — from
+  // the last scan, with the daemon's last free-space check. Registered before `/:id`.
+  app.get('/retained', (c) => {
+    const ws = c.get('ws');
+    const disk = ws.ctx.db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'disk.last_check'")?.value;
+    return c.json({ ...ws.services.workers.retainedCopies(), disk: disk ? JSON.parse(disk) as DiskCheck : null });
+  });
+  app.post('/retained/scan', (c) => {
+    const started = c.get('ws').services.workers.startRetainedScan();
+    return c.json({ started, scanning: true }, 202);
+  });
+  // Raises discard_approval cards for captain; never removes anything itself.
+  app.post('/retained/reclaim', async (c) => {
+    const { directories } = await body(c, z.object({ directories: z.array(z.string().min(1)).min(1).max(500) }).strict());
+    return c.json(await c.get('ws').services.workers.offerRetainedReclaim(c.get('actor'), directories));
   });
 
   app.get('/:id', (c) => {

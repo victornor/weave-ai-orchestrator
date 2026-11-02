@@ -19,13 +19,18 @@ function trim1(v: number): string {
   return s.endsWith('.0') ? s.slice(0, -2) : s;
 }
 
-/** 512B · 4.2KB · 1.1MB — an attachment's size, on the same "short and never scientific" terms as `formatTokens`. */
+/**
+ * 512B · 4.2KB · 1.1MB · 12.3GB — an attachment's or a worker copy's size (VS-955 added GB and TB), on
+ * the same "short and never scientific" terms as `formatTokens`.
+ */
 export function formatBytes(n: number | null | undefined): string {
   if (n === null || n === undefined || !Number.isFinite(n)) return '—';
   const v = Math.max(0, Math.round(n));
   if (v < 1024) return `${v}B`;
-  if (v < 1024 * 1024) return `${trim1(v / 1024)}KB`;
-  return `${trim1(v / (1024 * 1024))}MB`;
+  if (v < 1024 ** 2) return `${trim1(v / 1024)}KB`;
+  if (v < 1024 ** 3) return `${trim1(v / 1024 ** 2)}MB`;
+  if (v < 1024 ** 4) return `${trim1(v / 1024 ** 3)}GB`;
+  return `${trim1(v / 1024 ** 4)}TB`;
 }
 
 /** Cents → `$0.41`. Sub-cent amounts keep a leading `<`. */

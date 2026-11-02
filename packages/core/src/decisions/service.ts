@@ -6,6 +6,7 @@ import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
 import { interruptRunForSteer, steerInterruptTarget } from '../runs/active.js';
 import { WORKERS_RUNTIME_CORRELATION } from '../models/index.js';
+import { isReclaimTarget } from '../workers/retained.js';
 
 const asDecision = (r: Record<string, unknown>): Decision => decisionRow(r) as unknown as Decision;
 
@@ -509,6 +510,18 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
     await deps().models.settleWorkersRuntime(actor, key.slice('runtime:'.length));
   }
 
+  /**
+   * VS-955: a reclaim card for retained worker copies. Only a human's `approve` removes anything, and
+   * `reclaimRetained` re-reads every copy before it does; `reject` changes nothing.
+   */
+  async function applyRetainedReclaim(actor: Actor, d: Decision, key: string): Promise<void> {
+    if (key !== NAMED_CARD_OPTION_KEYS.discard_approval.approve) {
+      recordActivity(db, ws, actor, 'worker.retained_copy_reclaim_declined', 'decision', d.id, {});
+      return;
+    }
+    await deps().workers.reclaimRetained(actor, d);
+  }
+
   function applyDiscardApproval(actor: Actor, d: Decision, key: string, text: string | null): void {
     const ticketId = ticketOf(d);
     if (!ticketId) return;
@@ -632,6 +645,12 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
       const supersededBy = d.status === 'superseded' ? replacementFor(d) : null;
       throw new OcError('wrong_status', `decision ${id} is ${d.status}`, { status: d.status, ...(supersededBy ? { supersededBy } : {}) });
     }
+    // VS-955: a reclaim of retained worker copies discards unlanded work, so only captain's own tap
+    // answers it — not the weaver, not a relay, not the daemon's auto-approval. Refused before anything
+    // is recorded, so the card stays open.
+    if (d.kind === 'discard_approval' && isReclaimTarget(d.target) && (actor.kind !== 'human' || ans.relayFromMessageId)) {
+      throw new OcError('forbidden', 'a reclaim of retained worker copies is answered by the human only');
+    }
     // VS-310: enforced here, not only in the tool's `scope: 'weaver'`, so no future caller can
     // fabricate a relay. Validated before any write and before the side effects below.
     const relayFrom = ans.relayFromMessageId ? validateRelayMessage(actor, d, ans.relayFromMessageId) : null;
@@ -720,7 +739,10 @@ export function createDecisionsService(ctx: WorkspaceContext, deps: () => CoreSe
         case 'merge_approval': await applyMergeApproval(actor, answered, effective, text); break;
         case 'hire_approval': await applyHireApproval(actor, answered, effective); break;
         case 'retry_approval': await applyRetryApproval(actor, answered, effective); break;
-        case 'discard_approval': applyDiscardApproval(actor, answered, effective, text); break;
+        case 'discard_approval':
+          if (isReclaimTarget(answered.target)) await applyRetainedReclaim(actor, answered, effective);
+          else applyDiscardApproval(actor, answered, effective, text);
+          break;
         case 'question': await applyWorkersRuntimeQuestion(actor, answered, effective); break;
         default: break;
       }

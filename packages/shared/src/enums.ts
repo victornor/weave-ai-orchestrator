@@ -72,6 +72,20 @@ export type ArchiveCommit = (typeof ARCHIVE_COMMITS)[number];
 export const MODEL_SOURCES = ['workspace', 'daemon', 'default'] as const;
 export type ModelSource = (typeof MODEL_SOURCES)[number];
 
+/**
+ * VS-955: a retained worker copy's class — a `workers/` checkout kept because its work has not landed.
+ * `open`: its ticket is not terminal (never offered for reclaim). `finished_unlanded`: ticket done or
+ * cancelled, branch still in the project clone. `branch_gone`: ticket terminal and the branch is no
+ * longer in the clone, so only the copy's own files remain. `orphan`: no agent row, or no ticket.
+ */
+export const RETAINED_COPY_CLASSES = ['open', 'finished_unlanded', 'branch_gone', 'orphan'] as const;
+export type RetainedCopyClass = (typeof RETAINED_COPY_CLASSES)[number];
+/** VS-955: why a retained copy was not retired. A copy may carry several. */
+export const RETAINED_COPY_REASONS = ['uncommitted', 'commits_not_on_landing_branch', 'branch_gone', 'unreadable'] as const;
+export type RetainedCopyReason = (typeof RETAINED_COPY_REASONS)[number];
+/** VS-955: `Decision.target.kind` of a `discard_approval` that reclaims retained worker copies. */
+export const RETAINED_RECLAIM_TARGET_KIND = 'retained_copy_reclaim';
+
 export const DECISION_KINDS = ['approval', 'question', 'concern', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval', 'retry_approval', 'action_approval', 'promotion_approval'] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];
 

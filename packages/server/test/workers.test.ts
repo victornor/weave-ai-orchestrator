@@ -449,3 +449,50 @@ describe('GET /workers — session context size (VS-554)', () => {
     expect(list.find((w) => w.id === 'ag_no_ctx')?.lastContextTokens).toBeNull();
   });
 });
+
+describe('retained worker copies (VS-955)', () => {
+  const report = {
+    scannedAt: '2026-11-02T19:00:00.000Z', scanning: false, offerDays: 30,
+    totals: { count: 1, bytes: 12 * 1024 ** 3, offerable: { count: 1, bytes: 12 * 1024 ** 3 }, byClass: {} },
+    copies: [{ directory: 'ag_old', class: 'finished_unlanded', bytes: 12 * 1024 ** 3, reasons: ['uncommitted'] }],
+  };
+
+  it('GET /workers/retained serves the stored report with the last disk check', async () => {
+    const { h, fetch } = app();
+    h.impls.workers!['retainedCopies'] = () => report;
+    h.db.run("INSERT INTO meta (key, value) VALUES ('disk.last_check', ?)", [JSON.stringify({ path: '/srv', freeBytes: 1, totalBytes: 2, low: true, thresholds: { freePercent: 10, freeBytes: 5 }, checkedAt: 't' })]);
+    const res = await fetch('/api/w/ws1/workers/retained', { headers: authed() });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ totals: { count: 1 }, copies: [{ directory: 'ag_old' }], disk: { path: '/srv', low: true } });
+  });
+
+  it('POST /workers/retained/scan starts a background scan and answers 202', async () => {
+    const { h, fetch } = app();
+    const start = vi.fn(() => true);
+    h.impls.workers!['startRetainedScan'] = start;
+    const res = await fetch('/api/w/ws1/workers/retained/scan', { method: 'POST', headers: authed() });
+    expect(res.status).toBe(202);
+    expect(await res.json()).toEqual({ started: true, scanning: true });
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it('POST /workers/retained/reclaim offers cards for the named copies and passes the human actor', async () => {
+    const { h, fetch } = app();
+    const offer = vi.fn(async () => ({ cards: [{ decisionId: 'd1', directories: ['ag_old'], bytes: 1, own: true }], skipped: [] }));
+    h.impls.workers!['offerRetainedReclaim'] = offer;
+    const res = await fetch('/api/w/ws1/workers/retained/reclaim', {
+      method: 'POST', headers: { ...authed(), 'content-type': 'application/json' }, body: JSON.stringify({ directories: ['ag_old'] }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ cards: [{ decisionId: 'd1' }] });
+    expect(offer).toHaveBeenCalledWith(expect.objectContaining({ kind: 'human' }), ['ag_old']);
+  });
+
+  it('POST /workers/retained/reclaim refuses an empty selection', async () => {
+    const { fetch } = app();
+    const res = await fetch('/api/w/ws1/workers/retained/reclaim', {
+      method: 'POST', headers: { ...authed(), 'content-type': 'application/json' }, body: JSON.stringify({ directories: [] }),
+    });
+    expect(res.status).toBe(400);
+  });
+});

@@ -3,13 +3,16 @@
  * daemon database and each workspace database are real, and the two things the notice reaches — the
  * primary chat thread and the weaver's wake queue — are recorded by fakes.
  */
-import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Db, newId, nowIso } from '@weave-ai/db';
 import type { RestartNotice } from '@weave-ai/shared';
 import {
-  announceRestart, interruptedTurns, markBooted, observeBoot, queuedForCapacity, recordShutdown, recordStartFailure,
-  restartNoticeReason, restartNoticeText, type BootObservation, type InterruptedTurn,
+  announceRestart, formatOutage, interruptedTurns, markBooted, observeBoot, queuedForCapacity, recordAlive, recordShutdown,
+  recordStartFailure, restartNoticeReason, restartNoticeText, startLivenessTrail, type BootObservation, type InterruptedTurn,
 } from '../src/restart-notice.js';
+import { parseServiceExit } from '../src/serviceExit.js';
 import type { WorkspaceRuntime } from '../src/types.js';
 
 interface Workspace {
@@ -67,6 +70,8 @@ const observation = (over: Partial<BootObservation> = {}): BootObservation => ({
   downAt: '2026-09-13T19:16:31.000Z',
   shutdownReason: 'SIGTERM',
   clean: true,
+  lastAliveAt: '2026-09-13T19:16:00.000Z',
+  previousInvocationId: null,
   failedStarts: { count: 0, lastAt: null, lastReason: null },
   ...over,
 });
@@ -111,6 +116,148 @@ describe('the durable lifecycle (VS-339)', () => {
     markBooted(db, { now: '2026-09-13T19:17:30.000Z', release: '/rel/a', pid: 2 });
     const after = observeBoot(db, { now: '2026-09-13T19:20:00.000Z', release: '/rel/a', pid: 3 });
     expect(after.failedStarts.count).toBe(0);
+    db.close();
+  });
+});
+
+describe('a crash after an earlier clean shutdown (VS-955)', () => {
+  // The 2026-11-02 record: the upgrade's SIGTERM shutdown at 02:10:34.237, then the process that booted
+  // at 02:10:34.638 died of SIGBUS at 20:00:43 without recording anything.
+  function crashedDb(): Db {
+    const db = new Db(':memory:');
+    db.migrate();
+    markBooted(db, { now: '2026-11-01T09:00:00.000Z', release: '/rel/a', pid: 1, invocationId: null });
+    recordShutdown(db, 'SIGTERM', '2026-11-02T02:10:34.237Z');
+    markBooted(db, { now: '2026-11-02T02:10:34.638Z', release: '/rel/b', pid: 2, invocationId: '40c354b060bb480ab4b7c667845021b0' });
+    recordAlive(db, '2026-11-02T19:00:20.000Z');
+    return db;
+  }
+
+  it('reports the down time and reason as unknown, never the earlier process’s shutdown', () => {
+    const db = crashedDb();
+    const seen = observeBoot(db, { now: '2026-11-02T19:00:46.605Z', release: '/rel/b', pid: 3 });
+    expect(seen.clean).toBe(false);
+    expect(seen.downAt).toBeNull();
+    expect(seen.shutdownReason).toBeNull();
+    expect(seen.previousBootAt).toBe('2026-11-02T02:10:34.638Z');
+    expect(seen.lastAliveAt).toBe('2026-11-02T19:00:20.000Z');
+    expect(seen.previousInvocationId).toBe('40c354b060bb480ab4b7c667845021b0');
+    // No time reported may predate the previous boot.
+    for (const t of [seen.downAt, seen.lastAliveAt]) if (t !== null) expect(t >= seen.previousBootAt!).toBe(true);
+    db.close();
+  });
+
+  it('ignores a liveness instant and an invocation left by an earlier process', () => {
+    const db = new Db(':memory:');
+    db.migrate();
+    markBooted(db, { now: '2026-11-01T09:00:00.000Z', release: '/rel/a', pid: 1, invocationId: 'aaaa' });
+    recordAlive(db, '2026-11-01T10:00:00.000Z');
+    // A boot that never reached its first liveness write keeps the boot instant itself.
+    markBooted(db, { now: '2026-11-02T02:10:34.638Z', release: '/rel/a', pid: 2 });
+    const seen = observeBoot(db, { now: '2026-11-02T03:00:00.000Z', release: '/rel/a', pid: 3 });
+    expect(seen.lastAliveAt).toBe('2026-11-02T02:10:34.638Z');
+    expect(seen.previousInvocationId).toBe('');
+    db.close();
+  });
+
+  it('the wake and the line say unknown when nothing recorded the exit', async () => {
+    const db = crashedDb();
+    const ws = workspace('ws1');
+    const seen = observeBoot(db, { now: '2026-11-02T19:00:46.605Z', release: '/rel/b', pid: 3 });
+    await announceRestart({ db: daemonDb(), workspaces: new Map([[ws.id, ws.runtime]]), observation: seen, readExit: async () => null });
+    const notice = ws.woken[0]!.payload;
+    expect(notice).toMatchObject({ clean: false, downAt: null, downAtSource: null, shutdownReason: null, exit: null, lastAliveAt: '2026-11-02T19:00:20.000Z' });
+    expect(ws.sent[0]!.text).toMatch(/^Back up at \d\d:\d\d after an unclean shutdown; when it went down and why are unknown \(last alive at \d\d:\d\d\)\.$/);
+    db.close(); ws.db.close();
+  });
+
+  it('the wake and the line state the exit and the outage when the journal recorded them', async () => {
+    const db = crashedDb();
+    const ws = workspace('ws1');
+    const fixture = readFileSync(join(import.meta.dirname, 'fixtures', 'journal-sigbus-crash.jsonl'), 'utf8');
+    const asked: string[] = [];
+    const seen = observeBoot(db, { now: '2026-11-02T19:00:46.605Z', release: '/rel/b', pid: 3 });
+    await announceRestart({
+      db: daemonDb(), workspaces: new Map([[ws.id, ws.runtime]]), observation: seen,
+      readExit: async (id) => { asked.push(id); return parseServiceExit(fixture); },
+    });
+    expect(asked).toEqual(['40c354b060bb480ab4b7c667845021b0']);
+    const notice = ws.woken[0]!.payload;
+    expect(notice).toMatchObject({
+      clean: false, downAt: '2026-11-02T19:00:43.527Z', downAtSource: 'service_manager', shutdownReason: null,
+      exit: { exitCode: 'dumped', signal: 'SIGBUS', unitResult: 'core-dump', restarts: 1 },
+    });
+    expect(ws.sent[0]!.text).toMatch(/^Back up at \d\d:\d\d after an unclean shutdown \(SIGBUS, core dumped\); down 3 s\.$/);
+    expect(ws.woken[0]!.reason).toContain('unclean shutdown (SIGBUS, core dumped)');
+    db.close(); ws.db.close();
+  });
+
+  it('a journal exit outside the previous process’s window is not its down time', async () => {
+    const ws = workspace('ws1');
+    await announceRestart({
+      db: daemonDb(), workspaces: new Map([[ws.id, ws.runtime]]),
+      observation: observation({ clean: false, downAt: null, shutdownReason: null, previousInvocationId: 'x' }),
+      readExit: async () => ({ source: 'systemd', exitCode: 'dumped', exitStatus: '7', signal: 'SIGBUS', unitResult: null, restarts: null, exitedAt: '2026-09-13T09:00:00.000Z' }),
+    });
+    expect(ws.woken[0]!.payload).toMatchObject({ downAt: null, downAtSource: null });
+    expect(ws.sent[0]!.text).toContain('(SIGBUS, core dumped); when it went down is unknown');
+    ws.db.close();
+  });
+
+  it('a reader that throws leaves the exit unknown', async () => {
+    const ws = workspace('ws1');
+    await announceRestart({
+      db: daemonDb(), workspaces: new Map([[ws.id, ws.runtime]]),
+      observation: observation({ clean: false, downAt: null, shutdownReason: null, previousInvocationId: 'x' }),
+      readExit: async () => { throw new Error('no journalctl'); },
+    });
+    expect(ws.woken[0]!.payload).toMatchObject({ exit: null, downAt: null });
+    ws.db.close();
+  });
+
+  it('a clean restart keeps its recorded time and reason and never asks the journal', async () => {
+    const ws = workspace('ws1');
+    let asked = 0;
+    await announceRestart({
+      db: daemonDb(), workspaces: new Map([[ws.id, ws.runtime]]),
+      observation: observation({ previousInvocationId: 'x' }),
+      readExit: async () => { asked += 1; return null; },
+    });
+    expect(asked).toBe(0);
+    expect(ws.woken[0]!.payload).toMatchObject({ downAt: '2026-09-13T19:16:31.000Z', downAtSource: 'recorded_shutdown', shutdownReason: 'SIGTERM' });
+    ws.db.close();
+  });
+
+  it('formats an outage for one line', () => {
+    expect(formatOutage(3_078)).toBe('3 s');
+    expect(formatOutage(12 * 60_000)).toBe('12 min');
+    expect(formatOutage(125 * 60_000)).toBe('2 h 5 min');
+    expect(formatOutage(120 * 60_000)).toBe('2 h');
+  });
+});
+
+describe('the liveness trail (VS-955)', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('advances every interval, and a failing write neither throws nor stops it', () => {
+    vi.useFakeTimers();
+    const db = new Db(':memory:');
+    db.migrate();
+    markBooted(db, { now: '2026-11-02T00:00:00.000Z', release: null, pid: null });
+    let n = 0;
+    let fail = false;
+    const trail = startLivenessTrail(db, {
+      everyMs: 1000,
+      now: () => { n += 1; if (fail) throw new Error('ENOSPC'); return `2026-11-02T00:00:0${n}.000Z`; },
+    });
+    vi.advanceTimersByTime(1000);
+    expect(observeBoot(db, { now: '2026-11-02T01:00:00.000Z', release: null, pid: null }).lastAliveAt).toBe('2026-11-02T00:00:01.000Z');
+    fail = true;
+    expect(() => vi.advanceTimersByTime(2000)).not.toThrow();
+    fail = false;
+    vi.advanceTimersByTime(1000);
+    expect(observeBoot(db, { now: '2026-11-02T01:00:00.000Z', release: null, pid: null }).lastAliveAt).toBe('2026-11-02T00:00:04.000Z');
+    trail.stop();
     db.close();
   });
 });

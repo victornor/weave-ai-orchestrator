@@ -61,6 +61,35 @@ describe('the restart notice at boot (VS-339)', () => {
     await until(() => ctx.db.get("SELECT id FROM thread_messages WHERE body LIKE 'Back up at%'") !== undefined);
   }, 20_000);
 
+  it('a crash restart reports an unknown down time, and a hanging journal lookup does not hold the boot (VS-955)', async () => {
+    const configDir = await configDirFor('crash');
+    daemon = await startDaemon({ configDir, restart: { invocationId: '40c354b060bb480ab4b7c667845021b0' } });
+    await daemon.stop('test');
+    daemon = null;
+
+    // Simulate a crash: the previous process's own shutdown record never got written.
+    const configDb = openDb(join(configDir, 'daemon.sqlite'));
+    configDb.run("DELETE FROM meta WHERE key IN ('daemon.lifecycle.shutdown_at', 'daemon.lifecycle.shutdown_reason')");
+    configDb.close();
+
+    let release: (v: null) => void = () => undefined;
+    const asked: string[] = [];
+    daemon = await startDaemon({
+      configDir,
+      restart: { invocationId: null, readExit: (id) => { asked.push(id); return new Promise((r) => { release = r; }); } },
+    });
+    // The boot returned while the lookup is still pending.
+    expect(asked).toEqual(['40c354b060bb480ab4b7c667845021b0']);
+    expect(restartedWake(daemon, 'crash')).toBeUndefined();
+
+    release(null);
+    await until(() => restartedWake(daemon!, 'crash') !== undefined);
+    const wake = daemon.workspaces.get('crash')!.ctx.db
+      .get<{ reason: string; payload: string }>("SELECT reason, payload_json AS payload FROM wakeups WHERE reason LIKE 'The daemon restarted%'")!;
+    expect(wake.reason).toContain('unclean shutdown');
+    expect(JSON.parse(wake.payload)).toMatchObject({ clean: false, downAt: null, downAtSource: null, shutdownReason: null, exit: null });
+  }, 20_000);
+
   it('a boot on a different release is an upgrade and posts no restart notice', async () => {
     const configDir = await configDirFor('upgrade');
     daemon = await startDaemon({ configDir });

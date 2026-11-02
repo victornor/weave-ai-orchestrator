@@ -61,6 +61,9 @@ transcription:
   command: ""                 # reads audio on stdin, prints the transcript
 supervisor:
   stallExitSec: 600           # a workspace supervisor `stalled` this long exits the daemon under systemd (INVOCATION_ID) so Restart=always restarts it; 0 = only log
+disk:                         # VS-955: warn captain when the filesystem holding a workspace is low; never deletes anything
+  warnFreePercent: 10         # warn below this share of the filesystem free…
+  warnFreeBytes: 53687091200  # …or below this many bytes (50 GiB), whichever trips first; checked every 10 min, once per low episode
 logLevel: info
 otlpEndpoint: ""              # unset = no export; there is no phone-home
 ```
@@ -94,6 +97,7 @@ defaults:
   turnTimeoutSec: 2700
   silenceTimeoutSec: 600      # the stuck-worker watchdog window
   humanReminderAfterSec: 14400  # remind the human of a card still theirs to answer after 4 h; 0 = never
+  retainedCopyOfferDays: 30   # VS-955: a retained worker copy is marked offerable for reclaim once its ticket has been terminal this long; it only highlights, nothing is removed without approval
   humanReminderEverySec: 86400  # then again every 24 h; the clock starts at the weaver's review for plan/merge/action approvals
   bootstrapBudgetTokens: 16000
   knowledgeBudgetTokens:        # tokens per knowledge file; curation is triggered at 80% of it

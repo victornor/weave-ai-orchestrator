@@ -26,6 +26,7 @@ import {
   type NamedCardKind,
   type Run,
   type Ticket,
+  RETAINED_RECLAIM_TARGET_KIND,
 } from '@weave-ai/shared';
 import { workerPauseReason } from '@weave-ai/render';
 import { A, useGo } from '../app/link';
@@ -86,6 +87,11 @@ const NAMED: NamedCardKind[] = ['plan_approval', 'merge_approval', 'hire_approva
 /** The approval kinds that show the ticket's attached evidence (VS-555). */
 const EVIDENCE_KINDS = new Set<string>(['plan_approval', 'merge_approval', 'action_approval']);
 
+/** VS-955: a discard card that reclaims retained worker copies rather than one ticket's worktree. */
+function isRetainedReclaim(d: Decision): boolean {
+  return d.target?.['kind'] === RETAINED_RECLAIM_TARGET_KIND;
+}
+
 /** The header phrase, neutral text — no status glyph (HANDOFF §6). */
 function headerLabel(d: Decision, asker?: 'weaver' | 'worker'): string {
   if (d.kind === 'question') return asker === 'weaver' ? 'Weaver asks' : asker === 'worker' ? 'Worker question' : 'Needs you';
@@ -94,7 +100,7 @@ function headerLabel(d: Decision, asker?: 'weaver' | 'worker'): string {
   if (d.kind === 'retry_approval') return 'Worker stopped';
   if (d.kind === 'plan_approval' || d.kind === 'action_approval' || d.kind === 'hire_approval') return 'Needs you';
   if (d.kind === 'merge_approval') return 'Merge approval';
-  if (d.kind === 'discard_approval') return 'Discard worktree';
+  if (d.kind === 'discard_approval') return isRetainedReclaim(d) ? 'Reclaim worker copies' : 'Discard worktree';
   return 'Needs you';
 }
 
@@ -393,6 +399,9 @@ export function V2DecisionCard({
   // blocked card cannot be mistaken for an actionable one.
   const approveReady = !blocked && missing.length === 0;
   const destructive = decision.kind === 'discard_approval';
+  // VS-955: a reclaim card names no ticket, so it is confirmed by typing the word instead.
+  const reclaimCard = destructive && isRetainedReclaim(decision);
+  const confirmPhrase = reclaimCard ? 'reclaim' : (ticketIdentifier ?? '');
   // VS-806: only a card an agent raised can be dismissed; a system approval gates a ticket or agent.
   const dismissible = onDismiss != null && !inert && (ASKABLE_DECISION_KINDS as readonly string[]).includes(decision.kind);
   const docTarget = documentTarget(decision);
@@ -630,8 +639,8 @@ export function V2DecisionCard({
         {destructive && !inert ? (
           <input
             value={confirm} onChange={(e) => setConfirm(e.target.value)}
-            placeholder={`type ${ticketIdentifier ?? 'the ticket id'} to confirm`}
-            aria-label="Type the ticket identifier to confirm"
+            placeholder={reclaimCard ? 'type reclaim to confirm' : `type ${ticketIdentifier ?? 'the ticket id'} to confirm`}
+            aria-label={reclaimCard ? 'Type reclaim to confirm' : 'Type the ticket identifier to confirm'}
             className="ac-mono mb-2 h-8 w-full rounded-r4 border border-line-2 bg-bg-input px-2.5 text-meta text-text-1 outline-none placeholder:text-text-4"
           />
         ) : null}
@@ -758,11 +767,11 @@ export function V2DecisionCard({
         <div className={cx('flex flex-wrap items-center gap-2', !inert && !blocked ? 'min-h-[34px]' : null)}>
           {inert ? null : destructive ? (
             <button
-              type="button" disabled={busy || confirm.trim() !== (ticketIdentifier ?? '')}
+              type="button" disabled={busy || confirm.trim() !== confirmPhrase}
               onClick={() => answer(approveKey)}
               className="h-9 rounded-r4 border-0 bg-blocked px-3 text-meta font-medium text-white disabled:cursor-not-allowed disabled:opacity-55"
             >
-              Discard
+              {reclaimCard ? 'Reclaim' : 'Discard'}
             </button>
           ) : namedKind === 'plan_approval' || namedKind === 'action_approval' ? (
             <>

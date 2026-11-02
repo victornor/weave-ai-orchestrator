@@ -52,14 +52,16 @@ const fs = require('node:fs');
 const LINES = ${JSON.stringify(spec.lines ?? [])};
 const FLUSH = ${JSON.stringify(spec.onInterrupt?.lines ?? [])};
 function writeAll(list) { for (const l of list) process.stdout.write(l + '\\n'); }
-writeAll(LINES);
 function finish(sig, code) {
   try { fs.writeFileSync(${JSON.stringify(marker)}, sig); } catch (e) { /* best effort */ }
   writeAll(FLUSH);
   process.exit(code);
 }
+// Handlers before the first line: an adapter may interrupt the moment it reads that line, and a
+// signal arriving before registration takes the default action — no marker, a flaky test (VS-955).
 ${sigint}
 process.on('SIGTERM', () => finish('SIGTERM', ${exitCode}));
+writeAll(LINES);
 ${spec.hang === false
     ? 'process.exit(0);'
     // The interval is what makes only a signal able to end the turn; the timeout is a safety net so

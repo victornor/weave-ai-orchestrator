@@ -551,6 +551,12 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
    */
   knowledgeNeverReadDays: z.number().int().min(1).default(90),
   workerArchiveDays: z.number().int().default(30),
+  /**
+   * VS-955: how long a retained worker copy's ticket must have been terminal before the copy is marked
+   * offerable for reclaim. It only orders and highlights the storage view; nothing is ever removed
+   * because of it — a reclaim of unlanded work always needs captain's `discard_approval`.
+   */
+  retainedCopyOfferDays: z.number().int().min(0).default(30),
   runLogRetentionDays: z.number().int().default(30),
   permissionMode: z.enum(PERMISSION_MODES).default('auto'),
   /**
@@ -875,6 +881,14 @@ export const DaemonConfigSchema = z.object({
    * outside systemd a stall is only logged, because nothing would restart the process.
    */
   supervisor: z.object({ stallExitSec: z.number().int().min(0).default(600) }).default({}),
+  /**
+   * VS-955: warn captain when the filesystem holding a workspace root has less free space than either
+   * threshold. Checked every 10 minutes; once per low episode; never deletes anything.
+   */
+  disk: z.object({
+    warnFreePercent: z.number().min(0).max(100).default(10),
+    warnFreeBytes: z.number().int().min(0).default(50 * 1024 ** 3),
+  }).default({}),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   otlpEndpoint: z.string().optional(),
   /**

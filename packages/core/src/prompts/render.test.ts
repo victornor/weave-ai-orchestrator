@@ -246,6 +246,14 @@ describe('prompt rendering', () => {
     expect(out).not.toMatch(/\{\{|\}\}/);
   });
 
+  it('tells the weaver a restart wake with no downAt is an unknown outage, never a computed one (VS-955)', () => {
+    h.ctx.templatesDir = SHIPPED_TEMPLATES;
+    const out = renderConductorInstructions(h.ctx, h.deps);
+    expect(out).toContain('`kind: daemon.restarted`');
+    expect(out).toContain('a null `downAt` means the down time is unknown');
+    expect(out).toContain('`lastAliveAt` is only an upper bound');
+  });
+
   it('names the weaver project list by the display label, falling back to the slug (VS-330)', () => {
     h.db.update('projects', h.projectId, { name: 'Weave AI' });
     expect(renderConductorInstructions(h.ctx, h.deps)).toContain('- `api` — Weave AI');

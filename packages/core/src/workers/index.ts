@@ -17,6 +17,7 @@ import { effectiveModels, modelSettingFor, modelsFor, resolveWorkerModelId as re
 import { landedWorkTest, worktreeChanges } from '../worktrees/landed.js';
 import { configureGitWorktreeIdentity, git, resolveWorkerGitIdentity, worktreeState } from '../util/git.js';
 import { buildHandoverCommand } from './resume-command.js';
+import { createRetainedCopies } from './retained.js';
 import { sessionActivitySignal } from './activity-signal.js';
 import { handoverCommentBody, reconcileHandover, type HandoverSnapshot } from './handover-reconcile.js';
 
@@ -136,6 +137,11 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     if (!p) throw new OcError('internal', 'no worktree provider registered');
     return p;
   };
+  // VS-955: the retained-copy report and its approval-gated reclaim.
+  const retained = createRetainedCopies({
+    ctx, deps,
+    providerFor: (project, providerId) => (providerId ? ctx.registries.worktreeProviders.get(providerId) : undefined) ?? providerFor(project),
+  });
   const liveInProject = (projectId: string): number =>
     ctx.db.get<{ n: number }>(`SELECT COUNT(*) n FROM agents WHERE project_id = ? AND kind = 'worker' AND status IN ${LIVE}`, [projectId])?.n ?? 0;
 
@@ -1182,6 +1188,12 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       }
       return result;
     },
+
+    retainedCopies: () => retained.report(),
+    scanRetainedCopies: () => retained.scan(),
+    startRetainedScan: () => retained.startScan(),
+    offerRetainedReclaim: (actor, directories) => retained.offer(actor, directories),
+    reclaimRetained: (actor, decision) => retained.reclaim(actor, decision),
 
     sessionResumable(id: string): boolean {
       return sessions.active(id) !== null;

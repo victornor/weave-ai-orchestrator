@@ -350,6 +350,93 @@ export interface UpgradeAnnouncement {
  * in the notice's `interrupted` list and, for the subset the run limit holds back, in
  * `queuedForCapacity` (VS-375).
  */
+/** VS-955: one retained worker copy, as the last scan found it. */
+export interface RetainedCopy {
+  /** The directory name under `workers/` — the worker id, or an unknown name for an orphan. */
+  directory: string;
+  workerId: string | null;
+  workerName: string | null;
+  workerStatus: E.AgentStatus | null;
+  ticketId: string | null;
+  ticketIdentifier: string | null;
+  ticketStatus: E.TicketStatus | null;
+  projectId: string | null;
+  branch: string | null;
+  /** The checkout's HEAD when scanned; a reclaim refuses a copy whose head moved since its card. */
+  headSha: string | null;
+  class: E.RetainedCopyClass;
+  /** Not `open`, and terminal for at least `defaults.retainedCopyOfferDays`. Highlights only. */
+  offerable: boolean;
+  /** Where the age is measured from: the ticket's terminal time, else the worker's finish time. */
+  ageFrom: string | null;
+  /** Size on disk of the whole home, from `du`; null when it could not be measured. */
+  bytes: number | null;
+  /** Null when the checkout's status could not be read. */
+  uncommitted: { tracked: number; untracked: number } | null;
+  /** Commits on the branch not contained in the landing branch (0 when a merged PR proves it landed). */
+  commitsNotOnLandingBranch: number | null;
+  /** Of the branch's commits, how many are on no remote. */
+  commitsOnNoRemote: number | null;
+  /** Commits reachable only from the checkout's HEAD — not from any branch, remote or tag. Null: unknown. */
+  commitsOnlyHere: number | null;
+  /** The ticket has a merged pull-request work product, the durable landing proof (VS-859). */
+  mergedPr: boolean;
+  error: string | null;
+  reasons: E.RetainedCopyReason[];
+  /**
+   * A reclaim of this copy needs a `discard_approval` of its own, never shared: it has unpushed
+   * commits, commits only the copy holds, or state that could not be read.
+   */
+  needsOwnApproval: boolean;
+  scannedAt: string;
+}
+
+export interface RetainedCopyTotals { count: number; bytes: number }
+
+/** VS-955: the last free-space check of the filesystem holding a workspace root. */
+export interface DiskCheck {
+  path: string;
+  freeBytes: number;
+  totalBytes: number;
+  low: boolean;
+  thresholds: { freePercent: number; freeBytes: number };
+  checkedAt: string;
+}
+
+/** VS-955: a workspace's retained worker copies — `GET /api/w/:ws/workers/retained`. */
+export interface RetainedCopiesReport {
+  scannedAt: string | null;
+  scanning: boolean;
+  offerDays: number;
+  totals: RetainedCopyTotals & { offerable: RetainedCopyTotals; byClass: Record<E.RetainedCopyClass, RetainedCopyTotals> };
+  /** Largest first. */
+  copies: RetainedCopy[];
+  /** The daemon's last free-space check of this workspace's filesystem; null before the first one. */
+  disk?: DiskCheck | null;
+}
+
+/** VS-955: what a reclaim request raised — cards, never removals — and what it would not offer. */
+export interface RetainedReclaimOffer {
+  cards: Array<{ decisionId: string; directories: string[]; bytes: number; own: boolean }>;
+  skipped: Array<{ directory: string; reason: string }>;
+}
+
+/**
+ * VS-955: the previous daemon process's exit as systemd's journal recorded it for that invocation —
+ * `EXIT_CODE` (`exited` | `killed` | `dumped`), `EXIT_STATUS` (an exit status or a signal number),
+ * `UNIT_RESULT` (e.g. `core-dump`) and the restart counter.
+ */
+export interface ServiceExit {
+  source: 'systemd';
+  exitCode: string;
+  exitStatus: string | null;
+  /** The signal name for `killed`/`dumped` (`7` → `SIGBUS`); null for a normal exit. */
+  signal: string | null;
+  unitResult: string | null;
+  restarts: number | null;
+  exitedAt: string | null;
+}
+
 export interface RestartNoticeTurn {
   runId: string;
   agentId: string;
@@ -370,11 +457,25 @@ export interface RestartNotice {
   bootAt: string;
   /** When the previous process booted, from the durable lifecycle record; null on the first boot. */
   previousBootAt: string | null;
-  /** When the previous process recorded a deliberate shutdown; null when it crashed or never shut down. */
+  /**
+   * When the previous process went down, only when that is known (VS-955): its own recorded deliberate
+   * shutdown, or the service manager's record of its exit. Null means unknown — never a guess, and never
+   * a shutdown recorded by an earlier process.
+   */
   downAt: string | null;
+  /** Where `downAt` came from; null exactly when `downAt` is. */
+  downAtSource: 'recorded_shutdown' | 'service_manager' | null;
+  /** The previous process's recorded shutdown reason; null for a crash (it recorded none). */
   shutdownReason: string | null;
   /** True when the previous process recorded a deliberate shutdown at or after its own boot. */
   clean: boolean;
+  /**
+   * VS-955: the previous process's last liveness instant (written every minute while serving). Only an
+   * upper bound on the outage — the process was alive then and down by `bootAt` — never the down time.
+   */
+  lastAliveAt: string | null;
+  /** VS-955: how the service manager recorded the previous process's exit; null when unknown. */
+  exit: ServiceExit | null;
   /** Start attempts that failed since the previous boot, with the last one's reason. */
   failedStarts: { count: number; lastAt: string | null; lastReason: string | null };
   /** The turns the restart cut off and is resuming: the worker, its ticket and its run. */

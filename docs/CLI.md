@@ -71,6 +71,9 @@ still works when the daemon is not answering; `releases` and `rollback` go with 
 | `weave worker message <id> <text>` | direct message to a worker (wakes it) |
 | `weave worker pause \| resume \| cancel \| relaunch \| purge <id>` | worker lifecycle |
 | `weave worker handover <id>` · `weave worker handback <id> --note <note>` | take a worker's session for your own terminal, or give it back (VS-249) |
+| `weave worker prune-homes [--dry-run] [--ignore-age]` | reclaim finished workers' homes whose work has provably landed and whose checkout is clean (VS-859) |
+| `weave worker retained [--scan] [--json]` | worker copies kept because their work has not landed: size, class, age, why kept, and the last disk check (VS-955) |
+| `weave worker reclaim <dir...> \| --class <c> \| --offerable` | offer a reclaim of retained copies: raises discard-approval cards, removes nothing (VS-955) |
 | `weave ticket create <title...> [-p] [-k kind] [--priority] [-d desc] [--assign role] [--auto-merge] [--parent] [--blocked-by]` | create a ticket |
 | `weave ticket list [-p] [-s] [-k] [-r] [--search] [--limit]` · `weave ticket show <id>` | the board in the terminal |
 | `weave ticket merge-queue [-p <project>]` | who is landing now and who is waiting behind them |

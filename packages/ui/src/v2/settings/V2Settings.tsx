@@ -15,6 +15,7 @@ import { DaemonModelsSection, WorkspaceModelsSection } from './sections/Models';
 import { ProvidersSection } from './sections/Providers';
 import { McpServersSection } from './sections/McpServers';
 import { ApprovalsSection, GeneralSection, KnowledgeSection, PluginsSection, WeaverSection, WorkerMemorySection } from './sections/Workspace';
+import { StorageSection } from './sections/Storage';
 import {
   ChannelsSection,
   DeviceSection,
@@ -69,6 +70,7 @@ function WorkspaceBody({ section }: { section: string }): React.ReactElement | n
     case 'projects': return <ProjectsSection />;
     case 'knowledge': return <KnowledgeSection />;
     case 'worker-memory': return <WorkerMemorySection />;
+    case 'storage': return <StorageSection />;
     case 'approvals': return <ApprovalsSection />;
     case 'channels': return <ChannelsSection />;
     case 'presentation': return <PresentationSection />;

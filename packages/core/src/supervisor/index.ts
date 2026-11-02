@@ -55,6 +55,8 @@ const ACCOUNTS_EVERY_MS = 5 * 60_000;
  */
 const LOGIN_RECHECK_EVERY_MS = 60_000;
 const RETENTION_EVERY_MS = DAY_MS;
+/** VS-955: how often the retained-copy scan (git state and `du` of every kept worker copy) runs. */
+const RETAINED_SCAN_EVERY_MS = DAY_MS;
 /**
  * VS-383: how often stale scratch landing worktrees are reclaimed. Well above any landing's runtime,
  * so a tree still in flight (the in-process set also protects it) is never swept.
@@ -1724,6 +1726,12 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         if (due('supervisor:login_recheck_at', LOGIN_RECHECK_EVERY_MS)) await runStep('runtime login recheck', loginRecheck);
         if (due('supervisor:reconcile_at', RECONCILE_EVERY_MS)) await runStep('reconcile pass', reconcilePass);
         if (due('supervisor:retention_at', RETENTION_EVERY_MS)) await runStep('retention pass', retentionPass);
+        // VS-955: started, never awaited. A `du` over hundreds of worker copies can take minutes, and a
+        // step in flight for 30 minutes would mark the supervisor `stalled` (and, under systemd, exit
+        // the daemon); the scan runs one copy at a time in the background and serialises itself.
+        if (due('supervisor:retained_scan_at', RETAINED_SCAN_EVERY_MS)) {
+          try { deps().workers.startRetainedScan(); } catch (e) { log.warn({ err: String(e) }, 'retained-copy scan did not start'); }
+        }
         if (due('supervisor:scratch_at', SCRATCH_SWEEP_EVERY_MS)) await runStep('scratch sweep', sweepScratch);
       } finally {
         ticking = false;

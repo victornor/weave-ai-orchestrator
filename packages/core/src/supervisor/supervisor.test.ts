@@ -1285,6 +1285,23 @@ describe('supervisor scheduled passes', () => {
       expect(reclaim).toHaveBeenCalledWith(expect.objectContaining({ kind: 'system' }), { dryRun: false, ignoreAge: false });
     });
 
+    it('starts the retained-copy scan daily without awaiting it, so a scan that never settles holds no step (VS-955)', async () => {
+      let started = 0;
+      (h.services.workers as unknown as { startRetainedScan: () => boolean }).startRetainedScan = () => {
+        started += 1;
+        void new Promise(() => undefined); // a scan that never finishes
+        return true;
+      };
+      await supervisor.tick();
+      expect(started).toBe(1);
+      const health = supervisor.health();
+      expect(health.stepsInFlight).toEqual([]);
+      expect(health.lastTickFinishedAt).not.toBeNull();
+      await supervisor.tick();
+      expect(started).toBe(1); // once a day, not once a tick
+      expect(h.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', ['supervisor:retained_scan_at'])).toBeTruthy();
+    });
+
     it('still prunes archives when the home reclaim fails (VS-859)', async () => {
       const reclaim = h.services.workers!.reclaimFinishedHomes as ReturnType<typeof vi.fn>;
       reclaim.mockRejectedValueOnce(new Error('home sweep exploded'));

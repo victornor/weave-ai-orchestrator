@@ -548,6 +548,25 @@ export interface WorkersService {
    * retention pass always passes false. `now` is a test seam for the cutoff only.
    */
   reclaimFinishedHomes(actor: Actor, opts: { dryRun: boolean; now?: number; ignoreAge?: boolean }): Promise<ReclaimHomesResult>;
+  /**
+   * VS-955: the last retained-copy scan — every `workers/` checkout kept because its work has not
+   * landed, with size, class, age and reasons. Read from the stored scan; never walks the disk.
+   */
+  retainedCopies(): S.RetainedCopiesReport;
+  /** VS-955: scan now and resolve with the fresh report. A call while one runs joins it. Changes nothing on disk. */
+  scanRetainedCopies(): Promise<S.RetainedCopiesReport>;
+  /** VS-955: start a scan in the background; false when one is already running. Never throws. */
+  startRetainedScan(): boolean;
+  /**
+   * VS-955: raise `discard_approval` cards for these retained copies — one per copy holding unpushed
+   * or copy-only commits, one shared card for the rest. Removes nothing.
+   */
+  offerRetainedReclaim(actor: Actor, directories: string[]): Promise<S.RetainedReclaimOffer>;
+  /**
+   * VS-955: carry out an approved reclaim card: re-read each copy, refuse any that changed since the
+   * card, and remove the rest (checkout and home; the branch is kept). Only the decision answer path calls it.
+   */
+  reclaimRetained(actor: Actor, decision: S.Decision): Promise<{ reclaimed: Array<{ directory: string; bytes: number | null }>; refused: Array<{ directory: string; reason: string }> }>;
   /** Whether this agent's next turn would resume its existing session rather than start a fresh one. */
   sessionResumable(id: string): boolean;
   brief(workerId: string): string;

@@ -350,6 +350,65 @@ export interface UpgradeAnnouncement {
  * in the notice's `interrupted` list and, for the subset the run limit holds back, in
  * `queuedForCapacity` (VS-375).
  */
+/** VS-955: one retained worker copy, as the last scan found it. */
+export interface RetainedCopy {
+  /** The directory name under `workers/` — the worker id, or an unknown name for an orphan. */
+  directory: string;
+  workerId: string | null;
+  workerName: string | null;
+  workerStatus: E.AgentStatus | null;
+  ticketId: string | null;
+  ticketIdentifier: string | null;
+  ticketStatus: E.TicketStatus | null;
+  projectId: string | null;
+  branch: string | null;
+  /** The checkout's HEAD when scanned; a reclaim refuses a copy whose head moved since its card. */
+  headSha: string | null;
+  class: E.RetainedCopyClass;
+  /** Not `open`, and terminal for at least `defaults.retainedCopyOfferDays`. Highlights only. */
+  offerable: boolean;
+  /** Where the age is measured from: the ticket's terminal time, else the worker's finish time. */
+  ageFrom: string | null;
+  /** Size on disk of the whole home, from `du`; null when it could not be measured. */
+  bytes: number | null;
+  /** Null when the checkout's status could not be read. */
+  uncommitted: { tracked: number; untracked: number } | null;
+  /** Commits on the branch not contained in the landing branch (0 when a merged PR proves it landed). */
+  commitsNotOnLandingBranch: number | null;
+  /** Of the branch's commits, how many are on no remote. */
+  commitsOnNoRemote: number | null;
+  /** Commits reachable only from the checkout's HEAD — not from any branch, remote or tag. Null: unknown. */
+  commitsOnlyHere: number | null;
+  /** The ticket has a merged pull-request work product, the durable landing proof (VS-859). */
+  mergedPr: boolean;
+  error: string | null;
+  reasons: E.RetainedCopyReason[];
+  /**
+   * A reclaim of this copy needs a `discard_approval` of its own, never shared: it has unpushed
+   * commits, commits only the copy holds, or state that could not be read.
+   */
+  needsOwnApproval: boolean;
+  scannedAt: string;
+}
+
+export interface RetainedCopyTotals { count: number; bytes: number }
+
+/** VS-955: a workspace's retained worker copies — `GET /api/w/:ws/workers/retained`. */
+export interface RetainedCopiesReport {
+  scannedAt: string | null;
+  scanning: boolean;
+  offerDays: number;
+  totals: RetainedCopyTotals & { offerable: RetainedCopyTotals; byClass: Record<E.RetainedCopyClass, RetainedCopyTotals> };
+  /** Largest first. */
+  copies: RetainedCopy[];
+}
+
+/** VS-955: what a reclaim request raised — cards, never removals — and what it would not offer. */
+export interface RetainedReclaimOffer {
+  cards: Array<{ decisionId: string; directories: string[]; bytes: number; own: boolean }>;
+  skipped: Array<{ directory: string; reason: string }>;
+}
+
 /**
  * VS-955: the previous daemon process's exit as systemd's journal recorded it for that invocation —
  * `EXIT_CODE` (`exited` | `killed` | `dumped`), `EXIT_STATUS` (an exit status or a signal number),

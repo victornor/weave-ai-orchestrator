@@ -8,9 +8,9 @@
 
 ## 2. Retained-copy scan and report
 
-- [ ] 2.1 Add `RETAINED_COPY_CLASSES`/`RETAINED_COPY_REASONS` to `shared/enums.ts`, the `RetainedCopy`/`RetainedCopiesReport` types, `defaults.retainedCopyOfferDays` (30) in the workspace config, and a migration for the `retained_copies` table. Verify with `pnpm typecheck` and the migration test.
-- [ ] 2.2 Add typed git helpers in `worktrees/landed.ts`: commits not on the landing branch, commits on no remote, commits only reachable from the checkout's HEAD, branch-exists, head SHA. Verify with unit tests against a temp repo with a bare remote: pushed commit, unpushed commit, detached commit, deleted branch.
-- [ ] 2.3 Implement `WorkersService.scanRetainedCopies()`. It selects copies (skipping live agents, including orphans), classifies them, computes ages and the offerable flag, measures size with `du -sk` (falling back to the walk, with timeouts), and replaces the table in one transaction. It is serialised by a `scanning` flag. Verify with the acceptance test, a fixture workspace holding:
+- [x] 2.1 Add `RETAINED_COPY_CLASSES`/`RETAINED_COPY_REASONS` to `shared/enums.ts`, the `RetainedCopy`/`RetainedCopiesReport` types, `defaults.retainedCopyOfferDays` (30) in the workspace config, and a migration for the `retained_copies` table. Verify with `pnpm typecheck` and the migration test.
+- [x] 2.2 Add typed git helpers in `worktrees/landed.ts`: commits not on the landing branch, commits on no remote, commits only reachable from the checkout's HEAD, branch-exists, head SHA. Verify with unit tests against a temp repo with a bare remote: pushed commit, unpushed commit, detached commit, deleted branch.
+- [x] 2.3 Implement `WorkersService.scanRetainedCopies()`. It selects copies (skipping live agents, including orphans), classifies them, computes ages and the offerable flag, measures size with `du -sk` (falling back to the walk, with timeouts), and replaces the table in one transaction. It is serialised by a `scanning` flag. Verify with the acceptance test, a fixture workspace holding:
   - a worker with 2 modified and 3 untracked files;
   - one with 4 commits not on the landing branch, 1 on no remote;
   - one `branch_gone`;
@@ -19,23 +19,23 @@
   - an orphan directory.
 
   Assert the counts, sizes (> 0), reasons, classes and totals, that the running worker is absent, and that a byte-for-byte listing of every copy is identical before and after the scan.
-- [ ] 2.4 Make the supervisor trigger the scan daily via `due(...)` without awaiting it in `runStep`. Verify with a supervisor test that a scan that never settles does not keep a step in flight or make the state `stalled`, and that a second trigger while scanning is a no-op.
+- [x] 2.4 Make the supervisor trigger the scan daily via `due(...)` without awaiting it in `runStep`. Verify with a supervisor test that a scan that never settles does not keep a step in flight or make the state `stalled`, and that a second trigger while scanning is a no-op.
 - [ ] 2.5 Add `GET /workers/retained`, `POST /workers/retained/scan` (202), and `retainedCopies` on `GET /api/w/:ws/`, with `routetable.ts` entries. Verify with server route tests over the fixture.
 - [ ] 2.6 Add `weave worker retained [--json] [--scan]`, a table sorted by size with human-readable sizes and a totals line. Verify with a CLI test against a stubbed client.
 
 ## 3. Reclaim, gated on captain's approval
 
-- [ ] 3.1 Implement `WorkersService.offerReclaim(actor, directories)`. It drops `open` copies, splits solo from batch, raises human-owned `discard_approval` cards with the `retained_copy_reclaim` target snapshot and a context listing bytes and losses, and skips copies already on an open card. Verify with tests:
+- [x] 3.1 Implement `WorkersService.offerReclaim(actor, directories)`. It drops `open` copies, splits solo from batch, raises human-owned `discard_approval` cards with the `retained_copy_reclaim` target snapshot and a context listing bytes and losses, and skips copies already on an open card. Verify with tests:
   - a set with one unpushed-commit copy and two uncommitted-only copies yields one solo card and one batch card listing both;
   - a `branch_gone` copy whose commits cannot be determined is solo;
   - `open` is refused;
   - after the offer every copy is still on disk, unchanged.
-- [ ] 3.2 Branch `applyDiscardApproval` on `retained_copy_reclaim` into `reclaimRetained`. It re-reads each copy, refuses on a live worker or a snapshot mismatch, and otherwise removes through the provider with `deleteBranch: false, force: true` and deletes the home. It records activity and posts one chat result line. Verify with tests:
+- [x] 3.2 Branch `applyDiscardApproval` on `retained_copy_reclaim` into `reclaimRetained`. It re-reads each copy, refuses on a live worker or a snapshot mismatch, and otherwise removes through the provider with `deleteBranch: false, force: true` and deletes the home. It records activity and posts one chat result line. Verify with tests:
   - approve removes the checkout and home, the branch still resolves with the same commits, and an activity row carries the bytes;
   - reject changes nothing;
   - a head moved after the card refuses that copy while its batch sibling is reclaimed;
   - a relaunched (active) worker is refused.
-- [ ] 3.3 Pin the no-automatic-removal rule. Verify with tests:
+- [x] 3.3 Pin the no-automatic-removal rule. Verify with tests:
   - `retentionPass`, `scanRetainedCopies` and the disk check over offerable copies with unlanded work and no approved card remove nothing;
   - the auto-approval pass with YOLO on and a weaver `weave_decision_answer` both leave a reclaim card open.
 - [ ] 3.4 Add `POST /workers/retained/reclaim` and `weave worker reclaim <dir…> | --class <c> [--offerable]`, which print the card ids and never remove anything. Verify with route and CLI tests.

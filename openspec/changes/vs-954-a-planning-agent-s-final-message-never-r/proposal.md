@@ -17,6 +17,10 @@ having it installed is incidental.
 - When a planner turn succeeds, wrote nothing to its plan's thread, and left final text (not a bare
   run report), the engine posts that text to the plan thread **in full**, as the planner, linked to the run.
   Same posture as VS-596's session-answer delivery.
+- A planner turn that ends `timed_out`, `cancelled`, `interrupted` or `failed` leaves the same plain-reason
+  system notice a session turn does (`sessionOutcomeNotice`), with the same silences: a scheduled retry,
+  a shutdown or live-message interruption, and a run that already posted. Success-only would repeat the
+  VS-596 -> VS-598 sequence.
 - That fallback is recorded as a `runtime.raw` run event `run.delivery.fallback` (warn). If the post
   itself fails, the run gets a `run.delivery.failed` event (error) as well as the log line, so a lost
   answer is never silent.

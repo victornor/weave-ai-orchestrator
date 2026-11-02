@@ -14,12 +14,19 @@ that long answers are the ones composed as closing prose.
    run report, and no outbound message carrying this run id in the plan's thread -> post `finalText`
    (trimmed, full length). Alternative considered: failing the run when the tool was not used. Rejected:
    captain would lose the answer *and* get an error; posting is strictly better.
-2. **Visibility via run events, not status.** The answer is delivered, so `succeeded` is accurate. A
+2. **Every terminal status, with VS-598's silence rules.** Success-only is what VS-596 shipped before
+   VS-598 had to follow. For a non-succeeded planner turn the engine posts `sessionOutcomeNotice(...)`
+   (system author) to the plan thread - `timed_out`, `cancelled`, `interrupted`, `failed`, quota and auth
+   wording included - and is silent exactly where it is: a scheduled retry, `interrupted_by_shutdown` /
+   `interrupted_by_message`, and nothing posted when the run already wrote to the thread. The run is
+   re-read after finalize so a retry scheduled by finalize is seen. `resumesPending` comes from the turn's
+   wakes as for sessions. The thread is the plan's own (`planning.get(planId).threadId`), never another's.
+3. **Visibility via run events, not status.** The answer is delivered, so `succeeded` is accurate. A
    `run.delivery.fallback` event records that the tool path was skipped; `run.delivery.failed` records a
    failed post. Both use the existing `runtime.raw` event type with `originalType` (as VS-943 did), so no
    new event type or schema.
-3. **A tools-only turn stays silent.** No final text means nothing to deliver; unchanged.
-4. **Prompt unchanged.** Planners are still told to use `weave_plan_reply`; the fallback is a net.
+4. **A tools-only turn stays silent.** No final text means nothing to deliver; unchanged.
+5. **Prompt unchanged.** Planners are still told to use `weave_plan_reply`; the fallback is a net.
 
 ## Risks
 

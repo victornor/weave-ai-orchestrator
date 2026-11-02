@@ -6,6 +6,7 @@ import { executeRun } from './engine.js';
 import { runState } from './active.js';
 import { modelSettingFor, modelsFor } from '../models/resolve.js';
 import { flattenWakes } from '../prompts/index.js';
+import { refreshQueuedDigests } from '../supervisor/pendingReview.js';
 
 export interface CoreDispatcher extends Dispatcher {
   /** Await every run this dispatcher started (tests and shutdown). */
@@ -152,6 +153,8 @@ export function createDispatcher(ctx: WorkspaceContext, deps: () => CoreServices
         [agent.id, now],
       );
       if (!queued.length) return null;
+      // VS-956: a digest queued before the weaver marked a card must not name it as unreviewed.
+      if (agent.kind === 'weaver') refreshQueuedDigests(ctx, queued);
       const ids = queued.map((w) => w.id);
       for (const id of ids) ctx.db.update('wakeups', id, { status: 'claimed', claimedAt: now });
       const runId = newId();

@@ -7,11 +7,13 @@ import { newId, nowIso } from '@weave-ai/db';
 import type { Wakeup } from '@weave-ai/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { makeHarness, type TestHarness } from '../testing/context.js';
+import type { WakeService } from '../api.js';
 import { createWakeService } from '../wake/index.js';
 import { refreshQueuedDigests, reviewNote, type PendingReviewEntry } from './pendingReview.js';
 
 let h: TestHarness;
-beforeEach(() => { h = makeHarness(); h.services.wake = createWakeService(h.ctx, h.deps); });
+let wake: WakeService;
+beforeEach(() => { h = makeHarness(); wake = createWakeService(h.ctx, h.deps); h.services.wake = wake; });
 afterEach(() => h.cleanup());
 
 function seedApproval(over: Record<string, unknown> = {}): { id: string; entry: PendingReviewEntry } {
@@ -25,7 +27,7 @@ function seedApproval(over: Record<string, unknown> = {}): { id: string; entry: 
 }
 
 function queueDigest(entries: PendingReviewEntry[]): Wakeup {
-  return h.services.wake.enqueue(h.conductorId, {
+  return wake.enqueue(h.conductorId, {
     source: 'system', reason: `digest${reviewNote(entries)}`, payload: { events: [], pendingReview: entries },
   });
 }
@@ -67,7 +69,7 @@ describe('refreshQueuedDigests (VS-956)', () => {
 
   it('refreshes a digest that was coalesced into an already-queued wake', () => {
     const a = seedApproval();
-    h.services.wake.enqueue(h.conductorId, { source: 'system', reason: 'something else' });
+    wake.enqueue(h.conductorId, { source: 'system', reason: 'something else' });
     queueDigest([a.entry]);
     h.db.update('decisions', a.id, { weaverReviewStatus: 'looked' });
     const target = h.db.get<Wakeup>("SELECT * FROM wakeups WHERE status = 'queued' AND agent_id = ?", [h.conductorId])!;

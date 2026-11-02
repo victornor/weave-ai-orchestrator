@@ -50,6 +50,13 @@ vi.mock('../api/hooks', () => ({
     { id: 'beta', name: 'Beta', ticketPrefix: 'BETA', root: '', projects: [], needsYou: 0 },
   ] }),
   useWorkers: () => ({ data: [] }),
+  // VS-955: the Storage section's retained-copy report, empty.
+  useRetainedCopies: () => ({ isLoading: false, isError: false, data: {
+    scannedAt: null, scanning: false, offerDays: 30, copies: [], disk: null,
+    totals: { count: 0, bytes: 0, offerable: { count: 0, bytes: 0 }, byClass: {} },
+  } }),
+  useRetainedScan: () => ({ mutate: () => undefined, isPending: false }),
+  useOfferReclaim: () => ({ mutateAsync: async () => ({ cards: [], skipped: [] }), isPending: false }),
   useWorkersMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
   useDecisionsMany: (ids: readonly string[]) => ids.map(() => ({ data: [] })),
   useIncidents: () => ({ data: { items: [] } }),
@@ -157,6 +164,7 @@ describe('every listed section renders a real body', () => {
     mcp: 'None configured.',
     projects: 'projects-body', knowledge: 'Curation',
     'worker-memory': 'Effective limit',
+    storage: 'No scan has run yet. Rescan to measure them.',
     approvals: 'Proposal approval', channels: 'channels-body', presentation: 'presentation-body',
     plugins: 'No plugins are configured for this workspace, or the daemon.',
   };

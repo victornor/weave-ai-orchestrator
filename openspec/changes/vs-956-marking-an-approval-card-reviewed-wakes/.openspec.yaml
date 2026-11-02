@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-02
+goal: Marking an approval card reviewed wakes the weaver ~15 seconds later to be
+  told the same card is still unreviewed

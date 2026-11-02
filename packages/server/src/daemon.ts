@@ -27,13 +27,13 @@ import type { RuntimeAdapter, RuntimeHost } from '@weave-ai/runtime-sdk';
 import type { WeaveAIPlugin, PluginHost, AgentToolDefinition, WorktreeProvider, ForgeAdapter } from '@weave-ai/plugin-sdk';
 import {
   OcError, SHUTDOWN_CANCEL_GRACE_MS, SHUTDOWN_DRAIN_GRACE_MS, COMMON_TOOLS, WEAVER_TOOLS, WORKER_ONLY_TOOLS,
-  type DaemonConfig, type EventType, type ProviderProfile, type WorkspaceEvent,
+  type DaemonConfig, type EventType, type ProviderProfile, type ServiceExit, type WorkspaceEvent,
 } from '@weave-ai/shared';
 import { createApp, type WorkspaceAdmin } from './app.js';
 import { createUpdateChecker, runningReleaseRoot, type ReleaseProject } from './release-info.js';
 import { createUpgradeService } from './upgrade.js';
 import { toolContractProvider } from './tool-contract.js';
-import { announceRestart, markBooted, observeBoot, recordShutdown, recordStartFailure } from './restart-notice.js';
+import { announceRestart, markBooted, observeBoot, recordShutdown, recordStartFailure, startLivenessTrail } from './restart-notice.js';
 import { ChannelManager } from './channels.js';
 import { WebhookDispatcher } from './webhooks.js';
 import { PushDispatcher } from './pushDispatcher.js';
@@ -95,6 +95,11 @@ export interface StartOptions {
    * test can make an address "appear" after a delay without owning a real interface IP.
    */
   listenWait?: { timeoutMs?: number; initialDelayMs?: number; maxDelayMs?: number; hostForAttempt?: (attempt: number) => string };
+  /**
+   * VS-955 test-only seam for the restart notice: the service manager's invocation id this boot records
+   * (default `INVOCATION_ID`), and the reader of a previous invocation's exit (default the journal).
+   */
+  restart?: { invocationId?: string | null; readExit?: (invocationId: string) => Promise<ServiceExit | null> };
 }
 
 export interface DaemonHandle {
@@ -249,10 +254,13 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
   // second notice; a boot on a different release than the previous boot's is an upgrade restart, so
   // only a same-release restart gets the restart notice (VS-339). Not awaited: these are reports about
   // a daemon that is already up, and a slow channel must not hold the boot.
-  markBooted(daemonDb, { now: bootObservation.bootAt, release: releaseRoot, pid: process.pid });
+  const invocationId = opts.restart && 'invocationId' in opts.restart ? opts.restart.invocationId ?? null : process.env.INVOCATION_ID ?? null;
+  markBooted(daemonDb, { now: bootObservation.bootAt, release: releaseRoot, pid: process.pid, invocationId });
+  // VS-955: a crash records no shutdown, so the next boot bounds the outage by this trail instead.
+  const livenessTrail = startLivenessTrail(daemonDb);
   void upgrades.announce().catch((e: unknown) => log.error({ err: e }, 'upgrade announcement failed'));
   if (bootObservation.previousBootAt !== null && bootObservation.previousBootRelease === releaseRoot) {
-    void announceRestart({ db: daemonDb, workspaces, observation: bootObservation })
+    void announceRestart({ db: daemonDb, workspaces, observation: bootObservation, readExit: opts.restart?.readExit })
       .catch((e: unknown) => log.error({ err: e }, 'restart announcement failed'));
   }
 
@@ -266,6 +274,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
 
   async function shutdown(reason: string): Promise<void> {
     log.info({ reason }, 'daemon shutting down');
+    livenessTrail.stop();
     stopStallWatchdog();
     demoPlayer?.stop();
     // VS-339: mark every workspace and record the deliberate shutdown before the first await. systemd

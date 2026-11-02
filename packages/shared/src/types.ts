@@ -350,6 +350,22 @@ export interface UpgradeAnnouncement {
  * in the notice's `interrupted` list and, for the subset the run limit holds back, in
  * `queuedForCapacity` (VS-375).
  */
+/**
+ * VS-955: the previous daemon process's exit as systemd's journal recorded it for that invocation —
+ * `EXIT_CODE` (`exited` | `killed` | `dumped`), `EXIT_STATUS` (an exit status or a signal number),
+ * `UNIT_RESULT` (e.g. `core-dump`) and the restart counter.
+ */
+export interface ServiceExit {
+  source: 'systemd';
+  exitCode: string;
+  exitStatus: string | null;
+  /** The signal name for `killed`/`dumped` (`7` → `SIGBUS`); null for a normal exit. */
+  signal: string | null;
+  unitResult: string | null;
+  restarts: number | null;
+  exitedAt: string | null;
+}
+
 export interface RestartNoticeTurn {
   runId: string;
   agentId: string;
@@ -370,11 +386,25 @@ export interface RestartNotice {
   bootAt: string;
   /** When the previous process booted, from the durable lifecycle record; null on the first boot. */
   previousBootAt: string | null;
-  /** When the previous process recorded a deliberate shutdown; null when it crashed or never shut down. */
+  /**
+   * When the previous process went down, only when that is known (VS-955): its own recorded deliberate
+   * shutdown, or the service manager's record of its exit. Null means unknown — never a guess, and never
+   * a shutdown recorded by an earlier process.
+   */
   downAt: string | null;
+  /** Where `downAt` came from; null exactly when `downAt` is. */
+  downAtSource: 'recorded_shutdown' | 'service_manager' | null;
+  /** The previous process's recorded shutdown reason; null for a crash (it recorded none). */
   shutdownReason: string | null;
   /** True when the previous process recorded a deliberate shutdown at or after its own boot. */
   clean: boolean;
+  /**
+   * VS-955: the previous process's last liveness instant (written every minute while serving). Only an
+   * upper bound on the outage — the process was alive then and down by `bootAt` — never the down time.
+   */
+  lastAliveAt: string | null;
+  /** VS-955: how the service manager recorded the previous process's exit; null when unknown. */
+  exit: ServiceExit | null;
   /** Start attempts that failed since the previous boot, with the last one's reason. */
   failedStarts: { count: number; lastAt: string | null; lastReason: string | null };
   /** The turns the restart cut off and is resuming: the worker, its ticket and its run. */

@@ -5,6 +5,7 @@ import { WORKER_STATUSES, TERMINAL_TICKET_STATUSES, TICKET_PRIORITIES, SELF_WAKE
 import type { ForgeAdapter } from '@weave-ai/plugin-sdk';
 import { scopeUnitName, stopScope, systemdScopeAvailable } from '@weave-ai/runtime-sdk';
 import { formatAge } from '@weave-ai/render';
+import { reviewNote as digestReviewNote, type PendingReviewEntry } from './pendingReview.js';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices, Supervisor } from '../api.js';
 import { runState } from '../runs/active.js';
@@ -913,8 +914,6 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     return { summaryOmitted: 'no_report' };
   }
 
-  interface PendingReviewEntry { decisionId: string; kind: string; ticketIdentifier: string | null; title: string; ageMs: number }
-
   /**
    * VS-469: the open human-owned approvals whose review state is still `unseen` — the cards a weaver
    * that believed it reviewed them would otherwise lose track of. Shared by the digest's explicit
@@ -994,11 +993,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
     // such card on the digest itself, bounded, and in the wake reason so it is read without opening
     // the payload.
     const pendingReview = pendingReviewEntries();
-    const reviewNote = pendingReview.length
-      ? ` — ${pendingReview.length} approval card${pendingReview.length === 1 ? '' : 's'} still not reviewed: `
-        + pendingReview.slice(0, 3).map((p) => `${p.ticketIdentifier ?? 'workspace'} ${p.kind.replace('_approval', '')} ${formatAge(new Date(Date.now() - p.ageMs).toISOString())}`).join(', ')
-        + (pendingReview.length > 3 ? `, +${pendingReview.length - 3} more` : '')
-      : '';
+    const reviewNote = digestReviewNote(pendingReview);
     try {
       deps().wake.enqueue(conductor.id, {
         source: 'system', reason: `digest${reviewNote}`,

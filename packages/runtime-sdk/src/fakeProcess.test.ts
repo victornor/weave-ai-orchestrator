@@ -43,6 +43,28 @@ describe('writeFakeProcess', () => {
     expect(outcome.exitCode).toBe(130);
     expect(readFileSync(p.marker, 'utf8')).toBe('SIGINT');
   });
+
+  // VS-957: the weave and claude interrupt tests read `marker` the moment the turn resolves and once
+  // failed with ENOENT on a loaded runner. The cause was not a late write (the marker is written
+  // before the flush and the exit, so it always precedes the child's `close`): the adapter had
+  // interrupted on seeing the first line, and a signal that beat the handler registration took the
+  // default action, so no marker was ever written. Interrupting on the first line, many times over,
+  // pins the ordering that closes that window.
+  it('records the signal even when it arrives the instant the first line is read', async () => {
+    for (let i = 0; i < 25; i++) {
+      const p = fake({ name: 'fake-cli', lines: ['{"hello":1}'], onInterrupt: { exitCode: 130 } });
+      let cancelled: Promise<void> | undefined;
+      let run!: ReturnType<typeof spawnLines>;
+      run = spawnLines({
+        cmd: p.bin, args: [], cwd: p.dir, env: process.env as Record<string, string>,
+        stdin: null, timeoutMs: 5000, onLine: (stream) => { if (stream === 'stdout') cancelled ??= run.cancel('interrupt'); },
+      });
+      const outcome = await run.done;
+      await cancelled;
+      expect(outcome.exitCode).toBe(130);
+      expect(readFileSync(p.marker, 'utf8')).toBe('SIGINT');
+    }
+  });
 });
 
 describe('interruptedTurn', () => {

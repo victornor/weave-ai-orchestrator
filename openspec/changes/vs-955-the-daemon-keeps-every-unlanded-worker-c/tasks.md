@@ -39,12 +39,12 @@
   - `retentionPass`, `scanRetainedCopies` and the disk check over offerable copies with unlanded work and no approved card remove nothing;
   - the auto-approval pass with YOLO on and a weaver `weave_decision_answer` both leave a reclaim card open.
 - [x] 3.4 Add `POST /workers/retained/reclaim` and `weave worker reclaim <dir…> | --class <c> [--offerable]`, which print the card ids and never remove anything. Verify with route and CLI tests.
-- [ ] 3.5 Make the web app's discard card render a reclaim target: a per-copy list of bytes and losses, and the batch total. Verify with a `DecisionCard` test for a solo card and a batch card.
+- [x] 3.5 Make the web app's discard card render a reclaim target: a per-copy list of bytes and losses, and the batch total. Verify with a `DecisionCard` test for a solo card and a batch card.
 
 ## 4. Storage view
 
-- [ ] 4.1 Add a workspace settings section `storage`: last disk check line, totals by class, sortable copy table with checkboxes, "Rescan", and "Offer reclaim" showing the solo/batch split before sending. Verify with a UI test asserting the rendered sizes, reasons and the request body sent. Check the render by eye: screenshot it at phone and desktop width (saved in the agent home) and attach it to the ticket.
-- [ ] 4.2 Add the `useRetainedCopies` hook and the API client functions. Verify with the UI hook test.
+- [x] 4.1 Add a workspace settings section `storage`: last disk check line, totals by class, sortable copy table with checkboxes, "Rescan", and "Offer reclaim" showing the solo/batch split before sending. Verify with a UI test asserting the rendered sizes, reasons and the request body sent. Check the render by eye: screenshot it at phone and desktop width (saved in the agent home) and attach it to the ticket.
+- [x] 4.2 Add the `useRetainedCopies` hook and the API client functions. Verify with the UI hook test.
 
 ## 5. Low-disk warning
 

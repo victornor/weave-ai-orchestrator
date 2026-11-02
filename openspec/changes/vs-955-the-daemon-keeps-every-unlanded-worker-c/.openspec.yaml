@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-02
+goal: Bound and surface retained worker copies; make the restart wake state the
+  outage honestly

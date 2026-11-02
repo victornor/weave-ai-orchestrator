@@ -744,7 +744,7 @@ describe('retained copies and disk thresholds (VS-955)', () => {
   it('defaults the offer window to 30 days and the disk warning to 10 % or 50 GiB free', () => {
     const daemon = DaemonConfigSchema.parse({});
     expect(daemon.disk).toEqual({ warnFreePercent: 10, warnFreeBytes: 50 * 1024 ** 3 });
-    const ws = WorkspaceConfigSchema.parse({ version: 1, id: 'w', name: 'W', ticketPrefix: 'W' });
+    const ws = WorkspaceConfigSchema.parse({ version: 1, id: 'acme', name: 'Acme', ticketPrefix: 'ACME' });
     expect(ws.defaults.retainedCopyOfferDays).toBe(30);
   });
 

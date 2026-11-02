@@ -1,7 +1,7 @@
-## ADDED Requirements
-
 ## Purpose
 A planning agent talks to captain only through its plan's conversation. This capability keeps a planner's answer from being lost when the agent finishes a turn without using its reply tool, and makes any loss visible instead of reporting a quiet success.
+
+## ADDED Requirements
 
 ### Requirement: A planner's final text reaches the plan conversation in full
 

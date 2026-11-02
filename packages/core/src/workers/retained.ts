@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { nowIso } from '@weave-ai/db';
 import { formatBytes } from '@weave-ai/render';
 import {
-  NAMED_CARD_OPTION_KEYS, RETAINED_COPY_CLASSES, TERMINAL_TICKET_STATUSES, landingBranchOf,
+  NAMED_CARD_OPTION_KEYS, RETAINED_COPY_CLASSES, RETAINED_RECLAIM_TARGET_KIND, TERMINAL_TICKET_STATUSES, landingBranchOf,
   type Agent, type Decision, type Project, type RetainedCopiesReport, type RetainedCopy, type RetainedCopyClass,
   type RetainedCopyReason, type RetainedReclaimOffer, type Ticket,
 } from '@weave-ai/shared';
@@ -38,7 +38,7 @@ const DAY_MS = 86_400_000;
 const LIVE_STATUSES = new Set(['provisioning', 'active', 'running', 'paused']);
 const DU_TIMEOUT_MS = 120_000;
 const GIT_TIMEOUT_MS = 15_000;
-export const RECLAIM_TARGET_KIND = 'retained_copy_reclaim';
+export const RECLAIM_TARGET_KIND = RETAINED_RECLAIM_TARGET_KIND;
 
 /** What a reclaim card states about one copy; the reclaim refuses the copy when any of it changed. */
 export interface ReclaimSnapshot {

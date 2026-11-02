@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient, UseMutationResult, UseQueryResult } from '@tanstack/react-query';
-import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, TicketStatus, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, RoadmapBlock, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanOrigin, PlanSummary, ChannelThread } from '@weave-ai/shared';
+import type { RunEvent, RunTrace, RunSortDir, RunSortKey, TicketComment, Ticket, TicketStatus, Decision, DecisionAnswerInputs, Agent, Role, Run, Project, ProjectSyncState, UsageGrain, UsageWindow, Workspace, Incident, IncidentReporterKind, RoadmapItem, RoadmapBlock, Routine, RoutineFire, RoutineListItem, RoutineUsage, WorkerActivitySummary, Plan, PlanDraft, PlanOrigin, PlanSummary, ChannelThread, RetainedCopiesReport, RetainedReclaimOffer } from '@weave-ai/shared';
 import { dayKey, runtimePartialOutput } from '@weave-ai/render';
 import { listOf, api, qs } from './client';
 import { qk } from './keys';
@@ -931,6 +931,41 @@ export function usePatchConfig(): UseMutationResult<unknown, Error, Record<strin
   return useMutation({
     mutationFn: (patch) => api.ws(ws, '/config', { method: 'PATCH', body: patch }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: qk.workspace(ws) }),
+  });
+}
+
+/* ------------------------------------------------------- retained copies */
+
+/**
+ * VS-955: the worker copies the daemon keeps because their work has not landed, from the last scan,
+ * with the last disk check. Polls while a scan runs so the view fills in when it finishes.
+ */
+export function useRetainedCopies(): UseQueryResult<RetainedCopiesReport> {
+  const ws = useWs();
+  return useQuery({
+    queryKey: qk.retainedCopies(ws),
+    queryFn: () => api.ws<RetainedCopiesReport>(ws, '/workers/retained'),
+    refetchInterval: (q) => (q.state.data?.scanning ? 2_000 : false),
+  });
+}
+
+/** VS-955: start a retained-copy scan in the background. */
+export function useRetainedScan(): UseMutationResult<unknown, Error, void> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.ws(ws, '/workers/retained/scan', { method: 'POST', body: {} }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.retainedCopies(ws) }),
+  });
+}
+
+/** VS-955: offer a reclaim — raises discard-approval cards in Needs you; removes nothing. */
+export function useOfferReclaim(): UseMutationResult<RetainedReclaimOffer, Error, string[]> {
+  const ws = useWs();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (directories) => api.ws<RetainedReclaimOffer>(ws, '/workers/retained/reclaim', { method: 'POST', body: { directories } }),
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: qk.decisions(ws) }); },
   });
 }
 

@@ -29,6 +29,8 @@ export const qk = {
   roles: (ws: string) => ['w', ws, 'roles'] as const,
   role: (ws: string, id: string) => ['w', ws, 'roles', id] as const,
   workers: (ws: string) => ['w', ws, 'workers'] as const,
+  /** VS-955: the retained worker copies report — not under `workers`, so a worker event does not refetch a disk scan's result. */
+  retainedCopies: (ws: string) => ['w', ws, 'retained-copies'] as const,
   worker: (ws: string, id: string) => ['w', ws, 'workers', id] as const,
   workerBrief: (ws: string, id: string) => ['w', ws, 'workers', id, 'brief'] as const,
   /** VS-249: the resume command a worker would offer, kept separate from `worker()` so polling it does not thrash the worker detail query. */

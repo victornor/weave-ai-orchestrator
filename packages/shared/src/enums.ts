@@ -83,6 +83,8 @@ export type RetainedCopyClass = (typeof RETAINED_COPY_CLASSES)[number];
 /** VS-955: why a retained copy was not retired. A copy may carry several. */
 export const RETAINED_COPY_REASONS = ['uncommitted', 'commits_not_on_landing_branch', 'branch_gone', 'unreadable'] as const;
 export type RetainedCopyReason = (typeof RETAINED_COPY_REASONS)[number];
+/** VS-955: `Decision.target.kind` of a `discard_approval` that reclaims retained worker copies. */
+export const RETAINED_RECLAIM_TARGET_KIND = 'retained_copy_reclaim';
 
 export const DECISION_KINDS = ['approval', 'question', 'concern', 'gate_finding', 'plan_approval', 'hire_approval', 'merge_approval', 'discard_approval', 'retry_approval', 'action_approval', 'promotion_approval'] as const;
 export type DecisionKind = (typeof DECISION_KINDS)[number];

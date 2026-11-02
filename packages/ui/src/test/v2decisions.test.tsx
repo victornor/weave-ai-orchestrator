@@ -2,7 +2,7 @@
  * VS-345: the V2 decision card — neutral header, review states, the held state with its
  * reason-required override, every input kind, relayed answers, artifacts and the narrow variant.
  */
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps, ReactNode } from 'react';
 import type { Run, TicketAttachment } from '@weave-ai/shared';
@@ -686,5 +686,37 @@ describe('dismissing an agent-raised card (VS-806)', () => {
     closed.unmount();
     renderCard({ decision: question() });
     expect(screen.queryByRole('button', { name: 'Dismiss…' })).toBeNull();
+  });
+});
+
+describe('a reclaim card for retained worker copies (VS-955)', () => {
+  const reclaim = () => makeDecision({
+    kind: 'discard_approval',
+    ticketId: null,
+    title: 'Reclaim 2 worker copies (16GB), discarding their uncommitted files?',
+    context: 'Reclaiming removes each worker copy\'s checkout and home directory and frees about 16GB. The branch and its commits stay in the project clone.\n\n- `w1` — VS-349 (cancelled, finished_unlanded), 12GB: 2 modified and 3 untracked file(s) are lost; branch `ac/vs-349-x` stays in the project clone\n- `w2` — VS-350 (done, finished_unlanded), 4GB: 0 modified and 1 untracked file(s) are lost',
+    options: [{ key: 'approve', label: 'Reclaim these copies' }, { key: 'reject', label: 'Keep', recommended: true }],
+    target: { kind: 'retained_copy_reclaim', copies: [] },
+  });
+
+  it('names the reclaim, lists each copy with its size and losses, and is confirmed by typing reclaim', async () => {
+    const { onAnswer } = renderCard({ decision: reclaim() });
+    expect(screen.getByText('Reclaim worker copies')).toBeInTheDocument();
+    expect(screen.getByText(/12GB: 2 modified and 3 untracked file\(s\) are lost/)).toBeInTheDocument();
+    expect(screen.getByText(/frees about 16GB/)).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Reclaim' });
+    expect(button).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Type reclaim to confirm'), { target: { value: 'reclaim' } });
+    expect(button).toBeEnabled();
+    fireEvent.click(button);
+    await waitFor(() => expect(onAnswer).toHaveBeenCalled());
+    expect(onAnswer.mock.calls[0]![0]).toMatchObject({ key: 'approve' });
+  });
+
+  it('an ordinary worktree discard keeps its ticket-id confirmation and label', () => {
+    renderCard({ decision: makeDecision({ kind: 'discard_approval' }), ticketIdentifier: 'ACME-42' });
+    expect(screen.getByText('Discard worktree')).toBeInTheDocument();
+    expect(screen.getByLabelText('Type the ticket identifier to confirm')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeInTheDocument();
   });
 });

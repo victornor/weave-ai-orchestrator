@@ -692,8 +692,8 @@ describe('run engine', () => {
         const plan = h.services.planning.create({ kind: 'human', id: 'victor' }, h.projectId, { threadId });
         h.db.run('UPDATE agents SET plan_id = ? WHERE id = ?', [plan.id, plannerId]);
       }
-      const outbound = (): Array<{ body: string; authorId: string | null; runId: string | null }> => h.db.all(
-        "SELECT body, author_id AS authorId, run_id AS runId FROM thread_messages WHERE thread_id = ? AND direction = 'outbound' ORDER BY created_at, rowid", [threadId]);
+      const outbound = (): Array<{ body: string; authorKind: string; authorId: string | null; runId: string | null }> => h.db.all(
+        "SELECT body, author_kind AS authorKind, author_id AS authorId, run_id AS runId FROM thread_messages WHERE thread_id = ? AND direction = 'outbound' ORDER BY created_at, rowid", [threadId]);
       const eventTypes = (runId: string): string[] => h.db.all<{ p: string }>(
         "SELECT payload_json AS p FROM run_events WHERE run_id = ? AND type = 'runtime.raw'", [runId]).map((r) => JSON.parse(r.p).originalType);
 
@@ -726,6 +726,19 @@ describe('run engine', () => {
         const rows = outbound();
         expect(rows).toHaveLength(1);
         expect(rows[0]!.body).toMatch(re);
+        expect(rows[0]).toMatchObject({ authorKind: 'system', authorId: null, runId: run.id });
+      });
+
+      it('stays silent for a turn interrupted by a live human message', async () => {
+        seedPlan();
+        h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'plan it' });
+        runtime.queue.push(async (input) => {
+          runState(h.ctx).active.get(input.runId)!.cancelled = { mode: 'interrupt', cause: 'message' };
+          return { finalText: null, structured: undefined, exitCode: 143, signal: 'SIGTERM' } as never;
+        });
+        const run = await runOnce(plannerId);
+        expect(run.status).toBe('interrupted');
+        expect(outbound()).toHaveLength(0);
       });
 
       it('stays silent for a failure with a retry scheduled', async () => {

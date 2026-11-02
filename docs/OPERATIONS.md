@@ -288,6 +288,14 @@ An old `last_wake` with `running = 0` and `open_human_decisions > 0` is a worksp
 
 **Self-restart on a stall.** Each awaited supervisor step has a 2-minute timeout. A step that hangs is left running in the background, and later ticks skip it until it settles, so one hung forge or git call cannot freeze the others. If a workspace stays `stalled` for `supervisor.stallExitSec` (daemon.yaml, default 600 s), a daemon running under systemd (`INVOCATION_ID` set) logs a `fatal` line and exits non-zero. The unit's `Restart=always` brings it back, and boot recovery resumes the interrupted turns. A daemon started by `weave daemon start` only logs the stall, because nothing would restart it. One limit remains: a process whose event loop is blocked outright (a synchronous infinite loop) cannot run any timer, so neither check fires. systemd's `WatchdogSec=` would catch that, but the daemon does not speak `sd_notify`.
 
+**What a restart reports (VS-339, VS-955).** After a restart that was not an upgrade, the daemon posts one "Back up at …" line in chat and wakes the weaver with a `daemon.restarted` payload. A deliberate stop records its time and reason first, so the next boot reports `clean: true`, `downAt` and `shutdownReason`. A crash records nothing, so the report says `clean: false`, and:
+
+- `downAt` is `null` (unknown) unless systemd's journal recorded how that process exited. The daemon stores its `INVOCATION_ID` at boot and, after a crash, reads `journalctl --user USER_INVOCATION_ID=<id> -o json` (then the system journal) for the `Main process exited` entry. When found, the payload's `exit` carries `exitCode` (`exited` | `killed` | `dumped`), `exitStatus`, `signal` (`7` → `SIGBUS`), `unitResult` and `restarts`, and `downAt` is that exit's time (`downAtSource: service_manager`). The 2026-11-02 crash reads "after an unclean shutdown (SIGBUS, core dumped); down 3 s".
+- `lastAliveAt` is the last minute-by-minute liveness write — an upper bound on the outage, never the down time.
+- A shutdown recorded by an *earlier* process is never reported for a crash. Before VS-955 it was, which made a 3-second crash read as a 17-hour outage with `SIGTERM`.
+
+The journal read is bounded (3 s per query) and runs after the daemon is serving; without `journalctl` or a persistent journal the exit is simply reported as unknown.
+
 ---
 
 ## 4. Logs
@@ -821,15 +829,48 @@ proxy down, or the daemon refused to start. Check the journal: a refusal to bind
 
 ### Disk fills up
 
-`<workspace>/.weave/runs/` and `<workspace>/archive/workers/` are the usual culprits, then
-per-worker `node_modules` in worktrees. **Neither is pruned automatically yet** —
-`defaults.runLogRetentionDays` (30) and `defaults.workerArchiveDays` (30) are accepted by the config
-schema but nothing enforces them, so delete old run directories and worker archives yourself (a
-`find … -mtime +30 -delete` in a cron job is enough; run directories are named by run id and nothing
-else references them once the run is finished). `weave worker purge <id>` removes one worker's home and
-worktree (refuses a dirty worktree without `--force`). Never delete a live worker's `work/` by hand —
-`weave worktree verify <id>` tells you whether the work has landed, and `weave worktree discard <id>` is
-the supported destructive path.
+What the daemon itself puts on disk, largest first:
+
+1. **Retained worker copies** (`<workspace>/workers/<id>/`, each with a full `work/` checkout, `node_modules` and build output). See below.
+2. Finished worker homes whose work landed. The daily retention pass reclaims them once they are past `defaults.workerArchiveDays` (30) and their checkout is clean (VS-859). `weave worker prune-homes --dry-run` shows what it would take, and `--ignore-age` widens it.
+3. `<workspace>/archive/workers/` and `<workspace>/.weave/runs/`, pruned by the same pass after `workerArchiveDays` and `runLogRetentionDays`.
+
+**Retained worker copies (VS-955).** When a worker's ticket ends but its checkout still holds work that has not landed, retirement refuses to remove it, and so does the VS-859 sweep. The checkout may hold modified or untracked files, or commits not on the landing branch. Both are right to refuse: that is real, unrecoverable-if-deleted work. On 2026-11-02 such copies came to 255 GB across two workspaces and helped fill the host's disk. They are measured, aged and offered for reclaim, but **never removed without your approval**.
+
+```bash
+weave worker retained --scan          # measure now (git state + du of each copy), then list largest first
+weave worker retained --json | jq '.totals'
+weave worker reclaim --offerable      # raise approval cards for every copy terminal ≥ 30 days; removes nothing
+weave worker reclaim <dir> <dir>      # or name copies (the directory under workers/)
+```
+
+The web app shows the same list in **Settings → workspace → Storage**: free space, totals by class, and every copy with its size, age and why it is kept. Select copies there and **Offer reclaim**.
+
+- **What is shown.** Each copy's worker and its ticket and status, age since the ticket ended, and size. It also says why the copy is kept:
+  - `uncommitted`: modified and untracked file counts;
+  - `commits_not_on_landing_branch`: how many commits, and how many are on no remote;
+  - `branch_gone`: the branch no longer exists in the project clone;
+  - `unreadable`.
+
+  A scan runs daily and on request, off the supervisor tick, and changes nothing.
+- **Classes.**
+
+  | Class | Meaning |
+  |---|---|
+  | `open` | The ticket is still live. Never offered. |
+  | `finished_unlanded` | The ticket is `done` or `cancelled`. |
+  | `branch_gone` | The ticket is finished and its branch is gone from the clone. Only the copy's own files remain. |
+  | `orphan` | No agent or ticket. |
+
+  A copy is *offerable* once its ticket has been terminal for `defaults.retainedCopyOfferDays` (30). That only highlights it.
+- **How a reclaim works.** Offering raises `discard_approval` cards in Needs you, each stating the space it frees and exactly what is lost.
+  - **A copy with unpushed commits, commits only it holds, or unreadable state gets its own card.** Copies without such commits share one card.
+  - Approving (type `reclaim` to confirm) removes the checkout and the worker's home directory. **The branch and its commits stay in the project clone**, so only the copy's uncommitted files are lost.
+  - Before removing anything, each copy is re-read. One whose worker came back, or whose head or files changed since the card, is kept and named in the result line.
+  - Only your own tap answers these cards. The weaver, a relayed chat answer and YOLO auto-approval cannot.
+- **Low-disk warning.** Every 10 minutes the daemon checks free space on the filesystem holding each workspace. Below `disk.warnFreePercent` (10 %) or `disk.warnFreeBytes` (50 GiB) in `daemon.yaml`, it warns once per low episode: a chat line in each affected workspace and one incident. The warning names the five largest retained copies and the workspace's total. It warns again only if free space halves, and resets once space recovers 5 % above the threshold. It never deletes anything.
+
+`weave worker purge <id>` still removes one worker's home and worktree outright (it refuses a dirty worktree without `--force`), and `weave worktree discard <id>` is the per-worktree destructive path; prefer the reclaim cards, which keep the branch. Never delete a `workers/<id>/work` directory by hand: the project clone keeps metadata for it, and a live worker may own it.
 
 ---
 

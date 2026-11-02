@@ -1331,6 +1331,7 @@ weave project set-policy <id> visualPlanArtifact=true|false   experimental, off 
 weave runtime list|detect|login <id>              runtime availability and auth per workspace
 weave role list|show|activate|pause|resume|retire|charter show|charter rollback|memory show
 weave worker list|show|pause|resume|relaunch|cancel|purge|handover|handback --note <note>   handover/handback (VS-249): take a worker's session for your own terminal, or give it back
+weave worker retained [--scan]|reclaim <dir...>|--class <c>|--offerable   worker copies kept because their work has not landed, and the approval-gated reclaim offer (VS-955)
 weave ticket create|list|show|merge-queue [-p <project>]|assign <role>|set --auto-merge|transition|comment|cancel|discard --force|open (browser)
 weave decision list|show|answer <id> <key|text>
 weave routine list|show|add|pause|resume|rm     scheduled tasks (recurring weaver alarms); add --daily HH:MM or --every <minutes> --tz --instruction [--action report|file_work] [--max-tickets] [--project]

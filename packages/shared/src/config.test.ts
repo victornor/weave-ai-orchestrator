@@ -739,3 +739,17 @@ describe('deleteBranchAfterMergeEnabled (VS-770)', () => {
     expect(WorkspaceDefaultsSchema.parse({}).deleteBranchAfterMerge).toBe(true);
   });
 });
+
+describe('retained copies and disk thresholds (VS-955)', () => {
+  it('defaults the offer window to 30 days and the disk warning to 10 % or 50 GiB free', () => {
+    const daemon = DaemonConfigSchema.parse({});
+    expect(daemon.disk).toEqual({ warnFreePercent: 10, warnFreeBytes: 50 * 1024 ** 3 });
+    const ws = WorkspaceConfigSchema.parse({ version: 1, id: 'w', name: 'W', ticketPrefix: 'W' });
+    expect(ws.defaults.retainedCopyOfferDays).toBe(30);
+  });
+
+  it('accepts overrides and rejects a percentage above 100', () => {
+    expect(DaemonConfigSchema.parse({ disk: { warnFreePercent: 5 } }).disk).toEqual({ warnFreePercent: 5, warnFreeBytes: 50 * 1024 ** 3 });
+    expect(() => DaemonConfigSchema.parse({ disk: { warnFreePercent: 150 } })).toThrow();
+  });
+});

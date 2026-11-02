@@ -33,6 +33,7 @@ import { createApp, type WorkspaceAdmin } from './app.js';
 import { createUpdateChecker, runningReleaseRoot, type ReleaseProject } from './release-info.js';
 import { createUpgradeService } from './upgrade.js';
 import { toolContractProvider } from './tool-contract.js';
+import { createDiskWatch } from './diskWatch.js';
 import { announceRestart, markBooted, observeBoot, recordShutdown, recordStartFailure, startLivenessTrail } from './restart-notice.js';
 import { ChannelManager } from './channels.js';
 import { WebhookDispatcher } from './webhooks.js';
@@ -269,6 +270,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
 
   let stopping: Promise<void> | null = null;
   let stopStallWatchdog = (): void => {};
+  let stopDiskWatch = (): void => {};
   let demoPlayer: { stop(): void } | null = null;
   const stop = (reason = 'shutdown'): Promise<void> => (stopping ??= shutdown(reason));
 
@@ -276,6 +278,7 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     log.info({ reason }, 'daemon shutting down');
     livenessTrail.stop();
     stopStallWatchdog();
+    stopDiskWatch();
     demoPlayer?.stop();
     // VS-339: mark every workspace and record the deliberate shutdown before the first await. systemd
     // signals the whole control group, so a runtime child can exit and its turn finalize before the
@@ -339,6 +342,17 @@ export async function startDaemon(opts: StartOptions = {}): Promise<DaemonHandle
     });
     stallWatchdog.start();
     stopStallWatchdog = () => stallWatchdog.stop();
+
+    // VS-955: warn captain before the filesystem holding a workspace fills up, naming what the daemon
+    // keeps there. Its own timer, so a stalled supervisor cannot silence it; it never deletes anything.
+    const diskWatch = createDiskWatch({
+      workspaces: () => [...new Set(workspaces.values())],
+      db: daemonDb,
+      incidents,
+      thresholds: () => daemonCfg.disk ?? { warnFreePercent: 10, warnFreeBytes: 50 * 1024 ** 3 },
+    });
+    diskWatch.start();
+    stopDiskWatch = () => diskWatch.stop();
   }
 
   // VS-770: the scripted live progress that makes a demo's running views move; stopped with the daemon.

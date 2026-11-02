@@ -48,8 +48,8 @@
 
 ## 5. Low-disk warning
 
-- [ ] 5.1 Add `disk.warnFreePercent` (10) and `disk.warnFreeBytes` (50 GiB) to `DaemonConfigSchema`. Verify with the config schema test.
-- [ ] 5.2 Add `server/src/diskWatch.ts`: an injected `readFs`, de-duplication by device, thresholds with a 5 % recovery margin, episode state in `daemon.sqlite` meta, re-warn at half, the top five copies from each workspace's table, `notifyHuman` per workspace, and one deduped incident. Wire it into `daemon.ts` (10 min, unref'd, not in demo mode). Verify with tests, all with a fake reader:
+- [x] 5.1 Add `disk.warnFreePercent` (10) and `disk.warnFreeBytes` (50 GiB) to `DaemonConfigSchema`. Verify with the config schema test.
+- [x] 5.2 Add `server/src/diskWatch.ts`: an injected `readFs`, de-duplication by device, thresholds with a 5 % recovery margin, episode state in `daemon.sqlite` meta, re-warn at half, the top five copies from each workspace's table, `notifyHuman` per workspace, and one deduped incident. Wire it into `daemon.ts` (10 min, unref'd, not in demo mode). Verify with tests, all with a fake reader:
   - 24 GB of 1.6 TB with copies of 12, 9 and 4 GB gives one warning naming all three and the total, and one incident;
   - a second low check is silent;
   - a halving re-warns;

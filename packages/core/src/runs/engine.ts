@@ -825,6 +825,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
   });
   await afterTurnHooks(ctx, deps, agent, ticket);
   await deliverSessionAnswer(ctx, deps, { agent, ticket, wakes, result, run: finished });
+  await deliverPlannerAnswer(ctx, deps, { agent, wakes, result, run: finished, record });
   await deliverConductorTurnNotice(ctx, deps, { agent, ticket, wakes, result, run: finished });
   return finished;
 }
@@ -973,6 +974,58 @@ async function deliverSessionAnswer(
     await deps().threads.outbound({ kind: 'system', id: null }, threadId, notice, { runId: input.run.id });
   } catch (e) {
     log.warn({ err: String(e), agentId: input.agent.id }, 'failed to deliver a session answer to its thread');
+  }
+}
+
+/**
+ * VS-954: a planning agent's only delivery is `weave_plan_reply`; its plain final text is recorded as
+ * the run summary (cut to 1000 characters) and goes nowhere. A long answer written as the turn's
+ * closing prose rather than through the tool therefore streamed to the chat and then vanished, while
+ * the run reported success. When a succeeded planner turn wrote nothing to its plan's thread and did
+ * leave final text, the engine posts that text there in full, and records a run event either way
+ * (`run.delivery.fallback`, or `run.delivery.failed` when even the post failed), so a lost answer is
+ * never silent. A turn that already replied through the tool, or ended with no text, is left alone.
+ * A turn that ends timed out, cancelled, interrupted or failed leaves the session turn's outcome
+ * notice (VS-598) with its silences, instead of a stream that vanishes.
+ */
+async function deliverPlannerAnswer(
+  ctx: WorkspaceContext,
+  deps: () => CoreServices,
+  input: { agent: Agent; wakes: Wakeup[]; result: TurnResult | null; run: Run; record: (type: RunEvent['type'], payload: Record<string, unknown>, stream?: 'stdout' | 'stderr' | 'runtime' | 'system', level?: string) => void },
+): Promise<void> {
+  if (input.agent.kind !== 'planner' || !input.agent.planId) return;
+  const log = ctx.log('run').child({ runId: input.run.id });
+  const raw = input.result?.finalText;
+  const text = typeof raw === 'string' ? raw.trim() : '';
+  const answer = text.length > 0 && extractReport(text) === null ? text : null;
+  try {
+    // Re-read the run: finalize schedules a retry after it returns, so the snapshot does not know yet.
+    const run = ctx.db.get<Run>('SELECT * FROM runs WHERE id = ?', [input.run.id]) ?? input.run;
+    const threadId = deps().planning.get(input.agent.planId).threadId;
+    // The reply tool (or an earlier delivery) already wrote for this run: nothing to add.
+    if (deps().threads.hasOutboundForRun(threadId, input.run.id)) return;
+    if (run.status === 'succeeded') {
+      if (answer === null) return;
+      try {
+        await deps().threads.outbound({ kind: 'agent', id: input.agent.id, runId: input.run.id }, threadId, answer, { runId: input.run.id });
+      } catch (e) {
+        log.warn({ err: String(e), agentId: input.agent.id }, 'failed to deliver a planner answer to its plan thread');
+        input.record('runtime.raw', { originalType: 'run.delivery.failed', data: { error: String(e), chars: answer.length } }, 'system', 'error');
+        return;
+      }
+      input.record('runtime.raw', { originalType: 'run.delivery.fallback', data: { reason: 'no weave_plan_reply in the turn; final text posted to the plan thread', chars: answer.length } }, 'system', 'warn');
+      return;
+    }
+    // VS-598's rules: the same plain-reason notice and the same silences (scheduled retry, shutdown or
+    // live-message interruption) as a session turn.
+    const errorText = ctx.db.get<{ errorText: string | null }>('SELECT error_text FROM agents WHERE id = ?', [input.agent.id])?.errorText ?? null;
+    const resumesPending = input.wakes.some((w) => ctx.db.get<{ status: string }>('SELECT status FROM wakeups WHERE id = ?', [w.id])?.status === 'queued');
+    const notice = sessionOutcomeNotice(run, errorText, !!run.scheduledRetryAt, resumesPending);
+    if (notice === null) return;
+    await deps().threads.outbound({ kind: 'system', id: null }, threadId, notice, { runId: input.run.id });
+  } catch (e) {
+    log.warn({ err: String(e), agentId: input.agent.id }, 'failed to deliver a planner turn outcome to its plan thread');
+    input.record('runtime.raw', { originalType: 'run.delivery.failed', data: { error: String(e) } }, 'system', 'error');
   }
 }
 

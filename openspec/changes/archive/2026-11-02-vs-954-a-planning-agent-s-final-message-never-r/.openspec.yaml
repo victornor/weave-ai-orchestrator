@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-02
+goal: A planning agent's final message never reaches the chat when its answer
+  runs long

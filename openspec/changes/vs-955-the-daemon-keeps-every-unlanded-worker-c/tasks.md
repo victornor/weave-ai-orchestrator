@@ -20,8 +20,8 @@
 
   Assert the counts, sizes (> 0), reasons, classes and totals, that the running worker is absent, and that a byte-for-byte listing of every copy is identical before and after the scan.
 - [x] 2.4 Make the supervisor trigger the scan daily via `due(...)` without awaiting it in `runStep`. Verify with a supervisor test that a scan that never settles does not keep a step in flight or make the state `stalled`, and that a second trigger while scanning is a no-op.
-- [ ] 2.5 Add `GET /workers/retained`, `POST /workers/retained/scan` (202), and `retainedCopies` on `GET /api/w/:ws/`, with `routetable.ts` entries. Verify with server route tests over the fixture.
-- [ ] 2.6 Add `weave worker retained [--json] [--scan]`, a table sorted by size with human-readable sizes and a totals line. Verify with a CLI test against a stubbed client.
+- [x] 2.5 Add `GET /workers/retained`, `POST /workers/retained/scan` (202), and `retainedCopies` on `GET /api/w/:ws/`, with `routetable.ts` entries. Verify with server route tests over the fixture.
+- [x] 2.6 Add `weave worker retained [--json] [--scan]`, a table sorted by size with human-readable sizes and a totals line. Verify with a CLI test against a stubbed client.
 
 ## 3. Reclaim, gated on captain's approval
 
@@ -38,7 +38,7 @@
 - [x] 3.3 Pin the no-automatic-removal rule. Verify with tests:
   - `retentionPass`, `scanRetainedCopies` and the disk check over offerable copies with unlanded work and no approved card remove nothing;
   - the auto-approval pass with YOLO on and a weaver `weave_decision_answer` both leave a reclaim card open.
-- [ ] 3.4 Add `POST /workers/retained/reclaim` and `weave worker reclaim <dir…> | --class <c> [--offerable]`, which print the card ids and never remove anything. Verify with route and CLI tests.
+- [x] 3.4 Add `POST /workers/retained/reclaim` and `weave worker reclaim <dir…> | --class <c> [--offerable]`, which print the card ids and never remove anything. Verify with route and CLI tests.
 - [ ] 3.5 Make the web app's discard card render a reclaim target: a per-copy list of bytes and losses, and the batch total. Verify with a `DecisionCard` test for a solo card and a batch card.
 
 ## 4. Storage view

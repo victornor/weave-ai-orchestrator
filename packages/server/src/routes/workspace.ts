@@ -25,6 +25,8 @@ export function workspaceRoutes(deps: AppDeps): Hono<AppEnv> {
       // VS-334: this workspace's own loaded plugins — workspace-configured and daemon-wide alike —
       // for the Settings management list and the web app's "Plugins" nav section / page route.
       plugins: ws.ctx.plugins.loaded,
+      // VS-955: how much the daemon keeps in retained worker copies, from the last scan.
+      retainedCopies: retainedSummary(ws),
     });
   });
 
@@ -100,4 +102,14 @@ function statusOf(ws: WorkspaceRuntime): string {
 function setStatus(ws: WorkspaceRuntime, status: string): void {
   ws.ctx.db.run('UPDATE workspaces SET status = ?, updated_at = ? WHERE id = ?', [status, nowIso(), ws.ctx.workspaceId]);
   ws.ctx.events.emit('workspace.updated', 'workspace', ws.id, { status });
+}
+
+/** VS-955: the retained-copy count and total for the workspace summary; never fails the summary. */
+function retainedSummary(ws: WorkspaceRuntime): { count: number; bytes: number; scannedAt: string | null } | null {
+  try {
+    const r = ws.services.workers.retainedCopies();
+    return { count: r.totals.count, bytes: r.totals.bytes, scannedAt: r.scannedAt };
+  } catch {
+    return null;
+  }
 }

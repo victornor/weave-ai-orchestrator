@@ -150,3 +150,69 @@ describe('weave worker prune-homes (VS-859)', () => {
     expect(out).toContain('would be reclaimed');
   });
 });
+
+describe('weave worker retained / reclaim (VS-955)', () => {
+  const GB = 1024 ** 3;
+  const copy = (over: Record<string, unknown>) => ({
+    directory: 'w1', workerId: 'w1', workerName: 'Engineer #1', workerStatus: 'done', ticketId: 't1', ticketIdentifier: 'VS-349',
+    ticketStatus: 'cancelled', projectId: 'p1', branch: 'ac/vs-349-x', headSha: 'abc', class: 'finished_unlanded', offerable: true,
+    ageFrom: new Date(Date.now() - 50 * 86_400_000).toISOString(), bytes: 12 * GB, uncommitted: { tracked: 2, untracked: 3 },
+    commitsNotOnLandingBranch: 0, commitsOnNoRemote: 0, commitsOnlyHere: 0, mergedPr: false, error: null,
+    reasons: ['uncommitted'], needsOwnApproval: false, scannedAt: '2026-11-02T19:00:00.000Z', ...over,
+  });
+  const report = {
+    scannedAt: '2026-11-02T19:00:00.000Z', scanning: false, offerDays: 30,
+    totals: { count: 2, bytes: 16 * GB, offerable: { count: 1, bytes: 12 * GB }, byClass: {} },
+    copies: [
+      copy({}),
+      copy({ directory: 'w2', ticketIdentifier: 'VS-900', ticketStatus: 'in_review', class: 'open', offerable: false, bytes: 4 * GB,
+        reasons: ['commits_not_on_landing_branch'], uncommitted: { tracked: 0, untracked: 0 }, commitsNotOnLandingBranch: 4, commitsOnNoRemote: 1, needsOwnApproval: true }),
+    ],
+    disk: { path: '/home', freeBytes: 24 * GB, totalBytes: 1600 * GB, low: true, thresholds: { freePercent: 10, freeBytes: 50 * GB }, checkedAt: 't' },
+  };
+
+  it('prints the copies largest first with size, class, age and why each is kept, and the totals', async () => {
+    routes['GET /api/w/ws1/workers/retained'] = () => ({ body: report });
+    const { out } = await cli('worker', 'retained');
+    expect(out).toContain('12GB');
+    expect(out).toContain('VS-349');
+    expect(out).toContain('finished_unlanded *');
+    expect(out).toContain('2 modified, 3 untracked');
+    expect(out).toContain('4 commit(s) not landed (1 unpushed)');
+    expect(out).toContain('own card');
+    expect(out).toContain('2 retained copies, 16GB; 1 offerable');
+    expect(out).toContain('/home: 24GB free of 1.6TB (2%) — below the warning threshold');
+  });
+
+  it('--scan starts a scan and waits for it before printing', async () => {
+    let reads = 0;
+    routes['POST /api/w/ws1/workers/retained/scan'] = () => ({ status: 202, body: { started: true, scanning: true } });
+    routes['GET /api/w/ws1/workers/retained'] = () => ({ body: { ...report, scanning: reads++ === 0 } });
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const done = cli('worker', 'retained', '--scan');
+    await vi.waitFor(() => expect(reads).toBe(1));
+    await vi.advanceTimersByTimeAsync(2_000);
+    vi.useRealTimers();
+    const { out } = await done;
+    expect(calls.map((c) => `${c.method} ${c.path}`)).toEqual([
+      'POST /api/w/ws1/workers/retained/scan', 'GET /api/w/ws1/workers/retained', 'GET /api/w/ws1/workers/retained', 'GET /api/w/ws1/workers/retained',
+    ]);
+    expect(out).toContain('VS-349');
+  });
+
+  it('reclaim --offerable sends only the offerable copies and says nothing was removed', async () => {
+    routes['GET /api/w/ws1/workers/retained'] = () => ({ body: report });
+    routes['POST /api/w/ws1/workers/retained/reclaim'] = () => ({ body: { cards: [{ decisionId: 'dec_1', directories: ['w1'], bytes: 12 * GB, own: false }], skipped: [] } });
+    const { out } = await cli('worker', 'reclaim', '--offerable');
+    expect(calls.find((c) => c.path.endsWith('/retained/reclaim'))?.body).toEqual({ directories: ['w1'] });
+    expect(out).toContain('dec_1');
+    expect(out).toContain('nothing has been removed');
+  });
+
+  it('reclaim with named directories posts them as given', async () => {
+    routes['POST /api/w/ws1/workers/retained/reclaim'] = () => ({ body: { cards: [], skipped: [{ directory: 'w2', reason: 'its ticket VS-900 is still in_review' }] } });
+    const { out } = await cli('worker', 'reclaim', 'w2');
+    expect(calls[0]!.body).toEqual({ directories: ['w2'] });
+    expect(out).toContain('not offered w2: its ticket VS-900 is still in_review');
+  });
+});

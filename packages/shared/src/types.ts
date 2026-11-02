@@ -393,6 +393,16 @@ export interface RetainedCopy {
 
 export interface RetainedCopyTotals { count: number; bytes: number }
 
+/** VS-955: the last free-space check of the filesystem holding a workspace root. */
+export interface DiskCheck {
+  path: string;
+  freeBytes: number;
+  totalBytes: number;
+  low: boolean;
+  thresholds: { freePercent: number; freeBytes: number };
+  checkedAt: string;
+}
+
 /** VS-955: a workspace's retained worker copies — `GET /api/w/:ws/workers/retained`. */
 export interface RetainedCopiesReport {
   scannedAt: string | null;
@@ -401,6 +411,8 @@ export interface RetainedCopiesReport {
   totals: RetainedCopyTotals & { offerable: RetainedCopyTotals; byClass: Record<E.RetainedCopyClass, RetainedCopyTotals> };
   /** Largest first. */
   copies: RetainedCopy[];
+  /** The daemon's last free-space check of this workspace's filesystem; null before the first one. */
+  disk?: DiskCheck | null;
 }
 
 /** VS-955: what a reclaim request raised — cards, never removals — and what it would not offer. */

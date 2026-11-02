@@ -62,5 +62,5 @@
 ## 6. Docs, knowledge and verification
 
 - [x] 6.1 `docs/OPERATIONS.md`: rewrite "Disk fills up" — what retained copies are, why they are kept, the classes, the Storage view and `weave worker retained`/`reclaim`, the card split and that the branch is kept, the low-disk warning and its thresholds. Correct the stale claim that nothing is pruned. Add the restart-notice crash fields to the service section. Also update `docs/API.md` (new routes, `RestartNotice` fields), `docs/CLI.md` (two commands) and `docs/CONFIGURATION.md` (three keys). Verify by reading the rendered sections against the specs.
-- [ ] 6.2 Run `pnpm lint`, `pnpm typecheck` and both test suites (per-directory with `--maxWorkers=1` if the turn's memory limit requires it), and paste both suite blocks verbatim into the PR.
-- [ ] 6.3 Update the KB document `worker-home-retention` with the retained-copy section: what they are, why they are kept, how captain reclaims, and the solo/batch rule. Add one hub landmine line pointing at it. Verify by reading the document back with `weave_knowledge_doc_get`.
+- [x] 6.2 Run `pnpm lint`, `pnpm typecheck` and both test suites (per-directory with `--maxWorkers=1` if the turn's memory limit requires it), and paste both suite blocks verbatim into the PR.
+- [x] 6.3 Update the KB document `worker-home-retention` with the retained-copy section: what they are, why they are kept, how captain reclaims, and the solo/batch rule. Add one hub landmine line pointing at it. Verify by reading the document back with `weave_knowledge_doc_get`.

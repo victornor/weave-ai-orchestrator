@@ -186,7 +186,7 @@ describe('retained worker copies (VS-955)', () => {
       expect(c).toMatchObject({ commitsOnlyHere: 1, commitsOnNoRemote: 0, reasons: ['commits_not_on_landing_branch'], needsOwnApproval: true });
       const offer = await workers.offerRetainedReclaim(HUMAN, [detached.worker.id]);
       expect(offer.cards).toMatchObject([{ own: true, directories: [detached.worker.id] }]);
-      expect(h.services.decisions.get(offer.cards[0]!.decisionId).context).toContain('1 commit(s) only this copy holds are lost');
+      expect(h.services.decisions!.get(offer.cards[0]!.decisionId).context).toContain('1 commit(s) only this copy holds are lost');
     });
 
     it('marks a copy offerable only once its ticket has been terminal for the window', async () => {
@@ -218,7 +218,7 @@ describe('retained worker copies (VS-955)', () => {
       await workers.scanRetainedCopies();
       return { unpushed, uncommittedA, uncommittedB };
     }
-    const openReclaimCards = () => h.services.decisions.list({ status: ['open'] }).filter((d) => d.kind === 'discard_approval');
+    const openReclaimCards = () => h.services.decisions!.list({ status: ['open'] }).filter((d) => d.kind === 'discard_approval');
 
     it('an offer raises one card for the copy with unpushed commits and one shared card for the rest, and removes nothing', async () => {
       const { unpushed, uncommittedA, uncommittedB } = await threeCopies();
@@ -231,11 +231,11 @@ describe('retained worker copies (VS-955)', () => {
       const shared = offer.cards.find((c) => !c.own)!;
       expect(own.directories).toEqual([unpushed.worker.id]);
       expect(shared.directories.sort()).toEqual([uncommittedA.worker.id, uncommittedB.worker.id].sort());
-      const ownCard = h.services.decisions.get(own.decisionId);
+      const ownCard = h.services.decisions!.get(own.decisionId);
       expect(ownCard).toMatchObject({ kind: 'discard_approval', owner: 'human', status: 'open' });
       expect(ownCard.context).toContain('2 commit(s) on no remote');
       expect(ownCard.context).toContain('stays in the project clone');
-      const sharedCard = h.services.decisions.get(shared.decisionId);
+      const sharedCard = h.services.decisions!.get(shared.decisionId);
       expect(sharedCard.context).toContain('0 modified and 1 untracked file(s) are lost');
       expect(sharedCard.context).toContain('1 modified and 0 untracked file(s) are lost');
       expect(sharedCard.title).toMatch(/^Reclaim 2 worker copies \(/);
@@ -260,7 +260,7 @@ describe('retained worker copies (VS-955)', () => {
       const { unpushed } = await threeCopies();
       const head = (await git(['rev-parse', unpushed.branch], clonePath)).stdout.trim();
       const offer = await workers.offerRetainedReclaim(HUMAN, [unpushed.worker.id]);
-      await h.services.decisions.answer(HUMAN, offer.cards[0]!.decisionId, { key: 'approve' });
+      await h.services.decisions!.answer(HUMAN, offer.cards[0]!.decisionId, { key: 'approve' });
 
       expect(existsSync(unpushed.home)).toBe(false);
       expect((await git(['rev-parse', unpushed.branch], clonePath)).stdout.trim()).toBe(head);
@@ -275,7 +275,7 @@ describe('retained worker copies (VS-955)', () => {
       const { uncommittedA, uncommittedB } = await threeCopies();
       const offer = await workers.offerRetainedReclaim(HUMAN, [uncommittedA.worker.id, uncommittedB.worker.id]);
       const before = await fingerprint();
-      await h.services.decisions.answer(HUMAN, offer.cards[0]!.decisionId, { key: 'reject' });
+      await h.services.decisions!.answer(HUMAN, offer.cards[0]!.decisionId, { key: 'reject' });
       expect(await fingerprint()).toBe(before);
     });
 
@@ -283,7 +283,7 @@ describe('retained worker copies (VS-955)', () => {
       const { uncommittedA, uncommittedB } = await threeCopies();
       const offer = await workers.offerRetainedReclaim(HUMAN, [uncommittedA.worker.id, uncommittedB.worker.id]);
       await commit(uncommittedA.wt, 'late');
-      await h.services.decisions.answer(HUMAN, offer.cards[0]!.decisionId, { key: 'approve' });
+      await h.services.decisions!.answer(HUMAN, offer.cards[0]!.decisionId, { key: 'approve' });
 
       expect(existsSync(uncommittedA.wt)).toBe(true);
       expect(statSync(join(uncommittedA.wt, 'late')).isFile()).toBe(true);
@@ -295,7 +295,7 @@ describe('retained worker copies (VS-955)', () => {
       const { unpushed } = await threeCopies();
       const offer = await workers.offerRetainedReclaim(HUMAN, [unpushed.worker.id]);
       h.db.update('agents', unpushed.worker.id, { status: 'active' });
-      await h.services.decisions.answer(HUMAN, offer.cards[0]!.decisionId, { key: 'approve' });
+      await h.services.decisions!.answer(HUMAN, offer.cards[0]!.decisionId, { key: 'approve' });
       expect(existsSync(unpushed.wt)).toBe(true);
       expect(posted.at(-1)).toContain('its worker is active again');
     });
@@ -309,10 +309,10 @@ describe('retained worker copies (VS-955)', () => {
       await workers.scanRetainedCopies();
       const weaver = h.db.get<Agent>("SELECT * FROM agents WHERE kind = 'weaver'")!;
       for (const card of offer.cards) {
-        await expect(h.services.decisions.answer({ kind: 'agent', id: weaver.id, runId: 'r1' }, card.decisionId, { key: 'approve' }))
+        await expect(h.services.decisions!.answer({ kind: 'agent', id: weaver.id, runId: 'r1' }, card.decisionId, { key: 'approve' }))
           .rejects.toMatchObject({ code: 'forbidden' });
-        await expect(h.services.decisions.answer(SYSTEM, card.decisionId, { key: 'approve' })).rejects.toMatchObject({ code: 'forbidden' });
-        expect(h.services.decisions.get(card.decisionId).status).toBe('open');
+        await expect(h.services.decisions!.answer(SYSTEM, card.decisionId, { key: 'approve' })).rejects.toMatchObject({ code: 'forbidden' });
+        expect(h.services.decisions!.get(card.decisionId).status).toBe('open');
       }
       expect(await fingerprint()).toBe(before);
     });

@@ -16,5 +16,5 @@
 
 ## 4. Verification and the workspace measurement
 
-- [ ] 4.1 Run `pnpm lint`, `pnpm typecheck` and the changed test directories, with both suite blocks pasted verbatim in the PR. Where the worker's memory limit prevents the full suite, say which directories ran and leave the full suite to CI.
-- [ ] 4.2 Measure the corrected classification over v-services read-only (D5): per copy, the proof's verdict and `du -sk`. Use `weave_ticket_get` deliveries for agent-conductor tickets and the `edge` squash-commit proxy for FanStack tickets. Report in the PR how many of the 153 copies become reclaimable and how many GB against the 181 GB measured, which stay and why, and whether the 18 "branch not found" copies are recoverable.
+- [x] 4.1 Run `pnpm lint`, `pnpm typecheck` and the changed test directories, with both suite blocks pasted verbatim in the PR. Where the worker's memory limit prevents the full suite, say which directories ran and leave the full suite to CI.
+- [x] 4.2 Measure the corrected classification over v-services read-only (D5): per copy, the proof's verdict and `du -sk`. Use `weave_ticket_get` deliveries for agent-conductor tickets and the `edge` squash-commit proxy for FanStack tickets. Report in the PR how many of the 153 copies become reclaimable and how many GB against the 181 GB measured, which stay and why, and whether the 18 "branch not found" copies are recoverable.

@@ -341,6 +341,8 @@ export function whyKept(c: RetainedCopy): string {
     parts.push(`${n} commit(s) not landed${c.commitsOnNoRemote ? ` (${c.commitsOnNoRemote} unpushed)` : ''}`);
   }
   if (c.reasons.includes('branch_gone')) parts.push('branch gone from the clone');
+  // VS-963: the ticket says it merged; only this copy could not be checked against the merge.
+  if (c.reasons.includes('landing_unverified')) parts.push(`merge recorded, not checkable${c.landingNote ? `: ${c.landingNote.slice(0, 60)}` : ''}`);
   if (c.reasons.includes('unreadable')) parts.push(`unreadable${c.error ? `: ${c.error.slice(0, 60)}` : ''}`);
   return parts.join('; ') || (c.class === 'orphan' ? 'no agent or ticket' : '');
 }

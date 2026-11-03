@@ -15,6 +15,7 @@ const CLASS_LABEL: Record<RetainedCopyClass, string> = {
   open: 'ticket open',
   finished_unlanded: 'finished, unlanded',
   branch_gone: 'branch gone',
+  landing_unverified: 'merged, unverified',
   orphan: 'orphan',
 };
 
@@ -35,6 +36,8 @@ export function whyKept(c: RetainedCopy): string {
     parts.push(`${n} ${n === 1 ? 'commit' : 'commits'} not landed${c.commitsOnNoRemote ? ` (${c.commitsOnNoRemote} unpushed)` : ''}`);
   }
   if (c.reasons.includes('branch_gone')) parts.push('branch gone from the clone');
+  // VS-963: the ticket says it merged; only this copy could not be checked against the merge.
+  if (c.reasons.includes('landing_unverified')) parts.push('ticket records a merge this copy cannot be checked against');
   if (c.reasons.includes('unreadable')) parts.push('state unreadable');
   return parts.join(' · ') || (c.class === 'orphan' ? 'no agent or ticket' : '');
 }

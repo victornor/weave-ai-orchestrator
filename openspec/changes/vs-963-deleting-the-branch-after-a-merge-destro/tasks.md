@@ -11,8 +11,8 @@
 
 ## 3. Surfaces and docs
 
-- [ ] 3.1 Label `landing_unverified` in the Storage view (`packages/ui/src/v2/settings/sections/Storage.tsx`) and `weave worker retained` (`packages/cli/src/commands/worker.ts`). Verify with the existing Storage and CLI tests extended to the new class.
-- [ ] 3.2 Update `docs/OPERATIONS.md` → "Disk fills up" with the recorded-merge proof and the `landing_unverified` class. Verify by reading the rendered section.
+- [x] 3.1 Label `landing_unverified` in the Storage view (`packages/ui/src/v2/settings/sections/Storage.tsx`) and `weave worker retained` (`packages/cli/src/commands/worker.ts`). Verify with the existing Storage and CLI tests extended to the new class.
+- [x] 3.2 Update `docs/OPERATIONS.md` → "Disk fills up" with the recorded-merge proof and the `landing_unverified` class. Verify by reading the rendered section.
 
 ## 4. Verification and the workspace measurement
 

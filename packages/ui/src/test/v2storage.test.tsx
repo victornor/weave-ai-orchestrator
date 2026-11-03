@@ -43,12 +43,14 @@ beforeEach(() => {
       commitsNotOnLandingBranch: 4, commitsOnNoRemote: 1, needsOwnApproval: true }),
     copy({ directory: 'w3', ticketIdentifier: 'VS-351', bytes: 2 * GB, ticketStatus: 'done', uncommitted: { tracked: 0, untracked: 1 } }),
     copy({ directory: 'w4', ticketIdentifier: 'VS-900', ticketStatus: 'in_review', class: 'open', offerable: false, bytes: 1 * GB }),
+    copy({ directory: 'w5', ticketIdentifier: 'VS-340', ticketStatus: 'done', class: 'landing_unverified', offerable: false, bytes: 1 * GB,
+      reasons: ['landing_unverified'], uncommitted: { tracked: 0, untracked: 0 }, commitsNotOnLandingBranch: null, landingNote: 'the project clone does not hold the recorded merge commit 4b37832e09e3' }),
   ];
   state.report = {
     scannedAt: '2026-11-02T19:00:00.000Z', scanning: false, offerDays: 30,
     totals: {
-      count: 4, bytes: 19 * GB, offerable: { count: 3, bytes: 18 * GB },
-      byClass: { open: { count: 1, bytes: GB }, finished_unlanded: { count: 3, bytes: 18 * GB }, branch_gone: { count: 0, bytes: 0 }, orphan: { count: 0, bytes: 0 } },
+      count: 5, bytes: 20 * GB, offerable: { count: 3, bytes: 18 * GB },
+      byClass: { open: { count: 1, bytes: GB }, finished_unlanded: { count: 3, bytes: 18 * GB }, branch_gone: { count: 0, bytes: 0 }, landing_unverified: { count: 1, bytes: GB }, orphan: { count: 0, bytes: 0 } },
     },
     copies,
     disk: { path: '/home/v/ws', freeBytes: 24 * GB, totalBytes: 1600 * GB, low: true, thresholds: { freePercent: 10, freeBytes: 50 * GB }, checkedAt: 't' },
@@ -60,7 +62,7 @@ describe('StorageSection (VS-955)', () => {
     render(<StorageSection />);
     expect(screen.getByText(/24GB free of 1\.6TB \(2%\) on the filesystem holding/)).toBeInTheDocument();
     expect(screen.getByText(/below the warning threshold/)).toBeInTheDocument();
-    expect(screen.getByText('4 copies, 19GB')).toBeInTheDocument();
+    expect(screen.getByText('5 copies, 20GB')).toBeInTheDocument();
     const row = (dir: string) => within(document.querySelector(`[data-retained-copy="${dir}"]`) as HTMLElement);
     expect(row('w1').getByText('12GB')).toBeInTheDocument();
     expect(row('w1').getByText('2 modified, 3 untracked')).toBeInTheDocument();
@@ -68,6 +70,10 @@ describe('StorageSection (VS-955)', () => {
     expect(row('w2').getByText('own card')).toBeInTheDocument();
     expect(row('w4').getByText('ticket open')).toBeInTheDocument();
     expect(row('w4').getByRole('checkbox')).toBeDisabled();
+    // VS-963: a recorded merge this copy cannot be checked against is its own class, not unlanded commits.
+    expect(row('w5').getByText('merged, unverified')).toBeInTheDocument();
+    expect(row('w5').getByText('ticket records a merge this copy cannot be checked against')).toBeInTheDocument();
+    expect(screen.getByText(/merged, unverified: 1 · 1GB/)).toBeInTheDocument();
   });
 
   it('selects the offerable copies, shows the card split, and sends only after confirming', async () => {

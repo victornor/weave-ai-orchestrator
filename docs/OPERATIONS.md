@@ -835,6 +835,8 @@ What the daemon itself puts on disk, largest first:
 2. Finished worker homes whose work landed. The daily retention pass reclaims them once they are past `defaults.workerArchiveDays` (30) and their checkout is clean (VS-859). `weave worker prune-homes --dry-run` shows what it would take, and `--ignore-age` widens it.
 3. `<workspace>/archive/workers/` and `<workspace>/.weave/runs/`, pruned by the same pass after `workerArchiveDays` and `runLogRetentionDays`.
 
+**How "landed" is decided (VS-963).** Retirement, the VS-859 sweep and the retained-copy scan all ask the ticket first. A `done` ticket's delivery records the merge: `merged`, the pull request head (`prHead`) and the merge commit. These are written by the daemon only after it has verified the landing. A copy has landed when its checkout's HEAD is the recorded pull-request head or an ancestor of it. Failing that, it has landed when every file the copy changed is identical in the recorded merge commit; the ticket's own `openspec/changes/<change>/` and `openspec/specs/` are ignored, because the archive rewrites them. This reads the checkout's HEAD and the clone's objects only. It therefore still works after the branch was deleted from the remote (VS-770) or from the clone, and for a multi-commit squash merge, where `git cherry` never finds a per-commit match. Commits made after the recorded merge stay unlanded. A ticket with no recorded merge is judged by the older git tests: every commit on a remote, or, with a merged PR, containment in the landing branch.
+
 **Retained worker copies (VS-955).** When a worker's ticket ends but its checkout still holds work that has not landed, retirement refuses to remove it, and so does the VS-859 sweep. The checkout may hold modified or untracked files, or commits not on the landing branch. Both are right to refuse: that is real, unrecoverable-if-deleted work. On 2026-11-02 such copies came to 255 GB across two workspaces and helped fill the host's disk. They are measured, aged and offered for reclaim, but **never removed without your approval**.
 
 ```bash
@@ -849,7 +851,8 @@ The web app shows the same list in **Settings → workspace → Storage**: free 
 - **What is shown.** Each copy's worker and its ticket and status, age since the ticket ended, and size. It also says why the copy is kept:
   - `uncommitted`: modified and untracked file counts;
   - `commits_not_on_landing_branch`: how many commits, and how many are on no remote;
-  - `branch_gone`: the branch no longer exists in the project clone;
+  - `branch_gone`: the branch no longer exists in the project clone, and no recorded merge proves the copy;
+  - `landing_unverified`: the ticket records a merge, but the copy cannot be checked against it, for example because the clone does not hold the merge commit or a file differs; the reason names which;
   - `unreadable`.
 
   A scan runs daily and on request, off the supervisor tick, and changes nothing.
@@ -860,6 +863,7 @@ The web app shows the same list in **Settings → workspace → Storage**: free 
   | `open` | The ticket is still live. Never offered. |
   | `finished_unlanded` | The ticket is `done` or `cancelled`. |
   | `branch_gone` | The ticket is finished and its branch is gone from the clone. Only the copy's own files remain. |
+  | `landing_unverified` | The ticket is finished and records a merge, but this copy cannot be checked against it. It is not reported as unlanded commits. |
   | `orphan` | No agent or ticket. |
 
   A copy is *offerable* once its ticket has been terminal for `defaults.retainedCopyOfferDays` (30). That only highlights it.

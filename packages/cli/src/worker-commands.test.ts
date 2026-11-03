@@ -167,6 +167,9 @@ describe('weave worker retained / reclaim (VS-955)', () => {
       copy({}),
       copy({ directory: 'w2', ticketIdentifier: 'VS-900', ticketStatus: 'in_review', class: 'open', offerable: false, bytes: 4 * GB,
         reasons: ['commits_not_on_landing_branch'], uncommitted: { tracked: 0, untracked: 0 }, commitsNotOnLandingBranch: 4, commitsOnNoRemote: 1, needsOwnApproval: true }),
+      copy({ directory: 'w3', ticketIdentifier: 'VS-340', ticketStatus: 'done', class: 'landing_unverified', offerable: false, bytes: 1 * GB,
+        reasons: ['landing_unverified'], uncommitted: { tracked: 0, untracked: 0 }, commitsNotOnLandingBranch: null,
+        landingNote: 'the project clone does not hold the recorded merge commit 4b37832e09e3' }),
     ],
     disk: { path: '/home', freeBytes: 24 * GB, totalBytes: 1600 * GB, low: true, thresholds: { freePercent: 10, freeBytes: 50 * GB }, checkedAt: 't' },
   };
@@ -180,6 +183,8 @@ describe('weave worker retained / reclaim (VS-955)', () => {
     expect(out).toContain('2 modified, 3 untracked');
     expect(out).toContain('4 commit(s) not landed (1 unpushed)');
     expect(out).toContain('own card');
+    expect(out).toContain('landing_unverified');
+    expect(out).toContain('merge recorded, not checkable: the project clone does not hold the recorded merge');
     expect(out).toContain('2 retained copies, 16GB; 1 offerable');
     expect(out).toContain('/home: 24GB free of 1.6TB (2%) — below the warning threshold');
   });

@@ -29,7 +29,7 @@ import type { WorktreeProvider } from '@weave-ai/plugin-sdk';
 import type { WorkspaceContext } from '../context.js';
 import type { Actor, CoreServices } from '../api.js';
 import { recordActivity } from '../events.js';
-import { worktreeChanges } from '../worktrees/landed.js';
+import { recordedLandingProof, worktreeChanges, type RecordedLandingProof } from '../worktrees/landed.js';
 import { git, resolveBaseRef } from '../util/git.js';
 import { sh } from '../util/exec.js';
 
@@ -170,13 +170,27 @@ export function createRetainedCopies({ ctx, deps, providerFor }: RetainedCopiesD
 
     const clone = project?.clonePath && existsSync(project.clonePath) ? project.clonePath : null;
     const branchGone = Boolean(project && branch && (!clone || !(await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], clone, GIT_TIMEOUT_MS)).ok));
+    // VS-963: the ticket's recorded merge, checked against the checkout's HEAD, decides before any ref
+    // comparison — it survives the branch being deleted from the remote or the clone.
+    const proof: RecordedLandingProof = clone && ticket && headSha
+      ? await recordedLandingProof({ repoPath: clone, worktreePath: wt, delivery: ticket.delivery, changeName: ticket.openspecChangeName })
+      : { kind: 'none' };
+    // A merged pull-request work product is VS-859's accepted proof on its own, so a record the copy
+    // cannot be checked against does not override it; commits made after the merge always do.
+    const proven = proof.kind === 'landed' || (proof.kind === 'unverified' && mergedPr);
+    const unverified = proof.kind === 'unverified' && !mergedPr;
     let commitsNotOnLandingBranch: number | null = null;
     let commitsOnNoRemote: number | null = null;
     if (clone && branch && !branchGone) {
       const landing = landingBranchOf(project!, ticket);
       const baseRef = (await resolveBaseRef(clone, landing)) ?? landing;
-      commitsNotOnLandingBranch = mergedPr ? 0 : await commitsNotIn(clone, branch, baseRef);
+      commitsNotOnLandingBranch = proven || (proof.kind === 'none' && mergedPr) ? 0
+        : proof.kind === 'unlanded' ? proof.commitsAfterMerge
+          : unverified ? null
+            : await commitsNotIn(clone, branch, baseRef);
       commitsOnNoRemote = await count(['rev-list', '--count', branch, '--not', '--remotes'], clone);
+    } else if (proof.kind === 'unlanded') {
+      commitsNotOnLandingBranch = proof.commitsAfterMerge;
     }
     // What the checkout alone holds: its HEAD's commits that no branch, remote or tag reaches. On a
     // checkout whose branch was deleted, or whose `.git` link is dangling, git cannot answer: unknown.
@@ -184,12 +198,15 @@ export function createRetainedCopies({ ctx, deps, providerFor }: RetainedCopiesD
 
     const reasons: RetainedCopyReason[] = [];
     if (changes.ok && (changes.tracked.length || changes.untracked.length)) reasons.push('uncommitted');
-    // Commits only the checkout's HEAD reaches (a detached commit) are not on the landing branch either.
-    if ((commitsNotOnLandingBranch ?? 0) > 0 || (commitsOnlyHere ?? 0) > 0) reasons.push('commits_not_on_landing_branch');
-    if (branchGone) reasons.push('branch_gone');
-    if (!changes.ok || (!branchGone && clone && branch && commitsNotOnLandingBranch === null)) reasons.push('unreadable');
+    // Commits only the checkout's HEAD reaches (a detached commit) are not on the landing branch either,
+    // unless the recorded merge contains them. An unverifiable record is never counted as unlanded commits.
+    if (proof.kind === 'unlanded' || (proof.kind === 'none' && ((commitsNotOnLandingBranch ?? 0) > 0 || (commitsOnlyHere ?? 0) > 0))) reasons.push('commits_not_on_landing_branch');
+    if (branchGone && !proven) reasons.push('branch_gone');
+    if (unverified) reasons.push('landing_unverified');
+    if (!changes.ok || (proof.kind === 'none' && !branchGone && clone && branch && commitsNotOnLandingBranch === null)) reasons.push('unreadable');
     const terminal = ticket ? TERMINAL_TICKET_STATUSES.includes(ticket.status) : false;
-    const cls: RetainedCopyClass = !agent || !ticket ? 'orphan' : !terminal ? 'open' : branchGone ? 'branch_gone' : 'finished_unlanded';
+    const cls: RetainedCopyClass = !agent || !ticket ? 'orphan' : !terminal ? 'open'
+      : unverified ? 'landing_unverified' : branchGone && !proven ? 'branch_gone' : 'finished_unlanded';
     // A finished copy with nothing unlanded is VS-859's to reclaim once its window passes, not ours.
     if (reasons.length === 0 && cls !== 'orphan' && cls !== 'open') return null;
     if (reasons.length === 0 && cls === 'open') return null;
@@ -219,6 +236,7 @@ export function createRetainedCopies({ ctx, deps, providerFor }: RetainedCopiesD
       commitsOnNoRemote,
       commitsOnlyHere,
       mergedPr,
+      landingNote: proof.kind === 'none' ? null : proof.reason,
       error: errors.length ? errors.join('; ').slice(0, 500) : null,
       reasons,
       needsOwnApproval: (commitsOnNoRemote ?? 0) > 0 || commitsOnlyHere !== 0 || reasons.includes('unreadable'),

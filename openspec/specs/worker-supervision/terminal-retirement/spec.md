@@ -57,11 +57,12 @@ not fail the transition.
 
 The landed-work test SHALL distinguish untracked files (`??` in `git status --porcelain`) from
 modified or staged tracked files. Untracked files alone SHALL NOT make a worktree "not landed":
-when every commit on the ticket branch is contained in the ticket's effective landing branch (or
-the pull request is merged and the branch's content matches it), the worktree SHALL be treated as
-landed even though untracked files are present. Modified or staged tracked files SHALL continue to
-make it not landed, and commits not contained in the landing branch SHALL continue to make it not
-landed, exactly as before.
+when every commit on the ticket branch is contained in the ticket's effective landing branch, the
+pull request is merged and the branch's content matches it, or the ticket's recorded merge proves the
+checkout (`worker-landing-proof`), the worktree SHALL be treated as landed even though untracked files
+are present. Modified or staged tracked files SHALL continue to make it not landed, and commits that
+are neither contained in the landing branch nor covered by the ticket's recorded merge SHALL continue
+to make it not landed.
 
 Before a worktree carrying untracked files is removed, the daemon SHALL copy those files into the
 worker's archive directory under `untracked/`, preserving their relative paths, so that nothing
@@ -97,8 +98,16 @@ listing the relative paths (capped, with the remainder as a count), and the same
 
 #### Scenario: An unlanded commit still blocks retirement
 
-- **WHEN** a worker's branch has a commit that its landing branch does not contain
+- **WHEN** a worker's branch has a commit that its landing branch does not contain and that the
+  ticket's recorded merge does not cover
 - **THEN** the worker is not retired, irrespective of untracked files
+
+#### Scenario: A squash-merged multi-commit branch retires at merge
+
+- **WHEN** a ticket reaches `done` through `mergeDone`, its pull request squash-merged a branch of
+  several commits, and the worker's checkout HEAD is the recorded pull-request head
+- **THEN** the worker is retired and its worktree is removed, although `git cherry` finds no
+  equivalent patch for the branch's individual commits
 
 ### Requirement: A terminal ticket's stale pull-request record is refreshed from the forge
 

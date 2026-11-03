@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-03
+goal: Deleting the branch after a merge destroys the only proof the work landed,
+  so the copy is kept forever

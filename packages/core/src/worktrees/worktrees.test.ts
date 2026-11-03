@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GitWorktreeProvider } from './git.js';
-import { landedWorkTest, unlandedCommitCount } from './landed.js';
+import { landedWorkTest, recordedLandingProof, unlandedCommitCount } from './landed.js';
 import { renderWtConfig } from './wtconfig.js';
 import { configureGitWorktreeIdentity, git, looksPersonalGitEmail, readGitIdentity, resolveWorkerGitIdentity } from '../util/git.js';
 import { projectKeyFromUrl } from '../util/git.js';
@@ -249,6 +249,160 @@ describe('landed-work test', () => {
 
     const onDefault = await landedWorkTest({ repoPath: repo, worktreePath: target, branch: 'ac/tst-10', landingBranch: 'main', localBranch: true });
     expect(onDefault.landed).toBe(false);
+  });
+});
+
+describe('recorded-merge landing proof (VS-963)', () => {
+  const head = async (dir: string): Promise<string> => (await git(['rev-parse', 'HEAD'], dir)).stdout.trim();
+
+  /** A clone with a bare origin, and a worker checkout on `branch` cut from `base`. */
+  async function cloneWithWorker(branch: string, base = 'main'): Promise<{ origin: string; clone: string; target: string }> {
+    const origin = tmpDir();
+    await git(['init', '--bare', '-b', 'main'], origin);
+    const clone = await initRepo();
+    await git(['remote', 'add', 'origin', origin], clone);
+    await git(['push', '-u', 'origin', 'main'], clone);
+    if (base !== 'main') { await git(['branch', base], clone); await git(['push', 'origin', base], clone); }
+    const target = join(tmpDir(), 'work');
+    await new GitWorktreeProvider().create({ repoPath: clone, branch, base, targetPath: target });
+    await git(['config', 'user.email', 'test@example.com'], target);
+    await git(['config', 'user.name', 'Test'], target);
+    return { origin, clone, target };
+  }
+
+  /** Squash-merge `branch` into `into` in the clone as one commit, the way a forge's squash merge does; returns the merge commit. */
+  async function squashInto(clone: string, branch: string, into = 'main', after?: () => Promise<void>): Promise<string> {
+    await git(['checkout', into], clone);
+    await git(['merge', '--squash', branch], clone);
+    await after?.();
+    await git(['commit', '-m', `${branch} (#1)`], clone);
+    return head(clone);
+  }
+
+  it('lands a copy whose branch was deleted after its merged pull request (head equals the recorded PR head)', async () => {
+    const { clone, target } = await cloneWithWorker('ac/tst-20');
+    await commit(target, 'a.txt', 'a\n', 'feat: a');
+    await commit(target, 'b.txt', 'b\n', 'feat: b');
+    await git(['push', 'origin', 'ac/tst-20'], target);
+    const prHead = await head(target);
+    const mergeCommit = await squashInto(clone, 'ac/tst-20');
+    await git(['push', 'origin', 'main'], clone);
+    await git(['push', 'origin', '--delete', 'ac/tst-20'], clone);
+    await git(['fetch', '--prune', 'origin'], clone);
+
+    // Without the record the test refuses: the squash has no per-commit patch match and the branch is on no remote.
+    const before = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'ac/tst-20', landingBranch: 'main', mergedPr: true });
+    expect(before.landed).toBe(false);
+    expect(before.reason).toMatch(/not contained in origin\/main/);
+
+    const v = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'ac/tst-20', landingBranch: 'main', mergedPr: true, delivery: { merged: true, prHead, mergeCommit, prState: 'open' } });
+    expect(v.landed).toBe(true);
+    expect(v.reason).toMatch(/merged pull request head/);
+    expect(v.evidence.proof).toBe('recorded_merge');
+  });
+
+  it('lands a copy whose HEAD is an ancestor of the recorded PR head (the daemon archive commit on top)', async () => {
+    const { clone, target } = await cloneWithWorker('ac/tst-21');
+    await commit(target, 'a.txt', 'a\n', 'feat: a');
+    const workerHead = await head(target);
+    await commit(target, 'openspec/changes/archive/x/proposal.md', 'p\n', 'chore(openspec): archive');
+    const prHead = await head(target);
+    await git(['reset', '--hard', workerHead], target);
+    const proof = await recordedLandingProof({ repoPath: clone, worktreePath: target, delivery: { merged: true, prHead }, changeName: null });
+    expect(proof.kind).toBe('landed');
+  });
+
+  it('lands a three-commit squash merge with no recorded PR head by per-path content', async () => {
+    const { clone, target } = await cloneWithWorker('ac/tst-22');
+    await commit(target, 'a.txt', 'a1\n', 'feat: a');
+    await commit(target, 'a.txt', 'a2\n', 'fix: a');
+    await commit(target, 'b.txt', 'b\n', 'feat: b');
+    await commit(clone, 'other.txt', 'landed meanwhile\n', 'other ticket');
+    const mergeCommit = await squashInto(clone, 'ac/tst-22');
+    const proof = await recordedLandingProof({ repoPath: clone, worktreePath: target, delivery: { merged: true, mergeCommit }, changeName: null });
+    expect(proof).toMatchObject({ kind: 'landed', evidence: { pathsChanged: 2, pathsDiffering: 0 } });
+  });
+
+  it('ignores the OpenSpec paths the daemon archive rewrote in the merged result', async () => {
+    const { clone, target } = await cloneWithWorker('ac/tst-23');
+    await commit(target, 'openspec/changes/tst-23/proposal.md', 'why\n', 'propose');
+    await commit(target, 'src/x.ts', 'export {}\n', 'feat: x');
+    const mergeCommit = await squashInto(clone, 'ac/tst-23', 'main', async () => {
+      await git(['mv', 'openspec/changes/tst-23', 'openspec/changes/archive-2026-11-03-tst-23'], clone);
+      mkdirSync(join(clone, 'openspec', 'specs', 'cap'), { recursive: true });
+      writeFileSync(join(clone, 'openspec', 'specs', 'cap', 'spec.md'), 'merged\n', 'utf8');
+      await git(['add', '-A'], clone);
+    });
+    const proof = await recordedLandingProof({ repoPath: clone, worktreePath: target, delivery: { merged: true, mergeCommit }, changeName: 'tst-23' });
+    expect(proof.kind).toBe('landed');
+    // Without the change name the moved directory is a real difference, never a silent pass.
+    const strict = await recordedLandingProof({ repoPath: clone, worktreePath: target, delivery: { merged: true, mergeCommit }, changeName: null });
+    expect(strict.kind).toBe('unverified');
+  });
+
+  it('lands a detached checkout whose branch is gone from the clone and the remote', async () => {
+    const { clone, target } = await cloneWithWorker('ac/tst-24');
+    await commit(target, 'a.txt', 'a\n', 'feat: a');
+    await commit(target, 'b.txt', 'b\n', 'feat: b');
+    const mergeCommit = await squashInto(clone, 'ac/tst-24');
+    await git(['checkout', '--detach'], target);
+    await git(['branch', '-D', 'ac/tst-24'], clone);
+    const v = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'ac/tst-24', landingBranch: 'main', delivery: { merged: true, mergeCommit } });
+    expect(v.landed).toBe(true);
+    expect(v.reason).toMatch(/identical in the recorded merge commit/);
+  });
+
+  it('lands a ticket merged to edge although main never received it', async () => {
+    const { clone, target } = await cloneWithWorker('ac/tst-25', 'edge');
+    await commit(target, 'a.txt', 'a\n', 'feat: a');
+    await commit(target, 'b.txt', 'b\n', 'feat: b');
+    const mergeCommit = await squashInto(clone, 'ac/tst-25', 'edge');
+    const v = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'ac/tst-25', landingBranch: 'edge', mergedPr: true, delivery: { merged: true, mergeCommit } });
+    expect(v.landed).toBe(true);
+    expect((await git(['merge-base', '--is-ancestor', mergeCommit, 'main'], clone)).ok).toBe(false);
+  });
+
+  it('keeps a commit made after the recorded merge unlanded, and counts it', async () => {
+    const { clone, target } = await cloneWithWorker('ac/tst-26');
+    await commit(target, 'a.txt', 'a\n', 'feat: a');
+    await commit(target, 'b.txt', 'b\n', 'feat: b');
+    const prHead = await head(target);
+    const mergeCommit = await squashInto(clone, 'ac/tst-26');
+    await commit(target, 'a.txt', 'changed after the merge\n', 'fix: after merge');
+    const v = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'ac/tst-26', landingBranch: 'main', mergedPr: true, delivery: { merged: true, prHead, mergeCommit } });
+    expect(v.landed).toBe(false);
+    expect(v.unverified).toBeUndefined();
+    expect(v.reason).toBe('1 commit(s) were made after the recorded merge');
+  });
+
+  it('reports a recorded merge the clone cannot check as unverified, not as unlanded commits', async () => {
+    const { clone, target } = await cloneWithWorker('ac/tst-27');
+    await commit(target, 'a.txt', 'a\n', 'feat: a');
+    const v = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'ac/tst-27', landingBranch: 'main', delivery: { merged: true, mergeCommit: 'f'.repeat(40) } });
+    expect(v.landed).toBe(false);
+    expect(v.unverified).toBe(true);
+    expect(v.reason).toMatch(/does not hold the recorded merge commit ffffffffffff/);
+    expect(v.reason).not.toMatch(/not contained/);
+  });
+
+  it('judges a ticket with no recorded merge by the ref tests: commits on no remote stay unlanded', async () => {
+    const { clone, target } = await cloneWithWorker('ac/tst-28');
+    await commit(target, 'a.txt', 'a\n', 'feat: a');
+    await commit(target, 'b.txt', 'b\n', 'feat: b');
+    expect((await recordedLandingProof({ repoPath: clone, worktreePath: target, delivery: null, changeName: null })).kind).toBe('none');
+    const v = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'ac/tst-28', landingBranch: 'main', delivery: { prState: 'open', merged: false } });
+    expect(v.landed).toBe(false);
+    expect(v.reason).toBe('no merged pull request and commits are not on any remote');
+  });
+
+  it('still refuses uncommitted tracked changes before consulting the record', async () => {
+    const { clone, target } = await cloneWithWorker('ac/tst-29');
+    await commit(target, 'a.txt', 'a\n', 'feat: a');
+    const prHead = await head(target);
+    writeFileSync(join(target, 'a.txt'), 'edited\n', 'utf8');
+    const v = await landedWorkTest({ repoPath: clone, worktreePath: target, branch: 'ac/tst-29', landingBranch: 'main', delivery: { merged: true, prHead } });
+    expect(v.landed).toBe(false);
+    expect(v.reason).toMatch(/uncommitted/);
   });
 });
 

@@ -493,6 +493,39 @@ describe('workers', () => {
     expect(h.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [ticket.id])!.workerId).toBeNull();
   });
 
+  /** VS-963: commit `files` on the worker's branch, then squash-merge the branch into the clone's `main` as one commit. */
+  async function commitAndSquash(wt: string, branch: string, files: string[]): Promise<{ prHead: string; mergeCommit: string }> {
+    for (const f of files) {
+      writeFileSync(join(wt, f), `${f}\n`, 'utf8');
+      await git(['add', f], wt);
+      await git(['commit', '-m', `add ${f}`], wt);
+    }
+    const prHead = (await git(['rev-parse', 'HEAD'], wt)).stdout.trim();
+    await git(['merge', '--squash', branch], clonePath);
+    await git(['commit', '-m', `${branch} (#7)`], clonePath);
+    return { prHead, mergeCommit: (await git(['rev-parse', 'HEAD'], clonePath)).stdout.trim() };
+  }
+
+  it("retires a worker whose PR squash-merged a multi-commit branch, from the ticket's recorded merge (VS-963)", async () => {
+    const ticket = seedTicket({ status: 'done' });
+    const worker = await workers.spawnForTicket(SYSTEM, ticket.id);
+    const wtPath = worker.worktreePath!;
+    const merge = await commitAndSquash(wtPath, worker.branch!, ['a.txt', 'b.txt', 'c.txt']);
+    h.db.insert('ticket_work_products', {
+      id: newId(), ticketId: ticket.id, type: 'pull_request', provider: 'github', url: 'https://github.com/acme/api/pull/7',
+      title: 'PR 7', state: 'open', isPrimary: 1, createdAt: nowIso(), updatedAt: nowIso(),
+    });
+
+    const before = await workers.retireIfLanded(SYSTEM, worker.id);
+    expect(before.retired).toBe(false);
+
+    h.db.update('tickets', ticket.id, { deliveryJson: { prUrl: 'https://github.com/acme/api/pull/7', prState: 'open', merged: true, ...merge } });
+    const result = await workers.retireIfLanded(SYSTEM, worker.id);
+    expect(result.retired).toBe(true);
+    expect(existsSync(wtPath)).toBe(false);
+    expect(h.db.get<{ status: string }>('SELECT status FROM worktrees WHERE agent_id = ?', [worker.id])!.status).toBe('removed');
+  });
+
   /** VS-859: a finished worker with a real worktree and a merged-PR work product (the landing proof). */
   let finishedNumber = 100;
   async function finishedWorker(opts: { status?: 'done' | 'retired'; mergedPr?: boolean; lastRunAt?: string | null; retiredAt?: string | null } = {}) {
@@ -550,6 +583,56 @@ describe('workers', () => {
       const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
       expect(r.reclaimed.map((w) => w.workerId)).toEqual([worker.id]);
       expect(existsSync(home)).toBe(false);
+    });
+
+    it("reclaims a copy its ticket's recorded merge proves, though the PR record is stale open (VS-963)", async () => {
+      const { ticket, worker, home, wt } = await finishedWorker({ mergedPr: false });
+      const merge = await commitAndSquash(wt, worker.branch!, ['a.txt', 'b.txt']);
+      h.db.update('tickets', ticket.id, { deliveryJson: { prState: 'open', merged: true, ...merge } });
+
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed.map((w) => w.workerId)).toEqual([worker.id]);
+      expect(existsSync(home)).toBe(false);
+      expect((await git(['rev-parse', '--verify', worker.branch!], clonePath)).ok).toBe(true);
+    });
+
+    it('reclaims a proven detached copy whose branch is gone from the clone, by path (VS-963)', async () => {
+      const { ticket, worker, home, wt } = await finishedWorker({ mergedPr: false });
+      const { mergeCommit } = await commitAndSquash(wt, worker.branch!, ['a.txt', 'b.txt']);
+      await git(['checkout', '--detach'], wt);
+      await git(['branch', '-D', worker.branch!], clonePath);
+      h.db.update('tickets', ticket.id, { deliveryJson: { merged: true, mergeCommit } });
+
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed.map((w) => w.workerId)).toEqual([worker.id]);
+      expect(existsSync(home)).toBe(false);
+      expect((await new GitWorktreeProvider().list(clonePath)).some((t) => t.path === wt)).toBe(false);
+    });
+
+    it('skips a copy whose recorded merge cannot be checked as landing unverified (VS-963)', async () => {
+      const { ticket, worker, home, wt } = await finishedWorker({ mergedPr: false });
+      await commitAndSquash(wt, worker.branch!, ['a.txt']);
+      h.db.update('tickets', ticket.id, { deliveryJson: { merged: true, mergeCommit: 'f'.repeat(40) } });
+
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed).toEqual([]);
+      const skipped = r.skipped.find((x) => x.workerId === worker.id)!;
+      expect(skipped.reason).toBe('landing unverified');
+      expect(skipped.detail).not.toMatch(/not contained/);
+      expect(existsSync(home)).toBe(true);
+    });
+
+    it('refuses a commit made after the recorded merge, even with a merged PR work product (VS-963)', async () => {
+      const { ticket, worker, home, wt } = await finishedWorker();
+      const merge = await commitAndSquash(wt, worker.branch!, ['a.txt', 'b.txt']);
+      writeFileSync(join(wt, 'a.txt'), 'after the merge\n', 'utf8');
+      await git(['commit', '-am', 'fix: after the merge'], wt);
+      h.db.update('tickets', ticket.id, { deliveryJson: { merged: true, ...merge } });
+
+      const r = await workers.reclaimFinishedHomes(SYSTEM, { dryRun: false });
+      expect(r.reclaimed).toEqual([]);
+      expect(r.skipped.find((x) => x.workerId === worker.id)).toMatchObject({ reason: 'no landed proof', detail: '1 commit(s) were made after the recorded merge' });
+      expect(existsSync(home)).toBe(true);
     });
 
     it('refuses a worktree with a modified tracked file and keeps the rest sweeping', async () => {

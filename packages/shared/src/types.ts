@@ -373,7 +373,10 @@ export interface RetainedCopy {
   bytes: number | null;
   /** Null when the checkout's status could not be read. */
   uncommitted: { tracked: number; untracked: number } | null;
-  /** Commits on the branch not contained in the landing branch (0 when a merged PR proves it landed). */
+  /**
+   * Commits on the branch not contained in the landing branch (0 when a merged PR or the ticket's
+   * recorded merge proves it landed; for a recorded merge, the commits made after it — VS-963).
+   */
   commitsNotOnLandingBranch: number | null;
   /** Of the branch's commits, how many are on no remote. */
   commitsOnNoRemote: number | null;
@@ -381,6 +384,8 @@ export interface RetainedCopy {
   commitsOnlyHere: number | null;
   /** The ticket has a merged pull-request work product, the durable landing proof (VS-859). */
   mergedPr: boolean;
+  /** VS-963: what the ticket's recorded merge proved about this copy, or why it could not be checked; null without a record. */
+  landingNote?: string | null;
   error: string | null;
   reasons: E.RetainedCopyReason[];
   /**

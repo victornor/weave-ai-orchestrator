@@ -222,6 +222,19 @@ describe('supervisor', () => {
     expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [workerId])!.status).toBe('done');
   });
 
+  it('bounds one retire pass by its budget and carries the rest over, least recently touched first (VS-963)', async () => {
+    supervisor.stop();
+    supervisor = createSupervisor(h.ctx, h.deps, { retirePassBudgetMs: 0 });
+    retireIfLanded.mockResolvedValue({ retired: false, reason: 'no landed proof' });
+    const ids = [1, 2, 3].map((i) => {
+      const workerId = h.addWorker(seedTicket(h, { status: 'done', number: 70 + i, identifier: `TST-${70 + i}` }));
+      h.db.update('agents', workerId, { updatedAt: `2026-11-0${i}T00:00:00.000Z` });
+      return workerId;
+    });
+    for (let i = 0; i < 3; i++) await supervisor.tick();
+    expect(retireIfLanded.mock.calls.map((c) => c[1])).toEqual(ids);
+  });
+
   it('wakes the workers of tickets that violate the liveness rule', async () => {
     const ticketId = seedTicket(h, { status: 'in_progress' });
     const workerId = h.addWorker(ticketId);

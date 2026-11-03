@@ -88,6 +88,13 @@ const REVIEW_REMINDER_EVERY_MS = 60 * 60_000;
  * `ticking` guard while the process and `/api/health` look healthy.
  */
 const STEP_TIMEOUT_MS = 2 * 60_000;
+/**
+ * VS-963: one retire pass stops starting new retirements after this long. A backlog of copies that
+ * become provably landed at once (141 on v-services, ~176 GB, each a multi-GB `git worktree remove`)
+ * would otherwise keep the step in flight towards SUPERVISOR_STALL_STEP_MS and the stall exit. The
+ * rest carry over: the pass takes the least recently touched workers first.
+ */
+const RETIRE_PASS_BUDGET_MS = 60_000;
 /** The approvals a weaver reviews before they become the human's to answer (VS-469's review-carrying kinds). */
 const REVIEW_CARRYING_KINDS = new Set(['plan_approval', 'merge_approval', 'action_approval']);
 
@@ -145,7 +152,7 @@ async function worktreeTouchedSince(path: string, since: Date): Promise<boolean>
 }
 
 /** Test seams; production uses the defaults. */
-export interface SupervisorOptions { stepTimeoutMs?: number }
+export interface SupervisorOptions { stepTimeoutMs?: number; /** VS-963: how long one retire pass may keep starting retirements. */ retirePassBudgetMs?: number }
 
 /** PLAN §7.5: daemon-side supervision. Zero LLM tokens; every action is recorded as a supervisor event. */
 export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices, opts: SupervisorOptions = {}): Supervisor {
@@ -418,12 +425,19 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
   }
 
   async function retireFinished(): Promise<void> {
-    const workers = ctx.db.all<Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'worker' AND status IN ('active','done','error') AND ticket_id IS NOT NULL", [ctx.workspaceId]);
+    const workers = ctx.db.all<Agent>("SELECT * FROM agents WHERE workspace_id = ? AND kind = 'worker' AND status IN ('active','done','error') AND ticket_id IS NOT NULL ORDER BY updated_at, id", [ctx.workspaceId]);
+    const deadline = Date.now() + (opts.retirePassBudgetMs ?? RETIRE_PASS_BUDGET_MS);
+    let attempted = 0;
     for (const w of workers) {
+      if (attempted > 0 && Date.now() >= deadline) {
+        log.info({ attempted, remaining: workers.length - workers.indexOf(w) }, 'retire pass budget spent; the rest carry over to the next pass');
+        break;
+      }
       const ticket = ctx.db.get<Ticket>('SELECT * FROM tickets WHERE id = ?', [w.ticketId!]);
       if (!ticket || !TERMINAL_TICKET_STATUSES.includes(ticket.status)) continue;
       const running = ctx.db.get<{ id: string }>("SELECT id FROM runs WHERE agent_id = ? AND status = 'running' LIMIT 1", [w.id]);
       if (running) continue;
+      attempted += 1;
       try {
         const r = await deps().workers.retireIfLanded({ kind: 'system', id: null }, w.id);
         if (!r.retired) {

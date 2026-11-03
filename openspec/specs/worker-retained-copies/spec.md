@@ -7,11 +7,12 @@ Make the worker copies the daemon keeps because their work has not landed visibl
 
 ### Requirement: The daemon reports every retained worker copy with its size and reason
 
-A *retained copy* is a directory under a workspace's `workers/` that still holds a checkout (`work/`) and whose worker is not live (not `active`, `running`, `paused` or `provisioning`), or that has no agent row. For each workspace the daemon SHALL produce a report of its retained copies with, per copy: the directory, the worker id and name, the ticket identifier and status, the project, the branch, the age measured from the ticket's terminal time (or from the worker's finish time when there is no ticket), the size on disk, and every reason it was not retired:
+A *retained copy* is a directory under a workspace's `workers/` that still holds a checkout (`work/`) and whose worker is not live (not `active`, `running`, `paused` or `provisioning`), or that has no agent row. A finished worker's clean checkout whose work is proven landed — including by its ticket's recorded merge (`worker-landing-proof`), whether or not its branch still exists — is not a retained copy. For each workspace the daemon SHALL produce a report of its retained copies with, per copy: the directory, the worker id and name, the ticket identifier and status, the project, the branch, the age measured from the ticket's terminal time (or from the worker's finish time when there is no ticket), the size on disk, and every reason it was not retired:
 
 - `uncommitted`: the number of modified or staged tracked files and the number of untracked files;
-- `commits_not_on_landing_branch`: the number of commits on the branch not contained in the landing branch, and how many of them are on no remote;
-- `branch_gone`: the recorded branch does not exist in the project clone;
+- `commits_not_on_landing_branch`: the number of commits on the branch not contained in the landing branch, and how many of them are on no remote; for a ticket with a recorded merge, the number of commits made after that merge;
+- `branch_gone`: the recorded branch does not exist in the project clone and no recorded merge proves the copy;
+- `landing_unverified`: the ticket records a merge that the copy could not be checked against, with what was missing or which paths differ;
 - `unreadable`: the checkout's state could not be read, with the error.
 
 The report SHALL carry per-workspace totals: the number of retained copies, their total size, and the totals per class. Sizes SHALL carry the time they were measured.
@@ -40,13 +41,19 @@ The report SHALL be available as `GET /api/w/:ws/workers/retained` (and `POST �
 - **WHEN** a scan runs over a workspace
 - **THEN** no file, worktree, branch or agent row in it is created, modified or removed
 
+#### Scenario: A squash-merged copy whose branch was deleted is not retained
+
+- **WHEN** a `done` ticket's clean checkout has three commits, its remote branch was deleted after the merge, and its recorded squash merge commit contains its content
+- **THEN** it does not appear in the retained-copy report
+
 ### Requirement: Each retained copy has a retention class
 
 Each retained copy SHALL be given exactly one class:
 
 - `open`: its ticket is not in a terminal status. An open copy is never offered for reclaim.
-- `finished_unlanded`: its ticket is `done` or `cancelled` and its branch exists in the project clone.
-- `branch_gone`: its ticket is `done` or `cancelled` and its recorded branch no longer exists in the project clone, so the clone holds nothing to recover; only the copy's own files remain.
+- `landing_unverified`: its ticket is `done` or `cancelled`, its delivery records a merge, and the copy could not be checked against that merge. It is shown apart from unlanded work so the report does not imply work is at risk that the ticket says shipped.
+- `finished_unlanded`: its ticket is `done` or `cancelled`, it is not `landing_unverified`, and its branch exists in the project clone.
+- `branch_gone`: its ticket is `done` or `cancelled`, it is not `landing_unverified`, and its recorded branch no longer exists in the project clone, so the clone holds nothing to recover; only the copy's own files remain.
 - `orphan`: it has no agent row, or no ticket.
 
 A copy SHALL be marked *offerable* when it is not `open` and its age is at least `defaults.retainedCopyOfferDays` (workspace configuration, default 30). The class and the offerable mark SHALL be shown in the report. Neither the class nor the age SHALL ever cause a removal by itself.
@@ -58,8 +65,13 @@ A copy SHALL be marked *offerable* when it is not `open` and its age is at least
 
 #### Scenario: The branch is gone from the clone
 
-- **WHEN** a copy's ticket is `done` and its recorded branch is not found in the project clone
+- **WHEN** a copy's ticket is `done` with no recorded merge and its recorded branch is not found in the project clone
 - **THEN** its class is `branch_gone`
+
+#### Scenario: A recorded merge that cannot be checked
+
+- **WHEN** a copy's ticket is `done`, its delivery records `merged: true`, and neither its recorded pull-request head nor its merge commit is in the project clone
+- **THEN** its class is `landing_unverified`, its reasons include `landing_unverified`, and it is not counted as `finished_unlanded`
 
 ### Requirement: A reclaim is offered with what it frees and what it loses, and only captain's approval takes it
 

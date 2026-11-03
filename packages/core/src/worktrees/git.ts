@@ -70,3 +70,16 @@ export class GitWorktreeProvider implements WorktreeProvider {
     }
   }
 }
+
+/**
+ * Remove a linked checkout by its path, keeping every branch (VS-963). For a copy whose recorded
+ * branch no longer exists in the clone — a provider that removes by branch name cannot find it.
+ * Without `force`, a checkout git considers dirty is refused, never deleted.
+ */
+export async function removeCheckoutByPath(repoPath: string, path: string, force: boolean): Promise<void> {
+  const r = await git(['worktree', 'remove', ...(force ? ['--force'] : []), path], repoPath, 120_000);
+  if (!r.ok && existsSync(path)) {
+    throw new OcError('worktree_dirty', `git worktree remove failed: ${r.stderr.trim() || r.stdout.trim()}`, { path });
+  }
+  await git(['worktree', 'prune'], repoPath, 30_000);
+}

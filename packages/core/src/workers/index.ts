@@ -14,8 +14,9 @@ import { renderHome } from './home.js';
 import { renderBrief, withDictatedNotice } from '../prompts/index.js';
 import { createSessions } from '../sessions/index.js';
 import { effectiveModels, modelSettingFor, modelsFor, resolveWorkerModelId as resolveWorkerModelOption } from '../models/resolve.js';
-import { landedWorkTest, worktreeChanges } from '../worktrees/landed.js';
-import { configureGitWorktreeIdentity, git, resolveWorkerGitIdentity, worktreeState } from '../util/git.js';
+import { landedWorkTest, recordedMergeOf, worktreeChanges } from '../worktrees/landed.js';
+import { branchExists, configureGitWorktreeIdentity, git, resolveWorkerGitIdentity, worktreeState } from '../util/git.js';
+import { removeCheckoutByPath } from '../worktrees/git.js';
 import { buildHandoverCommand } from './resume-command.js';
 import { createRetainedCopies } from './retained.js';
 import { sessionActivitySignal } from './activity-signal.js';
@@ -979,6 +980,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         const verdict = await landedWorkTest({
           repoPath: project.clonePath, worktreePath: wt.path, branch: wt.branch, landingBranch: landingBranchOf(project, ticket),
           mergedPr: merged, localBranch: (policies.deliveryMode ?? ctx.config.defaults.deliveryMode) === 'local-branch',
+          delivery: ticket?.delivery ?? null, changeName: ticket?.openspecChangeName ?? null,
         });
         if (!verdict.landed) {
           ctx.db.update('worktrees', wt.id, { status: 'dirty', lastVerifiedAt: nowIso(), landedEvidenceJson: verdict.evidence });
@@ -1017,8 +1019,12 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
         }
 
         try {
-          const provider = providerFor(project);
-          await provider.remove({ repoPath: project.clonePath, path: wt.path, branch: wt.branch, deleteBranch: true, force: untracked.length > 0, configPath: ctx.paths.wtConfig });
+          // VS-963: a copy proven by its ticket's merge record may have lost its branch; remove it by path.
+          if (wt.branch && (await branchExists(project.clonePath, wt.branch))) {
+            await providerFor(project).remove({ repoPath: project.clonePath, path: wt.path, branch: wt.branch, deleteBranch: true, force: untracked.length > 0, configPath: ctx.paths.wtConfig });
+          } else {
+            await removeCheckoutByPath(project.clonePath, wt.path, untracked.length > 0);
+          }
         } catch (e) {
           ctx.db.update('worktrees', wt.id, { status: 'dirty', lastVerifiedAt: nowIso() });
           return refuse(`worktree removal failed: ${String(e)}`);
@@ -1131,24 +1137,30 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
             const name = head.ok ? head.stdout.trim() : '';
             if (name && name !== 'HEAD') branch = name;
           }
-          if (!branch) {
-            skip({ workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status, reason: 'cannot determine the branch', detail: 'the worktree is on a detached HEAD and no branch is recorded' }, {});
-            continue;
-          }
-
           // A merged pull request is the durable landing proof: a squash merge, a pruned merged branch
           // or a rewritten history leaves a landed branch looking unlanded to git (VS-798, VS-831).
           const mergedPr = Boolean(agent.ticketId && ctx.db.get(
             "SELECT id FROM ticket_work_products WHERE ticket_id = ? AND type = 'pull_request' AND state = 'merged' LIMIT 1", [agent.ticketId],
           ));
-          if (!mergedPr) {
+          if (!mergedPr || !branch || recordedMergeOf(ticket?.delivery)) {
+            // VS-963: the ticket's merge record is checked against the checkout's HEAD, so a detached
+            // copy whose branch is recorded nowhere can still be proven, and commits made after the
+            // merge are caught even when a merged pull request is recorded. Without a branch, only
+            // that proof counts: the ref tests need a branch to test.
             const policies = (project.policies ?? {}) as { deliveryMode?: string };
             const verdict = await landedWorkTest({
-              repoPath: project.clonePath, worktreePath: wt, branch, landingBranch: landingBranchOf(project, ticket),
+              repoPath: project.clonePath, worktreePath: wt, branch: branch ?? '', landingBranch: landingBranchOf(project, ticket),
               localBranch: (policies.deliveryMode ?? ctx.config.defaults.deliveryMode) === 'local-branch',
+              delivery: ticket?.delivery ?? null, changeName: ticket?.openspecChangeName ?? null,
             });
-            if (!verdict.landed) {
-              skip({ workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status, reason: 'no landed proof', detail: verdict.reason }, { evidence: verdict.evidence });
+            const byRecord = verdict.evidence.proof === 'recorded_merge';
+            if (!branch && !byRecord) {
+              skip({ workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status, reason: 'cannot determine the branch', detail: 'the worktree is on a detached HEAD and no branch is recorded' }, {});
+              continue;
+            }
+            // A merged pull request still proves a copy its merge record cannot be checked against.
+            if (!verdict.landed && !(mergedPr && verdict.unverified)) {
+              skip({ workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status, reason: verdict.unverified ? 'landing unverified' : 'no landed proof', detail: verdict.reason }, { evidence: verdict.evidence });
               continue;
             }
           }
@@ -1161,8 +1173,14 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
           try {
             // Remove through the provider that created this worktree when it is still registered; the
             // project's current provider is the fallback (the row may predate a provider change).
-            const provider = (row?.provider ? ctx.registries.worktreeProviders.get(row.provider) : undefined) ?? providerFor(project);
-            await provider.remove({ repoPath: project.clonePath, path: wt, branch: branch!, deleteBranch: false, force: false, configPath: ctx.paths.wtConfig });
+            // VS-963: a proven copy whose branch is gone from the clone is removed by path; a
+            // provider that removes by branch name cannot find it.
+            if (branch && (await branchExists(project.clonePath, branch))) {
+              const provider = (row?.provider ? ctx.registries.worktreeProviders.get(row.provider) : undefined) ?? providerFor(project);
+              await provider.remove({ repoPath: project.clonePath, path: wt, branch, deleteBranch: false, force: false, configPath: ctx.paths.wtConfig });
+            } else {
+              await removeCheckoutByPath(project.clonePath, wt, false);
+            }
           } catch (e) {
             result.failed.push({ workerId: agent.id, error: String(e) });
             skip({ workerId: agent.id, directory, name: agent.name, kind: agent.kind, status: agent.status, reason: 'worktree removal failed', detail: String(e) }, {});

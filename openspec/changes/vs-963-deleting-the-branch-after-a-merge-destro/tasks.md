@@ -5,9 +5,9 @@
 
 ## 2. Callers
 
-- [ ] 2.1 `retireIfLanded` passes `ticket.delivery` and `ticket.openspecChangeName`. Verify with a workers test: a `done` ticket whose PR squash-merged a three-commit branch, remote branch deleted, PR work product still `open`, retires and removes its worktree.
-- [ ] 2.2 `reclaimFinishedHomes` passes the delivery and change name, and removes a proven copy whose recorded branch is missing from the clone by path (`git worktree remove` + `prune`, no force, no branch deletion) (D4). Verify with sweep tests: a branch-deleted merged copy past the window is reclaimed; a detached-HEAD, branch-gone proven copy is reclaimed by path; a `landing_unverified` copy is skipped with that reason; genuinely unlanded copies are still skipped.
-- [ ] 2.3 `retained.inspect` uses the same proof (D3): landed → not a retained copy even when the branch is gone; unverified → reason and class `landing_unverified`; unlanded(n) → `finished_unlanded` with n. Add `landing_unverified` to `RETAINED_COPY_CLASSES` and `RETAINED_COPY_REASONS` in `packages/shared/src/enums.ts`. Verify with `retained.test.ts` cases for each, including that a squash-merged, branch-deleted clean copy is absent from the report.
+- [x] 2.1 `retireIfLanded` passes `ticket.delivery` and `ticket.openspecChangeName`. Verify with a workers test: a `done` ticket whose PR squash-merged a three-commit branch, remote branch deleted, PR work product still `open`, retires and removes its worktree.
+- [x] 2.2 `reclaimFinishedHomes` passes the delivery and change name, and removes a proven copy whose recorded branch is missing from the clone by path (`git worktree remove` + `prune`, no force, no branch deletion) (D4). Verify with sweep tests: a branch-deleted merged copy past the window is reclaimed; a detached-HEAD, branch-gone proven copy is reclaimed by path; a `landing_unverified` copy is skipped with that reason; genuinely unlanded copies are still skipped.
+- [x] 2.3 `retained.inspect` uses the same proof (D3): landed → not a retained copy even when the branch is gone; unverified → reason and class `landing_unverified`; unlanded(n) → `finished_unlanded` with n. Add `landing_unverified` to `RETAINED_COPY_CLASSES` and `RETAINED_COPY_REASONS` in `packages/shared/src/enums.ts`. Verify with `retained.test.ts` cases for each, including that a squash-merged, branch-deleted clean copy is absent from the report.
 
 ## 3. Surfaces and docs
 

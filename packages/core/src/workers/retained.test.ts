@@ -178,6 +178,47 @@ describe('retained worker copies (VS-955)', () => {
       expect((await workers.scanRetainedCopies()).copies).toEqual([]);
     });
 
+    /** VS-963: commit files on the copy's branch, then squash-merge it into the clone's main as one commit. */
+    async function squashMerged(c: { wt: string; branch: string }, files: string[]): Promise<{ prHead: string; mergeCommit: string }> {
+      for (const f of files) await commit(c.wt, f);
+      const prHead = (await git(['rev-parse', 'HEAD'], c.wt)).stdout.trim();
+      await git(['merge', '--squash', c.branch], clonePath);
+      await git(['commit', '-m', `${c.branch} (#3)`], clonePath);
+      return { prHead, mergeCommit: (await git(['rev-parse', 'HEAD'], clonePath)).stdout.trim() };
+    }
+
+    it("leaves out a squash-merged copy whose branch was deleted, proven by its ticket's recorded merge (VS-963)", async () => {
+      const shipped = await copy('done');
+      const merge = await squashMerged(shipped, ['s1', 's2', 's3']);
+      await git(['push', 'origin', 'main'], clonePath);
+      h.db.update('tickets', shipped.ticket.id, { deliveryJson: { merged: true, prState: 'open', ...merge } });
+      // Branch deleted after the merge: from the remote it never reached, and from the clone.
+      await git(['checkout', '--detach'], shipped.wt);
+      await git(['branch', '-D', shipped.branch], clonePath);
+      expect((await workers.scanRetainedCopies()).copies).toEqual([]);
+    });
+
+    it('classes a recorded merge the copy cannot be checked against as landing_unverified (VS-963)', async () => {
+      const c = await copy('done');
+      for (const f of ['u1', 'u2']) await commit(c.wt, f);
+      h.db.update('tickets', c.ticket.id, { deliveryJson: { merged: true, mergeCommit: 'f'.repeat(40) } });
+      const r = await workers.scanRetainedCopies();
+      expect(r.copies[0]).toMatchObject({ class: 'landing_unverified', reasons: ['landing_unverified'], commitsNotOnLandingBranch: null });
+      expect(r.copies[0]!.landingNote).toMatch(/does not hold the recorded merge commit/);
+      expect(r.totals.byClass.landing_unverified.count).toBe(1);
+      expect(r.totals.byClass.finished_unlanded.count).toBe(0);
+    });
+
+    it('counts commits made after the recorded merge as unlanded (VS-963)', async () => {
+      const c = await copy('done');
+      const merge = await squashMerged(c, ['m1', 'm2']);
+      writeFileSync(join(c.wt, 'm1'), 'after\n', 'utf8');
+      await git(['commit', '-am', 'after the merge'], c.wt);
+      h.db.update('tickets', c.ticket.id, { deliveryJson: { merged: true, ...merge } });
+      const r = await workers.scanRetainedCopies();
+      expect(r.copies[0]).toMatchObject({ class: 'finished_unlanded', commitsNotOnLandingBranch: 1, reasons: ['commits_not_on_landing_branch'] });
+    });
+
     it('keeps a checkout whose HEAD holds commits no branch, remote or tag reaches, and gives it its own card', async () => {
       const detached = await copy('done');
       await git(['checkout', '--detach'], detached.wt);

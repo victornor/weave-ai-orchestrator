@@ -143,6 +143,11 @@ export function classifyError(exitCode: number | null, stderr: string): { code: 
   }
   if (/enotfound|econnreset|etimedout|502|503|504|network/.test(s)) return { code: 'transient_upstream', family: 'transient_upstream', message: 'transient upstream failure' };
   if (/unauthori[sz]ed|401|invalid api key|not logged in|login required|authentication|oauth session expired|could not be refreshed|failed to authenticate/.test(s)) return { code: 'auth', family: 'auth', message: 'runtime authentication failed' };
+  // VS-959: a response stream that ended before it completed. Matched on the shape (a stream, connection
+  // or response that ended, closed or was cut before completion), not one provider's sentence.
+  if (/(stream|connection|response)\b[^\n]{0,40}\b(ended|closed|terminated|dropped|cut off|interrupted|disconnected)\b[^\n]{0,40}\b(before|prematurely|unexpectedly)|premature close|incomplete chunked|terminated unexpectedly/.test(s)) {
+    return { code: 'stream_ended', family: 'transient_upstream', message: truncate(stderr.trim() || 'the response stream ended before completion', 4000) };
+  }
   if (/enoent|command not found|no such file/.test(s)) return { code: 'tooling', family: 'tooling', message: 'runtime binary or dependency missing' };
   return { code: `exit_${exitCode ?? 'signal'}`, family: 'unknown', message: truncate(stderr.trim().split('\n').pop() || `exit ${exitCode}`, 4000) };
 }

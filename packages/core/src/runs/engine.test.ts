@@ -763,6 +763,76 @@ describe('run engine', () => {
         expect(outbound().map((m) => m.body)).toEqual(['the real reply']);
         expect(eventTypes(run.id)).not.toContain('run.delivery.fallback');
       });
+
+      describe('a dropped stream (VS-959)', () => {
+        const RECORDED = '{"message":"The stream ended before completion.","type":"api_error"}';
+        const drop = { error: { code: 'stream_ended', family: 'transient_upstream', message: RECORDED }, exitCode: 1 } as never;
+        const retryDue = (): void => { h.db.run("UPDATE wakeups SET status = 'queued', run_id = NULL, not_before = '2000-01-01T00:00:00.000Z' WHERE agent_id = ? AND source = 'retry'", [plannerId]); };
+        const scheduledRetry = (id: string): string | null => h.db.get<{ scheduledRetryAt: string | null }>('SELECT scheduled_retry_at FROM runs WHERE id = ?', [id])!.scheduledRetryAt;
+
+        it('retries the first drop without telling the planning thread', async () => {
+          seedPlan();
+          h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'plan it' });
+          runtime.queue.push(drop);
+          const first = await runOnce(plannerId);
+
+          expect(first).toMatchObject({ status: 'failed', errorFamily: 'transient_upstream', errorCode: 'stream_ended' });
+          expect(scheduledRetry(first.id)).toBeTruthy();
+          expect(outbound()).toHaveLength(0);
+        });
+
+        it('says so once when the retry drops again, and the retry that works adds only its answer', async () => {
+          seedPlan();
+          h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'plan it' });
+          runtime.queue.push(drop);
+          await runOnce(plannerId);
+          retryDue();
+          runtime.queue.push(drop);
+          const second = await runOnce(plannerId);
+
+          expect(scheduledRetry(second.id)).toBeTruthy();
+          expect(outbound().map((m) => [m.authorKind, m.body])).toEqual([['system', 'The connection to the model dropped again. Retrying this turn automatically.']]);
+
+          retryDue();
+          runtime.queue.push(async (input) => {
+            await h.services.threads!.outbound({ kind: 'agent', id: plannerId, runId: input.runId }, threadId, 'the answer', { runId: input.runId });
+            return { finalText: 'the answer', structured: undefined } as never;
+          });
+          const third = await runOnce(plannerId);
+          expect(third.status).toBe('succeeded');
+          expect(outbound().map((m) => m.body)).toEqual(['The connection to the model dropped again. Retrying this turn automatically.', 'the answer']);
+        });
+
+        it('does not repeat an answer posted before the stream died, and adds no notice to it', async () => {
+          seedPlan();
+          h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'plan it' });
+          runtime.queue.push(async (input) => {
+            await h.services.threads!.outbound({ kind: 'agent', id: plannerId, runId: input.runId }, threadId, 'already said this', { runId: input.runId });
+            return drop;
+          });
+          const first = await runOnce(plannerId);
+          expect(scheduledRetry(first.id)).toBeTruthy();
+          retryDue();
+          runtime.queue.push(async (input) => {
+            await h.services.threads!.outbound({ kind: 'agent', id: plannerId, runId: input.runId }, threadId, 'already said this', { runId: input.runId });
+            return drop;
+          });
+          await runOnce(plannerId);
+
+          // Each run posted its own text once; the second drop's notice is skipped because that run had already replied.
+          expect(outbound().map((m) => m.authorKind)).toEqual(['agent', 'agent']);
+        });
+
+        it('does not retry an unrecognised failure of the same agent', async () => {
+          seedPlan();
+          h.services.wake!.enqueue(plannerId, { source: 'human_message', reason: 'plan it' });
+          runtime.queue.push({ error: { code: 'exit_1', family: 'unknown', message: 'segmentation fault' }, exitCode: 1 } as never);
+          const run = await runOnce(plannerId);
+
+          expect(run.errorFamily).toBe('unknown');
+          expect(scheduledRetry(run.id)).toBeNull();
+        });
+      });
     });
 
     it('restricts every turn to the planner allowlist, mode restricted, no built-in write tool', async () => {

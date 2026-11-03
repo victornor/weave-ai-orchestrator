@@ -19,13 +19,14 @@ import { join } from 'node:path';
  * (`env: { PATH: dir + ':' + process.env.PATH }`) and let `launchCommand` resolve `claude` to it —
  * no adapter code needs to know a fake is involved.
  */
-export function writeFakeClaudeCli(opts: { assistantText?: string; sessionId?: string; respondDelayMs?: number; stream?: boolean } = {}): string {
+export function writeFakeClaudeCli(opts: { assistantText?: string; sessionId?: string; respondDelayMs?: number; stream?: boolean; errorResult?: string } = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'ac-fake-claude-'));
   const path = join(dir, 'claude');
   const sessionId = opts.sessionId ?? 'fake-cli-session';
   const text = opts.assistantText ?? 'ack';
   const delayMs = opts.respondDelayMs ?? 0;
   const stream = opts.stream === true;
+  const errorResult = opts.errorResult ?? null;
   const script = `#!/usr/bin/env node
 const readline = require('node:readline');
 const replay = process.argv.slice(2).includes('--replay-user-messages');
@@ -45,6 +46,11 @@ function respond() {
     process.stdout.write(se({ type: 'message_stop' }));
   } else {
     process.stdout.write(JSON.stringify({ type: 'assistant', session_id: SID, message: { model: 'fake-model', role: 'assistant', content: [{ type: 'text', text: TEXT }] } }) + '\\n');
+  }
+  if (${JSON.stringify(errorResult)} !== null) {
+    // VS-959: a turn the CLI ends with an error result and a non-zero exit.
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: true, result: ${JSON.stringify(errorResult)}, session_id: SID }) + '\\n', () => process.exit(1));
+    return;
   }
   process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: TEXT, session_id: SID, usage: { input_tokens: 1, output_tokens: 1 } }) + '\\n');
 }

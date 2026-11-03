@@ -151,3 +151,22 @@ describe('claude adapter — headless turn streaming (VS-599)', () => {
     expect(events.find((e) => e.type === 'assistant.text')!.payload['partId']).toBe(partials[0]!.partId);
   });
 });
+
+describe('claude adapter — a stream that dies mid-turn (VS-959)', () => {
+  it('classifies the recorded error result as transient_upstream / stream_ended', async () => {
+    const recorded = readFileSync(fileURLToPath(new URL('../../../runtime-sdk/src/fixtures/vs-959-claude-stream-ended.txt', import.meta.url)), 'utf8').trim();
+    const fakeDir = writeFakeClaudeCli({ errorResult: recorded });
+    dirs.push(fakeDir);
+    const input: TurnInput = {
+      runId: 'run-stream-ended', turnEpoch: 1, cwd: tmp('ac-ended-'), worktree: null,
+      session: { policy: 'fresh', ref: null, isFirstTurn: true },
+      systemPrompt: { text: '', mode: 'skip' },
+      prompt: 'do the thing', mcpServers: {},
+      env: { PATH: `${fakeDir}:${process.env['PATH'] ?? ''}` },
+      options: { liveInput: false }, limits: { timeoutMs: 10_000 }, permission: { mode: 'auto' },
+    };
+    const result = await adapter.runTurn(input, { onSpawn: () => undefined, onEvent: () => undefined, onRaw: () => undefined, onPartial: () => undefined });
+    expect(result.error).toMatchObject({ code: 'stream_ended', family: 'transient_upstream' });
+    expect(result.error?.message).toBe(recorded);
+  });
+});

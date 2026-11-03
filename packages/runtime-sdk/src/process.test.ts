@@ -17,6 +17,9 @@ const CODEX_USAGE_LIMIT_CAPTURE = fixture('codex-youve-hit-your-usage-limit.txt'
 // not a guess; the surrounding sentence (e.g. a reset time) is not captured, only this phrase.
 const CLAUDE_USAGE_LIMIT_CAPTURE = fixture('vs-251-claude-usage-limit-reached.txt');
 
+// The recorded error payload of the six dropped turns (VS-959).
+const VS959_CAPTURE = fixture('vs-959-claude-stream-ended.txt');
+
 const ECHO_SCRIPT = "process.stdin.setEncoding('utf8'); process.stdin.on('data', c => process.stdout.write(c.split('\\n').filter(Boolean).map(l => 'echo:' + l + '\\n').join(''))); process.stdin.on('end', () => process.exit(0));";
 
 describe('spawnLines stdin modes', () => {
@@ -139,6 +142,30 @@ describe('classifyError', () => {
   it('does not classify a bare mention of "usage" as quota (VS-251)', () => {
     const err = classifyError(1, 'Usage: cursor-agent [options]\n\nRun with --help for more information.');
     expect(err?.family).not.toBe('provider_quota');
+  });
+
+  it('classifies the recorded mid-stream termination as a retryable transient failure (VS-959)', () => {
+    // The real payload from the six recorded runs (2026-10-18 .. 2026-11-02), not a paraphrase.
+    const err = classifyError(1, VS959_CAPTURE);
+    expect(err).toMatchObject({ code: 'stream_ended', family: 'transient_upstream' });
+    expect(err?.message).toBe(VS959_CAPTURE);
+  });
+
+  it.each([
+    'Error: The connection was closed before the response completed',
+    'premature close',
+    'Response stream terminated unexpectedly',
+  ])('classifies other wordings of a cut stream the same way: %s (VS-959)', (text) => {
+    expect(classifyError(1, text)).toMatchObject({ code: 'stream_ended', family: 'transient_upstream' });
+  });
+
+  it('keeps a usage limit or login failure in its own family even when it mentions a stream (VS-959)', () => {
+    expect(classifyError(1, 'stream ended before completion: usage limit reached')?.family).toBe('provider_quota');
+    expect(classifyError(1, 'stream ended before completion: failed to authenticate')?.family).toBe('auth');
+  });
+
+  it('leaves an unrecognised failure unknown, so it is not retried (VS-959)', () => {
+    expect(classifyError(1, 'segmentation fault in plugin')?.family).toBe('unknown');
   });
 });
 

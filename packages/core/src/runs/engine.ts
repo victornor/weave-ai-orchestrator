@@ -72,6 +72,9 @@ export function testParallelismDefaults(env: Record<string, string | undefined>)
  */
 export const RETRYABLE: RunErrorFamily[] = ['transient_upstream', 'resource'];
 
+/** VS-959: the run error code of a response stream that ended before it completed (runtime-sdk `classifyError`). */
+const STREAM_ENDED_ERROR_CODE = 'stream_ended';
+
 /** VS-579: the run error code a worker killed for exceeding its memory limit carries. */
 export const WORKER_MEMORY_ERROR_CODE = 'worker_memory_limit';
 
@@ -969,7 +972,7 @@ async function deliverSessionAnswer(
     // healthy, while an exhausted outage parks the work and raises a card. The notice says which, so
     // the human knows whether to wait or to log in and act.
     const resumesPending = input.wakes.some((w) => ctx.db.get<{ status: string }>('SELECT status FROM wakeups WHERE id = ?', [w.id])?.status === 'queued');
-    const notice = sessionOutcomeNotice(run, errorText, retryScheduled, resumesPending);
+    const notice = sessionOutcomeNotice(run, errorText, retryScheduled, resumesPending, isRepeatedStreamDrop(ctx, run));
     if (notice === null) return;
     await deps().threads.outbound({ kind: 'system', id: null }, threadId, notice, { runId: input.run.id });
   } catch (e) {
@@ -1020,7 +1023,7 @@ async function deliverPlannerAnswer(
     // live-message interruption) as a session turn.
     const errorText = ctx.db.get<{ errorText: string | null }>('SELECT error_text FROM agents WHERE id = ?', [input.agent.id])?.errorText ?? null;
     const resumesPending = input.wakes.some((w) => ctx.db.get<{ status: string }>('SELECT status FROM wakeups WHERE id = ?', [w.id])?.status === 'queued');
-    const notice = sessionOutcomeNotice(run, errorText, !!run.scheduledRetryAt, resumesPending);
+    const notice = sessionOutcomeNotice(run, errorText, !!run.scheduledRetryAt, resumesPending, isRepeatedStreamDrop(ctx, run));
     if (notice === null) return;
     await deps().threads.outbound({ kind: 'system', id: null }, threadId, notice, { runId: input.run.id });
   } catch (e) {
@@ -1034,7 +1037,9 @@ async function deliverPlannerAnswer(
  * will retry or resume the turn by itself — announcing it then would only add noise before the real
  * outcome. The wording is for the human: no run ids and no error internals.
  */
-function sessionOutcomeNotice(run: Run, errorText: string | null, retryScheduled: boolean, resumesPending: boolean): string | null {
+function sessionOutcomeNotice(run: Run, errorText: string | null, retryScheduled: boolean, resumesPending: boolean, repeatedStreamDrop = false): string | null {
+  // VS-959: the first dropped stream retries unannounced; a second in a row is worth telling the human.
+  if (retryScheduled && repeatedStreamDrop) return 'The connection to the model dropped again. Retrying this turn automatically.';
   if (retryScheduled) return null; // a retry is already scheduled
   // A daemon shutdown, or a live human message, resumes the turn: the next run carries the outcome.
   if (run.errorCode === 'interrupted_by_shutdown' || run.errorCode === 'interrupted_by_message') return null;
@@ -1057,6 +1062,11 @@ function sessionOutcomeNotice(run: Run, errorText: string | null, retryScheduled
         : `The turn failed: ${plainFailureReason(run, errorText)}.`;
     default: return null;
   }
+}
+
+/** VS-959: this failed run is itself a retry and dropped its stream again — the one repeat that is no longer silent. */
+function isRepeatedStreamDrop(ctx: WorkspaceContext, run: Run): boolean {
+  return run.errorCode === STREAM_ENDED_ERROR_CODE && countRetries(ctx, run.id) >= 1;
 }
 
 /** VS-598: the human-facing usage-limit notice — the reset when the runtime reported one, and the fact that nothing retries it. */
@@ -1105,7 +1115,7 @@ async function deliverConductorTurnNotice(
     const errorText = ctx.db.get<{ errorText: string | null }>('SELECT error_text FROM agents WHERE id = ?', [input.agent.id])?.errorText ?? null;
     const retryScheduled = !!run.scheduledRetryAt;
     const resumesPending = input.wakes.some((w) => ctx.db.get<{ status: string }>('SELECT status FROM wakeups WHERE id = ?', [w.id])?.status === 'queued');
-    const notice = sessionOutcomeNotice(run, errorText, retryScheduled, resumesPending);
+    const notice = sessionOutcomeNotice(run, errorText, retryScheduled, resumesPending, isRepeatedStreamDrop(ctx, run));
     if (notice === null) return;
     await deps().threads.outbound({ kind: 'system', id: null }, threadId, notice, { runId: input.run.id });
   } catch (e) {

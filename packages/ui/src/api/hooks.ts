@@ -851,7 +851,7 @@ export function useMoveProject(): UseMutationResult<void, Error, { destWs: strin
   });
 }
 
-export interface ProjectSync { syncState: ProjectSyncState; behindBy: number | null }
+export interface ProjectSync { syncState: ProjectSyncState; behindBy: number | null; message?: string }
 
 /**
  * How a project's clone compares to its remote (VS-131). `staleTime: 60_000` is the one place this

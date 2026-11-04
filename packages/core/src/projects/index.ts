@@ -64,6 +64,21 @@ async function fetchLanding(project: Project, log?: Logger, opts: { retryTransie
   return landing;
 }
 
+/**
+ * VS-964: the remote had no commits when the clone last fetched. A clone of an empty remote has an
+ * unborn HEAD and no remote-tracking refs at all; either one alone is not enough (a clone can sit on
+ * an unborn branch while `origin` has others, and a normal clone has remote refs).
+ */
+async function cloneIsEmpty(cwd: string): Promise<boolean> {
+  const head = await git(['rev-parse', '--verify', '--quiet', 'HEAD'], cwd, 15_000);
+  if (head.ok && head.stdout.trim()) return false;
+  const refs = await git(['for-each-ref', '--count=1', '--format=%(refname)', 'refs/remotes/origin'], cwd, 15_000);
+  return refs.ok && refs.stdout.trim() === '';
+}
+
+/** The wording the empty state carries wherever it is shown (VS-964). */
+export const EMPTY_REMOTE_MESSAGE = 'the remote has no commits yet; the clone will pick them up on the next fetch';
+
 function looksLocal(url: string): boolean {
   if (/^[a-z+]+:\/\//i.test(url)) return false;
   if (/^[^@\s]+@[^:]+:/.test(url)) return false;   // scp-style git@host:owner/repo
@@ -482,6 +497,12 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       // ticket's override — see design.md), not just fast-forwarded: `git clone` may have left the
       // clone on the repository's actual default branch, which differs from the landing branch.
       const landing = await fetchLanding(project, log, opts);
+      if (await cloneIsEmpty(project.clonePath)) {
+        ctx.db.update('projects', project.id, { syncState: 'empty', lastFetchedAt: nowIso(), updatedAt: nowIso() });
+        ctx.events.emit('project.updated', 'project', project.id, { slug: project.slug, syncState: 'empty' });
+        log.info({ project: project.slug }, `${EMPTY_REMOTE_MESSAGE} (VS-964)`);
+        return { head: '', fastForwarded: false };
+      }
       const before = await git(['rev-parse', 'HEAD'], project.clonePath, 15_000);
       const beforeHead = before.stdout.trim();
       await git(['checkout', landing], project.clonePath, 30_000);
@@ -515,9 +536,14 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
       return { head, fastForwarded };
     },
 
-    async checkSync(id: string): Promise<{ syncState: ProjectSyncState; behindBy: number | null }> {
+    async checkSync(id: string): Promise<{ syncState: ProjectSyncState; behindBy: number | null; message?: string }> {
       const project = get(id);
       const landing = await fetchLanding(project, log);
+      if (await cloneIsEmpty(project.clonePath)) {
+        ctx.db.update('projects', project.id, { syncState: 'empty', updatedAt: nowIso() });
+        ctx.events.emit('project.updated', 'project', project.id, { slug: project.slug, syncState: 'empty' });
+        return { syncState: 'empty', behindBy: null, message: EMPTY_REMOTE_MESSAGE };
+      }
       const remote = `origin/${landing}`;
       const head = await git(['rev-parse', 'HEAD'], project.clonePath, 15_000);
       const remoteHead = await git(['rev-parse', remote], project.clonePath, 15_000);

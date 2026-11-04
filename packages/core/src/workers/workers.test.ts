@@ -816,6 +816,31 @@ describe('workers', () => {
     expect(h.db.get<{ n: number }>("SELECT COUNT(*) n FROM activity WHERE action = 'worker.worktree_provisioned' AND entity_id = ?", [healthy.id])!.n).toBe(0);
   });
 
+  // VS-964: a project registered before its first commit stays `empty` until a fetch sees one, and
+  // the scheduled sweep is hourly. Giving a worker its worktree is the moment to fetch right now —
+  // once, never in a loop.
+  it('fetches an empty project once before giving a worker its worktree, and does not loop while it stays empty (VS-964)', async () => {
+    h.db.update('projects', h.projectId, { syncState: 'empty' });
+    const fetch = vi.fn(async () => ({ head: '', fastForwarded: false }));
+    h.services.projects = { fetch } as never;
+    const first = h.addWorker(seedTicket().id, { branch: 'ac/tst-1-add-dark-mode', worktreePath: null, status: 'provisioning' });
+
+    await workers.ensureWorktree(first);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(h.projectId);
+
+    fetch.mockImplementationOnce(async () => { h.db.update('projects', h.projectId, { syncState: 'in_sync' }); return { head: 'abc', fastForwarded: true }; });
+    h.db.update('projects', h.projectId, { syncState: 'empty' });
+    const second = h.addWorker(seedTicket({ number: 2, identifier: 'TST-2' }).id, { branch: 'ac/tst-2-x', worktreePath: null, status: 'provisioning' });
+    await workers.ensureWorktree(second);
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    // an in_sync project is never fetched on demand
+    const third = h.addWorker(seedTicket({ number: 3, identifier: 'TST-3' }).id, { branch: 'ac/tst-3-x', worktreePath: null, status: 'provisioning' });
+    await workers.ensureWorktree(third);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it('relaunching a worker with a missing worktree provisions it before marking it active (VS-636)', async () => {
     const worker = h.addWorker(seedTicket({ status: 'in_progress' }).id, { branch: 'ac/tst-1-add-dark-mode', worktreePath: null, status: 'provisioning' });
     wake.calls.length = 0;

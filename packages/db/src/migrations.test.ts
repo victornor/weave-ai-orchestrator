@@ -526,12 +526,45 @@ describe('migrations', () => {
       db.close();
     });
 
-    it('accepts behind and diverged, and refuses anything else', () => {
+    it('accepts behind, diverged and empty, and refuses anything else', () => {
       const db = openDb(join(dir, 'sync2.sqlite'));
       seedProject(db, 'p1');
       db.run("UPDATE projects SET sync_state = 'behind' WHERE id = 'p1'");
       db.run("UPDATE projects SET sync_state = 'diverged' WHERE id = 'p1'");
+      db.run("UPDATE projects SET sync_state = 'empty' WHERE id = 'p1'");
       expect(() => db.run("UPDATE projects SET sync_state = 'ahead' WHERE id = 'p1'")).toThrow(/CHECK constraint failed/);
+      db.close();
+    });
+
+    // VS-964: 0067 rebuilds `projects` to widen the CHECK. Every column of a fully populated row, and
+    // the rows that reference it, must come through the rebuild unchanged.
+    it('carries every column and referencing row across the 0067 rebuild', () => {
+      const path = join(dir, 'sync3.sqlite');
+      const before = openDbAsOf(path, '0066_retained_copies.sql');
+      before.run(
+        `INSERT INTO workspaces (id, slug, name, ticket_prefix, ticket_counter, status, root_path, created_at, updated_at)
+         VALUES ('w1', 'w', 'W', 'VS', 1, 'active', '/tmp/w', 't0', 't0')`);
+      before.run(
+        `INSERT INTO projects (id, workspace_id, slug, name, git_url, default_branch, clone_path, max_workers, setup_command, warm_paths_json,
+           worktree_provider, openspec_enabled, openspec_version, policies_json, status, last_fetched_at, error_text, created_at, updated_at,
+           landing_branch, sync_state, knowledge_repo_enabled, knowledge_switch_json, primary_clone_synced_head, worker_identity_json)
+         VALUES ('p1', 'w1', 'api', 'API', 'git@e:a/b.git', 'main', '/tmp/p', 7, 'pnpm i', '["node_modules"]',
+           'git', 0, '1.2.3', '{"a":1}', 'ready', 'f0', 'oops', 'c0', 'u0',
+           'edge', 'behind', 1, '{"s":1}', 'abc123', '{"name":"n"}')`);
+      before.run(
+        `INSERT INTO agents (id, workspace_id, kind, project_id, name, runtime_id, status, home_path, created_at, updated_at)
+         VALUES ('a1', 'w1', 'worker', 'p1', 'W1', 'claude', 'active', '/tmp/h', 't0', 't0')`);
+      const rowBefore = before.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', ['p1'])!;
+      const colsBefore = cols(before, 'projects');
+      before.close();
+
+      const db = openDb(path);
+      expect(cols(db, 'projects').sort()).toEqual([...colsBefore].sort());
+      expect(db.get<Record<string, unknown>>('SELECT * FROM projects WHERE id = ?', ['p1'])).toEqual(rowBefore);
+      expect(db.get<{ projectId: string }>('SELECT project_id FROM agents WHERE id = ?', ['a1'])!.projectId).toBe('p1');
+      expect(db.all('PRAGMA foreign_key_check')).toEqual([]);
+      expect(() => db.run("INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, created_at, updated_at) VALUES ('p1', 'w1', 'dup', 'D', 'u', '/x', 't', 't')")).toThrow();
+      expect(() => db.run("INSERT INTO projects (id, workspace_id, slug, name, git_url, clone_path, created_at, updated_at) VALUES ('p2', 'w1', 'api', 'D', 'u', '/x', 't', 't')")).toThrow(/UNIQUE/);
       db.close();
     });
   });

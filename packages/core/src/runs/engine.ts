@@ -435,7 +435,9 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
       // `projects.fetch` is called (checkSync, reconcilePass, archiveAfterMerge, ...).
       await deps().projects.fetch(project.id, { retryTransient: true });
       const row = ctx.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id]);
-      if (!row || row.syncState !== 'in_sync') {
+      if (row?.syncState === 'empty') {
+        freshnessError = `${project.slug}'s remote has no commits yet; the clone will pick them up on the next fetch`;
+      } else if (!row || row.syncState !== 'in_sync') {
         freshnessError = `primary clone for ${project.slug} could not be safely brought in sync with origin/${landingBranchOf(row ?? project, ticket)}: it holds a commit not confirmed to be a stale copy of the remote, so it was left untouched`;
       } else {
         Object.assign(project, row);

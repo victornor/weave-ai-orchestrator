@@ -133,6 +133,18 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
     if (!p) throw new OcError('not_found', `project ${id} not found`);
     return p;
   };
+  /**
+   * VS-964: a project registered before its first commit is `empty` until a fetch sees one, and the
+   * scheduled sweep is hourly. A worker about to be given a worktree is the moment the wait is known
+   * to matter, so fetch once, right now, and re-read. One attempt, never a loop: a remote that is
+   * still empty leaves the row `empty` and the worktree create below fails as it would have.
+   */
+  const withFreshEmptyClone = async (project: Project): Promise<Project> => {
+    if (project.syncState !== 'empty') return project;
+    try { await deps().projects.fetch(project.id); }
+    catch (e) { ctx.log('daemon').warn({ project: project.slug, err: String(e) }, 'on-demand fetch of an empty project failed (VS-964)'); }
+    return projectOf(project.id);
+  };
   const providerFor = (project: Project): WorktreeProvider => {
     const p = ctx.registries.worktreeProviders.get(project.worktreeProvider) ?? ctx.registries.worktreeProviders.get('git');
     if (!p) throw new OcError('internal', 'no worktree provider registered');
@@ -152,6 +164,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
    * without going through `spawn()` itself (which creates a second, `kind='worker'` agent).
    */
   async function provisionTicketWorktree(agentId: string, home: string, project: Project, ticket: Ticket, branch: string): Promise<{ path: string; branch: string; worktreeRowId: string }> {
+    project = await withFreshEmptyClone(project);
     const { identity } = resolveWorkerGitIdentity({ project: project.workerIdentity, workspace: ctx.config.defaults.workerGitIdentity });
     const provider = providerFor(project);
     const targetPath = join(home, 'work');
@@ -224,7 +237,7 @@ export function createWorkersService(ctx: WorkspaceContext, deps: () => CoreServ
       if (!agentNeedsCheckout(agent)) return { path: agent.worktreePath ?? agent.homePath, branch: agent.branch ?? '', provisioned: false };
       if (agent.worktreePath && existsSync(agent.worktreePath)) return { path: agent.worktreePath, branch: agent.branch ?? '', provisioned: false };
 
-      const project = projectOf(agent.projectId!);
+      const project = await withFreshEmptyClone(projectOf(agent.projectId!));
       const ticket = agent.ticketId ? ticketOf(agent.ticketId) : null;
       const branch = agent.branch ?? (ticket ? ticketBranch(ticket) : null);
       if (!branch) throw new OcError('internal', `${agent.name} needs a worktree but has no branch to create it on`);

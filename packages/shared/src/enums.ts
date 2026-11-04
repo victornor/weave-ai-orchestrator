@@ -316,8 +316,10 @@ export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
  * How a project's primary clone compares to `origin/<landingBranch>` (VS-131): `behind` is
  * fast-forwardable and routine; `diverged` means the clone holds a commit the remote's tip no
  * longer recognises (a force-push or rebase upstream) and needs a human, never an automatic fix.
+ * `empty` (VS-964) means the remote has no commits yet, so the clone has nothing to compare: not a
+ * fault, and the next fetch after the first push resolves it.
  */
-export const PROJECT_SYNC_STATES = ['in_sync', 'behind', 'diverged'] as const;
+export const PROJECT_SYNC_STATES = ['in_sync', 'behind', 'diverged', 'empty'] as const;
 export type ProjectSyncState = (typeof PROJECT_SYNC_STATES)[number];
 
 export const WORKSPACE_STATUSES = ['active', 'paused', 'archived'] as const;

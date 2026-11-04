@@ -589,6 +589,49 @@ describe('projects', () => {
       expect((await git(['cat-file', '-e', before], project.clonePath)).ok).toBe(true);
       expect(h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [project.id])!.syncState).toBe('diverged');
     });
+
+    describe('a remote with no commits yet (VS-964)', () => {
+      async function emptyRemote(): Promise<string> {
+        const dir = mkdtempSync(join(tmpdir(), 'ac-empty-'));
+        tmps.push(dir);
+        await git(['init', '-b', 'main'], dir);
+        await git(['config', 'user.email', 'test@example.com'], dir);
+        await git(['config', 'user.name', 'Test'], dir);
+        return dir;
+      }
+      const rowOf = (id: string): Project => h.db.get<Project>('SELECT * FROM projects WHERE id = ?', [id])!;
+
+      it('reports empty, not diverged, with text naming the next fetch', async () => {
+        const src = await emptyRemote();
+        const project = await projects.add(HUMAN, quick(src));
+
+        const result = await projects.checkSync(project.id);
+        expect(result.syncState).toBe('empty');
+        expect(result.behindBy).toBeNull();
+        expect(result.message).toBe('the remote has no commits yet; the clone will pick them up on the next fetch');
+        expect(rowOf(project.id).syncState).toBe('empty');
+      });
+
+      it('fetch records empty without touching the clone, then recovers once the first commit is pushed', async () => {
+        const src = await emptyRemote();
+        const project = await projects.add(HUMAN, quick(src));
+
+        expect(await projects.fetch(project.id)).toEqual({ head: '', fastForwarded: false });
+        expect(rowOf(project.id).syncState).toBe('empty');
+        expect(rowOf(project.id).primaryCloneSyncedHead).toBeNull();
+
+        writeFileSync(join(src, 'README.md'), '# first\n', 'utf8');
+        await git(['add', '.'], src);
+        await git(['commit', '-m', 'first commit'], src);
+        const first = (await git(['rev-parse', 'main'], src)).stdout.trim();
+
+        const result = await projects.fetch(project.id);
+        expect(result).toEqual({ head: first, fastForwarded: true });
+        expect(rowOf(project.id).syncState).toBe('in_sync');
+        expect(rowOf(project.id).primaryCloneSyncedHead).toBe(first);
+        expect((await projects.checkSync(project.id)).syncState).toBe('in_sync');
+      });
+    });
   });
 
   it('reconcile creates rows for declared projects and leaves orphans alone', async () => {

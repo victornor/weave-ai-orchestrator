@@ -328,7 +328,7 @@ export interface ProjectsService {
    *  caller — including `checkSync` — must fail on the first attempt. */
   fetch(id: string, opts?: { retryTransient?: boolean }): Promise<{ head: string; fastForwarded: boolean }>;   // git fetch + ff primary clone
   /** Read-only (VS-131): fetches and classifies against origin/<landingBranch> without checkout or merge. */
-  checkSync(id: string): Promise<{ syncState: S.ProjectSyncState; behindBy: number | null }>;
+  checkSync(id: string): Promise<{ syncState: S.ProjectSyncState; behindBy: number | null; /** VS-964: set for `empty`, naming the next fetch. */ message?: string }>;
   reconcile(): Promise<void>;                                              // declared vs db
   /** The project's commit graph (VS-96): default branch plus every live worker/ticket branch, paged. */
   history(id: string, query?: HistoryQuery): Promise<HistoryPage>;

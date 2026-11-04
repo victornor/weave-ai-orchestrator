@@ -109,6 +109,15 @@ function ProjectSyncStatus({ projectId }: { projectId: string }): React.ReactEle
   const state = sync.data?.syncState;
   if (!state || state === 'in_sync') return null;
 
+  if (state === 'empty') {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <span className="v2-tag text-text-2">No commits yet</span>
+        <span className="text-micro text-text-2">{sync.data?.message ?? 'the remote has no commits yet; the clone will pick them up on the next fetch'}</span>
+      </span>
+    );
+  }
+
   if (state === 'diverged') {
     return (
       <span className="inline-flex items-center gap-1.5">

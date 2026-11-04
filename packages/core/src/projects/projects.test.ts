@@ -770,6 +770,60 @@ describe('projects', () => {
     expect(saved.at(-1)!.projects).toEqual([]);
     expect(existsSync(project.clonePath)).toBe(true);   // the clone is never deleted
   });
+
+  describe('a rejected push of the OpenSpec adoption commit (VS-965)', () => {
+    let savedPath: string | undefined;
+    beforeEach(() => { savedPath = process.env.PATH; });
+    afterEach(() => { process.env.PATH = savedPath; });
+
+    /** A bare remote whose pre-receive hook rejects every push; seeded with one commit unless `empty`. */
+    async function rejectingRemote(empty: boolean): Promise<string> {
+      const bare = mkdtempSync(join(tmpdir(), 'ac-bare-'));
+      tmps.push(bare);
+      await git(['init', '--bare', '-b', 'main'], bare);
+      if (!empty) {
+        const seed = await sourceRepo();
+        await git(['push', bare, 'main'], seed);
+      }
+      const hook = join(bare, 'hooks', 'pre-receive');
+      writeFileSync(hook, '#!/bin/sh\necho rejected >&2\nexit 1\n', { mode: 0o755 });
+      return bare;
+    }
+
+    /** A stand-in `openspec` on PATH that writes a scaffold the way `openspec init` does. */
+    function fakeOpenspec(): void {
+      const bin = mkdtempSync(join(tmpdir(), 'ac-fakebin-'));
+      tmps.push(bin);
+      writeFileSync(join(bin, 'openspec'), '#!/bin/sh\nmkdir -p openspec\necho "schema: spec-driven" > openspec/config.yaml\n', { mode: 0o755 });
+      process.env.PATH = `${bin}:${process.env.PATH}`;
+    }
+
+    it('leaves an unborn branch and the scaffold uncommitted when the remote is empty', async () => {
+      fakeOpenspec();
+      const remote = await rejectingRemote(true);
+      const { project, jobId } = projects.startAdd(HUMAN, cfg(remote));
+      await settled(jobId);
+
+      const clone = projects.get(project.id).clonePath;
+      expect(existsSync(join(clone, 'openspec', 'config.yaml'))).toBe(true);
+      expect((await git(['rev-parse', '--verify', '--quiet', 'HEAD'], clone)).ok).toBe(false);
+      const staged = (await git(['status', '--porcelain'], clone)).stdout;
+      expect(staged).toMatch(/openspec\/config\.yaml/);
+    });
+
+    it('returns HEAD to its prior commit when the remote already has history', async () => {
+      fakeOpenspec();
+      const remote = await rejectingRemote(false);
+      const { project, jobId } = projects.startAdd(HUMAN, cfg(remote));
+      await settled(jobId);
+
+      const clone = projects.get(project.id).clonePath;
+      const log = (await git(['log', '--format=%s'], clone)).stdout.trim().split('\n');
+      expect(log).toEqual(['init']);
+      expect(existsSync(join(clone, 'openspec', 'config.yaml'))).toBe(true);
+      expect((await git(['status', '--porcelain'], clone)).stdout).toMatch(/openspec\//);
+    });
+  });
 });
 
 describe('adding a project to an isolated daemon (VS-143, daemon-isolation/dispatch-gate)', () => {

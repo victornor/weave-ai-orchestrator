@@ -194,8 +194,13 @@ export function createProjectsService(ctx: WorkspaceContext, deps: () => CoreSer
           if (!push.ok) {
             // Never leave the primary clone ahead of origin (fetch could no longer fast-forward): undo the
             // commit, keep the files, and let the human commit the scaffold through their own flow.
-            await git(['reset', '-q', '--mixed', 'HEAD~1'], project.clonePath, 30_000);
-            log.warn({ project: project.slug, stderr: push.stderr.slice(0, 200) }, 'OpenSpec init could not be pushed; left uncommitted in the primary clone — commit `openspec/` (and the tool dirs) to the default branch yourself');
+            // On an empty remote the commit is the root commit: HEAD~1 does not exist, so the branch goes unborn instead (VS-965).
+            const isRoot = !(await git(['rev-parse', '--verify', '--quiet', 'HEAD^'], project.clonePath, 10_000)).ok;
+            const undo = isRoot
+              ? await git(['update-ref', '-d', 'HEAD'], project.clonePath, 30_000)
+              : await git(['reset', '-q', '--mixed', 'HEAD~1'], project.clonePath, 30_000);
+            if (undo.ok) log.warn({ project: project.slug, stderr: push.stderr.slice(0, 200) }, 'OpenSpec init could not be pushed; left uncommitted in the primary clone — commit `openspec/` (and the tool dirs) to the default branch yourself');
+            else log.error({ project: project.slug, push: push.stderr.slice(0, 200), undo: undo.stderr.slice(0, 200) }, 'OpenSpec init could not be pushed and the local commit could not be undone; the primary clone is ahead of origin — reset it by hand');
           }
         }
       }

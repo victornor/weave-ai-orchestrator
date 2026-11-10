@@ -41,7 +41,8 @@ export function refreshDigestWake(ctx: WorkspaceContext, w: { reason: string; pa
 /** Rewrite, in place, every queued digest wake (a coalesced bundle entry included) whose named cards were reviewed since. */
 export function refreshQueuedDigests(ctx: WorkspaceContext, queued: Wakeup[]): void {
   for (const w of queued) {
-    if (w.source !== 'system') continue;
+    // No source filter (VS-976): a digest is enqueued as 'system' but coalesces into whatever wake is
+    // already queued, so it can ride in a worker report, a decision answer or a human message.
     const patch: Record<string, unknown> = {};
     const top = refreshDigestWake(ctx, { reason: w.reason, payload: (w.payload ?? {}) as Record<string, unknown> });
     let payload = (w.payload ?? {}) as Record<string, unknown>;

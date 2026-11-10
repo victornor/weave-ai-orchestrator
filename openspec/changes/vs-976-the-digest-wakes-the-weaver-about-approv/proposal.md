@@ -7,6 +7,7 @@ Cause (read from `supervisor/pendingReview.ts`): `refreshQueuedDigests` skips ev
 ## What Changes
 
 - The claim-time re-check applies to every queued weaver wake, whatever its own source; the digest is found by its `pendingReview` payload (top level or bundle entry), not by the carrier's source.
+- The same re-check runs again in the run engine right before the weaver's prompt is built, because a fifth occurrence (04:01:40Z, VS-976's own plan card, digest source `system`, age `0s`) showed the claim itself can precede the mark: an age left at the enqueue value means the claim-time check ran before the mark or found the card still unseen. Live rows were not inspected, so the claim-to-render gap is the best-fit explanation, not a proven one.
 - A card with no review mark is still named; nothing about how real unreviewed cards are reported changes.
 
 ## Capabilities

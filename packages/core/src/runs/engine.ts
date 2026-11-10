@@ -1,5 +1,4 @@
 import { credentialReaderFor, reconcileRuntimeCredential } from '../workspace/loader.js';
-import { refreshQueuedDigests } from '../supervisor/pendingReview.js';
 import { gateRuntimeForLogin, ungateRuntime } from './authgate.js';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -557,10 +556,6 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
     const prompt = await phase('build_prompt', async () => {
       // VS-659: a `path`-form run gets its image attachments written to readable files, named below.
       if (imageInput === 'path') promptOptions.attachmentPaths = materializeRunAttachments(deps(), agent.homePath, runId, wakes).paths;
-      // VS-976: the claim re-checks a digest's unreviewed cards, but a run waits between claim and here
-      // (worktree, session and login prep), and the weaver's mark can land in that gap. Re-check once
-      // more at the point the reason is rendered; it is a no-op when nothing changed.
-      if (agent.kind === 'weaver') refreshQueuedDigests(ctx, wakes);
       const text = await buildTurnPrompt(ctx, deps, agent, wakes, promptOptions);
       writeFileSync(join(runDir, 'prompt.md'), text, 'utf8');
       return text;

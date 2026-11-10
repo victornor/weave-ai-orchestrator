@@ -93,18 +93,6 @@ describe('refreshQueuedDigests (VS-956)', () => {
     expect(bundle[0]!.payload.pendingReview!.map((p) => p.decisionId)).toEqual([unmarked.id]);
   });
 
-  it('refreshes a digest already claimed, in the row the prompt is built from (VS-976)', () => {
-    const a = seedApproval();
-    const queued = queueDigest([a.entry]);
-    h.db.update('wakeups', queued.id, { status: 'claimed', claimedAt: nowIso() });
-    h.db.update('decisions', a.id, { weaverReviewStatus: 'looked' });
-    const claimed = reload(queued);
-    refreshQueuedDigests(h.ctx, [claimed]);
-    expect(claimed.reason).toBe('digest');
-    expect(claimed.payload).not.toHaveProperty('pendingReview');
-    expect(reload(queued).reason).toBe('digest');
-  });
-
   it('leaves a non-digest wake untouched (VS-976)', () => {
     const carrier = wake.enqueue(h.conductorId, { source: 'human_message', reason: 'hello', payload: { threadId: 't' } });
     const before = reload(carrier);

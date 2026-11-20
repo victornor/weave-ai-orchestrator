@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-11-20
+goal: Merge-slot stall alert must not fire on healthy slow CI

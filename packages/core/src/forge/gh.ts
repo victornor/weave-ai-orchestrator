@@ -4,7 +4,7 @@ import type {
 import { OcError } from '@weave-ai/shared';
 import { sh } from '../util/exec.js';
 
-interface GhCheck { name?: string; context?: string; workflowName?: string; state?: string; conclusion?: string; status?: string; detailsUrl?: string; targetUrl?: string }
+interface GhCheck { name?: string; context?: string; workflowName?: string; state?: string; conclusion?: string; status?: string; detailsUrl?: string; targetUrl?: string; startedAt?: string }
 
 interface GhPrView {
   state?: string;
@@ -77,9 +77,17 @@ function checkState(c: GhCheck): ForgeCheckState {
  * A rollup entry is either a check run (`name`, `detailsUrl`) or a commit status (`context`,
  * `targetUrl`); `gh` returns both shapes in the one array and neither field is always present.
  */
+/** `gh` spells an unset time as the zero value `0001-01-01T00:00:00Z`; only a real timestamp counts as a start. */
+function realStart(t: string | undefined): boolean { return !!t && !t.startsWith('0001-') && Number.isFinite(Date.parse(t)); }
+
 function toCheck(c: GhCheck): ForgeCheck {
   const name = c.name ?? c.context ?? c.workflowName ?? 'check';
   return { name: c.workflowName && c.name && c.workflowName !== c.name ? `${c.workflowName} / ${c.name}` : name, state: checkState(c), url: c.detailsUrl ?? c.targetUrl ?? null };
+}
+
+/** VS-991: `toCheck` plus the run's status and real start time, which the merge-slot stall judgement needs. */
+function toTimedCheck(c: GhCheck): ForgeCheck {
+  return { ...toCheck(c), ...(c.status ? { status: c.status.toUpperCase() } : {}), ...(c.startedAt && realStart(c.startedAt) ? { startedAt: c.startedAt } : {}) };
 }
 
 function toFile(f: { path?: string; additions?: number; deletions?: number }): ForgeChangedFile {
@@ -265,7 +273,7 @@ export class GhForge implements ForgeAdapter {
       state, mergeCommit: doc.mergeCommit?.oid, ciState: rollupState(doc.statusCheckRollup),
       checks: checkTally(doc.statusCheckRollup),
       // VS-481: the same rollup, by name, so a card can say which checks are pending or failed.
-      checkDetails: (doc.statusCheckRollup ?? []).map(toCheck),
+      checkDetails: (doc.statusCheckRollup ?? []).map(toTimedCheck),
       headSha: doc.headRefOid, mergeState: mergeStateOf(doc.mergeStateStatus), isDraft: doc.isDraft === true,
     };
   }

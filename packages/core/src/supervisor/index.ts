@@ -13,6 +13,7 @@ import { recordActivity } from '../events.js';
 import { tx } from '../tickets/tx.js';
 import { parkForHuman, runProducedEvidence } from '../runs/engine.js';
 import { recheckRuntimeLogin } from '../runs/authgate.js';
+import { judgeMergeChecks, type MergeStallVerdict } from './merge-stall.js';
 import { allWorkerStallStates, createWorkerStallState, deleteWorkerStallState, getWorkerStallState, recordEscalation, recordRecoveryAttempt } from './stall-state.js';
 import { archivedDirFor } from '../openspec/index.js';
 import { CURATION_BUDGET_FRACTION, budgetOf, docSlugOf, isDocPath } from '../knowledge/files.js';
@@ -1329,10 +1330,14 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
    * appends the self-hosted runner gap when a workflow asks for a label no online runner serves.
    * Best-effort: it never throws into the tick.
    */
-  async function raiseMergeChecksAlarm(forge: ForgeAdapter, row: MergingPrRow, ciState: string | null, checks: { passed: number; total: number } | null, head: string | null, thresholdMs: number): Promise<void> {
-    const description = ciState === 'pending'
-      ? `a run is in progress${checks ? ` (${checks.passed}/${checks.total} passed)` : ''}`
-      : `no successful run on ${head ?? 'the head'} (no run, all checks skipped or cancelled)`;
+  async function raiseMergeChecksAlarm(forge: ForgeAdapter, row: MergingPrRow, ciState: string | null, checks: { passed: number; total: number } | null, head: string | null, thresholdMs: number, verdict: Extract<MergeStallVerdict, { stuck: true }>): Promise<void> {
+    const tally = checks ? ` (${checks.passed}/${checks.total} passed)` : '';
+    const named = verdict.checks.map((n) => `\`${n}\``).join(', ');
+    const description = verdict.kind === 'past_job_timeout'
+      ? `${named} has been running longer than GitHub's own job limit${tally}`
+      : verdict.kind === 'not_started'
+        ? `${named} has not started${tally}`
+        : `no successful run on ${head ?? 'the head'} (no run, all checks skipped or cancelled)`;
     let runnerNote = '';
     try {
       const requested = requestedRunnerLabels(row.clonePath);
@@ -1341,7 +1346,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       if (gaps.length > 0) runnerNote = `; no online runner for ${gaps.map((label) => `\`${label}\``).join(', ')}`;
     } catch { /* runner awareness is best-effort and never fails the alarm */ }
     const mins = Math.round(thresholdMs / 60_000);
-    const message = `${row.identifier}: the merge slot has been held on ${row.url} for over ${mins} min with checks unresolved — ${description}${runnerNote} (head ${head ?? 'unknown'}). The landing is still waiting and has not merged.`;
+    const message = `${row.identifier}: the merge slot has been held on ${row.url} for over ${mins} min — ${description}${runnerNote} (head ${head ?? 'unknown'}). The landing is still waiting and has not merged; its merge-queue place is kept. Do not change the ticket's status or re-run the job because of this alert.`;
     log.warn({ ticket: row.identifier, url: row.url, ciState, head }, 'merge-slot holder stalled on checks');
     try { deps().tickets.comment(SYSTEM, row.id, message, 'status'); }
     catch (e) { log.warn({ ticket: row.identifier, err: String(e) }, 'merge-stall comment failed'); }
@@ -1428,10 +1433,14 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
       if (!ciResolved) {
         const startedAt = row.mergeStartedAt ? Date.parse(row.mergeStartedAt) : NaN;
         const last = mergeChecksAlarmedAt.get(row.id);
-        if (Number.isFinite(startedAt) && Date.now() - startedAt >= alarmThresholdMs
-          && (last === undefined || Date.now() - last >= alarmThresholdMs)) {
-          mergeChecksAlarmedAt.set(row.id, Date.now());
-          await raiseMergeChecksAlarm(forge, row, ciState, checks, head, alarmThresholdMs);
+        // VS-991: a check that is merely slow is not a stall — only a queued-and-never-started one,
+        // or one past GitHub's job limit, is. Judged per check from the rollup, not by slot age.
+        if (Number.isFinite(startedAt) && (last === undefined || Date.now() - last >= alarmThresholdMs)) {
+          const verdict = judgeMergeChecks({ checks: checkDetails, slotStartedAtMs: startedAt, nowMs: Date.now(), queuedGraceMs: alarmThresholdMs });
+          if (verdict.stuck) {
+            mergeChecksAlarmedAt.set(row.id, Date.now());
+            await raiseMergeChecksAlarm(forge, row, ciState, checks, head, alarmThresholdMs, verdict);
+          }
         }
       } else {
         mergeChecksAlarmedAt.delete(row.id);

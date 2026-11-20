@@ -24,7 +24,7 @@ export type ForgeMergeState = 'behind' | 'blocked' | 'clean' | 'dirty' | 'draft'
 /** One changed file with the lines it adds and removes. */
 export interface ForgeChangedFile { path: string; additions: number; deletions: number }
 /** One check, named, for a pull request's detail. The rolled-up `ForgeCheckState` is what a list shows. */
-export interface ForgeCheck { name: string; state: ForgeCheckState; url: string | null }
+export interface ForgeCheck { name: string; state: ForgeCheckState; url: string | null; /** VS-991: the forge's own run status (`QUEUED`, `IN_PROGRESS`, `COMPLETED`…), when it reports one. */ status?: string; /** VS-991: when the check run started, when the forge reports a real start time. */ startedAt?: string | null }
 /** One pull request as a forge lists it: everything a list entry shows, without a second request. */
 export interface ForgePullRequest {
   number: number; title: string; url: string; author: string | null;

@@ -1,0 +1,37 @@
+## MODIFIED Requirements
+
+### Requirement: The merge-checks alarm distinguishes slow from stuck
+
+The system SHALL raise the merge-slot checks alarm for a non-draft slot holder only when its pending
+checks are evidence of a stall, judged per check from the forge rollup: a check that is running SHALL
+count as stuck only after it has run for longer than GitHub's job limit (360 minutes); a check that is
+queued or has no recorded start SHALL count as stuck once it has waited `mergeChecksAlarmSec`; when no
+check is pending by name (no run, or all skipped or cancelled) the alarm SHALL fire as `no_run` only once
+the current head has been observed without pending checks for `mergeChecksAlarmSec`, measured from the later
+of the slot's start and the moment that head was first observed. A head first observed on the current poll
+SHALL never be `no_run`. The alarm SHALL repeat at the `mergeChecksAlarmSec` cadence while stuck.
+
+#### Scenario: A long job that is running is not alarmed
+
+- **WHEN** a slot holder has been admitted 37 minutes, six of seven checks passed and the seventh is `IN_PROGRESS` since admission
+- **THEN** no alarm is raised and the ticket stays `merging`
+
+#### Scenario: A check that never started is alarmed
+
+- **WHEN** a check is `QUEUED` for longer than `mergeChecksAlarmSec`
+- **THEN** the weaver is woken once, naming the check as not started
+
+#### Scenario: A job past GitHub's limit is alarmed
+
+- **WHEN** a check has been `IN_PROGRESS` for more than 360 minutes
+- **THEN** the weaver is woken, naming the check as running longer than GitHub's own job limit
+
+#### Scenario: A fresh head whose checks are not created yet is not alarmed
+
+- **WHEN** the slot has been held well past `mergeChecksAlarmSec` and the head just changed (for example the daemon's archive commit) with no checks on it yet
+- **THEN** no alarm is raised
+
+#### Scenario: A head that stays without checks is alarmed as no run
+
+- **WHEN** the current head has been observed with no checks for `mergeChecksAlarmSec`
+- **THEN** the weaver is woken with the `no_run` wording

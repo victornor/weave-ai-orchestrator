@@ -776,7 +776,7 @@ describe('supervisor scheduled passes', () => {
     });
 
     describe('merge-slot progress (VS-391)', () => {
-      type MergePrState = { state: 'open' | 'merged' | 'closed'; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number }; checkDetails?: Array<{ name: string; state: 'pending' | 'success' | 'failure' | 'none'; url: string | null }>; headSha?: string; mergeState?: 'clean' | 'blocked' | 'behind' | 'dirty'; isDraft?: boolean };
+      type MergePrState = { state: 'open' | 'merged' | 'closed'; ciState?: 'pending' | 'success' | 'failure' | 'none'; checks?: { passed: number; total: number }; checkDetails?: Array<{ name: string; state: 'pending' | 'success' | 'failure' | 'none'; url: string | null; status?: string; startedAt?: string | null }>; headSha?: string; mergeState?: 'clean' | 'blocked' | 'behind' | 'dirty'; isDraft?: boolean };
       const resetMergePoll = (): void => { h.db.run("UPDATE meta SET value = '0' WHERE key = 'supervisor:merge_ci_at'"); };
       const wakesFor = (ticketId: string): Array<{ input: Record<string, unknown> }> =>
         wake.calls.filter((c) => {
@@ -920,8 +920,18 @@ describe('supervisor scheduled passes', () => {
               && (input.payload as { kind?: string } | undefined)?.kind === 'merge_stalled'
               && (input.payload as { ticketId?: string } | undefined)?.ticketId === ticketId);
 
-        it('alarms the conductor once the holder has waited past the threshold (VS-467)', async () => {
-          const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState: 'pending', headSha: 'sha-1', checks: { passed: 1, total: 3 } }));
+        const minsAgo = (m: number): string => new Date(Date.now() - m * 60_000).toISOString();
+        // The shape of the FanStack case: six quick jobs passed, one long suite still running.
+        const slowSuite = (startedMinsAgo: number): Pick<MergePrState, 'ciState' | 'checks' | 'checkDetails'> => ({
+          ciState: 'pending', checks: { passed: 6, total: 7 },
+          checkDetails: [
+            { name: 'backend-tests / lint', state: 'success', url: null, status: 'COMPLETED', startedAt: minsAgo(startedMinsAgo) },
+            { name: 'backend-tests / dotnet-tests (FanStack.Api.Tests)', state: 'pending', url: null, status: 'IN_PROGRESS', startedAt: minsAgo(startedMinsAgo) },
+          ],
+        });
+
+        it('alarms a check that never started once the holder has waited past the threshold (VS-467, VS-991)', async () => {
+          const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', headSha: 'sha-1', ciState: 'pending', checks: { passed: 1, total: 3 }, checkDetails: [{ name: 'ci / test', state: 'pending', url: null, status: 'QUEUED', startedAt: minsAgo(21) }] }));
           setForge(prState);
           const ticketId = seedMergingPr({ mergeStartedAt: new Date(Date.now() - 21 * 60_000).toISOString() });
 
@@ -932,7 +942,46 @@ describe('supervisor scheduled passes', () => {
           const reason = String(alarms[0]!['reason']);
           expect(reason).toContain('TST-1');
           expect(reason).toContain('sha-1');
-          expect(reason).toContain('run is in progress');
+          expect(reason).toContain('`ci / test` has not started');
+          expect(reason).not.toContain('hung');
+        });
+
+        it('says nothing about a long job that is legitimately running (VS-991)', async () => {
+          // 37 minutes in, past the old 20 minute alarm: slow, not stuck.
+          const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', headSha: 'sha-1', ...slowSuite(37) }));
+          setForge(prState);
+          const ticketId = seedMergingPr({ mergeStartedAt: minsAgo(37) });
+
+          await supervisor.tick();
+
+          expect(alarmsFor(ticketId)).toHaveLength(0);
+          expect(h.db.get<{ status: string }>('SELECT status FROM tickets WHERE id = ?', [ticketId])?.status).toBe('merging');
+        });
+
+        it('alarms a running job that has outlived GitHub\'s job limit (VS-991)', async () => {
+          const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', headSha: 'sha-1', ...slowSuite(361) }));
+          setForge(prState);
+          const ticketId = seedMergingPr({ mergeStartedAt: minsAgo(362) });
+
+          await supervisor.tick();
+
+          const alarms = alarmsFor(ticketId);
+          expect(alarms).toHaveLength(1);
+          expect(String(alarms[0]!['reason'])).toContain('longer than GitHub\'s own job limit');
+        });
+
+        it('keeps the ticket in merging with its queue place when it alarms (VS-991)', async () => {
+          const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState: 'pending' }));
+          setForge(prState);
+          const queued = minsAgo(60);
+          const started = minsAgo(30);
+          const ticketId = seedMergingPr({ mergeQueuedAt: queued, mergeStartedAt: started });
+
+          await supervisor.tick();
+
+          expect(alarmsFor(ticketId)).toHaveLength(1);
+          const row = h.db.get<{ status: string; mergeQueuedAt: string | null; mergeStartedAt: string | null }>('SELECT status, merge_queued_at, merge_started_at FROM tickets WHERE id = ?', [ticketId]);
+          expect(row).toMatchObject({ status: 'merging', mergeQueuedAt: queued, mergeStartedAt: started });
         });
 
         it('does not alarm before the threshold, then alarms and throttles at the cadence (VS-467)', async () => {

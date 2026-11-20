@@ -441,9 +441,28 @@ describe('prState', () => {
     expect(state.ciState).toBe('failure');
     expect(state.checks).toEqual({ passed: 1, total: 3 });
     expect(state.checkDetails).toEqual([
-      { name: 'build', state: 'success', url: null },
-      { name: 'lint', state: 'pending', url: null },
-      { name: 'typecheck', state: 'failure', url: null },
+      { name: 'build', state: 'success', url: null, status: 'COMPLETED' },
+      { name: 'lint', state: 'pending', url: null, status: 'IN_PROGRESS' },
+      { name: 'typecheck', state: 'failure', url: null, status: 'COMPLETED' },
+    ]);
+  });
+
+  it('carries each check\'s status and real start time, dropping the zero time (VS-991)', async () => {
+    // Entry shape captured from `gh pr view --json statusCheckRollup`; the in-progress entry's
+    // completedAt is GitHub's zero value.
+    fakeGh(JSON.stringify({
+      state: 'OPEN',
+      statusCheckRollup: [
+        { __typename: 'CheckRun', completedAt: '2026-11-10T04:14:02Z', conclusion: 'SUCCESS', detailsUrl: 'https://github.com/o/r/actions/runs/1/job/2', name: 'typecheck', startedAt: '2026-11-10T04:13:00Z', status: 'COMPLETED', workflowName: 'CI' },
+        { __typename: 'CheckRun', completedAt: '0001-01-01T00:00:00Z', conclusion: '', detailsUrl: 'https://github.com/o/r/actions/runs/1/job/3', name: 'test-core', startedAt: '2026-11-10T04:13:00Z', status: 'IN_PROGRESS', workflowName: 'CI' },
+        { __typename: 'CheckRun', completedAt: '0001-01-01T00:00:00Z', conclusion: '', name: 'queued', startedAt: '0001-01-01T00:00:00Z', status: 'QUEUED', workflowName: 'CI' },
+      ],
+    }));
+    const state = await new GhForge().prState(home, 'https://github.com/acme/api/pull/77');
+    expect(state.checkDetails).toEqual([
+      { name: 'CI / typecheck', state: 'success', url: 'https://github.com/o/r/actions/runs/1/job/2', status: 'COMPLETED', startedAt: '2026-11-10T04:13:00Z' },
+      { name: 'CI / test-core', state: 'pending', url: 'https://github.com/o/r/actions/runs/1/job/3', status: 'IN_PROGRESS', startedAt: '2026-11-10T04:13:00Z' },
+      { name: 'CI / queued', state: 'pending', url: null, status: 'QUEUED' },
     ]);
   });
 

@@ -526,10 +526,10 @@ export const WorkspaceDefaultsSchema = withKeyAlias(z.object({
    */
   stalledWorkerMaxAutoRecoverAttempts: z.number().int().min(0).default(2),
   /**
-   * VS-467: how long a merge-slot holder may sit with unresolved checks before the supervisor raises
-   * its weaver-visible alarm — and how often the alarm repeats while it stays unresolved. A run that
-   * never starts, is cancelled and never re-runs, or belongs to a head the gate will not accept
-   * would otherwise hold the serial merge queue with no signal at all.
+   * VS-467: how long a merge-slot holder's checks may sit queued (never started), or with no run at
+   * all, before the supervisor raises its weaver-visible alarm — and how often the alarm repeats while
+   * stuck. VS-991: a check that is running is not judged by this; it alarms only past GitHub's own
+   * job limit (360 min), so a legitimately slow suite never alarms.
    */
   mergeChecksAlarmSec: z.number().int().min(60).default(1200),
   bootstrapBudgetTokens: z.number().int().default(16000),

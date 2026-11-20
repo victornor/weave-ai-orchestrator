@@ -9,8 +9,9 @@
  *     it is simply slow and says nothing;
  *   - a check that is QUEUED (or has no recorded start) is stuck once it has waited `queuedGraceMs`
  *     for a runner — measured from the slot's start when the forge gives no queue time.
- * With no per-check detail at all (no run, or a forge that reports none) the slot's own age against
- * `queuedGraceMs` is the only evidence there is, as before.
+ * With no pending check at all (no run, a forge that reports none, or a head whose checks do not exist
+ * yet) `no_run` needs the current head to have been observed without checks for `queuedGraceMs`,
+ * measured from the later of the slot's start and the head's first observation (VS-993).
  */
 import type { ForgeCheck } from '@weave-ai/plugin-sdk';
 
@@ -21,13 +22,16 @@ export type MergeStallVerdict =
   | { stuck: false }
   | { stuck: true; kind: 'no_run' | 'not_started' | 'past_job_timeout'; checks: string[] };
 
-export function judgeMergeChecks(input: { checks: ForgeCheck[] | null; slotStartedAtMs: number; nowMs: number; queuedGraceMs: number; jobTimeoutMs?: number }): MergeStallVerdict {
+export function judgeMergeChecks(input: { checks: ForgeCheck[] | null; slotStartedAtMs: number; nowMs: number; queuedGraceMs: number; jobTimeoutMs?: number; headObservedAtMs?: number }): MergeStallVerdict {
   const { checks, slotStartedAtMs, nowMs, queuedGraceMs } = input;
   const jobTimeoutMs = input.jobTimeoutMs ?? GITHUB_JOB_TIMEOUT_MS;
   const pending = (checks ?? []).filter((c) => c.state === 'pending');
   if (pending.length === 0) {
-    // Nothing pending by name: no run, or everything skipped/cancelled. The slot's age is the evidence.
-    return nowMs - slotStartedAtMs >= queuedGraceMs ? { stuck: true, kind: 'no_run', checks: [] } : { stuck: false };
+    // Nothing pending by name: no run, or everything skipped/cancelled, or (VS-993) a head whose checks
+    // are not created yet. The evidence is how long the CURRENT head has had none — not the slot's age,
+    // which is long past the grace whenever the daemon's archive commit moves the head mid-landing.
+    const since = Number.isFinite(input.headObservedAtMs) ? Math.max(slotStartedAtMs, input.headObservedAtMs as number) : slotStartedAtMs;
+    return nowMs - since >= queuedGraceMs ? { stuck: true, kind: 'no_run', checks: [] } : { stuck: false };
   }
   const notStarted: string[] = [];
   const overTimeout: string[] = [];

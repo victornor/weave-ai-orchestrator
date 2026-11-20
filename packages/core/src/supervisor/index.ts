@@ -1406,14 +1406,18 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         || JSON.stringify(stored['ciChecks'] ?? null) !== JSON.stringify(checkDetails)
         || JSON.stringify(stored['ciHead'] ?? null) !== JSON.stringify(head);
       const mergeStateChanged = (stored['mergeState'] ?? null) !== mergeState;
+      // VS-993: when the current head was first observed — reset on every head change, backfilled for rows written before it existed.
+      const headChanged = (stored['ciHead'] ?? null) !== head;
+      const ciHeadAt = !headChanged && typeof stored['ciHeadAt'] === 'string' ? stored['ciHeadAt'] : nowIso();
+      const headAtChanged = stored['ciHeadAt'] !== ciHeadAt;
       const stateChanged = (stored['prState'] ?? null) !== pr.state;
       const draftChanged = (stored['isDraft'] === true) !== draft;
       const now = nowIso();
       const ciStateAt = ciState !== (stored['ciState'] ?? null) ? now : (stored['ciStateAt'] as string | undefined) ?? now;
-      if (ciChanged || mergeStateChanged || stateChanged || draftChanged) {
+      if (ciChanged || mergeStateChanged || stateChanged || draftChanged || headAtChanged) {
         ctx.db.update('tickets', row.id, {
           deliveryJson: {
-            ...stored, prUrl: row.url, prState: pr.state, ciState, ciStateAt, ciHead: head, prChecks: checks,
+            ...stored, prUrl: row.url, prState: pr.state, ciState, ciStateAt, ciHead: head, ciHeadAt, prChecks: checks,
             ciChecks: checkDetails, prHead: head,
             mergeState, mergeStateHead: mergeState ? head : null, isDraft: draft,
           },
@@ -1436,7 +1440,7 @@ export function createSupervisor(ctx: WorkspaceContext, deps: () => CoreServices
         // VS-991: a check that is merely slow is not a stall — only a queued-and-never-started one,
         // or one past GitHub's job limit, is. Judged per check from the rollup, not by slot age.
         if (Number.isFinite(startedAt) && (last === undefined || Date.now() - last >= alarmThresholdMs)) {
-          const verdict = judgeMergeChecks({ checks: checkDetails, slotStartedAtMs: startedAt, nowMs: Date.now(), queuedGraceMs: alarmThresholdMs });
+          const verdict = judgeMergeChecks({ checks: checkDetails, slotStartedAtMs: startedAt, nowMs: Date.now(), queuedGraceMs: alarmThresholdMs, headObservedAtMs: Date.parse(ciHeadAt) });
           if (verdict.stuck) {
             mergeChecksAlarmedAt.set(row.id, Date.now());
             await raiseMergeChecksAlarm(forge, row, ciState, checks, head, alarmThresholdMs, verdict);

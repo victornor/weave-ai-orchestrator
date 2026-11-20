@@ -797,6 +797,11 @@ describe('supervisor scheduled passes', () => {
         return ticketId;
       }
 
+      // VS-993: a head already observed `mins` ago (the alarm measures the head, not the slot).
+      function headSeenAgo(ticketId: string, mins: number): void {
+        h.db.update('tickets', ticketId, { deliveryJson: { ciHeadAt: new Date(Date.now() - mins * 60_000).toISOString() } });
+      }
+
       function setForge(prState: ReturnType<typeof vi.fn>): void {
         h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState, mergePr: async () => ({}) } as never);
       }
@@ -977,11 +982,46 @@ describe('supervisor scheduled passes', () => {
           const started = minsAgo(30);
           const ticketId = seedMergingPr({ mergeQueuedAt: queued, mergeStartedAt: started });
 
-          await supervisor.tick();
+          await supervisor.tick(); // first observation of the head: never no_run (VS-993)
+          expect(alarmsFor(ticketId)).toHaveLength(0);
+          vi.useFakeTimers({ toFake: ['Date'] });
+          try {
+            vi.setSystemTime(Date.now() + 21 * 60_000);
+            resetMergePoll();
+            await supervisor.tick();
+          } finally { vi.useRealTimers(); }
 
           expect(alarmsFor(ticketId)).toHaveLength(1);
           const row = h.db.get<{ status: string; mergeQueuedAt: string | null; mergeStartedAt: string | null }>('SELECT status, merge_queued_at, merge_started_at FROM tickets WHERE id = ?', [ticketId]);
           expect(row).toMatchObject({ status: 'merging', mergeQueuedAt: queued, mergeStartedAt: started });
+        });
+
+        it('does not call a fresh head "no run" because the slot has been held long (VS-993)', async () => {
+          let head = 'sha-old';
+          const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', headSha: head, ciState: 'pending', checks: { passed: 0, total: 0 }, checkDetails: [] }));
+          setForge(prState);
+          const ticketId = seedMergingPr({ mergeStartedAt: minsAgo(40) });
+          await supervisor.tick();
+          vi.useFakeTimers({ toFake: ['Date'] });
+          try {
+            // 25 minutes on, the archive commit moves the head; its checks do not exist yet.
+            vi.setSystemTime(Date.now() + 25 * 60_000);
+            head = 'sha-new';
+            resetMergePoll();
+            await supervisor.tick();
+            expect(alarmsFor(ticketId)).toHaveLength(0);
+            const d = h.db.get<{ delivery: { ciHead?: string; ciHeadAt?: string } }>('SELECT delivery_json FROM tickets WHERE id = ?', [ticketId])?.delivery;
+            expect(d?.ciHead).toBe('sha-new');
+            expect(Date.parse(d?.ciHeadAt ?? '')).toBe(Date.now());
+
+            // Still no checks on that head a full grace later: a genuine no_run.
+            vi.setSystemTime(Date.now() + 21 * 60_000);
+            resetMergePoll();
+            await supervisor.tick();
+            const alarms = alarmsFor(ticketId);
+            expect(alarms).toHaveLength(1);
+            expect(String(alarms[0]!['reason'])).toContain('no successful run on sha-new');
+          } finally { vi.useRealTimers(); }
         });
 
         it('does not alarm before the threshold, then alarms and throttles at the cadence (VS-467)', async () => {
@@ -1017,6 +1057,7 @@ describe('supervisor scheduled passes', () => {
           const prState = vi.fn(async (): Promise<MergePrState> => ({ state: 'open', ciState }));
           setForge(prState);
           const ticketId = seedMergingPr({ mergeStartedAt: new Date(Date.now() - 21 * 60_000).toISOString() });
+          headSeenAgo(ticketId, 21);
 
           await supervisor.tick();
           expect(alarmsFor(ticketId)).toHaveLength(1);
@@ -1037,6 +1078,7 @@ describe('supervisor scheduled passes', () => {
           const runnerStatus = vi.fn(async () => ({ onlineLabels: ['self-hosted'] }));
           h.ctx.registries.forges.set('github', { id: 'github', detect: async () => true, prState, mergePr: async () => ({}), runnerStatus } as never);
           const ticketId = seedMergingPr({ mergeStartedAt: new Date(Date.now() - 21 * 60_000).toISOString() });
+          headSeenAgo(ticketId, 21);
           mkdirSync(join(h.ctx.paths.projects, h.projectSlug, '.github', 'workflows'), { recursive: true });
           writeFileSync(join(h.ctx.paths.projects, h.projectSlug, '.github', 'workflows', 'ci.yml'), 'jobs:\n  a:\n    runs-on: [self-hosted, weave-ci]\n');
 

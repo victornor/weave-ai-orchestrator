@@ -26,4 +26,16 @@ describe('judgeMergeChecks (VS-991)', () => {
     expect(judgeMergeChecks({ nowMs: NOW, slotStartedAtMs: NOW - 5 * 60_000, queuedGraceMs: GRACE, checks: null })).toEqual({ stuck: false });
     expect(judgeMergeChecks({ nowMs: NOW, slotStartedAtMs: NOW - 25 * 60_000, queuedGraceMs: GRACE, checks: [] })).toMatchObject({ stuck: true, kind: 'no_run' });
   });
+  it('VS-993: a slot held long, head whose checks were created seconds ago, is not no_run', () => {
+    const v = judgeMergeChecks({ nowMs: NOW, slotStartedAtMs: NOW - 40 * 60_000, headObservedAtMs: NOW, queuedGraceMs: GRACE, checks: [] });
+    expect(v).toEqual({ stuck: false });
+    expect(judgeMergeChecks({ nowMs: NOW, slotStartedAtMs: NOW - 40 * 60_000, headObservedAtMs: NOW - 5 * 60_000, queuedGraceMs: GRACE, checks: null })).toEqual({ stuck: false });
+  });
+  it('VS-993: a head with no checks for the full grace is still no_run', () => {
+    const v = judgeMergeChecks({ nowMs: NOW, slotStartedAtMs: NOW - 40 * 60_000, headObservedAtMs: NOW - 21 * 60_000, queuedGraceMs: GRACE, checks: [] });
+    expect(v).toEqual({ stuck: true, kind: 'no_run', checks: [] });
+  });
+  it('VS-993: a head observed before the slot began does not shorten the wait', () => {
+    expect(judgeMergeChecks({ nowMs: NOW, slotStartedAtMs: NOW - 5 * 60_000, headObservedAtMs: NOW - 60 * 60_000, queuedGraceMs: GRACE, checks: [] })).toEqual({ stuck: false });
+  });
 });

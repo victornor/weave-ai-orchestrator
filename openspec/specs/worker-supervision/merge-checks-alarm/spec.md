@@ -9,6 +9,7 @@ a 30-minute suite. On VS-981 the alert was answered by moving the ticket out of 
 `blocked`, which clears `merge_queued_at`/`merge_started_at`: the worker was stranded out of the queue
 until a human put it back. An alert that always fires carries no information, and waiting resolves
 itself where losing the queue place does not.
+
 ## Requirements
 
 ### Requirement: The merge-checks alarm distinguishes slow from stuck
@@ -17,8 +18,10 @@ The system SHALL raise the merge-slot checks alarm for a non-draft slot holder o
 checks are evidence of a stall, judged per check from the forge rollup: a check that is running SHALL
 count as stuck only after it has run for longer than GitHub's job limit (360 minutes); a check that is
 queued or has no recorded start SHALL count as stuck once it has waited `mergeChecksAlarmSec`; when no
-check is pending by name (no run, or all skipped or cancelled) the slot's age against
-`mergeChecksAlarmSec` SHALL decide. The alarm SHALL repeat at the `mergeChecksAlarmSec` cadence while stuck.
+check is pending by name (no run, or all skipped or cancelled) the alarm SHALL fire as `no_run` only once
+the current head has been observed without pending checks for `mergeChecksAlarmSec`, measured from the later
+of the slot's start and the moment that head was first observed. A head first observed on the current poll
+SHALL never be `no_run`. The alarm SHALL repeat at the `mergeChecksAlarmSec` cadence while stuck.
 
 #### Scenario: A long job that is running is not alarmed
 
@@ -34,6 +37,16 @@ check is pending by name (no run, or all skipped or cancelled) the slot's age ag
 
 - **WHEN** a check has been `IN_PROGRESS` for more than 360 minutes
 - **THEN** the weaver is woken, naming the check as running longer than GitHub's own job limit
+
+#### Scenario: A fresh head whose checks are not created yet is not alarmed
+
+- **WHEN** the slot has been held well past `mergeChecksAlarmSec` and the head just changed (for example the daemon's archive commit) with no checks on it yet
+- **THEN** no alarm is raised
+
+#### Scenario: A head that stays without checks is alarmed as no run
+
+- **WHEN** the current head has been observed with no checks for `mergeChecksAlarmSec`
+- **THEN** the weaver is woken with the `no_run` wording
 
 ### Requirement: The alarm never changes the ticket
 

@@ -15,7 +15,15 @@ Two things make it more than a copy of the Claude adapter:
 - **Effort.** A model is chosen as a family (`gemini-4-neon`, `gemini-4-argon`, `gemini-4-hydrogen`) plus an effort, and the adapter composes the exact variant id `agy models` lists (`gemini-4-neon-high`). It never passes `--effort`, so a model id and a conflicting effort flag can never both reach the CLI. Orchestrator ids take no effort.
 - **Auth.** The adapter watches stderr for the login prompt. On the first such line it kills the turn and returns an `auth`-family error with a fixed message. The OAuth URL is never copied into stored text. The `authentication failed or timed out` result and the mid-session `Authentication expired` message are classified the same way. From there the existing login gate, card, channel announcement and incident apply unchanged. `weave runtime login agy` and the outage text name `agy` as the native login.
 - **Isolated daemons.** The keyring is per OS user, not per config dir. An isolated daemon (VS-143) therefore runs agy with the D-Bus session variables removed. `agy` then falls back to file-based token storage inside the empty per-agent dir and fails to authenticate, instead of using the owner's real login.
-- **Models.** `listModels()` returns the families under the names captain used ("Gemini 4 Neon", "Gemini 4 Argon", "Gemini 4 Hydrogen", "Orchestrator (Neon)", "Orchestrator (Argon)"), with each family's efforts. Gemini 3.8 Flash is included. Claude and GPT-OSS ids offered through agy are deliberately left out.
+- **Models — everything `agy models` lists (captain, 2026-11-22).** `agy` exposes every model on the Antigravity subscription, Claude and GPT-OSS included, and all of them are selectable. `listModels()` returns all 23 ids of 1.5.14 as nine families with their efforts:
+  - Gemini 4 Neon, Gemini 4 Argon, Gemini 4 Hydrogen and Gemini 3.8 Flash;
+  - Orchestrator (Neon) and Orchestrator (Argon);
+  - Claude Opus 5.5 (Antigravity) and Claude Sonnet 5.5 (Antigravity);
+  - GPT-OSS 120B, whose only effort is `medium`.
+
+  An id outside the list is passed through unchanged, and `agy` itself rejects an unknown one.
+- **No conflation with the native `claude` runtime.** A Claude model reached through `agy` is a different credential, account and bill from the `claude` runtime's own. Its runs carry runtime `agy` and provider `antigravity` for every model, so the per-model usage breakdown, which groups by model and provider, never merges them. Cost estimation by model-id prefix would price `claude-opus-5-5-high` at Anthropic API rates on a run billed to the Antigravity subscription. A new runtime capability (`estimateCostByModel: false`) makes such runs `unpriced` instead.
+- **The worker-option catalog, not the adapter, limits what is one tap away.** The catalog holds at most 16 options, each fixing one model and one effort, so 23 ids cannot all be options next to the existing tiers. The adapter runs any id. An initial set of six options is proposed (design, Migration Plan).
 - A capture script for the owner, run once, records the real `stream-json` bytes of an authenticated turn, its MCP tool call and a resumed second turn. The event parser's fixtures are written from that capture, not from guesses.
 - An ADR records the reliance on the hidden `--gemini_dir` flag and the alternatives that were rejected.
 
@@ -25,11 +33,11 @@ Two things make it more than a copy of the Claude adapter:
 - `agy-runtime`: the Antigravity CLI runtime adapter: invocation, per-agent config isolation and the MCP surface, model/effort mapping, session resume, structured report, authentication-failure classification, and the isolated-daemon credential boundary.
 
 ### Modified Capabilities
-(none — the login gate, worker-option catalog and model resolution are reused unchanged)
+(none — the login gate, worker-option catalog and model resolution are reused unchanged; the cost-estimation opt-out is a new optional runtime capability whose default keeps today's behaviour)
 
 ## Impact
 
 - New: `packages/runtimes/agy/` (adapter, args, events, session, account, tests, fixtures).
-- Touched: `packages/server/src/daemon.ts` (`RUNTIME_PACKAGES`), `packages/server/package.json`, `packages/shared/src/runtime-login.ts` (`NATIVE_LOGIN`), `packages/cli/src/commands/runtime.ts`, `doctor.ts`, `install.ts`, `packages/core/src/runs/engine.ts` (D-Bus stripping on isolated daemons), tsconfig/vitest references, `docs/adr/0025-…`, `docs/OPERATIONS.md` (runtime table).
-- No schema or API change. The worker-option catalog entries (`agy-neon`, `agy-argon`, `agy-hydrogen`, `agy-orchestrator`) are configuration: they are added on the live daemon after the upgrade, through the models settings, not by this diff.
+- Touched: `packages/runtime-sdk/src/index.ts` (`RuntimeCapabilities.estimateCostByModel`), `packages/core/src/runs/engine.ts` (skip estimation when it is `false`), `packages/server/src/daemon.ts` (`RUNTIME_PACKAGES`), `packages/server/package.json`, `packages/shared/src/runtime-login.ts` (`NATIVE_LOGIN`), `packages/cli/src/commands/runtime.ts`, `doctor.ts`, `install.ts`, `packages/core/src/runs/engine.ts` (D-Bus stripping on isolated daemons), tsconfig/vitest references, `docs/adr/0025-…`, `docs/OPERATIONS.md` (runtime table).
+- No schema or API change. The worker-option catalog entries are configuration: they are added on the live daemon after the upgrade, through the models settings, not by this diff. The 16-option cap is unchanged here; reshaping the catalog (e.g. picking an effort per ticket) is a separate ticket.
 - Built against `agy` 1.5.14 (`/home/v/.local/bin/agy`).

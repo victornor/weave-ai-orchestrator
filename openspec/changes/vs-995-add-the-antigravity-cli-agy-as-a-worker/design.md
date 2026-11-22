@@ -22,9 +22,9 @@
 
 ## Goals / Non-Goals
 
-**Goals:** an `agy` worker can complete a ticket end to end. Its MCP surface is the weave server alone. Its sessions resume. Its report is schema-enforced. An `agy` login failure reaches the login gate quickly and visibly. Captain can pick Neon/Argon/Hydrogen/Orchestrator per ticket.
+**Goals:** an `agy` worker can complete a ticket end to end. Its MCP surface is the weave server alone. Its sessions resume. Its report is schema-enforced. An `agy` login failure reaches the login gate quickly and visibly. Every model `agy models` lists can run, Claude and GPT-OSS included (captain, 2026-11-22: "All of the models available in AGY should be selectable"). An `agy` run is never mistaken for a native `claude` run.
 
-**Non-Goals:** live mid-turn input (`--input-format stream-json`); `agy acp`; a usage/limits probe; routing Claude or GPT-OSS models through `agy`; the remote-agent, sandbox or swarm features.
+**Non-Goals:** live mid-turn input (`--input-format stream-json`); `agy acp`; a usage/limits probe; the remote-agent, sandbox and swarm features; reshaping the worker-option catalog or lifting its 16-option cap (a separate ticket if wanted); querying `agy models` live from `listModels()`.
 
 ## Decisions
 
@@ -60,28 +60,36 @@ An isolated daemon (VS-143) promises that a runtime never resolves to the owner'
 
 ### 4. Effort is folded into the model id; `--effort` is never sent
 
-The catalog carries `runtime`, `model` and `effort` separately. `agy` encodes effort in the id and also takes `--effort`, and which one wins when they disagree is unestablished. The adapter therefore never sends both:
+The catalog carries `runtime`, `model` and `effort` separately. `agy` encodes effort in the id and also takes `--effort`, and which one wins when they disagree is unestablished. The adapter therefore never sends `--effort`. It composes the variant id itself:
 
-| `model` | `effort` | `--model` sent |
+| `model` | `effort` | `--model` sent | Rule |
+|---|---|---|---|
+| `gemini-4-neon` | `high` | `gemini-4-neon-high` | offered: use it |
+| `claude-opus-5-5` | `high` | `claude-opus-5-5-high` | same rule for every family |
+| `gemini-4-argon` | `xhigh` | `gemini-4-argon-high` | highest offered ≤ requested |
+| `gpt-oss-120b` | `low` | `gpt-oss-120b-medium` | none ≤ requested: lowest offered |
+| `gemini-4-hydrogen` | — | `gemini-4-hydrogen-medium` | none requested: `medium` |
+| `gemini-4-neon-high` | `low` | `gemini-4-neon-high` | a full id wins; effort ignored |
+| `gemini-pro-orchestrator-neon` | any | unchanged | no efforts |
+| `some-future-model` | any | unchanged | unknown id: `agy` resolves or rejects it |
+
+Families and efforts, from the ticket's `agy models` capture (23 ids):
+
+| Family id | Label | Efforts |
 |---|---|---|
-| `gemini-4-neon` | `high` | `gemini-4-neon-high` |
-| `gemini-4-argon` | `xhigh` | `gemini-4-argon-high` (highest offered ≤ requested) |
-| `gemini-4-hydrogen` | — | `gemini-4-hydrogen-medium` |
-| `gemini-4-neon-high` | `low` | `gemini-4-neon-high` (a full id wins; effort ignored) |
-| `gemini-pro-orchestrator-neon` | any | unchanged |
+| `gemini-4-neon` | Gemini 4 Neon | low/medium/high/xhigh |
+| `gemini-4-argon` | Gemini 4 Argon | low/medium/high |
+| `gemini-4-hydrogen` | Gemini 4 Hydrogen | low/medium/high/xhigh |
+| `gemini-3.8-flash` | Gemini 3.8 Flash | low/medium/high |
+| `gemini-pro-orchestrator-neon` | Orchestrator (Neon) | none |
+| `gemini-pro-orchestrator-g1-pro` | Orchestrator (Argon) | none |
+| `claude-opus-5-5` | Claude Opus 5.5 (Antigravity) | low/medium/high |
+| `claude-sonnet-5-5` | Claude Sonnet 5.5 (Antigravity) | low/medium/high |
+| `gpt-oss-120b` | GPT-OSS 120B | medium |
 
-Families and efforts, from the ticket's `agy models` capture:
+The list is `static`, like Claude's. `agy models` needs a login and the network, so `listModels()` does not call it. A model that a newer `agy` adds still runs by its id (the pass-through row). It appears in the picker once this list is updated.
 
-| Family | Efforts |
-|---|---|
-| Neon | low/medium/high/xhigh |
-| Argon | low/medium/high |
-| Hydrogen | low/medium/high/xhigh |
-| Gemini 3.8 Flash | low/medium/high |
-| Orchestrator (Neon) `gemini-pro-orchestrator-neon` | none |
-| Orchestrator (Argon) `gemini-pro-orchestrator-g1-pro` | none |
-
-The list is `static`, like Claude's. `agy models` needs a login and the network, so it is not called from `listModels()`.
+The Claude labels carry "(Antigravity)" so a picker that shows several runtimes side by side never offers two identical "Claude Opus 5.5" rows.
 
 ### 5. Event parser fixtures come from one owner-run capture
 
@@ -108,6 +116,19 @@ The parser and its `fixtures/*.jsonl` are written from those bytes. Until the ca
 
 A headless run soft-denies a tool that needs approval and reports `denied_actions`; the adapter records those as a warning event.
 
+### 8. Keeping agy-routed Claude apart from the native `claude` runtime
+
+I checked each place the two could meet:
+
+| Place | Today | With this change |
+|---|---|---|
+| Model resolution (`models/resolve.ts`) | A worker option names its `runtime` explicitly | No merge: an option is `agy`+`claude-opus-5-5` or `claude`+`opus`, never both |
+| Runs / agent rows | `runtime_id` per run | No merge: `agy` vs `claude` |
+| Usage events | carry `runtime_id`, `model` and `provider`; the `runtime` filter separates them | No merge by runtime |
+| **Per-model usage breakdown** (`usage/service.ts`) | groups by **(model, provider) only**, not runtime | Would merge if both reported the same model string under provider `anthropic`. Fixed by the `agy` adapter reporting provider `antigravity` for every model |
+| **Cost estimation** (`engine.ts` → `estimateCostCents`) | prices by model-id regex, whatever the runtime | `claude-opus-5-5-high` matches `/claude-opus-5/` and would show an "estimated" Anthropic API cost on a run billed to the Antigravity subscription. `gemini-3.8-flash-*` would likewise match `/gemini-3/`. Fixed by a new optional capability `estimateCostByModel` (default `true`, so every existing runtime is unchanged); `agy` sets `false` and its runs are `unpriced` |
+| Login gate / credentials | per `runtimeId` | No merge: an expired agy login gates `agy` only, never `claude` |
+
 ## Risks / Trade-offs
 
 | Risk | Mitigation |
@@ -116,11 +137,21 @@ A headless run soft-denies a tool that needs approval and reports `denied_action
 | One keyring login shared by every agy agent and the owner's own `agy` | Same shape as the existing one-credential-per-runtime model; Google tokens are not single-use (inferred) |
 | An expired login fails three turns before the gate (engine threshold) | Each fails in under a second instead of 60 s; the threshold is unchanged and shared with Claude |
 | The success-path event shapes are unknown until the capture | Task order makes the capture a gate for the parser; nothing is guessed |
-| The worker-option catalog is capped at 16 entries | Four entries are proposed (`agy-neon`, `agy-argon`, `agy-hydrogen`, `agy-orchestrator`), each choosing an effort; captain can add more |
+| The worker-option catalog is capped at 16 options, each fixing one model and one effort | The adapter runs all 23 ids; the catalog decides which are one tap away. Six options are proposed below; reshaping the catalog is a separate ticket |
 
 ## Migration Plan
 
-Additive. After `weave daemon upgrade`, captain (or the weaver, on request) adds the four worker options through the models settings, with these descriptions:
+Additive. After `weave daemon upgrade`, captain (or the weaver, on request) adds worker options through the models settings.
+
+**What the cap means.** `WorkerOptionsArraySchema` allows at most 16 options. Each option fixes one runtime, one model and one effort. Captain's 23 agy ids (more, counting efforts as separate choices) therefore cannot all be one-tap options next to the existing `quick`/`standard`/`deep` tiers and any others. The adapter is not the limit: it runs every id `agy` lists. The catalog is what limits which models captain can pick when filing.
+
+A model that is not an option can still be used in two ways:
+- edit an option's model or effort;
+- set it as `models.workers`, the default for tickets that name no option.
+
+Lifting this (for example, choosing the effort or model per ticket instead of per option) is a catalog change, not part of this ticket.
+
+**Proposed initial set** (six options):
 
 | Option | Runtime / model / effort | Description |
 |---|---|---|
@@ -128,6 +159,10 @@ Additive. After `weave daemon upgrade`, captain (or the weaver, on request) adds
 | `agy-argon` | `agy` / `gemini-4-argon` / `high` | Gemini 4 Argon via Antigravity |
 | `agy-hydrogen` | `agy` / `gemini-4-hydrogen` / `high` | Gemini 4 Hydrogen via Antigravity |
 | `agy-orchestrator` | `agy` / `gemini-pro-orchestrator-neon` | Orchestrator (Neon) via Antigravity |
+| `agy-flash` | `agy` / `gemini-3.8-flash` / `medium` | Gemini 3.8 Flash via Antigravity: quick, cheap work |
+| `agy-opus` | `agy` / `claude-opus-5-5` / `high` | Claude Opus 5.5 billed to the Antigravity subscription, not the Claude login |
+
+`agy-opus` is the one that matters while the native Claude login is down: it runs Claude on a separate credential.
 
 The end-to-end acceptance run (a real ticket on an agy model) happens after the upgrade: a worker cannot run the live CLI from its own ticket.
 

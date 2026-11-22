@@ -1,6 +1,6 @@
 ## Purpose
 
-Run Weave AI agents on Google's Antigravity CLI (`agy`) in print mode, with its Gemini 4 models selectable per ticket. A worker on `agy` sees the weave MCP server and none of the machine owner's own MCP servers, plugins, hooks or global rules. Its sessions resume across turns, its final report validates against the run's schema, and an expired or missing `agy` login stops the runtime through the same login gate as any other runtime.
+Run Weave AI agents on Google's Antigravity CLI (`agy`) in print mode, with every model its Antigravity subscription offers (Gemini 4, Claude, GPT-OSS) selectable per ticket. A worker on `agy` sees the weave MCP server and none of the machine owner's own MCP servers, plugins, hooks or global rules. Its sessions resume across turns, its final report validates against the run's schema, and an expired or missing `agy` login stops the runtime through the same login gate as any other runtime. Its runs are never mistaken for the native `claude` runtime's, even on a Claude model.
 
 ## ADDED Requirements
 
@@ -29,20 +29,59 @@ Before each turn the adapter SHALL write `<dir>/config/mcp_config.json` with an 
 - **WHEN** `agy --gemini_dir <scratch> mcp list` exits non-zero or lists a server that was not seeded
 - **THEN** `detect()` reports `agy` unavailable with a reason naming the isolation check, and the dispatcher starts no `agy` turn
 
-### Requirement: A model is a family plus an effort, sent as one variant id
-The adapter SHALL list `agy` models as families with the names captain uses: Gemini 4 Neon, Gemini 4 Argon, Gemini 4 Hydrogen, Orchestrator (Neon), Orchestrator (Argon) and Gemini 3.8 Flash. Each family SHALL carry the efforts `agy models` offers for it. For a family with efforts, the adapter SHALL compose the exact variant id (`<family>-<effort>`) and pass it as `--model`. The effort SHALL be the requested one when the family offers it. Otherwise it SHALL be the highest offered effort not above the requested one, and `medium` when none was requested. The adapter SHALL never pass `--effort`. A model id that is already a full variant id SHALL be passed through unchanged, and any separately requested effort SHALL be ignored. Orchestrator ids SHALL be passed unchanged. Claude and GPT-OSS ids offered through `agy` SHALL NOT be listed.
+### Requirement: Every model agy lists is selectable, sent as one variant id
+The adapter SHALL list every model `agy models` offers, as families that each carry the efforts offered for them. For 1.5.14 that is 23 ids in nine families:
 
-#### Scenario: Family and effort
+| Family | Efforts |
+|---|---|
+| Gemini 4 Neon | low–xhigh |
+| Gemini 4 Argon | low–high |
+| Gemini 4 Hydrogen | low–xhigh |
+| Gemini 3.8 Flash | low–high |
+| Orchestrator (Neon) | none |
+| Orchestrator (Argon) | none |
+| Claude Opus 5.5 (Antigravity) | low–high |
+| Claude Sonnet 5.5 (Antigravity) | low–high |
+| GPT-OSS 120B | medium |
+
+For a family with efforts, the adapter SHALL compose the exact variant id (`<family>-<effort>`) and pass it as `--model`. The effort SHALL be chosen as follows:
+- the requested effort, when the family offers it;
+- otherwise the highest offered effort not above the requested one;
+- otherwise the lowest offered effort;
+- when no effort was requested, `medium` if offered, otherwise the lowest offered.
+
+The adapter SHALL never pass `--effort`. A model id that is already a full variant id, an Orchestrator id, or an id the adapter does not know SHALL be passed through unchanged, and any separately requested effort SHALL be ignored.
+
+#### Scenario: Gemini family and effort
 - **WHEN** a ticket's worker option is runtime `agy`, model `gemini-4-neon`, effort `high`
 - **THEN** the turn passes `--model gemini-4-neon-high` and no `--effort`
 
+#### Scenario: Claude through agy
+- **WHEN** the worker option is runtime `agy`, model `claude-opus-5-5`, effort `high`
+- **THEN** the turn passes `--model claude-opus-5-5-high` and no `--effort`
+
 #### Scenario: Effort the family does not offer
-- **WHEN** the model is `gemini-4-argon` and the effort is `xhigh`
-- **THEN** the turn passes `--model gemini-4-argon-high`
+- **WHEN** the model is `gemini-4-argon` and the effort is `xhigh`, or the model is `gpt-oss-120b` and the effort is `low`
+- **THEN** the turn passes `--model gemini-4-argon-high`, respectively `--model gpt-oss-120b-medium`
 
 #### Scenario: A full variant id with a conflicting effort
 - **WHEN** the model is `gemini-4-neon-high` and the effort is `low`
 - **THEN** the turn passes `--model gemini-4-neon-high` and no `--effort`
+
+#### Scenario: A model newer than the adapter's list
+- **WHEN** the model is an id the adapter does not list
+- **THEN** it is passed to `--model` unchanged, and an id `agy` cannot resolve fails the turn with `agy`'s own error
+
+### Requirement: An agy run is never conflated with the native claude runtime
+Every `agy` turn result SHALL report provider `antigravity`, whatever model family it ran. Its usage SHALL be recorded under runtime `agy`. A run, its usage events and the per-model usage breakdown (grouped by model and provider) SHALL therefore never merge an `agy`-routed Claude model with the `claude` runtime's own. The `agy` adapter SHALL declare `estimateCostByModel: false`. For such a runtime the engine SHALL NOT estimate a cost from the model id; a run with usage but no reported cost SHALL be `unpriced`, not priced at the model vendor's API rates. Runtimes that do not declare the capability SHALL keep today's estimation.
+
+#### Scenario: Claude Opus through agy
+- **WHEN** an `agy` run on `claude-opus-5-5-high` reports usage and no cost
+- **THEN** its usage event has runtime `agy`, provider `antigravity` and cost status `unpriced`, and the per-model breakdown shows it on a row separate from any `claude`-runtime row
+
+#### Scenario: Native claude unchanged
+- **WHEN** a `claude` runtime run reports usage
+- **THEN** its provider, cost and cost status are exactly as before this change
 
 ### Requirement: Sessions resume by conversation id
 The adapter SHALL take the `conversation_id` reported by the turn's stream as the agent's session ref. On a later turn with a stored ref it SHALL pass `--conversation <id>` with the same `--gemini_dir`. A run whose stream reports no conversation id SHALL keep the previous ref.

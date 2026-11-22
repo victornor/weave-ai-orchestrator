@@ -1,6 +1,6 @@
 ## 1. Capture real agy output (gate for the parser)
 
-- [ ] 1.1 Add `scripts/capture-agy-fixtures.sh` and its echo MCP server (design §5): fresh absolute `--gemini_dir` under `/tmp`, turn 1 with `--json-schema` and one MCP tool call, turn 2 with `--conversation`, the two `-p /model` effort probes, OAuth URL/token redaction, output to a directory the owner attaches back to the ticket; verify it end to end against a fake `agy` on PATH (never the real one)
+- [x] 1.1 Add `scripts/capture-agy-fixtures.sh` and its echo MCP server (design §5): fresh absolute `--gemini_dir` under `/tmp`, turn 1 with `--json-schema` and one MCP tool call, turn 2 with `--conversation`, the two `-p /model` effort probes, OAuth URL/token redaction, output to a directory the owner attaches back to the ticket; verify it end to end against a fake `agy` on PATH (never the real one)
 - [ ] 1.2 Ask the weaver (`weave_ask`) for the owner to run the script once and attach the output; record the captured `agy --version` and the `--effort` answer in the ticket
 
 ## 2. Package and invocation

@@ -72,6 +72,13 @@ export const adapter: RuntimeAdapter = {
   },
   async listModels(): Promise<RuntimeModel[]> { return MODELS.map((m) => ({ ...m, efforts: [...(m.efforts ?? [])] })); },
   configSchema(): JsonSchema { return structuredClone(CONFIG_SCHEMA); },
+  /**
+   * Deliberately none (design §6). agy's own timer tool is `schedule` (captured `init` tool list), and
+   * a headless run waits for its timers before exiting. agy offers no `--disallowedTools`, and its
+   * `permissions.deny` accepts any string unvalidated, so a `schedule` denial could not be shown to
+   * hold without a live run; the worker skill directs workers to `weave_schedule_wakeup` instead.
+   */
+  workerDeniedTools: [],
   skillsDir(): string { return '.agents/skills'; },
   instructionFiles(): string[] { return ['AGENTS.md']; },
   resumeCommand,
@@ -102,7 +109,7 @@ export const adapter: RuntimeAdapter = {
     try { rmSync(built.files[0]!.path, { force: true }); } catch { /* rewritten below */ }
     writeFiles(built.files);
 
-    const parser = createAgyParser();
+    const parser = createAgyParser({ resumed: built.resumed });
     let seq = 0;
     let authPrompted = false;
     let authStderr = false;
@@ -150,8 +157,14 @@ export const adapter: RuntimeAdapter = {
       session: conversationId ? { conversationId } : null,
       finalText: st.finalText,
       ...(structured !== undefined ? { structured } : {}),
-      ...(st.usage ? { usage: { inputTokens: st.usage.inputTokens, outputTokens: st.usage.outputTokens, cachedInputTokens: st.usage.cachedInputTokens, basis: 'per_turn' as const } } : {}),
-      ...(built.model ? { model: built.model } : {}),
+      ...(st.usage ? {
+        usage: {
+          inputTokens: st.usage.inputTokens, outputTokens: st.usage.outputTokens, cachedInputTokens: st.usage.cachedInputTokens,
+          contextTokens: st.usage.contextTokens, firstRequest: st.usage.firstRequest, basis: 'per_turn' as const,
+        },
+      } : {}),
+      // The model agy reports it ran (its `init` event), else the id the adapter sent.
+      ...((st.model ?? built.model) ? { model: (st.model ?? built.model)! } : {}),
       provider: AGY_PROVIDER,
       ...(error ? { error } : {}),
     };

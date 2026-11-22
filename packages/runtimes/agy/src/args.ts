@@ -15,8 +15,12 @@ import { asAgySession } from './session.js';
 
 /** The per-agent config dir inside the agent home. Always absolute: agy resolves a relative one itself. */
 export const AGY_DIR_NAME = '.agy';
-/** Above this the prompt goes on stdin rather than argv (MAX_ARG_STRLEN headroom). */
-export const MAX_ARGV_PROMPT = 96_000;
+/**
+ * Above this many bytes the prompt goes in a file instead of argv: Linux caps one argument at
+ * MAX_ARG_STRLEN (131072 bytes). agy 1.5.14 cannot take it on stdin instead — a valueless trailing
+ * `-p` is rejected (`flag needs an argument: -p`, exit 2; owner capture, fixtures/valueless-p.stderr.txt).
+ */
+export const MAX_ARGV_PROMPT = 120_000;
 
 export function agyDir(home: string): string {
   return join(isAbsolute(home) ? home : resolve(home), AGY_DIR_NAME);
@@ -34,6 +38,15 @@ export function mcpConfigJson(servers: Record<string, McpServerConfig>): string 
       : { command: s.command, args: s.args ?? [], ...(s.env ? { env: s.env } : {}) };
   }
   return `${JSON.stringify({ mcpServers }, null, 2)}\n`;
+}
+
+/** Where an over-long prompt is written for one run. */
+export function promptFilePath(dir: string, runId: string): string {
+  return join(dir, 'prompts', `${runId.replace(/[^\w.-]/g, '_')}.md`);
+}
+
+export function longPromptPointer(path: string): string {
+  return `This turn's prompt is too long for the command line, so it is in the file ${path}. Read that whole file first, then follow it exactly as if it were this message.`;
 }
 
 export interface AgyBuiltCommand extends BuiltCommand {
@@ -62,7 +75,10 @@ export function buildArgs(input: TurnInput): AgyBuiltCommand {
   const effort = str(input.effort) ?? str(input.options?.['effort']);
   const model = requested ? composeModelId(requested, effort) : null;
   if (model) tail.push('--model', model);
-  // Never `--effort`: the effort is already in the model id (design §4).
+  // Never `--effort`. agy 1.5.14 refuses a variant id combined with `--effort` outright, before the
+  // model is reached — `error: invalid model selection (--model "gemini-4-neon-high" --effort "low"):
+  // --model gemini-4-neon-high conflicts with --effort=low`, exit 1 (owner capture,
+  // fixtures/model-effort-conflict.stderr.txt). The effort is already in the id (design §4).
 
   switch (input.permission.mode) {
     case 'bypass': tail.push('--dangerously-skip-permissions'); break;
@@ -80,18 +96,17 @@ export function buildArgs(input: TurnInput): AgyBuiltCommand {
     { path: mcpConfigPath(dir), content: mcpConfigJson(input.mcpServers ?? {}) },
   ];
 
-  // A prompt flag takes the next word as its value, so `-p <prompt>` comes first after the dir. A
-  // prompt too long for argv goes on stdin with a trailing valueless `-p` (unverified on 1.5.14:
-  // the owner capture's `stdin-prompt` probe settles it).
-  let stdin: string | null = null;
-  if (input.prompt.length > MAX_ARGV_PROMPT) {
-    stdin = input.prompt;
-    args.push(...tail, '-p');
-  } else {
-    args.push('-p', input.prompt, ...tail);
+  // `-p <prompt>` comes first after the dir. A prompt too long for one argv entry is written to a
+  // file in the agent's own dir and `-p` tells the agent to read it before anything else.
+  let promptArg = input.prompt;
+  if (Buffer.byteLength(input.prompt, 'utf8') > MAX_ARGV_PROMPT) {
+    const path = promptFilePath(dir, input.runId);
+    files.push({ path, content: input.prompt });
+    promptArg = longPromptPointer(path);
   }
+  args.push('-p', promptArg, ...tail);
 
-  return { cmd: 'agy', args, stdin, env: { ...input.env }, files, conversationId: prev?.conversationId ?? null, resumed: Boolean(prev), model, dir };
+  return { cmd: 'agy', args, stdin: null, env: { ...input.env }, files, conversationId: prev?.conversationId ?? null, resumed: Boolean(prev), model, dir };
 }
 
 /** The bare interactive resume for a human's terminal: same dir and conversation, no print flags. */

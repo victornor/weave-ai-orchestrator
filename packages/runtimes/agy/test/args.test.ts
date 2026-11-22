@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { TurnInput } from '@weave-ai/runtime-sdk';
-import { buildArgs, MAX_ARGV_PROMPT, mcpConfigJson, resumeCommand } from '../src/index.js';
+import { readFileSync } from 'node:fs';
+import { buildArgs, FAMILIES, MAX_ARGV_PROMPT, mcpConfigJson, resumeCommand, variantIds } from '../src/index.js';
 
 const base = (over: Partial<TurnInput> = {}): TurnInput => ({
   runId: 'r1', turnEpoch: 1, cwd: '/w/01ABC', worktree: null,
@@ -58,13 +59,33 @@ describe('agy buildArgs (VS-995)', () => {
     expect(b.args.slice(i, i + flags.length)).toEqual([...flags]);
   });
 
-  it('adds an out-of-home worktree and puts an over-long prompt on stdin behind a trailing -p', () => {
-    const long = 'x'.repeat(MAX_ARGV_PROMPT + 1);
+  it('adds an out-of-home worktree and puts an over-long prompt in a file the -p value points at', () => {
+    // agy 1.5.14 rejects a valueless `-p` with the prompt on stdin (captured), so a file it is.
+    expect(readFileSync(new URL('../fixtures/valueless-p.stderr.txt', import.meta.url), 'utf8')).toContain('flag needs an argument: -p');
+    const long = 'é'.repeat(MAX_ARGV_PROMPT / 2 + 1); // over the limit in bytes, under it in characters
     const b = buildArgs(base({ prompt: long, worktree: { path: '/repo/wt', branch: 'b' } }));
     expect(b.args[b.args.indexOf('--add-dir') + 1]).toBe('/repo/wt');
-    expect(b.stdin).toBe(long);
-    expect(b.args.at(-1)).toBe('-p');
+    expect(b.stdin).toBeNull();
+    const file = b.files.find((f) => f.path === '/w/01ABC/.agy/prompts/r1.md');
+    expect(file?.content).toBe(long);
+    expect(b.args[b.args.indexOf('-p') + 1]).toContain('/w/01ABC/.agy/prompts/r1.md');
     expect(b.args.join(' ')).not.toContain(long);
+  });
+
+  it('never sends --model with --effort, which agy refuses outright', () => {
+    // The captured refusal: a variant id plus a conflicting --effort fails before the model is reached.
+    expect(readFileSync(new URL('../fixtures/model-effort-conflict.stderr.txt', import.meta.url), 'utf8'))
+      .toContain('--model gemini-4-neon-high conflicts with --effort=low');
+    const models = [...FAMILIES.map((f) => f.id), ...variantIds(), 'some-future-model'];
+    for (const model of models) {
+      for (const effort of [null, 'low', 'medium', 'high', 'xhigh', 'max']) {
+        for (const viaOptions of [false, true]) {
+          const b = buildArgs(base(viaOptions ? { options: { model, effort } } : { model, effort }));
+          expect(b.args).not.toContain('--effort');
+          expect(b.args.filter((a) => a === '--model')).toHaveLength(1);
+        }
+      }
+    }
   });
 
   it('builds the interactive resume with the same dir and conversation', () => {

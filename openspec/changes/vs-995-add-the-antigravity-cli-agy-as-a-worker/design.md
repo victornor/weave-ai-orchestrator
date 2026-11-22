@@ -15,7 +15,7 @@
 | The owner's default config already holds a personal MCP server | `jq 'keys'` on `~/.gemini/config/mcp_config.json` → `blender` (names only, nothing else read) | verified |
 | Login is stored in the OS keyring when a session bus exists; otherwise in a file | sandbox log: `Using file-based token storage because no D-Bus session bus detected`; changelog: "bypasses the keyring when no D-Bus session bus is present". The daemon's environment has `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus` and gnome-keyring is running | verified (the live keyring item itself was not read) |
 | Headless with no login blocks 60 s | sandbox: stderr `Authentication required. Please visit the URL to log in:` + URL, `Waiting for authentication (timeout 60s)...`; after 60 s `Error: authentication timed out.` / `error: authentication failed or timed out`, exit 1, and the stdout result event `{"event":"result","result":{"conversation_id":"","status":"ERROR","response":"","error":"authentication failed or timed out",…,"finished_reason":"error"}}` | verified (captured bytes) |
-| `--model`/`--effort` interplay | changelog: `--effort` does "variant selection"; base names without `--effort` pick a default level. What `gemini-4-neon-high --effort low` does is **not established** — it needs a logged-in run | unverified, designed around |
+| `--model`/`--effort` interplay | owner capture: `--model gemini-4-neon-high --effort low` → `error: invalid model selection (--model "gemini-4-neon-high" --effort "low"): --model gemini-4-neon-high conflicts with --effort=low`, exit 1. `--model gemini-4-neon --effort high` → `gemini-4-neon-high\tGemini 4 Neon (High)` | **verified: a conflicting combination refuses the turn** |
 | `--json-schema` root must be `"type":"object"`; for `stream-json` it applies to the final `result`; the result carries `structured_output` | `--help`; changelog; struct tag `json:"structured_output,omitempty"` | verified statically |
 | Resume: `--conversation <id>`; the result carries `conversation_id` | `--help`; captured result event | verified (field present, value empty without login) |
 | Workspace instruction files are `AGENTS.md`/`GEMINI.md`; workspace skills live in `.agents/skills/` | changelog entries for rules and `.agents/skills/` | verified statically |
@@ -60,7 +60,7 @@ An isolated daemon (VS-143) promises that a runtime never resolves to the owner'
 
 ### 4. Effort is folded into the model id; `--effort` is never sent
 
-The catalog carries `runtime`, `model` and `effort` separately. `agy` encodes effort in the id and also takes `--effort`, and which one wins when they disagree is unestablished. The adapter therefore never sends `--effort`. It composes the variant id itself:
+The catalog carries `runtime`, `model` and `effort` separately. `agy` encodes effort in the id and also takes `--effort`. The capture settled what happens when both are given: **neither wins.** A variant id combined with a conflicting `--effort` is refused before the model is reached, exit 1. Never sending `--effort` is therefore what keeps every turn alive, not a stylistic choice. A unit test asserts `buildArgs` never emits it for any model and effort. The adapter composes the variant id itself:
 
 | `model` | `effort` | `--model` sent | Rule |
 |---|---|---|---|
@@ -102,9 +102,11 @@ The success-path `stream-json` events (init, assistant text, tool call and resul
 
 The parser and its `fixtures/*.jsonl` are written from those bytes. Until the capture exists, the parser task stays open: the worker asks the weaver through `weave_ask` and does not guess.
 
-### 6. Instructions and skills
+### 6. Instructions, skills and denied tools
 
-`installInstructions` writes `AGENTS.md` (agy reads workspace `AGENTS.md` rules) and installs skills under `.agents/skills/`. The weave worker-denied scheduling tools have no `agy` equivalent identified, so `workerDeniedTools` stays empty until the capture shows the tool list from the `init` event.
+`installInstructions` writes `AGENTS.md` (agy reads workspace `AGENTS.md` rules) and installs skills under `.agents/skills/`.
+
+**Denied tools: none, deliberately, for v1.** The captured `init` tool list holds one scheduling tool, `schedule` (timers and cron schedules). It also has `wait`/`wait_5_seconds`, which wait inside the turn and are harmless, and browser automation (`browser_*`), which is useful for UI work and is not denied. `schedule` is the analogue of Claude's `ScheduleWakeup`/`Cron*`, which weave denies on worker turns. With agy the hazard is different: a headless run *waits* for scheduled timers before exiting, so a stray timer holds the turn until the engine's turn timeout instead of dying silently. agy has no `--disallowedTools`. The only deny mechanism is `permissions.deny` rules, with documented forms only for `command(...)`, `mcp(server/tool)` and `unsandboxed(...)`. `--settings` accepts *any* rule string without validating it (`bogus(((` parses, checked in the sandbox), so a `schedule` rule could not be shown to take effect without a live run. Declaring a denial the adapter cannot verify would be a false claim. `workerDeniedTools` therefore stays empty, the worker skill already directs workers to `weave_schedule_wakeup`, and enforcing a deny is a follow-up that needs one live check.
 
 ### 7. Permissions
 
@@ -166,7 +168,14 @@ Lifting this (for example, choosing the effort or model per ticket instead of pe
 
 The end-to-end acceptance run (a real ticket on an agy model) happens after the upgrade: a worker cannot run the live CLI from its own ticket.
 
+## Capture findings (owner run, 2026-11-22, agy 1.5.14)
+
+- **Effort:** a conflicting `--model` and `--effort` refuses the turn (see §4).
+- **Long prompts:** a trailing valueless `-p` with the prompt on stdin → `flag needs an argument: -p`, exit 2. Long prompts therefore go to `<agent>/.agy/prompts/<run>.md`, and `-p` points at that file.
+- **Usage:** `result.usage`, `duration_seconds` and `num_turns` are **cumulative over the conversation**; turn 2 reported turn 1's 13 857 fresh input tokens plus its own 2 468. Per-turn usage is therefore summed from the `step_update` `agent_response` steps. A step's `input_tokens` excludes its `cache_read_tokens`.
+- **MCP tools:** called through `call_mcp_tool` (ServerName, ToolName, Arguments), after the agent reads the cached tool schema under `<gemini dir>/antigravity-cli/mcp/<server>/`. The parser shows them as `mcp__<server>__<tool>`.
+- **Login and isolation:** the keyring login worked under the relocated `--gemini_dir`; isolation held (`mcp list` showed only the capture's server); `--conversation` resumed the turn-1 UUID.
+
 ## Open Questions
 
-- What `--effort` does against a conflicting variant id. The design does not depend on the answer; the capture records it.
-- Whether `agy` exposes a tool equivalent to a turn-scoped scheduler that workers must be denied. To be read from the capture's `init` tool list.
+- Whether a `permissions.deny` rule can stop agy's `schedule` tool (§6). It needs one live check.

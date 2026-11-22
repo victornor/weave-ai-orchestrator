@@ -70,12 +70,11 @@ describe('agy adapter — turns, resume and accounting (VS-995)', () => {
     }
   });
 
-  it('reports usage under provider antigravity and the exact model id, never a cost', async () => {
+  it('reports provider antigravity and the exact model id, never a cost', async () => {
     const fake = writeFakeAgy('ok'); dirs.push(fake);
     const { result } = await turn(input(fake, { model: 'claude-opus-5-5', effort: 'high' }));
     expect(result.provider).toBe('antigravity');
     expect(result.model).toBe('claude-opus-5-5-high');
-    expect(result.usage).toEqual({ inputTokens: 120, outputTokens: 30, cachedInputTokens: 40, basis: 'per_turn' });
     expect(result.cost).toBeUndefined();
     expect(adapter.capabilities.estimateCostByModel).toBe(false);
   });
@@ -87,6 +86,27 @@ describe('agy adapter — turns, resume and accounting (VS-995)', () => {
     expect(result.error).toMatchObject({ code: 'agy_isolation_failed', family: 'tooling' });
     const calls = readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]);
     expect(calls.some((a) => a.includes('-p'))).toBe(false);
+  });
+});
+
+describe('agy adapter — two captured turns end to end (VS-995)', () => {
+  it('resumes the captured conversation and reports per-turn usage and the report', async () => {
+    const fake = writeFakeAgy('replay'); dirs.push(fake);
+    const log = join(tmp('ac-agy-log-'), 'argv.jsonl');
+    const first = input(fake, { outputSchema: { type: 'object' } }, { FAKE_AGY_LOG: log });
+    const t1 = await turn(first);
+    expect(t1.result.error).toBeUndefined();
+    expect(t1.result.session).toEqual({ conversationId: 'bf1094f5-0123-4994-926b-c0bba7374957' });
+    expect(t1.result.structured).toEqual({ word: 'weave-capture-7' });
+    expect(t1.result.model).toBe('gemini-4-neon-low');
+    expect(t1.result.usage).toMatchObject({ inputTokens: 28344, cachedInputTokens: 14487, outputTokens: 379, contextTokens: 9751, basis: 'per_turn' });
+    expect(t1.events.map((e) => e.type)).toContain('tool.call');
+
+    const t2 = await turn({ ...first, runId: 'run-2', session: { policy: 'resume', ref: t1.result.session, isFirstTurn: false } });
+    expect(t2.result.session).toEqual(t1.result.session);
+    expect(t2.result.usage).toMatchObject({ inputTokens: 10170, cachedInputTokens: 7702, outputTokens: 74 });
+    const argv = readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l) as string[]).filter((a) => a.includes('-p'));
+    expect(argv[1]![argv[1]!.indexOf('--conversation') + 1]).toBe('bf1094f5-0123-4994-926b-c0bba7374957');
   });
 });
 

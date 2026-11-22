@@ -14,9 +14,10 @@ const fixture = (name: string): string => readFileSync(new URL(`../fixtures/${na
  *   reject-dir  rejects --gemini_dir like an unknown flag
  *   auth        prints the captured no-login prompt on stderr, then waits 60 s like the real one
  *   auth-result prints the captured `authentication failed or timed out` result and exits 1
+ *   replay      prints the owner-captured turn 1 stream, or turn 2 when given `--conversation`
  * Every invocation's argv is appended to $FAKE_AGY_LOG as one JSON line.
  */
-export function writeFakeAgy(mode: 'ok' | 'ignore-dir' | 'reject-dir' | 'auth' | 'auth-result', opts: { conversationId?: string } = {}): string {
+export function writeFakeAgy(mode: 'ok' | 'ignore-dir' | 'reject-dir' | 'auth' | 'auth-result' | 'replay', opts: { conversationId?: string } = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'ac-fake-agy-'));
   const path = join(dir, 'agy');
   const script = `#!/usr/bin/env node
@@ -24,6 +25,8 @@ const fs = require('node:fs');
 const MODE = ${JSON.stringify(mode)};
 const AUTH_STDERR = ${JSON.stringify(fixture('no-login.stderr.txt'))};
 const AUTH_RESULT = ${JSON.stringify(fixture('no-login-result.jsonl'))};
+const TURN1 = ${JSON.stringify(fixture('turn1-tool-schema.jsonl'))};
+const TURN2 = ${JSON.stringify(fixture('turn2-resumed.jsonl'))};
 let argv = process.argv.slice(2);
 if (process.env.FAKE_AGY_LOG) fs.appendFileSync(process.env.FAKE_AGY_LOG, JSON.stringify(argv) + '\\n');
 if (argv[0] === '--version') { process.stdout.write('1.5.14\\n'); process.exit(0); }
@@ -44,11 +47,11 @@ if (argv[0] === 'mcp' && argv[1] === 'list') {
 }
 if (MODE === 'auth') { process.stderr.write(AUTH_STDERR.split('Error:')[0]); setTimeout(() => process.exit(1), 60000); return; }
 if (MODE === 'auth-result') { process.stderr.write(AUTH_STDERR); process.stdout.write(AUTH_RESULT, () => process.exit(1)); return; }
+if (MODE === 'replay') { process.stdout.write(argv.includes('--conversation') ? TURN2 : TURN1, () => process.exit(0)); return; }
 const i = argv.indexOf('--conversation');
 const conv = i >= 0 ? argv[i + 1] : ${JSON.stringify(opts.conversationId ?? 'conv-1')};
-const result = { conversation_id: conv, status: 'SUCCESS', response: 'done', duration_seconds: 1.5, num_turns: 1,
-  usage: { input_tokens: 120, output_tokens: 30, thinking_tokens: 5, cache_read_tokens: 40, total_tokens: 195 },
-  structured_output: { mcpServers: names, gemini_dir: gd } };
+// Only fields the captured result carries; usage lives on step events (see the replay mode).
+const result = { conversation_id: conv, status: 'SUCCESS', response: 'done', structured_output: { mcpServers: names, gemini_dir: gd } };
 process.stdout.write(JSON.stringify({ event: 'result', result }) + '\\n', () => process.exit(0));
 `;
   writeFileSync(path, script);

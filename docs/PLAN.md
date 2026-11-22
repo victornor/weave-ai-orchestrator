@@ -617,13 +617,14 @@ run in a sandbox with no credential:
 
 | Concern | agy |
 |---|---|
-| Headless turn | `agy --gemini_dir <home>/.agy -p <prompt> --output-format stream-json` (`--gemini_dir` always first; it is accepted but not listed in `--help`) |
+| Headless turn | `agy --gemini_dir <home>/.agy -p <prompt> --output-format stream-json` (`--gemini_dir` always first; it is accepted but not listed in `--help`). A prompt over 120 000 bytes goes in a file that `-p` points at: a valueless `-p` with stdin is rejected |
 | Resume | `--conversation <id>`, the `conversation_id` of the stream's `result` event |
 | Structured output | `--json-schema <schema>`; the report is the `result` event's `structured_output` |
 | MCP | `<home>/.agy/config/mcp_config.json`, rewritten every turn; `--settings` rejects `mcpServers` |
 | Permissions | `--dangerously-skip-permissions` / `--mode accept-edits` / `--mode plan` |
-| Model / effort | `--model <family>-<effort>`, composed by the adapter; `--effort` is never sent |
+| Model / effort | `--model <family>-<effort>`, composed by the adapter; `--effort` is never sent, because a variant id plus a conflicting `--effort` refuses the turn (exit 1) |
 | Isolation of config | `--gemini_dir`, checked with `mcp list` before any turn; the login stays in the OS keyring |
+| Usage | summed from `step_update` `agent_response` steps; `result.usage` is cumulative over the conversation |
 | Mid-turn input | not used (`streamingInput: false`) |
 
 ### Implementation notes

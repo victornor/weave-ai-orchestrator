@@ -34,6 +34,19 @@ export interface RuntimeCapabilities {
    * that path. Omitted means `path` — the safe form that never silently drops an image (VS-659).
    */
   imageInput?: 'native' | 'path' | 'model';
+  /**
+   * VS-995: whether the engine may estimate a run's cost from its model id (`estimateCostCents`)
+   * when the runtime reports none. Omitted means `true`. A gateway runtime that bills every model to
+   * its own subscription (`agy`, whose Claude ids would otherwise be priced at Anthropic API rates)
+   * sets `false`, and its runs are recorded `unpriced`.
+   */
+  estimateCostByModel?: boolean;
+  /**
+   * VS-995: the CLI keeps its login in the host user's OS keyring (reached over the D-Bus session
+   * bus), not in a file under its config home. An isolated daemon (VS-143) then starts it with no
+   * session bus reachable, so it cannot use the owner's login. Omitted means `false`.
+   */
+  hostKeyring?: boolean;
 }
 export interface RuntimeDetection { status: 'available' | 'missing_binary' | 'broken' | 'unsupported'; version?: string; path?: string; notes?: string }
 /** `contextWindowTokens` is the model's own window; a variant with a larger window is its own entry.

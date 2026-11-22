@@ -213,6 +213,21 @@ function roleSecretsEnv(ctx: WorkspaceContext, deps: () => CoreServices, role: R
  * `RuntimeHost.providerKey`; the engine never passes it to the child. `undefined` when the model
  * names no daemon provider, its profile carries no `apiKeySecret`, or the store holds no value.
  */
+/**
+ * VS-995: an isolated daemon (VS-143) never lets a runtime reach the owner's credential. For a CLI
+ * whose login lives in the OS keyring (`hostKeyring`, e.g. agy) that credential is reached over the
+ * D-Bus session bus, so the turn gets no bus: `DBUS_SESSION_BUS_ADDRESS` empty (Go reads an empty
+ * value as unset) and `XDG_RUNTIME_DIR` an empty private dir, so the default `$XDG_RUNTIME_DIR/bus`
+ * cannot be found either. agy then falls back to file-based token storage and fails to authenticate
+ * instead of spending the owner's account. A daemon sharing host credentials is left alone.
+ */
+export function keyringIsolationEnv(opts: { isolated: boolean; hostKeyring: boolean; runDir: string }): Record<string, string> {
+  if (!opts.isolated || !opts.hostKeyring) return {};
+  const dir = join(opts.runDir, 'xdg-runtime');
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  return { DBUS_SESSION_BUS_ADDRESS: '', XDG_RUNTIME_DIR: dir };
+}
+
 function providerStoreKey(ctx: WorkspaceContext, model: string | null | undefined): string | undefined {
   const providerId = model?.split('/')[0];
   if (!providerId || providerId === model) return undefined;
@@ -632,6 +647,7 @@ export async function executeRun(ctx: WorkspaceContext, deps: () => CoreServices
 
     const runtime = ctx.registries.runtimes.get(setting.runtime);
     if (!runtime) throw Object.assign(new Error(`runtime ${setting.runtime} is not registered`), { ocFamily: 'tooling' as RunErrorFamily, ocCode: 'runtime_unreachable' });
+    Object.assign(env, keyringIsolationEnv({ isolated: ctx.isolated, hostKeyring: runtime.capabilities.hostKeyring === true, runDir }));
     // VS-398: a planning agent must never run unless its runtime can actually enforce a tool
     // allowlist — fail closed rather than let it run with every built-in write tool "restricted"
     // would otherwise have denied.
@@ -1244,7 +1260,8 @@ function finalize(ctx: WorkspaceContext, deps: () => CoreServices, sessions: Ses
   let costCents: number | null = null;
   let costStatus: 'reported' | 'estimated' | 'unpriced' = 'unpriced';
   if (r?.cost && typeof r.cost.usd === 'number') { costCents = Math.round(r.cost.usd * 100); costStatus = r.cost.status === 'reported' ? 'reported' : 'estimated'; }
-  else if (usage) {
+  // VS-995: a runtime that bills every model to its own subscription (agy) is never priced by model id.
+  else if (usage && ctx.registries.runtimes.get(f.run.runtimeId)?.capabilities.estimateCostByModel !== false) {
     const est = estimateCostCents(model, { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cachedInputTokens: usage.cachedInputTokens }, ctx.config.pricingOverrides);
     if (est !== null) { costCents = est; costStatus = 'estimated'; }
   }

@@ -23,11 +23,11 @@ Before each turn the adapter SHALL write `<dir>/config/mcp_config.json` with an 
 - **THEN** after the adapter writes the file, its `mcpServers` keys are exactly `["weave-ai"]`
 
 ### Requirement: The runtime refuses to run if config isolation no longer works
-`detect()` SHALL check that `--gemini_dir` still isolates MCP configuration on the installed `agy`. It SHALL seed a scratch directory with one server, run `agy --gemini_dir <scratch> mcp list`, and require that exactly that server is listed. This check needs neither a login nor the network. If the check fails, the runtime SHALL be reported as unavailable with a reason that names the failed isolation check, and no turn SHALL be started on it.
+`detect()` SHALL check that `--gemini_dir` still isolates MCP configuration on the installed `agy`. It SHALL seed a scratch directory with one server, run `agy --gemini_dir <scratch> mcp list`, and require that exactly that server is listed. This check needs neither a login nor the network. If the check fails, `detect()` SHALL report the runtime as `unsupported` with a reason that names the failed isolation check. `runTurn` SHALL run the same check once per process for each binary (path and modification time) before its first turn. If the check fails, `runTurn` SHALL fail with a `tooling`-family error and start no turn.
 
 #### Scenario: A future agy drops the flag
 - **WHEN** `agy --gemini_dir <scratch> mcp list` exits non-zero or lists a server that was not seeded
-- **THEN** `detect()` reports `agy` unavailable with a reason naming the isolation check, and the dispatcher starts no `agy` turn
+- **THEN** `detect()` reports `agy` `unsupported` with a reason naming the isolation check, and every `agy` turn fails with a `tooling` error before any prompt is sent
 
 ### Requirement: Every model agy lists is selectable, sent as one variant id
 The adapter SHALL list every model `agy models` offers, as families that each carry the efforts offered for them. For 1.5.14 that is 23 ids in nine families:

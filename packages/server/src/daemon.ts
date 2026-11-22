@@ -54,7 +54,7 @@ const LISTEN_WAIT_TIMEOUT_MS = 60_000;
 const LISTEN_WAIT_INITIAL_DELAY_MS = 500;
 const LISTEN_WAIT_MAX_DELAY_MS = 5_000;
 
-const RUNTIME_PACKAGES = ['@weave-ai/runtime-claude', '@weave-ai/runtime-codex', '@weave-ai/runtime-opencode', '@weave-ai/runtime-gemini', '@weave-ai/runtime-cursor', '@weave-ai/runtime-weave'];
+const RUNTIME_PACKAGES = ['@weave-ai/runtime-claude', '@weave-ai/runtime-codex', '@weave-ai/runtime-opencode', '@weave-ai/runtime-gemini', '@weave-ai/runtime-cursor', '@weave-ai/runtime-agy', '@weave-ai/runtime-weave'];
 const CHANNEL_PACKAGES = ['@weave-ai/channel-web', '@weave-ai/channel-cli', '@weave-ai/channel-telegram'];
 const SURFACE_PACKAGES = ['@weave-ai/surface-headless', '@weave-ai/surface-tmux', '@weave-ai/surface-herdr', '@weave-ai/surface-hyprland'];
 

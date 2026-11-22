@@ -23,6 +23,7 @@
 #   turn2.*            the same conversation resumed with --conversation <id from turn 1>
 #   model-variant.*    -p /model with --model gemini-4-neon-high --effort low (which wins?)
 #   model-base.*       -p /model with --model gemini-4-neon --effort high (does a base name resolve?)
+#   stdin-prompt.*     the prompt on stdin with a trailing valueless -p (the adapter's long-prompt path)
 #   mcp-requests.jsonl every JSON-RPC request agy sent to the MCP server
 #   agy-log/           agy's own log files for these runs (model resolution is logged there)
 set -u
@@ -81,6 +82,12 @@ if [ -n "$conv" ]; then
 else
   echo "no conversation_id in turn1.stdout; turn 2 (resume) skipped" > "$out/turn2.skipped"
 fi
+
+# The long-prompt path: prompt on stdin, `-p` last with no value.
+echo "--- stdin-prompt" >&2
+(cd "$ws" && printf 'Answer with the single word ok.' | "$agy" --gemini_dir "$gd" --output-format stream-json --model "$model" --dangerously-skip-permissions -p \
+  >"$out/stdin-prompt.stdout" 2>"$out/stdin-prompt.stderr")
+echo "$?" > "$out/stdin-prompt.exit"
 
 run model-variant --gemini_dir "$gd" -p "/model" --model gemini-4-neon-high --effort low
 run model-base --gemini_dir "$gd" -p "/model" --model gemini-4-neon --effort high

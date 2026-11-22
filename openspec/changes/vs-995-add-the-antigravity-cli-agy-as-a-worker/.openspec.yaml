@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-11-22
+goal: Add the Antigravity CLI (agy) as a worker runtime, with its Gemini 4
+  models selectable per ticket

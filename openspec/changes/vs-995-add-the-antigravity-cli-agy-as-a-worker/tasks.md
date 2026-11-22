@@ -33,4 +33,4 @@
 ## 6. Docs and delivery
 
 - [x] 6.1 ADR `docs/adr/0025-agy-runtime-config-isolation.md` (the `--gemini_dir` reliance, options A–D, self-check), `docs/OPERATIONS.md` runtime/login table row, and the PLAN runtime list if it enumerates runtimes
-- [ ] 6.2 `pnpm lint && pnpm typecheck && pnpm test` green, with both suite blocks pasted verbatim in the PR; the PR states the agy version built against (1.5.14 plus whatever the capture reports), what is verified only in the sandbox, and the post-upgrade steps (the six proposed catalog options, end-to-end ticket) and what the 16-option catalog cap means for captain
+- [x] 6.2 `pnpm lint && pnpm typecheck && pnpm test` green, with both suite blocks pasted verbatim in the PR; the PR states the agy version built against (1.5.14 plus whatever the capture reports), what is verified only in the sandbox, and the post-upgrade steps (the six proposed catalog options, end-to-end ticket) and what the 16-option catalog cap means for captain

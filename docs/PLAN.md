@@ -81,7 +81,7 @@ Weave AI turns a directory into a **workspace**: a virtual business made of one 
 | **Role** | A hired template scoped to one project: charter (responsibilities, capabilities, rules), concurrency limit. A role names no runtime or model — those are the workspace's two settings (ADR 0011). Roles do not run. | Hired by the weaver, confirmed by the human. Zero or more per project. |
 | **Worker** | A disposable agent spawned from a role for exactly one ticket: its own home, brief, worktree, and session for the life of the ticket. Retired once the work has landed. | firstmate's crewmate. One worker per ticket; many workers per role. |
 | **Agent** | Anything that runs turns: the weaver or a worker. Has `id`, `kind` (`weaver` \| `worker`), `runtime`, `status`, home directory, session. | |
-| **Runtime** | An adapter that runs an agent turn on a specific CLI (`claude`, `codex`, `opencode`, `gemini`, `cursor`) and normalizes its events, session handle, and usage. | Plugin interface §8. |
+| **Runtime** | An adapter that runs an agent turn on a specific CLI (`claude`, `codex`, `opencode`, `gemini`, `cursor`, `agy`) and normalizes its events, session handle, and usage. | Plugin interface §8. |
 | **Session** | The runtime's conversation handle for an agent (e.g. a Claude Code session id). The weaver's is persistent; a worker's lasts the life of its ticket. | §7.4 |
 | **Ticket** | The unit of work. Belongs to a workspace and optionally a project. Has a kind, status, an assigned role and (once spawned) its worker, blockers, comments, documents, work products, and (for `change` kind) a bound OpenSpec change. May carry its own landing branch, set only at creation, overriding its project's (VS-119) — e.g. a hotfix that lands directly on `main` in a project whose tickets otherwise land on `edge`. | Identifier `<PREFIX>-<n>` e.g. `ACME-42`. |
 | **Wakeup** | A durable request to run one turn of an agent, with a source, reason and payload. Coalesced per agent. | §7.1 |
@@ -520,7 +520,7 @@ Modules: `core/wakeups/{queue,gates}.ts`, `core/runs/{engine,dispatcher,supervis
 
 ```ts
 export interface RuntimeAdapter {
-  readonly id: string;                       // "claude" | "codex" | "opencode" | "gemini" | "cursor" | plugin ids
+  readonly id: string;                       // "claude" | "codex" | "opencode" | "gemini" | "cursor" | "agy" | plugin ids
   readonly displayName: string;
   readonly capabilities: RuntimeCapabilities;
   detect(): Promise<RuntimeDetection>;       // { status: available|missing_binary|broken|unsupported, version?, path?, notes? }
@@ -610,6 +610,21 @@ Decisions:
 - `listModels()` is mandatory. Claude: static alias list (`fable`, `opus`, `sonnet`, `haiku`) plus full ids, marked `static`; OpenCode: `opencode models` output (`detected`); Codex: static list from the pinned version plus any `-c model=` the human adds; Gemini: static. Settings → Models and `weave models set` show only models from that setting's runtime, plus free text for one the adapter does not list (ADR 0011).
 - Each runtime gets a **per-workspace config home** (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`) under `.weave/runtimes/<runtime>/` so agent runs never mutate the human's personal CLI config, and so session stores are per workspace. Authentication is inherited by copying/linking credential files on `weave runtime login <id>` (documented per CLI; Claude: `claude setup-token` or OAuth in that config dir).
 - Permission posture default: `auto`-style with a deny list (`git push --force`, `rm -rf` outside worktree, network to non-allowlisted hosts where the CLI can express it). `bypass` is opt-in per agent and warned about in the UI.
+
+
+**agy 1.5.14** (Antigravity CLI, VS-995, ADR 0025). Every flag below was checked against the binary,
+run in a sandbox with no credential:
+
+| Concern | agy |
+|---|---|
+| Headless turn | `agy --gemini_dir <home>/.agy -p <prompt> --output-format stream-json` (`--gemini_dir` always first; it is accepted but not listed in `--help`) |
+| Resume | `--conversation <id>`, the `conversation_id` of the stream's `result` event |
+| Structured output | `--json-schema <schema>`; the report is the `result` event's `structured_output` |
+| MCP | `<home>/.agy/config/mcp_config.json`, rewritten every turn; `--settings` rejects `mcpServers` |
+| Permissions | `--dangerously-skip-permissions` / `--mode accept-edits` / `--mode plan` |
+| Model / effort | `--model <family>-<effort>`, composed by the adapter; `--effort` is never sent |
+| Isolation of config | `--gemini_dir`, checked with `mcp list` before any turn; the login stays in the OS keyring |
+| Mid-turn input | not used (`streamingInput: false`) |
 
 ### Implementation notes
 

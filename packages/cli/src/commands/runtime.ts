@@ -24,6 +24,9 @@ const FALLBACK: Record<string, { env: string; command: string[]; instructions: s
   codex: { env: 'CODEX_HOME', command: ['codex', 'login'], instructions: ['Codex writes its auth into CODEX_HOME; the browser flow opens automatically.'] },
   opencode: { env: 'XDG_CONFIG_HOME', command: ['opencode', 'auth', 'login'], instructions: ['OpenCode keeps provider credentials under XDG_CONFIG_HOME/opencode.'] },
   gemini: { env: 'GEMINI_CLI_HOME', command: ['gemini'], instructions: ['Gemini CLI prompts for auth on first run; pick "Login with Google" or set an API key.'] },
+  // VS-995: agy keeps its Google sign-in in the host user's OS keyring, not under a config home, so the
+  // variable below is informational only (agy reads no such variable); the sign-in is shared host-wide.
+  agy: { env: 'WEAVE_AGY_CONFIG_HOME', command: ['agy'], instructions: ['agy keeps its Google sign-in in the OS keyring of the daemon\'s user, shared by every workspace on this host; run `agy`, complete the browser sign-in, then exit.'] },
   cursor: { env: 'CURSOR_CONFIG_DIR', command: ['cursor-agent', 'login'], instructions: ['Cursor CLI stores auth in auth.json under CURSOR_CONFIG_DIR; `cursor-agent login` opens the browser flow.'] },
 };
 

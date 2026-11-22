@@ -330,3 +330,31 @@ describe('billing type attribution', () => {
     expect(s.billingMix).toEqual({ subscription: 0, metered: 0, unknown: 0 });
   });
 });
+
+describe('an agy-routed model is never conflated with the claude runtime (VS-995)', () => {
+  /** Only `capabilities` is read by recordUsage; the rest of the adapter is irrelevant here. */
+  const gateway = { id: 'agy', capabilities: { estimateCostByModel: false } } as never;
+
+  it('records agy usage unpriced, and keeps it off the claude rows of the per-model breakdown', () => {
+    h = makeHarness();
+    h.ctx.registries.runtimes.set('agy', gateway);
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    const when = nowIso();
+    // The same Claude family, once through the claude runtime and once through agy, neither reporting a cost.
+    add({ occurredAt: when, runtimeId: 'claude', model: 'claude-opus-5-5', provider: 'anthropic', costCents: null, inputTokens: 1_000_000, outputTokens: 0 });
+    add({ occurredAt: when, runtimeId: 'agy', model: 'claude-opus-5-5-high', provider: 'antigravity', costCents: null, inputTokens: 1_000_000, outputTokens: 0 });
+    vi.setSystemTime(new Date(NOW.getTime() + 1000));
+
+    const events = h.db.all<{ runtimeId: string; provider: string; costStatus: string; costCents: number | null }>('SELECT runtime_id AS runtimeId, provider, cost_status AS costStatus, cost_cents AS costCents FROM usage_events ORDER BY runtime_id');
+    expect(events).toEqual([
+      { runtimeId: 'agy', provider: 'antigravity', costStatus: 'unpriced', costCents: null },
+      { runtimeId: 'claude', provider: 'anthropic', costStatus: 'estimated', costCents: 500 },
+    ]);
+
+    const rows = usage().models({ scope: 'workspace', window: '24h' });
+    expect(rows).toHaveLength(2);
+    expect(rows.find((r) => r.provider === 'antigravity')).toMatchObject({ model: 'claude-opus-5-5-high', runs: 1 });
+    expect(rows.find((r) => r.provider === 'anthropic')).toMatchObject({ model: 'claude-opus-5-5', runs: 1, costCents: 500 });
+  });
+});

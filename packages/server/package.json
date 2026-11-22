@@ -33,6 +33,7 @@
     "@weave-ai/runtime-claude": "workspace:*",
     "@weave-ai/runtime-codex": "workspace:*",
     "@weave-ai/runtime-cursor": "workspace:*",
+    "@weave-ai/runtime-agy": "workspace:*",
     "@weave-ai/runtime-gemini": "workspace:*",
     "@weave-ai/runtime-opencode": "workspace:*",
     "@weave-ai/runtime-weave": "workspace:*",

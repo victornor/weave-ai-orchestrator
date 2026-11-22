@@ -30,6 +30,7 @@ Skills are installed **into each agent's home** — `conductor/` for the weaver,
 | `codex` | `.agents/skills/<name>/SKILL.md` | `$<name>` |
 | `opencode` | `.opencode/skills/<name>/SKILL.md` | loaded by description |
 | `gemini` | `.gemini/skills/<name>/SKILL.md` | loaded by description |
+| `agy` | `.agents/skills/<name>/SKILL.md` | loaded by description |
 
 `references/` is copied alongside `SKILL.md`, preserving relative paths, so the links inside a skill resolve in every runtime.
 

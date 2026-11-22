@@ -492,3 +492,50 @@ describe('a probe alone does not lift the gate (VS-769)', () => {
     expect((await recheckRuntimeLogin(h.ctx, h.deps, 'claude', { manual: true })).released).toBe(false);
   });
 });
+
+describe('an agy login failure gets the same outcome as a claude one (VS-995)', () => {
+  // The agy adapter's fixed auth message (packages/runtimes/agy/src/auth.ts); core cannot import it.
+  const AGY_DETAIL = 'agy is not logged in or its login expired; run `weave runtime login agy` (or `agy` on the daemon\'s host, as the daemon\'s user)';
+  let filed: Array<Record<string, unknown>>;
+  beforeEach(() => {
+    filed = [];
+    h.services.incidents = {
+      create: (i: Record<string, unknown>) => { const row = { id: `inc${filed.length + 1}`, ...i }; filed.push(row); return row; },
+      list: () => ({ items: filed, total: 0 }),
+      resolve: () => ({}),
+    } as never;
+  });
+
+  it('gates agy alone, with one card, one message and one incident naming the agy fix', () => {
+    const onAgy = h.addWorker(null, { runtimeId: 'agy' });
+    const onClaude = h.addWorker(null);
+    gateRuntimeForLogin(h.ctx, h.deps, { runtimeId: 'agy' }, AGY_DETAIL);
+    gateRuntimeForLogin(h.ctx, h.deps, { runtimeId: 'agy' }, AGY_DETAIL);
+
+    expect(h.services.accounts!.gatedRuntimes()).toEqual(['agy']);
+    expect(agentRow(onAgy).status).toBe('paused');
+    expect(agentRow(onAgy).pauseDetail?.code).toBe(LOGIN_PAUSE_CODE);
+    // An agy-routed Claude model shares nothing with the claude runtime's own login.
+    expect(agentRow(onClaude).status).toBe('active');
+
+    expect(created).toHaveLength(1);
+    expect(created[0]!['title']).toBe('The agy login expired — log in again to resume');
+    expect(created[0]!['correlationKey']).toBe(loginCorrelationKey('agy'));
+    const context = String(created[0]!['context']);
+    expect(context).toContain('weave runtime login agy');
+    expect(context).toContain('`agy`');
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toContain('weave runtime login agy');
+    expect(filed).toHaveLength(1);
+    expect(filed[0]!['title']).toBe('Runtime login expired: agy');
+  });
+
+  it('resumes the agy agents on its own once the login works again', () => {
+    const onAgy = h.addWorker(null, { runtimeId: 'agy' });
+    gateRuntimeForLogin(h.ctx, h.deps, { runtimeId: 'agy' }, AGY_DETAIL);
+    ungateRuntime(h.ctx, h.deps, 'agy');
+    expect(agentRow(onAgy).status).toBe('active');
+    expect(h.services.accounts!.gatedRuntimes()).toEqual([]);
+    expect(withdrawn).toHaveLength(1);
+  });
+});

@@ -513,6 +513,7 @@ is no second copy anywhere.
 | `gemini` | `~/.gemini/oauth_creds.json`, `~/.gemini/google_accounts.json` | symlinks |
 | `opencode` | `~/.local/share/opencode/auth.json` | `…/runtimes/opencode/opencode/auth.json` → symlink |
 | `cursor` | `~/.config/cursor/auth.json` | `…/runtimes/cursor/auth.json` → symlink |
+| `agy` | the Google sign-in in the OS keyring of the daemon's user (no file; VS-995, ADR 0025) | nothing — each agent's own `--gemini_dir` (`<home>/.agy`) holds its MCP config and conversations |
 
 Only the credential file is shared. The rest of each runtime's config home — settings, session
 history, project state — stays per workspace, which is why `CLAUDE_CONFIG_DIR` still points at the
@@ -571,7 +572,7 @@ park workers individually.
 **To recover, log the CLI in on the daemon's host:**
 
 ```bash
-weave runtime login claude   # or codex · opencode · gemini · cursor (the CLI's own login also works if the workspace shares the host's credentials: claude /login · codex login · opencode auth login)
+weave runtime login claude   # or codex · opencode · gemini · cursor · agy (the CLI's own login also works if the workspace shares the host's credentials: claude /login · codex login · opencode auth login)
 ```
 
 That is the whole procedure. Once the credential has changed and the supervisor's probe succeeds (or you press "I fixed it" in the banner), the gate clears, every
@@ -660,9 +661,13 @@ weave doctor                # includes each runtime with the fix for it
   | codex | `CODEX_HOME` | `codex login` |
   | opencode | `XDG_CONFIG_HOME` | `opencode auth login` |
   | gemini | `GEMINI_CLI_HOME` | `gemini` (prompts on first run) |
+  | agy | — (keyring, host-wide) | `agy` (sign in in the browser, then exit) |
 
   `weave runtime login <id> --print` shows the plan without running anything — use that when you need to
   run the login by hand, e.g. over SSH with a browser flow.
+  To check, from a checkout, that the installed `agy` still honours the config isolation the agy runtime relies on
+  (ADR 0025) — `mcp list` only, no login and no network:
+  `AGY_BIN="$(command -v agy)" pnpm vitest run packages/runtimes/agy/test/isolation.test.ts`.
 - Git/forge auth is separate: `gh auth status` and `ssh -T git@github.com` as the daemon's user.
   Workers deliver via `gh` when `deliveryMode: pr`; without it, set `deliveryMode: local-branch` in
   `defaults` or the project's `policies`.

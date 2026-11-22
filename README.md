@@ -141,7 +141,7 @@ Three rules worth internalising:
 | Node | **≥ 22** to run the daemon (the DB uses `node:sqlite`); **26** to develop, which is what CI, `mise.toml` and the Docker image use. |
 | pnpm | 11.25.0, the version `packageManager` pins (`mise` installs it; `corepack` works too) |
 | git | required |
-| A coding CLI | at least one of `claude`, `opencode`, `codex`, `gemini`, `cursor-agent`, **logged in on the daemon host** |
+| A coding CLI | at least one of `claude`, `opencode`, `codex`, `gemini`, `cursor-agent`, `agy`, **logged in on the daemon host** |
 | `gh` | required for `deliveryMode: pr` (the default). Use `deliveryMode: local-branch` without it. |
 | `openspec` | optional, recommended: `npm i -g @fission-ai/openspec`. Without it `change` tickets skip spec artifacts and the Spec Explorer is empty. |
 | `worktrunk` (`wt`) | optional, recommended: `cargo install worktrunk` / `brew install worktrunk` / `pacman -S worktrunk`. Without it the built-in `git worktree` fallback is used automatically. |

@@ -281,7 +281,11 @@ export function recordUsage(ctx: WorkspaceContext, row: RecordUsageInput): S.Usa
   let costCents: number | null = row.costCents ?? null;
   let costStatus: S.CostStatus;
   if (costCents !== null) costStatus = 'reported';
-  else {
+  else if (ctx.registries.runtimes.get(row.runtimeId)?.capabilities.estimateCostByModel === false) {
+    // VS-995: a gateway runtime (agy) bills every model to its own subscription; pricing its Claude
+    // ids at Anthropic API rates would misstate the run, so its usage stays unpriced.
+    costStatus = 'unpriced';
+  } else {
     costCents = estimateCostCents(row.model, { inputTokens, outputTokens, cachedInputTokens }, ctx.config.pricingOverrides);
     costStatus = costCents === null ? 'unpriced' : 'estimated';
   }

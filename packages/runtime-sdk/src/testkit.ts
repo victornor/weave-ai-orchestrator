@@ -13,8 +13,16 @@ export class FakeRuntime implements RuntimeAdapter {
   permissionModes = ['auto', 'restricted', 'bypass'];
   /** VS-659: the form an image attachment reaches this runtime. Defaults to the safe `path`; set to `native` to simulate a vision runtime. */
   imageInput: 'native' | 'path' | 'model' = 'path';
+  /** VS-995: set `false` to simulate a gateway runtime (agy) whose runs are never priced by model id. */
+  estimateCostByModel?: boolean;
+  /** VS-995: set `true` to simulate a CLI whose login lives in the OS keyring (agy). */
+  hostKeyring?: boolean;
   get capabilities() {
-    return { resumableSessions: this.resumableSessions, forkSessions: false, streamingInput: this.streamingInput, systemPromptInjection: 'system_prompt' as const, structuredOutput: true, mcp: true, usageReporting: 'per_turn' as const, costReporting: false, permissionModes: this.permissionModes, imageInput: this.imageInput };
+    return {
+      resumableSessions: this.resumableSessions, forkSessions: false, streamingInput: this.streamingInput, systemPromptInjection: 'system_prompt' as const, structuredOutput: true, mcp: true, usageReporting: 'per_turn' as const, costReporting: false, permissionModes: this.permissionModes, imageInput: this.imageInput,
+      ...(this.estimateCostByModel !== undefined ? { estimateCostByModel: this.estimateCostByModel } : {}),
+      ...(this.hostKeyring !== undefined ? { hostKeyring: this.hostKeyring } : {}),
+    };
   }
   inputs: TurnInput[] = [];
   queue: Array<Partial<TurnResult> | ((input: TurnInput) => Partial<TurnResult> | Promise<Partial<TurnResult>>)> = [];

@@ -418,7 +418,7 @@ describe('run engine', () => {
     // Every other field is valid; `knowledge.recorded: true` with no `where` fails the schema, so
     // the whole report fails to parse — the same "incomplete report" outcome a missing `state` gets.
     runtime.queue.push({ structured: { state: 'done', summary: 'finished the ticket', tickets: [], knowledge: { recorded: true } } });
-    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
     const run = await runOnce();
     expect(run.status).toBe('succeeded');
     expect(run.liveness).toBe('empty');
@@ -432,7 +432,7 @@ describe('run engine', () => {
 
   it('fails the run and schedules a backed-off retry for transient errors', async () => {
     runtime.queue.push({ error: { code: 'overloaded', family: 'transient_upstream', message: 'upstream busy' }, exitCode: 1 });
-    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
     const run = await runOnce();
     expect(run.status).toBe('failed');
     expect(run.errorFamily).toBe('transient_upstream');
@@ -445,7 +445,7 @@ describe('run engine', () => {
 
   it('puts the agent in error after a non-retryable failure', async () => {
     runtime.queue.push({ error: { code: 'refused', family: 'model_refusal', message: 'refused' }, exitCode: 1 });
-    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
     const run = await runOnce();
     expect(run.status).toBe('failed');
     expect(h.db.get<{ status: string }>('SELECT status FROM agents WHERE id = ?', [h.conductorId])!.status).toBe('error');
@@ -454,7 +454,7 @@ describe('run engine', () => {
 
   it('fails cleanly when the runtime is not registered', async () => {
     h.ctx.config.models = { ...h.ctx.config.models, weaver: { runtime: 'nope', model: null } };
-    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
     const run = await runOnce();
     expect(run.status).toBe('failed');
     expect(run.errorFamily).toBe('tooling');
@@ -469,7 +469,7 @@ describe('run engine', () => {
       }
     }
     h.ctx.registries.runtimes.set('fake', new LeakyRuntime());
-    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
     const run = await runOnce();
     const rows = h.db.all<{ payload: { text?: string } }>("SELECT payload_json FROM run_events WHERE run_id = ? AND type = 'assistant.text'", [run.id]);
     expect(rows).toHaveLength(1);
@@ -498,7 +498,7 @@ describe('run engine', () => {
       }
     }
     h.ctx.registries.runtimes.set('fake', new StreamingRuntime());
-    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
     const run = await runOnce();
     const shown = frames.flatMap((f) => f.parts.map((p) => p.text)).join('');
     expect(shown).toContain('[redacted]');
@@ -523,7 +523,7 @@ describe('run engine', () => {
       }
     }
     h.ctx.registries.runtimes.set('fake', new ToolRuntime());
-    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
     const run = await runOnce();
     expect(liveDuring!.partials[0]!.text).toContain('[redacted]');
     expect(liveDuring!.partials[0]!.text).not.toContain('eyJ');
@@ -552,7 +552,7 @@ describe('run engine', () => {
       }
     }
     h.ctx.registries.runtimes.set('fake', new BashRuntime());
-    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
     const run = await runOnce();
     const parts = frames.flatMap((f) => f.parts);
     expect(parts.length).toBeGreaterThan(0);
@@ -645,7 +645,7 @@ describe('run engine', () => {
       }
       const leaky = new LeakyRuntime();
       h.ctx.registries.runtimes.set('fake', leaky);
-      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
       const run = await runOnce();
       expect(leaky.inputs[0]!.workspaceId).toBe(h.ctx.workspaceId);
       expect(leaky.inputs[0]!.env['WEAVE_LLM_FAKE_KEY']).toBeUndefined();
@@ -1207,7 +1207,7 @@ describe('run engine', () => {
 
     it('launches the conductor on the conductor setting', async () => {
       h.ctx.config.models.weaver = { runtime: 'fake', model: 'claude-fable-5-1', effort: 'low' };
-      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
       await runOnce();
       expect(runtime.inputs.at(-1)).toMatchObject({ model: 'claude-fable-5-1', effort: 'low' });
     });
@@ -1229,7 +1229,7 @@ describe('run engine', () => {
         workers: { runtime: 'fake', model: 'daemon-workers' },
         weaver: { runtime: 'fake', model: 'daemon-conductor' },
       };
-      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
       await runOnce();
       expect(runtime.inputs.at(-1)).toMatchObject({ model: 'daemon-conductor' });
       const ticketId = seedTicket(h);
@@ -1246,7 +1246,7 @@ describe('run engine', () => {
         workers: { runtime: 'fake', model: 'daemon-workers' },
         weaver: { runtime: 'fake', model: 'daemon-conductor' },
       };
-      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
       await runOnce();
       expect(runtime.inputs.at(-1)).toMatchObject({ model: 'workspace-conductor' });
       const ticketId = seedTicket(h);
@@ -1293,7 +1293,7 @@ describe('run engine', () => {
       };
       const ticketId = seedTicket(h);
       const workerId = h.addWorker(ticketId, { worktreePath: null });
-      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
       await runOnce();
       h.services.wake!.enqueue(workerId, { source: 'ticket_assigned', reason: 'TST-1' });
       await runOnce();
@@ -1331,7 +1331,7 @@ describe('run engine', () => {
 
     it('records on the run what it really ran on, and leaves it there when the setting moves on', async () => {
       h.ctx.config.models.weaver = { runtime: 'fake', model: 'the-model-it-ran-on' };
-      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
       const run = await runOnce();
       expect(run.runtimeId).toBe('fake');
 
@@ -1344,7 +1344,7 @@ describe('run engine', () => {
 
     it('fails the turn naming the runtime the setting points at, rather than using another', async () => {
       h.ctx.config.models.weaver = { runtime: 'nope', model: null };
-      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
       const run = await runOnce();
       expect(run.status).toBe('failed');
       expect(run.errorCode).toBe('runtime_unreachable');
@@ -1389,7 +1389,7 @@ describe('run engine', () => {
   describe('the retry link', () => {
     it('records the run a retry wake names, and nothing for an ordinary wake', async () => {
       runtime.queue.push({ structured: { state: 'working', summary: 'first', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
-      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
       const first = await runOnce();
       expect(first.retryOfRunId).toBeNull();
 
@@ -1402,7 +1402,7 @@ describe('run engine', () => {
     // ends up in that wake's `bundle`; the link has to survive that.
     it('records the link when the retry wake is coalesced into an ordinary one', async () => {
       runtime.queue.push({ structured: { state: 'working', summary: 'first', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
-      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
       const first = await runOnce();
 
       runtime.queue.push({ structured: { state: 'working', summary: 'second', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } });
@@ -1690,7 +1690,7 @@ describe('run engine', () => {
       credRuntime.queue.push({ structured: { state: 'done', summary: 'fine', tickets: [] } } as never);
       h.ctx.registries.runtimes.set('fake', credRuntime);
 
-      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+      h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
       const run = await runOnce();
 
       expect(run.status).toBe('succeeded');
@@ -3231,6 +3231,75 @@ describe('run engine', () => {
   });
 });
 
+describe('agy-shaped runtimes: unpriced runs and no keyring on an isolated daemon (VS-995)', () => {
+  let h: TestHarness;
+  let runtime: FakeRuntime;
+  let dispatcher: CoreDispatcher;
+  const done: Partial<TurnResult> = { structured: { state: 'done', summary: 'done', tickets: [], knowledge: { recorded: false, reason: 'test fixture' } } };
+
+  function setup(isolated: boolean): void {
+    h = makeHarness({ isolated });
+    runtime = new FakeRuntime();
+    h.ctx.registries.runtimes.set('fake', runtime);
+    h.ctx.config.models = { weaver: { runtime: 'fake', model: null }, workers: { runtime: 'fake', model: null }, workerOptions: [] };
+    h.services.wake = createWakeService(h.ctx, h.deps);
+    h.services.runs = createRunsService(h.ctx, h.deps);
+    dispatcher = createDispatcher(h.ctx, h.deps);
+    h.services.dispatcher = dispatcher;
+  }
+  afterEach(async () => { await dispatcher.stop(); h.cleanup(); });
+
+  async function turn(result: Partial<TurnResult>): Promise<{ costCents: number | null; usage: Array<{ costStatus: string; costCents: number | null }> }> {
+    runtime.queue.push({ ...done, ...result });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
+    await dispatcher.tick();
+    await dispatcher.drain();
+    const run = h.db.get<{ costCents: number | null }>('SELECT cost_cents AS costCents FROM runs ORDER BY created_at DESC LIMIT 1')!;
+    const usage = h.db.all<{ costStatus: string; costCents: number | null }>('SELECT cost_status AS costStatus, cost_cents AS costCents FROM usage_events');
+    return { costCents: run.costCents, usage };
+  }
+
+  const claudeViaGateway = { model: 'claude-opus-5-5-high', provider: 'antigravity', usage: { inputTokens: 1_000_000, outputTokens: 0, basis: 'per_turn' as const } };
+
+  it('never prices a gateway runtime\'s run by its model id', async () => {
+    setup(false);
+    runtime.estimateCostByModel = false;
+    const r = await turn(claudeViaGateway);
+    expect(r.costCents).toBeNull();
+    expect(r.usage).toEqual([{ costStatus: 'unpriced', costCents: null }]);
+  });
+
+  it('still estimates for a runtime that does not opt out', async () => {
+    setup(false);
+    const r = await turn(claudeViaGateway);
+    expect(r.costCents).toBe(500);
+    expect(r.usage[0]!.costCents).toBe(500);
+  });
+
+  it('hides the session bus from a keyring runtime on an isolated daemon', async () => {
+    setup(true);
+    runtime.hostKeyring = true;
+    await turn({});
+    const env = runtime.inputs[0]!.env;
+    expect(env['DBUS_SESSION_BUS_ADDRESS']).toBe('');
+    const xdg = env['XDG_RUNTIME_DIR']!;
+    expect(existsSync(xdg)).toBe(true);
+    expect(existsSync(join(xdg, 'bus'))).toBe(false);
+  });
+
+  it('leaves the environment alone on a daemon that shares host credentials, or for a file-credential runtime', async () => {
+    setup(false);
+    runtime.hostKeyring = true;
+    await turn({});
+    expect(runtime.inputs[0]!.env).not.toHaveProperty('DBUS_SESSION_BUS_ADDRESS');
+    await dispatcher.stop(); h.cleanup();
+    setup(true);
+    await turn({});
+    expect(runtime.inputs[0]!.env).not.toHaveProperty('DBUS_SESSION_BUS_ADDRESS');
+    expect(runtime.inputs[0]!.env).not.toHaveProperty('XDG_RUNTIME_DIR');
+  });
+});
+
 describe('MCP servers (VS-621)', () => {
   /** A fake that is registered under the `weave` runtime id, so the engine's weave-only wiring runs. */
   class WeaveFakeRuntime extends FakeRuntime {
@@ -3397,7 +3466,7 @@ describe('MCP servers (VS-621)', () => {
         })();
         h.ctx.config.models = { weaver: { runtime: 'weave', model: 'fake/m' }, workers: { runtime: 'weave', model: 'fake/m' }, workerOptions: [] };
         h.ctx.registries.runtimes.set('weave', weave);
-        h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+        h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
         const run = await weaveRun(weave, h.conductorId);
         const rows = h.db.all<{ payload: { text?: string } }>("SELECT payload_json FROM run_events WHERE run_id = ? AND type = 'assistant.text'", [run.id]);
         expect(rows[0]!.payload.text).toContain('[redacted]');
@@ -3412,7 +3481,7 @@ describe('MCP servers (VS-621)', () => {
     h.ctx.config.models.weaver = { runtime: 'weave', model: null };
     h.ctx.config.mcpServers = { github: server({}) };
     h.ctx.config.weaver = { ...h.ctx.config.weaver, mcpServers: ['github'] };
-    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go' });
+    h.services.wake!.enqueue(h.conductorId, { source: 'human_message', reason: 'go', requestedBy: { kind: 'human', id: 'u1' } });
     await weaveRun(weave, h.conductorId);
     expect(Object.keys(weave.inputs[0]!.mcpServers).sort()).toEqual(['github', 'weave-ai']);
   });

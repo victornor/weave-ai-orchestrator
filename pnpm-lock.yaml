@@ -262,6 +262,18 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
 
+  packages/runtimes/agy:
+    dependencies:
+      '@weave-ai/runtime-sdk':
+        specifier: workspace:*
+        version: link:../../runtime-sdk
+      '@weave-ai/shared':
+        specifier: workspace:*
+        version: link:../../shared
+      execa:
+        specifier: ^9.6.0
+        version: 9.6.1
+
   packages/runtimes/claude:
     dependencies:
       '@weave-ai/runtime-sdk':
@@ -379,6 +391,9 @@ importers:
       '@weave-ai/render':
         specifier: workspace:*
         version: link:../render
+      '@weave-ai/runtime-agy':
+        specifier: workspace:*
+        version: link:../runtimes/agy
       '@weave-ai/runtime-claude':
         specifier: workspace:*
         version: link:../runtimes/claude

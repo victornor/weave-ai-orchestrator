@@ -10,6 +10,8 @@ const NATIVE_LOGIN: Record<string, string> = {
   cursor: 'cursor-agent login',
   gemini: 'gemini',
   opencode: 'opencode auth login',
+  // agy has no login subcommand: its first interactive run starts the Google sign-in (VS-995).
+  agy: 'agy',
 };
 
 export interface RuntimeLoginFix {
